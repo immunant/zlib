@@ -410,6 +410,16 @@ impl DeflateCopyLayout {
             sym_bytes,
         })
     }
+
+    /// Return the smallest pending-buffer span containing both live pending
+    /// output and the live symbol staging bytes.  These areas share one
+    /// allocation, so the callback-copy boundary can duplicate their enclosing
+    /// byte representation with one non-overlapping transfer instead of two.
+    fn pending_copy_span(&self) -> Option<::core::ops::Range<usize>> {
+        let pending_end = self.pending_offset.checked_add(self.pending_bytes)?;
+        let sym_end = self.sym_offset.checked_add(self.sym_bytes)?;
+        Some(self.pending_offset.min(self.sym_offset)..pending_end.max(sym_end))
+    }
 }
 
 impl DeflateCallbackCopyPlan {
@@ -3810,6 +3820,9 @@ pub fn deflateCopy(
     let Some(callback_copy_plan) = DeflateCallbackCopyPlan::from_state(source_state) else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
+    let Some(pending_copy_span) = callback_copy_plan.layout.pending_copy_span() else {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    };
     // Default-pair streams already retain their four work buffers as owned
     // vectors. Clone the same validated live ranges before allocating the
     // opaque destination state, so this path never recreates callback-backed
@@ -3908,27 +3921,16 @@ pub fn deflateCopy(
                 )
             };
             dest_state.pending_out = copy_layout.pending_offset;
-            unsafe {
-                crate::stdlib::memcpy(
-                    dest_state.pending_buf.wrapping_add(dest_state.pending_out)
-                        as *mut ::core::ffi::c_void,
-                    source_state
-                        .pending_buf
-                        .wrapping_add(source_state.pending_out)
-                        as *const ::core::ffi::c_void,
-                    copy_layout.pending_bytes as crate::__stddef_size_t_h::size_t,
-                )
-            };
             dest_state.sym_buf = dest_state.lit_bufsize as usize;
             unsafe {
                 crate::stdlib::memcpy(
-                    dest_state.pending_buf.wrapping_add(dest_state.sym_buf)
+                    dest_state.pending_buf.wrapping_add(pending_copy_span.start)
                         as *mut ::core::ffi::c_void,
                     source_state
                         .pending_buf
-                        .wrapping_add(copy_layout.sym_offset)
+                        .wrapping_add(pending_copy_span.start)
                         as *const ::core::ffi::c_void,
-                    copy_layout.sym_bytes as crate::__stddef_size_t_h::size_t,
+                    pending_copy_span.len() as crate::__stddef_size_t_h::size_t,
                 )
             };
             crate::zlib_h::Z_OK
