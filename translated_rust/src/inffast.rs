@@ -157,6 +157,14 @@ fn inflate_fast_mask(bits: u32) -> Option<u64> {
     1u64.checked_shl(bits).map(|mask| mask.wrapping_sub(1))
 }
 
+/// The legacy ABI adapter keeps its table masks at zlib's `uInt` width.  Do
+/// the shift through a checked scalar helper so malformed state cannot turn a
+/// mask setup into an invalid Rust shift before the bounded core replaces the
+/// adapter entirely.
+fn inflate_fast_u32_mask(bits: u32) -> Option<u32> {
+    1u32.checked_shl(bits).map(|mask| mask.wrapping_sub(1))
+}
+
 /// Number of root entries addressed by a DEFLATE decode table.  Keep this
 /// checked even though normal inflate state constrains the widths: the safe
 /// core must reject a malformed borrowed view before it consumes any input.
@@ -524,8 +532,20 @@ pub unsafe extern "C" fn inflate_fast(mut strm: z_streamp, mut start: ::core::ff
     bits = state.bits;
     lcode = state.lencode;
     dcode = state.distcode;
-    lmask = ((1 as ::core::ffi::c_uint) << state.lenbits).wrapping_sub(1 as ::core::ffi::c_uint);
-    dmask = ((1 as ::core::ffi::c_uint) << state.distbits).wrapping_sub(1 as ::core::ffi::c_uint);
+    let Some(mask) = inflate_fast_u32_mask(state.lenbits) else {
+        strm.msg = b"invalid literal/length code\0".as_ptr() as *const ::core::ffi::c_char
+            as *mut ::core::ffi::c_char;
+        state.mode = BAD;
+        return;
+    };
+    lmask = mask;
+    let Some(mask) = inflate_fast_u32_mask(state.distbits) else {
+        strm.msg = b"invalid distance code\0".as_ptr() as *const ::core::ffi::c_char
+            as *mut ::core::ffi::c_char;
+        state.mode = BAD;
+        return;
+    };
+    dmask = mask;
     's_627: loop {
         if bits < 15 as ::core::ffi::c_uint {
             let c2rust_fresh0 = in_0;
@@ -832,8 +852,13 @@ pub unsafe extern "C" fn inflate_fast(mut strm: z_streamp, mut start: ::core::ff
     in_0 = in_0.wrapping_sub(len as usize);
     input_remaining = input_remaining.wrapping_add(len);
     bits = bits.wrapping_sub(len << 3 as ::core::ffi::c_int);
-    hold &= ((1 as ::core::ffi::c_uint) << bits).wrapping_sub(1 as ::core::ffi::c_uint)
-        as ::core::ffi::c_ulong;
+    if let Some(mask) = inflate_fast_mask(bits) {
+        hold &= mask as ::core::ffi::c_ulong;
+    } else {
+        strm.msg = b"invalid literal/length code\0".as_ptr() as *const ::core::ffi::c_char
+            as *mut ::core::ffi::c_char;
+        state.mode = BAD;
+    }
     strm.next_in = in_0 as *mut Bytef;
     strm.next_out = out as *mut Bytef;
     strm.avail_in = input_remaining;
