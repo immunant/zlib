@@ -66,11 +66,8 @@ pub use crate::zlib_h::Z_RLE;
 // read and write close paths preserve that observable result without each
 // repeating a raw-FD handoff.
 pub(crate) fn gz_close_fd(fd: rustix::fd::OwnedFd) -> rustix::io::Result<()> {
-    unsafe {
-        rustix::io::try_close(<rustix::fd::OwnedFd as rustix::fd::IntoRawFd>::into_raw_fd(
-            fd,
-        ))
-    }
+    nix::unistd::close(fd)
+        .map_err(|error| rustix::io::Errno::from_raw_os_error(error as ::core::ffi::c_int))
 }
 
 // A write handle's paired allocations are owned by `GzBuffers`, but embedded

@@ -13,6 +13,7 @@ crate-type = [ "cdylib",]
 
 [dependencies]
 errno = "0.3"
+nix = "0.30.1"
 rustix = { version = "1", features = ["fs", "stdio", "try_close"] }
 
 [workspace]
