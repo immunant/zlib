@@ -3014,21 +3014,24 @@ pub unsafe extern "C" fn inflateSetDictionary_ffi(
 ) -> ::core::ffi::c_int {
     inflateSetDictionary(strm, dictionary, dictLength)
 }
-pub unsafe extern "C" fn inflateGetHeader(
-    mut strm: crate::zlib_h::z_streamp,
-    mut head: crate::zlib_h::gz_headerp,
+// A registered gzip header must retain the original pointer's provenance for
+// later decoder calls.  The export boundary forms that handle after checking
+// the stream; this adapter owns the stream-bound opaque-state projection and
+// the one immediate `done` publication.
+pub unsafe fn inflateGetHeader(
+    strm: &mut crate::zlib_h::z_stream_s,
+    mut head: Option<::core::ptr::NonNull<crate::zlib_h::gz_header_s>>,
 ) -> ::core::ffi::c_int {
-    let Some(strm) = strm.as_mut() else {
-        return crate::zlib_h::Z_STREAM_ERROR;
-    };
     let Some((_strm, state)) = inflate_stream_and_state(strm) else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
     if state.normal.wrap & 2 as ::core::ffi::c_int == 0 as ::core::ffi::c_int {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    state.head = ::core::ptr::NonNull::new(head);
-    (*head).done = 0 as ::core::ffi::c_int;
+    state.head = head;
+    if let Some(head) = head.as_mut() {
+        head.as_mut().done = 0 as ::core::ffi::c_int;
+    }
     return crate::zlib_h::Z_OK;
 }
 #[export_name = "inflateGetHeader"]
@@ -3037,7 +3040,10 @@ pub unsafe extern "C" fn inflateGetHeader_ffi(
     mut strm: crate::zlib_h::z_streamp,
     mut head: crate::zlib_h::gz_headerp,
 ) -> ::core::ffi::c_int {
-    inflateGetHeader(strm, head)
+    let Some(strm) = strm.as_mut() else {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    };
+    inflateGetHeader(strm, ::core::ptr::NonNull::new(head))
 }
 fn syncsearch(have: &mut ::core::ffi::c_uint, buf: &[::core::ffi::c_uchar]) -> ::core::ffi::c_uint {
     let mut got: ::core::ffi::c_uint = 0;
