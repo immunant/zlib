@@ -516,7 +516,9 @@ fn gzrewind_state(state: &mut crate::gzguts_h::gz_state) -> bool {
     true
 }
 
-unsafe extern "C" fn gzrewind(mut file: crate::zlib_h::gzFile) -> ::core::ffi::c_int {
+#[export_name = "gzrewind"]
+
+pub unsafe extern "C" fn gzrewind_ffi(mut file: crate::zlib_h::gzFile) -> ::core::ffi::c_int {
     if file.is_null() {
         return -1;
     }
@@ -533,11 +535,6 @@ unsafe extern "C" fn gzrewind(mut file: crate::zlib_h::gzFile) -> ::core::ffi::c
     }
     gz_error(state, crate::zlib_h::Z_OK, ::core::ptr::null());
     0
-}
-#[export_name = "gzrewind"]
-
-pub unsafe extern "C" fn gzrewind_ffi(mut file: crate::zlib_h::gzFile) -> ::core::ffi::c_int {
-    gzrewind(file)
 }
 /// Validate and normalize a gzip seek request without touching the opaque
 /// handle or descriptor.  The boolean records the `SEEK_CUR` side effect of
@@ -666,6 +663,20 @@ fn gzseek_schedule_state(
     state.x.pos.wrapping_add(offset)
 }
 
+/// A descriptor operation selected entirely from gzip scalar state.  Both
+/// variants are issued by the exported seek boundary, keeping the selection
+/// safe while retaining exactly one raw descriptor call there.
+#[derive(Clone, Copy)]
+enum GzSeekDescriptorAction {
+    Copy {
+        offset: crate::stdlib::off64_t,
+        next_pos: crate::stdlib::off64_t,
+    },
+    Rewind {
+        start: crate::stdlib::off64_t,
+    },
+}
+
 pub unsafe extern "C" fn gzseek64(
     mut file: crate::zlib_h::gzFile,
     mut offset: crate::stdlib::off64_t,
@@ -694,38 +705,62 @@ pub unsafe extern "C" fn gzseek64(
     if clear_skip {
         state_ref.skip = 0;
     }
-    if let Some((descriptor_offset, next_pos)) = gzseek_copy_plan(
+    let descriptor_action = if let Some((descriptor_offset, next_pos)) = gzseek_copy_plan(
         state_ref.mode,
         state_ref.how,
         state_ref.x.pos,
         state_ref.x.have,
         offset,
     ) {
-        ret = crate::stdlib::lseek64(
-            state_ref.fd,
-            descriptor_offset as crate::stdlib::__off64_t,
-            crate::stdlib::SEEK_CUR,
-        ) as crate::stdlib::off64_t;
-        if ret == -1 as crate::stdlib::off64_t {
-            return -1 as crate::stdlib::off64_t;
-        }
-        gzseek_copy_commit_state(state_ref, next_pos);
-        gz_error(
-            state,
-            crate::zlib_h::Z_OK,
-            ::core::ptr::null::<::core::ffi::c_char>(),
-        );
-        return next_pos;
-    }
-    if offset < 0 as crate::stdlib::off64_t {
+        Some(GzSeekDescriptorAction::Copy {
+            offset: descriptor_offset,
+            next_pos,
+        })
+    } else if offset < 0 {
         let Some(rewind_offset) =
             gzseek_rewind_offset_state(state_ref.mode, state_ref.x.pos, offset)
         else {
             return -1 as crate::stdlib::off64_t;
         };
         offset = rewind_offset;
-        if gzrewind(file) == -1 {
+        Some(GzSeekDescriptorAction::Rewind {
+            start: state_ref.start,
+        })
+    } else {
+        None
+    };
+    if let Some(action) = descriptor_action {
+        let (descriptor_offset, whence) = match action {
+            GzSeekDescriptorAction::Copy { offset, .. } => (offset, crate::stdlib::SEEK_CUR),
+            GzSeekDescriptorAction::Rewind { start } => (start, crate::stdlib::SEEK_SET),
+        };
+        ret = crate::stdlib::lseek64(
+            state_ref.fd,
+            descriptor_offset as crate::stdlib::__off64_t,
+            whence,
+        ) as crate::stdlib::off64_t;
+        if ret == -1 {
             return -1 as crate::stdlib::off64_t;
+        }
+        let copied_to = match action {
+            GzSeekDescriptorAction::Copy { next_pos, .. } => {
+                gzseek_copy_commit_state(state_ref, next_pos);
+                Some(next_pos)
+            }
+            GzSeekDescriptorAction::Rewind { .. } => {
+                if !gzrewind_state(state_ref) {
+                    return -1 as crate::stdlib::off64_t;
+                }
+                None
+            }
+        };
+        gz_error(
+            state,
+            crate::zlib_h::Z_OK,
+            ::core::ptr::null::<::core::ffi::c_char>(),
+        );
+        if let Some(next_pos) = copied_to {
+            return next_pos;
         }
     }
     if state_ref.mode == crate::gzguts_h::GZ_READ {
