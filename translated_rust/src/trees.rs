@@ -5213,10 +5213,33 @@ unsafe extern "C" fn send_tree(
     }
 }
 
+fn finish_bl_tree_state(
+    bl_tree: &[crate::src::deflate::ct_data],
+    opt_len: &mut crate::zutil_h::ulg,
+) -> Option<::core::ffi::c_int> {
+    let mut max_blindex = crate::src::deflate::BL_CODES - 1 as ::core::ffi::c_int;
+    while max_blindex >= 3 as ::core::ffi::c_int {
+        let code = *bl_order.get(max_blindex as usize)? as usize;
+        if bl_tree.get(code)?.dl.len != 0 as crate::zutil_h::ush {
+            break;
+        }
+        max_blindex -= 1;
+    }
+    *opt_len = opt_len.wrapping_add(
+        (3 as crate::zutil_h::ulg)
+            .wrapping_mul(
+                (max_blindex as crate::zutil_h::ulg).wrapping_add(1 as crate::zutil_h::ulg),
+            )
+            .wrapping_add(5 as crate::zutil_h::ulg)
+            .wrapping_add(5 as crate::zutil_h::ulg)
+            .wrapping_add(4 as crate::zutil_h::ulg),
+    );
+    Some(max_blindex)
+}
+
 unsafe extern "C" fn build_bl_tree(
     mut s: *mut crate::src::deflate::deflate_state,
 ) -> ::core::ffi::c_int {
-    let mut max_blindex: ::core::ffi::c_int = 0;
     scan_tree(
         s,
         &raw mut (*s).dyn_ltree as *mut crate::src::deflate::ct_data_s
@@ -5235,25 +5258,7 @@ unsafe extern "C" fn build_bl_tree(
         s,
         &raw mut (*s).bl_desc as *mut crate::src::deflate::tree_desc,
     );
-    max_blindex = crate::src::deflate::BL_CODES - 1 as ::core::ffi::c_int;
-    while max_blindex >= 3 as ::core::ffi::c_int {
-        if (*s).bl_tree[bl_order[max_blindex as usize] as usize].dl.len as ::core::ffi::c_int
-            != 0 as ::core::ffi::c_int
-        {
-            break;
-        }
-        max_blindex -= 1;
-    }
-    (*s).opt_len = (*s).opt_len.wrapping_add(
-        (3 as crate::zutil_h::ulg)
-            .wrapping_mul(
-                (max_blindex as crate::zutil_h::ulg).wrapping_add(1 as crate::zutil_h::ulg),
-            )
-            .wrapping_add(5 as crate::zutil_h::ulg)
-            .wrapping_add(5 as crate::zutil_h::ulg)
-            .wrapping_add(4 as crate::zutil_h::ulg),
-    );
-    return max_blindex;
+    return finish_bl_tree_state(&(*s).bl_tree, &mut (*s).opt_len).unwrap_or(0);
 }
 
 fn send_all_trees_header_state(
