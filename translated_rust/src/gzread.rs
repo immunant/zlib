@@ -512,10 +512,11 @@ fn gz_read(
     crate::src::gzlib::gz_read_mark_past(state, len);
     return got;
 }
-// The exported wrapper owns handle validation and binding.  This coordinator
+// The exported wrapper owns handle validation and binding. This coordinator
 // operates on that bound state; its caller buffer remains the scoped raw
-// boundary used by `gz_read`.
-pub unsafe extern "C" fn gzread(
+// boundary used by `gz_read`. Its sole errno/C-string bridge remains confined
+// to the already-existing raw operation below.
+pub extern "C" fn gzread(
     state: &mut crate::gzguts_h::gz_state,
     mut buf: crate::stdlib::voidp,
     mut len: ::core::ffi::c_uint,
@@ -537,11 +538,15 @@ pub unsafe extern "C" fn gzread(
             return -1 as ::core::ffi::c_int;
         }
         if state.again != 0 {
-            crate::src::gzlib::gz_error(
-                state,
-                crate::zlib_h::Z_ERRNO,
-                Some(::core::ffi::CStr::from_ptr(crate::stdlib::strerror(*crate::stdlib::__errno_location())).to_bytes_with_nul()),
-            );
+            // SAFETY: the errno slot and strerror result are used only to
+            // record this would-block error immediately in the bound state.
+            unsafe {
+                crate::src::gzlib::gz_error(
+                    state,
+                    crate::zlib_h::Z_ERRNO,
+                    Some(::core::ffi::CStr::from_ptr(crate::stdlib::strerror(*crate::stdlib::__errno_location())).to_bytes_with_nul()),
+                );
+            }
             return -1 as ::core::ffi::c_int;
         }
     }
@@ -559,7 +564,7 @@ pub unsafe extern "C" fn gzread_ffi(
     }
     gzread(&mut *(file as crate::gzguts_h::gz_statep), buf, len)
 }
-pub unsafe extern "C" fn gzfread(
+pub extern "C" fn gzfread(
     mut buf: crate::stdlib::voidp,
     mut size: crate::stdlib::z_size_t,
     mut nitems: crate::stdlib::z_size_t,
