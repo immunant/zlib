@@ -241,7 +241,11 @@ pub mod zlib_h {
 }
 pub mod stdlib {
     unsafe extern "C" {
-        pub fn __errno_location() -> *mut ::core::ffi::c_int;
+        // This accessor has no inputs and only returns libc's thread-local
+        // errno slot. Calling it cannot violate Rust memory safety; callers
+        // still need an unsafe operation to read or write the returned raw
+        // pointer.
+        pub safe fn __errno_location() -> *mut ::core::ffi::c_int;
         pub fn fcntl(
             __fd: ::core::ffi::c_int,
             __cmd: ::core::ffi::c_int,
