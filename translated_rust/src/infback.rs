@@ -730,37 +730,23 @@ fn inflate_back_distance_code_needs_subtable(code: crate::src::inftrees::code) -
     (code.op as ::core::ffi::c_uint) & 0xf0 == 0
 }
 
-// A decode table is either one of the immutable fixed tables or a range in
-// `state.codes`.  Keep the pointer-to-index conversion here so callers only
-// select a table and an already-decoded index.
+// A decode table is either one of the immutable fixed tables or a checked
+// range in `state.codes`.  Reuse the inflater's central resolver rather than
+// deriving an index from a raw table cursor here.  That keeps inflateBack's
+// dynamic-table reads bounded by the same validation used by inflate_fast.
 fn inflate_back_code_table_entry(
     state: &crate::src::inflate::inflate_state,
     table: InflateBackCodeTable,
     index: usize,
 ) -> crate::src::inftrees::code {
-    let (code_table, fixed_table) = match table {
-        InflateBackCodeTable::Length => (
-            state.lencode,
-            crate::src::inftrees::inffixed_h::lenfix.as_ptr(),
-        ),
-        InflateBackCodeTable::Distance => (
-            state.distcode,
-            crate::src::inftrees::inffixed_h::distfix.as_ptr(),
-        ),
+    let table = match table {
+        InflateBackCodeTable::Length => crate::src::inflate::InflateCodeTable::Length,
+        InflateBackCodeTable::Distance => crate::src::inflate::InflateCodeTable::Distance,
     };
-    if ::core::ptr::eq(code_table, fixed_table) {
-        match table {
-            InflateBackCodeTable::Length => crate::src::inftrees::inffixed_h::lenfix[index],
-            InflateBackCodeTable::Distance => crate::src::inftrees::inffixed_h::distfix[index],
-        }
-    } else {
-        let base = state.codes.as_ptr().addr();
-        let start = code_table
-            .addr()
-            .wrapping_sub(base)
-            .wrapping_div(::core::mem::size_of::<crate::src::inftrees::code>());
-        state.codes[start.wrapping_add(index)]
-    }
+    crate::src::inflate::inflate_code_table(state, table)
+        .and_then(|entries| entries.get(index))
+        .copied()
+        .expect("live inflateBack decode cursor has a complete table")
 }
 
 fn inflate_back_low_bits(
