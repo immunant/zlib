@@ -2506,12 +2506,10 @@ pub unsafe extern "C" fn deflateCopy(
     if ds.is_null() {
         return crate::zlib_h::Z_MEM_ERROR;
     }
-    crate::stdlib::memset(
-        ds as *mut ::core::ffi::c_void,
-        0 as ::core::ffi::c_int,
-        ::core::mem::size_of::<crate::src::deflate::deflate_state>(),
-    );
     (*dest).state = ds as *mut crate::src::deflate::internal_state;
+    // The allocation is immediately overwritten with the source state before
+    // any field is observed.  Do not clear it first: that C-style write is
+    // dead and the copied state supplies every byte.
     crate::stdlib::memcpy(
         ds as *mut ::core::ffi::c_void,
         ss as *const ::core::ffi::c_void,
