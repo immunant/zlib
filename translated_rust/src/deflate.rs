@@ -1776,23 +1776,32 @@ pub unsafe extern "C" fn deflateBound_ffi(
     };
     deflate_bound(sourceLen as crate::stdlib::z_size_t, state) as crate::stdlib::uLong
 }
-fn put_short_msb_state(
+/// Append big-endian zlib wrapper words before advancing the pending cursor.
+/// Callers provide a complete header or trailer, so a capacity failure cannot
+/// leave a partially emitted wrapper field behind.
+fn append_zlib_words_state(
     pending_buf: &mut [crate::stdlib::Byte],
     pending: &mut crate::zutil_h::ulg,
-    b: crate::stdlib::uInt,
+    words: &[crate::stdlib::uInt],
 ) -> bool {
     let Ok(start) = usize::try_from(*pending) else {
         return false;
     };
-    let Some(end) = start.checked_add(2) else {
+    let Some(byte_len) = words.len().checked_mul(2) else {
+        return false;
+    };
+    let Some(end) = start.checked_add(byte_len) else {
         return false;
     };
     let Some(bytes) = pending_buf.get_mut(start..end) else {
         return false;
     };
-    bytes[0] = (b >> 8) as crate::stdlib::Byte;
-    bytes[1] = b as crate::stdlib::Byte;
-    *pending = pending.wrapping_add(2);
+
+    for (bytes, word) in bytes.chunks_exact_mut(2).zip(words) {
+        bytes[0] = (word >> 8) as crate::stdlib::Byte;
+        bytes[1] = *word as crate::stdlib::Byte;
+    }
+    *pending = end as crate::zutil_h::ulg;
     true
 }
 
@@ -1913,27 +1922,6 @@ fn append_gzip_fixed_header_state(
         *adler = crate::src::crc32::crc32_slice(*adler, &pending_buf[..end]);
     }
     true
-}
-
-unsafe extern "C" fn putShortMSB(
-    mut s: *mut crate::src::deflate::deflate_state,
-    mut b: crate::stdlib::uInt,
-) {
-    if s.is_null() {
-        return;
-    }
-    let Ok(pending_len) = usize::try_from((*s).pending_buf_size) else {
-        return;
-    };
-    if pending_len != 0 && (*s).pending_buf.is_null() {
-        return;
-    }
-    let pending_buf = if pending_len == 0 {
-        &mut []
-    } else {
-        ::core::slice::from_raw_parts_mut((*s).pending_buf, pending_len)
-    };
-    let _ = put_short_msb_state(pending_buf, &mut (*s).pending, b);
 }
 
 fn flush_pending_state(
@@ -2142,24 +2130,42 @@ pub unsafe extern "C" fn deflate(
         (*s).status = crate::src::deflate::BUSY_STATE;
     }
     if (*s).status == crate::src::deflate::INIT_STATE {
+        let state = &mut *s;
         let (header, dictionary_adler) = zlib_header_words(
-            (*s).w_bits,
-            (*s).strategy,
-            (*s).level,
-            (*s).strstart,
+            state.w_bits,
+            state.strategy,
+            state.level,
+            state.strstart,
             (*strm).adler,
         );
-        putShortMSB(s, header);
-        if let Some((adler_high, adler_low)) = dictionary_adler {
-            putShortMSB(s, adler_high);
-            putShortMSB(s, adler_low);
+        let Ok(pending_len) = usize::try_from(state.pending_buf_size) else {
+            return crate::zlib_h::Z_STREAM_ERROR;
+        };
+        if pending_len != 0 && state.pending_buf.is_null() {
+            return crate::zlib_h::Z_STREAM_ERROR;
+        }
+        let pending_buf = if pending_len == 0 {
+            &mut []
+        } else {
+            ::core::slice::from_raw_parts_mut(state.pending_buf, pending_len)
+        };
+        let header_written = match dictionary_adler {
+            Some((adler_high, adler_low)) => append_zlib_words_state(
+                pending_buf,
+                &mut state.pending,
+                &[header, adler_high, adler_low],
+            ),
+            None => append_zlib_words_state(pending_buf, &mut state.pending, &[header]),
+        };
+        if !header_written {
+            return crate::zlib_h::Z_STREAM_ERROR;
         }
         (*strm).adler = crate::src::adler32::adler32(
             0 as crate::stdlib::uLong,
             ::core::ptr::null::<crate::stdlib::Bytef>(),
             0 as crate::stdlib::uInt,
         );
-        (*s).status = crate::src::deflate::BUSY_STATE;
+        state.status = crate::src::deflate::BUSY_STATE;
         flush_pending(strm);
         if (*s).pending != 0 as crate::zutil_h::ulg {
             (*s).last_flush = -1 as ::core::ffi::c_int;
@@ -2488,14 +2494,28 @@ pub unsafe extern "C" fn deflate(
             return crate::zlib_h::Z_STREAM_ERROR;
         }
     } else {
-        putShortMSB(
-            s,
-            ((*strm).adler >> 16 as ::core::ffi::c_int) as crate::stdlib::uInt,
-        );
-        putShortMSB(
-            s,
-            ((*strm).adler & 0xffff as crate::stdlib::uLong) as crate::stdlib::uInt,
-        );
+        let state = &mut *s;
+        let Ok(pending_len) = usize::try_from(state.pending_buf_size) else {
+            return crate::zlib_h::Z_STREAM_ERROR;
+        };
+        if pending_len != 0 && state.pending_buf.is_null() {
+            return crate::zlib_h::Z_STREAM_ERROR;
+        }
+        let pending_buf = if pending_len == 0 {
+            &mut []
+        } else {
+            ::core::slice::from_raw_parts_mut(state.pending_buf, pending_len)
+        };
+        if !append_zlib_words_state(
+            pending_buf,
+            &mut state.pending,
+            &[
+                ((*strm).adler >> 16 as ::core::ffi::c_int) as crate::stdlib::uInt,
+                ((*strm).adler & 0xffff as crate::stdlib::uLong) as crate::stdlib::uInt,
+            ],
+        ) {
+            return crate::zlib_h::Z_STREAM_ERROR;
+        }
     }
     flush_pending(strm);
     if (*s).wrap > 0 as ::core::ffi::c_int {
