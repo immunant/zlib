@@ -314,7 +314,7 @@ pub unsafe extern "C" fn inflateReset2(
         Ok(window_bits) => window_bits,
         Err(error) => return error,
     };
-    if !state.window.is_null() && state.wbits != window_bits as ::core::ffi::c_uint {
+    if inflate_reset2_releases_window(state, window_bits) {
         Some((*strm).zfree.expect("non-null function pointer")).expect("non-null function pointer")(
             strm.opaque,
             state.window as crate::stdlib::voidpf,
@@ -322,6 +322,15 @@ pub unsafe extern "C" fn inflateReset2(
         state.window = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
     }
     inflate_reset_with_window_bits(strm, state, wrap, window_bits)
+}
+
+// This is the state-only part of `inflateReset2()`.  Its caller retains the
+// existing ABI bindings and callback ordering.
+fn inflate_reset2_releases_window(
+    state: &crate::src::inflate::inflate_state,
+    window_bits: ::core::ffi::c_int,
+) -> bool {
+    !state.window.is_null() && state.wbits != window_bits as ::core::ffi::c_uint
 }
 
 fn inflate_window_bits(
