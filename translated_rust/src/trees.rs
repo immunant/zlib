@@ -2343,7 +2343,7 @@ fn static_desc(kind: u8) -> &'static crate::src::deflate::static_tree_desc {
     }
 }
 
-unsafe extern "C" fn bi_reverse(
+fn bi_reverse(
     mut code: ::core::ffi::c_uint,
     mut len: ::core::ffi::c_int,
 ) -> ::core::ffi::c_uint {
