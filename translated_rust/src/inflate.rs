@@ -809,6 +809,23 @@ fn inflate_align_to_byte_boundary(
     (hold >> discarded_bits, bits.wrapping_sub(discarded_bits))
 }
 
+fn inflate_add_and_consume_extra_bits(
+    value: ::core::ffi::c_uint,
+    hold: crate::stdlib::uLong,
+    bits: ::core::ffi::c_uint,
+    extra_bits: ::core::ffi::c_uint,
+) -> (
+    ::core::ffi::c_uint,
+    crate::stdlib::uLong,
+    ::core::ffi::c_uint,
+) {
+    let value = value.wrapping_add(
+        hold as ::core::ffi::c_uint
+            & ((1 as ::core::ffi::c_uint) << extra_bits).wrapping_sub(1 as ::core::ffi::c_uint),
+    );
+    (value, hold >> extra_bits, bits.wrapping_sub(extra_bits))
+}
+
 unsafe fn inflateStateCheck(mut strm: crate::zlib_h::z_streamp) -> ::core::ffi::c_int {
     if strm.is_null() {
         return inflate_state_check_impl(None, None, false);
@@ -2162,13 +2179,12 @@ pub unsafe extern "C" fn inflate(
                         hold = hold.wrapping_add((*c2rust_fresh26 as ::core::ffi::c_ulong) << bits);
                         bits = bits.wrapping_add(8 as ::core::ffi::c_uint);
                     }
-                    (*state).length = (*state).length.wrapping_add(
-                        hold as ::core::ffi::c_uint
-                            & ((1 as ::core::ffi::c_uint) << (*state).extra)
-                                .wrapping_sub(1 as ::core::ffi::c_uint),
+                    ((*state).length, hold, bits) = inflate_add_and_consume_extra_bits(
+                        (*state).length,
+                        hold,
+                        bits,
+                        (*state).extra,
                     );
-                    hold >>= (*state).extra;
-                    bits = bits.wrapping_sub((*state).extra);
                     (*state).back = ((*state).back as ::core::ffi::c_uint)
                         .wrapping_add((*state).extra)
                         as ::core::ffi::c_int;
@@ -2348,13 +2364,12 @@ pub unsafe extern "C" fn inflate(
                         hold = hold.wrapping_add((*c2rust_fresh29 as ::core::ffi::c_ulong) << bits);
                         bits = bits.wrapping_add(8 as ::core::ffi::c_uint);
                     }
-                    (*state).offset = (*state).offset.wrapping_add(
-                        hold as ::core::ffi::c_uint
-                            & ((1 as ::core::ffi::c_uint) << (*state).extra)
-                                .wrapping_sub(1 as ::core::ffi::c_uint),
+                    ((*state).offset, hold, bits) = inflate_add_and_consume_extra_bits(
+                        (*state).offset,
+                        hold,
+                        bits,
+                        (*state).extra,
                     );
-                    hold >>= (*state).extra;
-                    bits = bits.wrapping_sub((*state).extra);
                     (*state).back = ((*state).back as ::core::ffi::c_uint)
                         .wrapping_add((*state).extra)
                         as ::core::ffi::c_int;
@@ -3249,15 +3264,15 @@ mod tests {
     use super::{
         apply_window_update, copy_dictionary_from_window, dynamic_code_length_repeat_fits,
         dynamic_code_length_repeat_spec, dynamic_header_counts, gzip_extra_copy_bounds,
-        inflateSyncPoint_ffi, inflate_accumulate_totals, inflate_align_to_byte_boundary,
-        inflate_assign_data_type, inflate_block_header, inflate_call_progress,
-        inflate_can_use_fast_path, inflate_codes_used_offset_value, inflate_copy_match_from_output,
-        inflate_copy_progress, inflate_data_type_value, inflate_dictionary_id_from_hold,
-        inflate_dictionary_is_allowed, inflate_get_dictionary_result, inflate_gzip_extra_progress,
-        inflate_gzip_flags, inflate_gzip_flags_error, inflate_gzip_flags_validation,
-        inflate_gzip_header_crc_bytes, inflate_gzip_header_crc_is_valid,
-        inflate_gzip_header_has_comment, inflate_gzip_header_has_crc,
-        inflate_gzip_header_has_extra, inflate_gzip_header_has_name,
+        inflateSyncPoint_ffi, inflate_accumulate_totals, inflate_add_and_consume_extra_bits,
+        inflate_align_to_byte_boundary, inflate_assign_data_type, inflate_block_header,
+        inflate_call_progress, inflate_can_use_fast_path, inflate_codes_used_offset_value,
+        inflate_copy_match_from_output, inflate_copy_progress, inflate_data_type_value,
+        inflate_dictionary_id_from_hold, inflate_dictionary_is_allowed,
+        inflate_get_dictionary_result, inflate_gzip_extra_progress, inflate_gzip_flags,
+        inflate_gzip_flags_error, inflate_gzip_flags_validation, inflate_gzip_header_crc_bytes,
+        inflate_gzip_header_crc_is_valid, inflate_gzip_header_has_comment,
+        inflate_gzip_header_has_crc, inflate_gzip_header_has_extra, inflate_gzip_header_has_name,
         inflate_gzip_length_check_required, inflate_gzip_text_field_should_continue,
         inflate_gzip_window_bits, inflate_head_skip_mode, inflate_header_crc_enabled,
         inflate_header_wrap_allows_capture, inflate_is_gzip_header, inflate_mark_progress,
@@ -3284,6 +3299,18 @@ mod tests {
         InflateZlibWindowParams, WindowAllocationPlan, BAD, CHECK, CODE_LENGTH_ORDER, COPY_,
         COPY_1, DICT, DICTID, HEAD, LEN_, MATCH, STORED, SYNC, TYPE, TYPEDO,
     };
+
+    #[test]
+    fn inflate_add_and_consume_extra_bits_preserves_low_bits_and_wrapping() {
+        assert_eq!(
+            inflate_add_and_consume_extra_bits(257, 0b1_1010, 9, 4),
+            (267, 0b1, 5)
+        );
+        assert_eq!(
+            inflate_add_and_consume_extra_bits(::core::ffi::c_uint::MAX, 1, 1, 1),
+            (0, 0, 0)
+        );
+    }
 
     #[test]
     fn inflate_gzip_extra_progress_preserves_partial_input() {

@@ -1322,7 +1322,7 @@ unsafe fn gz_fetch(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int 
     loop {
         match gz_fetch_action(state.how) {
             GzFetchAction::Look => {
-                if gz_look(state as *mut crate::gzguts_h::gz_state) == -1 as ::core::ffi::c_int {
+                if gz_fetch_look_failed(gz_look(state as *mut crate::gzguts_h::gz_state)) {
                     return -1 as ::core::ffi::c_int;
                 }
                 let how = state.how;
@@ -1400,6 +1400,10 @@ fn gz_fetch_should_continue(
     avail_in: crate::stdlib::uInt,
 ) -> bool {
     have == 0 && (eof == 0 || avail_in != 0)
+}
+
+fn gz_fetch_look_failed(result: ::core::ffi::c_int) -> bool {
+    result == -1 as ::core::ffi::c_int
 }
 
 fn gz_fetch_apply_copy_load(have: &mut ::core::ffi::c_uint, load: &GzLoadResult) -> bool {
@@ -1939,6 +1943,14 @@ mod tests {
         assert!(gz_decomp_needs_input_load(0));
         assert!(!gz_decomp_needs_input_load(1));
         assert!(!gz_decomp_needs_input_load(crate::stdlib::uInt::MAX));
+    }
+
+    #[test]
+    fn gz_fetch_look_failed_matches_only_gz_look_failure() {
+        assert!(gz_fetch_look_failed(-1));
+        assert!(!gz_fetch_look_failed(0));
+        assert!(!gz_fetch_look_failed(1));
+        assert!(!gz_fetch_look_failed(-2));
     }
 
     #[test]
