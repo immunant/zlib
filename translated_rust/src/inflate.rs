@@ -343,7 +343,7 @@ pub use crate::zutil_h::DEF_WBITS;
 // first validate the raw ABI pointer with `as_mut()` and then use this helper
 // for the association check, so no projected state reference can outlive the
 // stream it belongs to.
-unsafe fn inflate_stream_and_state<'stream>(
+pub(crate) unsafe fn inflate_stream_and_state<'stream>(
     stream: &'stream mut crate::zlib_h::z_stream_s,
 ) -> Option<(
     &'stream mut crate::zlib_h::z_stream_s,

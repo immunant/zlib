@@ -1,4 +1,4 @@
-use crate::src::inflate::{inflate_state, CodeTableRef, BAD, TYPE};
+use crate::src::inflate::{CodeTableRef, BAD, TYPE};
 use crate::src::inftrees::code;
 
 pub(crate) enum FastExit {
@@ -328,15 +328,35 @@ pub(crate) fn inflate_fast_from_views(
     result
 }
 
-pub unsafe extern "C" fn inflate_fast(strm: crate::zlib_h::z_streamp, start: ::core::ffi::c_uint) {
-    // The exported boundary owns raw cursor projection.  The decoder called
-    // below receives only bounded views and scalar state.
-    let strm = &mut *strm;
-    let state = &mut *(strm.state as *mut inflate_state);
-    let input = core::slice::from_raw_parts(strm.next_in, strm.avail_in as usize);
+// The ABI projection is deliberately separate from `inflate_fast()`: every
+// decoder invocation below owns only bounded slices and a pointer-free state
+// snapshot.  The shared state projection validates the opaque association and
+// ties the state borrow to this stream borrow before any cursor is exposed.
+pub(crate) unsafe fn inflate_fast_from_abi_boundary(
+    stream: &mut crate::zlib_h::z_stream_s,
+    start: ::core::ffi::c_uint,
+) {
+    let Some((strm, state)) = crate::src::inflate::inflate_stream_and_state(stream) else {
+        return;
+    };
+    let input = if strm.avail_in == 0 {
+        &[]
+    } else {
+        if strm.next_in.is_null() {
+            return;
+        }
+        core::slice::from_raw_parts(strm.next_in, strm.avail_in as usize)
+    };
     let written = start.wrapping_sub(strm.avail_out) as usize;
     let output_start = strm.next_out.wrapping_sub(written);
-    let output = core::slice::from_raw_parts_mut(output_start, start as usize);
+    let output = if start == 0 {
+        &mut []
+    } else {
+        if output_start.is_null() {
+            return;
+        }
+        core::slice::from_raw_parts_mut(output_start, start as usize)
+    };
     let window = state.owned_window.as_deref();
     let fast_state = InflateFastState {
         history: FastHistory::External(window),
@@ -356,7 +376,7 @@ pub unsafe extern "C" fn inflate_fast(strm: crate::zlib_h::z_streamp, start: ::c
     let Some(request) = request else {
         return;
     };
-    let (result, hold, bits, input_len, output_len) = request.run();
+    let (result, hold, bits, input_len, output_len) = inflate_fast(request);
     strm.next_in = strm.next_in.wrapping_add(result.input_used);
     strm.avail_in = input_len.wrapping_sub(result.input_used) as crate::stdlib::uInt;
     strm.next_out = output_start.wrapping_add(result.output_used);
@@ -383,10 +403,22 @@ pub unsafe extern "C" fn inflate_fast(strm: crate::zlib_h::z_streamp, start: ::c
     }
 }
 
+// This is the pointer-free fast-decoder dispatch used by the ABI adapter and
+// by future owners.  Keeping it separate prevents a raw stream projection
+// from becoming part of the fast path's API.
+pub(crate) fn inflate_fast(
+    request: InflateFastRequest<'_, '_, '_>,
+) -> (FastResult, u64, u32, usize, usize) {
+    request.run()
+}
+
 #[export_name = "inflate_fast"]
 pub unsafe extern "C" fn inflate_fast_ffi(
     strm: crate::zlib_h::z_streamp,
     start: ::core::ffi::c_uint,
 ) {
-    inflate_fast(strm, start)
+    let Some(stream) = strm.as_mut() else {
+        return;
+    };
+    inflate_fast_from_abi_boundary(stream, start)
 }
