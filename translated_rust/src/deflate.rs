@@ -1907,9 +1907,10 @@ fn fill_window_lookahead_after_read(
 
 /// Slide the retained window suffix to the front.
 ///
-/// `fill_window()` establishes the callback-owned window view at its state
-/// boundary.  Keeping the overlapping move here avoids recreating raw
-/// pointers for an operation that is naturally expressed by a slice.
+/// The exported deflate boundary establishes the callback-owned window view
+/// before it enters the refill core.  Keeping the overlapping move here
+/// avoids recreating raw pointers for an operation that is naturally
+/// expressed by a slice.
 fn fill_window_slide(
     window: &mut [crate::stdlib::Bytef],
     wsize: crate::stdlib::uInt,
@@ -2134,36 +2135,6 @@ fn fill_window_core(
     progress
 }
 
-unsafe fn fill_window(mut s: *mut crate::src::deflate::deflate_state) {
-    let state = &mut *s;
-    let stream = &mut *state.strm;
-    if stream.avail_in != 0 && stream.next_in.is_null() {
-        return;
-    }
-    if state.window.is_null() || state.head.is_null() || state.prev.is_null() {
-        return;
-    }
-    // The callback allocation has exactly these lengths.  This boundary
-    // creates the three refill views once; the refill algorithm itself only
-    // receives the established safe working set.
-    let window =
-        &mut *::core::ptr::slice_from_raw_parts_mut(state.window, state.window_size as usize);
-    let head = &mut *::core::ptr::slice_from_raw_parts_mut(state.head, state.hash_size as usize);
-    let prev = &mut *::core::ptr::slice_from_raw_parts_mut(state.prev, state.w_size as usize);
-    let Some(mut working) = DeflateWorkingSet::for_refill(state, window, head, prev) else {
-        return;
-    };
-    let input = if stream.avail_in == 0 {
-        &[]
-    } else {
-        core::slice::from_raw_parts(stream.next_in, stream.avail_in as usize)
-    };
-    let progress = working.refill(state, input, stream.avail_in, stream.total_in, stream.adler);
-    stream.avail_in = progress.avail_in;
-    stream.total_in = progress.total_in;
-    stream.adler = progress.adler;
-    stream.next_in = stream.next_in.wrapping_add(progress.consumed);
-}
 #[export_name = "deflateInit_"]
 
 pub unsafe extern "C" fn deflateInit__ffi(
@@ -5950,7 +5921,44 @@ macro_rules! deflate_rle_at_ffi_boundary {
             let mut bflush: ::core::ffi::c_int = 0;
             loop {
                 if (*s).lookahead <= crate::zutil_h::MAX_MATCH as crate::stdlib::uInt {
-                    fill_window(s);
+                    // This macro expands inside exported `deflate_ffi`: establish
+                    // callback and caller-input views only for this refill, then
+                    // commit the stream cursors before any later output borrow.
+                    let state = &mut *s;
+                    let stream = &mut *state.strm;
+                    if !(stream.avail_in != 0 && stream.next_in.is_null())
+                        && !state.window.is_null()
+                        && !state.head.is_null()
+                        && !state.prev.is_null()
+                    {
+                        let window = core::slice::from_raw_parts_mut(
+                            state.window,
+                            state.window_size as usize,
+                        );
+                        let head = core::slice::from_raw_parts_mut(
+                            state.head,
+                            state.hash_size as usize,
+                        );
+                        let prev = core::slice::from_raw_parts_mut(state.prev, state.w_size as usize);
+                        if let Some(mut working) =
+                            DeflateWorkingSet::for_refill(state, window, head, prev)
+                        {
+                            let input = if stream.avail_in == 0 { &[] } else {
+                                core::slice::from_raw_parts(stream.next_in, stream.avail_in as usize)
+                            };
+                            let progress = working.refill(
+                                state,
+                                input,
+                                stream.avail_in,
+                                stream.total_in,
+                                stream.adler,
+                            );
+                            stream.avail_in = progress.avail_in;
+                            stream.total_in = progress.total_in;
+                            stream.adler = progress.adler;
+                            stream.next_in = stream.next_in.wrapping_add(progress.consumed);
+                        }
+                    }
                     match deflate_rle_refill_action((*s).lookahead, flush) {
                         DeflateRleRefillAction::Continue => {}
                         DeflateRleRefillAction::NeedMore => break 'rle need_more,
@@ -6127,7 +6135,43 @@ macro_rules! deflate_huff_at_ffi_boundary {
             let mut bflush: ::core::ffi::c_int = 0;
             loop {
                 if (*s).lookahead == 0 as crate::stdlib::uInt {
-                    fill_window(s);
+                    // Keep the raw views at this exported-boundary expansion;
+                    // `fill_window_core` receives only the checked working set.
+                    let state = &mut *s;
+                    let stream = &mut *state.strm;
+                    if !(stream.avail_in != 0 && stream.next_in.is_null())
+                        && !state.window.is_null()
+                        && !state.head.is_null()
+                        && !state.prev.is_null()
+                    {
+                        let window = core::slice::from_raw_parts_mut(
+                            state.window,
+                            state.window_size as usize,
+                        );
+                        let head = core::slice::from_raw_parts_mut(
+                            state.head,
+                            state.hash_size as usize,
+                        );
+                        let prev = core::slice::from_raw_parts_mut(state.prev, state.w_size as usize);
+                        if let Some(mut working) =
+                            DeflateWorkingSet::for_refill(state, window, head, prev)
+                        {
+                            let input = if stream.avail_in == 0 { &[] } else {
+                                core::slice::from_raw_parts(stream.next_in, stream.avail_in as usize)
+                            };
+                            let progress = working.refill(
+                                state,
+                                input,
+                                stream.avail_in,
+                                stream.total_in,
+                                stream.adler,
+                            );
+                            stream.avail_in = progress.avail_in;
+                            stream.total_in = progress.total_in;
+                            stream.adler = progress.adler;
+                            stream.next_in = stream.next_in.wrapping_add(progress.consumed);
+                        }
+                    }
                     match deflate_huff_refill_action((*s).lookahead, flush) {
                         DeflateHuffRefillAction::Continue => {}
                         DeflateHuffRefillAction::NeedMore => break 'huff need_more,
