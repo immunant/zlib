@@ -604,6 +604,31 @@ fn inflate_prime_update(
     }
 }
 
+/// Apply an `inflatePrime()` request after the FFI boundary has established a
+/// valid state reference.  Keeping the mutation here means the exported
+/// wrapper only establishes that boundary; the bit-buffer transition itself
+/// has no raw-pointer dependency.
+fn inflate_prime_core(
+    state: &mut inflate_state,
+    requested_bits: ::core::ffi::c_int,
+    value: ::core::ffi::c_int,
+) -> ::core::ffi::c_int {
+    match inflate_prime_update(state.hold, state.bits, requested_bits, value) {
+        InflatePrimeUpdate::Keep => crate::zlib_h::Z_OK,
+        InflatePrimeUpdate::Clear => {
+            state.hold = 0;
+            state.bits = 0;
+            crate::zlib_h::Z_OK
+        }
+        InflatePrimeUpdate::Set { hold, bits } => {
+            state.hold = hold;
+            state.bits = bits;
+            crate::zlib_h::Z_OK
+        }
+        InflatePrimeUpdate::StreamError => crate::zlib_h::Z_STREAM_ERROR,
+    }
+}
+
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 struct WindowUpdate {
     replace: bool,
@@ -1223,21 +1248,8 @@ pub unsafe extern "C" fn inflatePrime_ffi(
     if inflate_state_check_at_ffi_boundary!(strm) {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    let state = (*strm).state as *mut crate::src::inflate::inflate_state;
-    match inflate_prime_update((*state).hold, (*state).bits, bits, value) {
-        InflatePrimeUpdate::Keep => crate::zlib_h::Z_OK,
-        InflatePrimeUpdate::Clear => {
-            (*state).hold = 0;
-            (*state).bits = 0;
-            crate::zlib_h::Z_OK
-        }
-        InflatePrimeUpdate::Set { hold, bits } => {
-            (*state).hold = hold;
-            (*state).bits = bits;
-            crate::zlib_h::Z_OK
-        }
-        InflatePrimeUpdate::StreamError => crate::zlib_h::Z_STREAM_ERROR,
-    }
+    let state = &mut *((*strm).state as *mut crate::src::inflate::inflate_state);
+    inflate_prime_core(state, bits, value)
 }
 
 pub(crate) fn inflate_can_use_fast_path(
