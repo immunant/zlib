@@ -161,7 +161,7 @@ pub(crate) fn inflate_one_shot(
         avail_out: 0,
         total_out: 0,
         msg: ::core::ptr::null_mut(),
-        state: ::core::ptr::null_mut(),
+        state: None,
         zalloc: None,
         zfree: None,
         opaque: ::core::ptr::null_mut(),
@@ -353,7 +353,10 @@ pub(crate) unsafe fn inflate_stream_and_state<'stream>(
         return None;
     }
     let identity = ::core::ptr::from_mut(stream).addr();
-    let state = (stream.state as *mut crate::src::inflate::inflate_state).as_mut()?;
+    let state = stream
+        .state?
+        .cast::<crate::src::inflate::inflate_state>()
+        .as_mut();
     if state.stream_identity != identity
         || (state.mode as ::core::ffi::c_uint)
             < crate::src::inflate::HEAD as ::core::ffi::c_int as ::core::ffi::c_uint
@@ -562,14 +565,18 @@ pub unsafe extern "C" fn inflateInit2_(
             was: 0,
         },
     );
-    strm.state = state as *mut crate::src::deflate::internal_state;
+    strm.state = Some(
+        ::core::ptr::NonNull::new(state)
+            .expect("checked state allocation")
+            .cast(),
+    );
     let ret = inflateReset2(strm, windowBits);
     if ret != crate::zlib_h::Z_OK {
         Some(strm.zfree.expect("non-null function pointer")).expect("non-null function pointer")(
             strm.opaque,
             state as crate::stdlib::voidpf,
         );
-        strm.state = ::core::ptr::null_mut::<crate::src::deflate::internal_state>();
+        strm.state = None;
     }
     return ret;
 }
@@ -2854,7 +2861,7 @@ pub unsafe extern "C" fn inflateEnd(mut strm: crate::zlib_h::z_streamp) -> ::cor
     let zfree = stream.zfree.expect("non-null function pointer");
     let opaque = stream.opaque;
     zfree(opaque, state_ptr.cast());
-    stream.state = ::core::ptr::null_mut::<crate::src::deflate::internal_state>();
+    stream.state = None;
     return crate::zlib_h::Z_OK;
 }
 #[export_name = "inflateEnd"]
@@ -3088,7 +3095,11 @@ pub unsafe extern "C" fn inflateSync(mut strm: crate::zlib_h::z_streamp) -> ::co
     inflateReset(strm);
     strm_ref.total_in = in_0;
     strm_ref.total_out = out;
-    let state = &mut *(strm_ref.state as *mut crate::src::inflate::inflate_state);
+    let state = strm_ref
+        .state
+        .expect("inflateSync reset retained initialized state")
+        .cast::<crate::src::inflate::inflate_state>();
+    let state = &mut *state.as_ptr();
     state.flags = flags;
     state.mode = crate::src::inflate::TYPE;
     return crate::zlib_h::Z_OK;
@@ -3219,7 +3230,7 @@ pub unsafe extern "C" fn inflateCopy(
             avail_out: source.avail_out,
             total_out: source.total_out,
             msg: source.msg,
-            state: copy.as_ptr().cast(),
+            state: Some(::core::ptr::NonNull::from(copy).cast()),
             zalloc: source.zalloc,
             zfree: source.zfree,
             opaque: source.opaque,

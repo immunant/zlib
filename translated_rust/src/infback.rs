@@ -151,7 +151,11 @@ pub unsafe extern "C" fn inflateBackInit_(
     if state.is_null() {
         return crate::zlib_h::Z_MEM_ERROR;
     }
-    strm.state = state as *mut crate::src::deflate::internal_state;
+    strm.state = Some(
+        ::core::ptr::NonNull::new(state)
+            .expect("checked state allocation")
+            .cast(),
+    );
     // Back-mode state uses the same allocation/release contract as normal
     // inflate.  Publish one fully initialized value into the callback-owned
     // allocation, whose returned bytes need not have been initialized. Keep

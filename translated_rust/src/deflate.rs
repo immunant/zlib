@@ -576,7 +576,7 @@ pub(crate) fn deflate_one_shot(
         avail_out: 0,
         total_out: 0,
         msg: ::core::ptr::null_mut::<::core::ffi::c_char>(),
-        state: ::core::ptr::null_mut::<crate::src::deflate::internal_state>(),
+        state: None,
         zalloc: None,
         zfree: None,
         opaque: ::core::ptr::null_mut::<::core::ffi::c_void>(),
@@ -1154,7 +1154,11 @@ pub unsafe extern "C" fn deflateInit2_(
         high_water: 0,
         slid: 0,
     });
-    stream.state = s as *mut crate::src::deflate::internal_state;
+    stream.state = Some(
+        ::core::ptr::NonNull::new(s)
+            .expect("checked state allocation")
+            .cast(),
+    );
     // Do not keep a Rust borrow of the installed state across an allocator
     // callback: a caller allocator may observe the stream re-entrantly.
     // Each callback result is instead published through a short projection,
@@ -1322,7 +1326,10 @@ unsafe fn deflate_stream_and_state<'stream>(
     if strm.zalloc.is_none() || strm.zfree.is_none() {
         return None;
     }
-    let state = (strm.state as *mut crate::src::deflate::deflate_state).as_mut()?;
+    let state = strm
+        .state?
+        .cast::<crate::src::deflate::deflate_state>()
+        .as_mut();
     if !deflate_state_status_is_valid(state.status) {
         return None;
     }
@@ -1855,7 +1862,11 @@ pub unsafe extern "C" fn deflateReset(mut strm: crate::zlib_h::z_streamp) -> ::c
     let mut ret: ::core::ffi::c_int = 0;
     ret = deflateResetKeep(strm);
     if ret == crate::zlib_h::Z_OK {
-        let state = &mut *((*strm).state as *mut crate::src::deflate::deflate_state);
+        let state = (*strm)
+            .state
+            .expect("deflateResetKeep accepted initialized state")
+            .cast::<crate::src::deflate::deflate_state>();
+        let state = &mut *state.as_ptr();
         // `head` has exactly `hash_size` elements from `deflateInit2_()` or
         // `deflateCopy()`.
         let head = ::core::slice::from_raw_parts_mut(
@@ -2442,7 +2453,10 @@ unsafe fn deflate_bound_state_for_stream(
     if stream.zalloc.is_none() || stream.zfree.is_none() {
         return None;
     }
-    let state = (stream.state as *const crate::src::deflate::deflate_state).as_ref()?;
+    let state = stream
+        .state?
+        .cast::<crate::src::deflate::deflate_state>()
+        .as_ref();
     if state.status != crate::src::deflate::INIT_STATE
         && state.status != crate::src::deflate::GZIP_STATE
         && state.status != crate::src::deflate::EXTRA_STATE
@@ -4091,7 +4105,7 @@ pub unsafe extern "C" fn deflateEnd(mut strm: crate::zlib_h::z_streamp) -> ::cor
     for allocation in allocations.into_iter().flatten() {
         zfree(opaque, allocation.as_ptr());
     }
-    strm.state = ::core::ptr::null_mut::<crate::src::deflate::internal_state>();
+    strm.state = None;
     return if status == crate::src::deflate::BUSY_STATE {
         crate::zlib_h::Z_DATA_ERROR
     } else {
@@ -4121,11 +4135,11 @@ unsafe fn deflate_copy_from_abi_boundary(
     if source.zalloc.is_none() || source.zfree.is_none() {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    let source_state = source.state as *const crate::src::deflate::deflate_state;
-    if source_state.is_null() {
+    let Some(source_state) = source.state else {
         return crate::zlib_h::Z_STREAM_ERROR;
-    }
-    let ss = &*source_state;
+    };
+    let source_state = source_state.cast::<crate::src::deflate::deflate_state>();
+    let ss = &*source_state.as_ptr();
     let dest = dest.as_mut();
     let payload = DeflateCopyPayload {
         data_type: source.data_type,
@@ -4229,7 +4243,7 @@ unsafe fn deflate_copy_from_abi_boundary(
     let Some(mut ds) = ::core::ptr::NonNull::new(ds) else {
         return crate::zlib_h::Z_MEM_ERROR;
     };
-    dest.state = ds.as_ptr() as *mut crate::src::deflate::internal_state;
+    dest.state = Some(ds.cast());
     // Publish an explicit initialized snapshot rather than byte-copying a
     // Rust value out of callback-owned storage.  The allocation handles are
     // retained until their replacements are installed below, preserving the

@@ -2080,7 +2080,7 @@ unsafe fn gz_open(path: GzOpenPath<'_>, mode: &[u8]) -> Option<Box<crate::gzguts
                 avail_out: initial.reset.codec.available_output,
                 total_out: initial.reset.codec.total_out,
                 msg: ::core::ptr::null_mut(),
-                state: ::core::ptr::null_mut(),
+                state: None,
                 zalloc: None,
                 zfree: None,
                 opaque: ::core::ptr::null_mut(),

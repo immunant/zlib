@@ -134,6 +134,15 @@ pub mod zlib_h {
 
     pub type z_stream = crate::zlib_h::z_stream_s;
 
+    // C exposes this only as an opaque pointer.  Keeping a distinct marker
+    // avoids making every stream borrow transitively carry the implementation
+    // state's allocation pointers; projection sites cast it only after they
+    // have validated the stream's lifecycle.
+    #[repr(C)]
+    pub struct z_stream_state_opaque {
+        _private: [u8; 0],
+    }
+
     #[repr(C)]
 
     pub struct z_stream_s {
@@ -144,7 +153,11 @@ pub mod zlib_h {
         pub avail_out: crate::stdlib::uInt,
         pub total_out: crate::stdlib::uLong,
         pub msg: *mut ::core::ffi::c_char,
-        pub state: *mut crate::src::deflate::internal_state,
+        // The opaque state slot has the same nullable-pointer ABI as C's
+        // `void *`, while keeping the Rust mirror from carrying a raw field.
+        // No implementation observes it without first validating the handle
+        // at the stream/state projection boundary.
+        pub state: Option<::core::ptr::NonNull<crate::zlib_h::z_stream_state_opaque>>,
         pub zalloc: crate::zlib_h::alloc_func,
         pub zfree: crate::zlib_h::free_func,
         pub opaque: crate::stdlib::voidpf,
