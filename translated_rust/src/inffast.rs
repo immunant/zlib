@@ -200,7 +200,7 @@ pub(crate) fn decode_table_entry(
         .map(crate::src::inftrees::copy_code)
 }
 
-pub unsafe fn inflate_fast(
+pub fn inflate_fast(
     strm: &mut crate::zlib_h::z_stream,
     mut start: ::core::ffi::c_uint,
     history_may_alias_output: bool,
@@ -224,11 +224,11 @@ pub unsafe fn inflate_fast(
     // The existing engine boundary validates this initialized stream before
     // entering the fast path. Keep the one raw handle conversion here, then
     // use the resulting borrow for all state access below.
-    let state = &mut *(strm.state as *mut crate::src::inflate::inflate_state);
+    let state = unsafe { &mut *(strm.state as *mut crate::src::inflate::inflate_state) };
     // The fast-loop entry condition leaves at least five input bytes.  Keep
     // that existing boundary here and use an indexed view for bit-buffer
     // reads, rather than repeatedly dereferencing the raw input cursor.
-    let input = ::core::slice::from_raw_parts(strm.next_in, strm.avail_in as usize);
+    let input = unsafe { ::core::slice::from_raw_parts(strm.next_in, strm.avail_in as usize) };
     last = input.len().wrapping_sub(5);
     out = strm.next_out as *mut ::core::ffi::c_uchar;
     beg = out
@@ -236,7 +236,7 @@ pub unsafe fn inflate_fast(
     // This is the same caller output extent represented by `beg` and `start`
     // below.  Keep it local to the fast engine, which already relies on the
     // five-byte/257-byte entry bounds before indexing this range.
-    let output = ::core::slice::from_raw_parts_mut(beg, start as usize);
+    let output = unsafe { ::core::slice::from_raw_parts_mut(beg, start as usize) };
     end = out.wrapping_offset(strm.avail_out.wrapping_sub(257 as crate::stdlib::uInt) as isize);
     wsize = state.wsize;
     whave = state.whave;
@@ -387,7 +387,7 @@ pub unsafe fn inflate_fast(
                                 let history = if window.is_null() || wsize == 0 {
                                     &[]
                                 } else {
-                                    ::core::slice::from_raw_parts(window, wsize as usize)
+                                    unsafe { ::core::slice::from_raw_parts(window, wsize as usize) }
                                 };
                                 let mut output_index = out.addr().wrapping_sub(beg.addr());
                                 let mut remaining = len as usize;
@@ -548,5 +548,5 @@ pub unsafe extern "C" fn inflate_fast_ffi(
     let Some(strm) = strm.as_mut() else {
         return;
     };
-    unsafe { inflate_fast(strm, start, false) }
+    inflate_fast(strm, start, false)
 }
