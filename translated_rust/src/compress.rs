@@ -133,14 +133,20 @@ macro_rules! compress2_z_at_boundary {
                 break;
             }
             let pending_len = (*state).pending_buf_size as usize;
-            if pending_len != 0 && (*state).pending_buf.is_null() {
+            if pending_len != 0 && (*state).pending_buf.is_none() {
                 err = crate::zlib_h::Z_STREAM_ERROR;
                 break;
             }
             let pending_buf = if pending_len == 0 {
                 &mut []
             } else {
-                ::core::slice::from_raw_parts_mut((*state).pending_buf, pending_len)
+                ::core::slice::from_raw_parts_mut(
+                    (*state)
+                        .pending_buf
+                        .expect("validated deflate pending buffer")
+                        .as_ptr(),
+                    pending_len,
+                )
             };
             let Some(mut window_hash) =
                 crate::src::deflate::deflate_window_hash_buffers_at_boundary!(&mut *state)

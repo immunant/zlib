@@ -282,13 +282,19 @@ macro_rules! gz_comp_at_boundary {
                     break 'gz_comp_result -1;
                 }
                 let pending_len = (*pending_state).pending_buf_size as usize;
-                if pending_len != 0 && (*pending_state).pending_buf.is_null() {
+                if pending_len != 0 && (*pending_state).pending_buf.is_none() {
                     break 'gz_comp_result -1;
                 }
                 let pending_buf = if pending_len == 0 {
                     &mut []
                 } else {
-                    ::core::slice::from_raw_parts_mut((*pending_state).pending_buf, pending_len)
+                    ::core::slice::from_raw_parts_mut(
+                        (*pending_state)
+                            .pending_buf
+                            .expect("validated deflate pending buffer")
+                            .as_ptr(),
+                        pending_len,
+                    )
                 };
                 let Some(mut window_hash) =
                     crate::src::deflate::deflate_window_hash_buffers_at_boundary!(&mut *pending_state)

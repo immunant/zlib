@@ -89,7 +89,10 @@ pub struct internal_state {
     // the tree core.  Keep the working value with the opaque codec state so
     // that core tree work does not need to dereference `strm`.
     pub data_type: ::core::ffi::c_int,
-    pub pending_buf: *mut crate::stdlib::Bytef,
+    /// The callback-owned pending allocation is absent until init succeeds.
+    /// This opaque state can retain the nullable C handle as an optional
+    /// non-null pointer rather than as a raw pointer in codec state.
+    pub pending_buf: Option<::core::ptr::NonNull<crate::stdlib::Bytef>>,
     pub pending_buf_size: crate::zutil_h::ulg,
     /// Offset of the next pending byte within `pending_buf`.  The deflate
     /// state is opaque across the ABI, so an offset preserves its observable
@@ -186,7 +189,7 @@ fn deflate_initial_state() -> deflate_state {
         strm: 0,
         status: 0,
         data_type: crate::zlib_h::Z_UNKNOWN,
-        pending_buf: ::core::ptr::null_mut(),
+        pending_buf: None,
         pending_buf_size: 0,
         pending_out: 0,
         pending: 0,
@@ -1214,7 +1217,7 @@ pub fn deflateInit2_(
         };
         let pending_buf = zalloc(strm_ref.opaque, lit_bufsize, 4 as crate::stdlib::uInt)
             as *mut crate::zutil_h::uchf as *mut crate::stdlib::Bytef;
-        (&mut *s).pending_buf = pending_buf;
+        (&mut *s).pending_buf = ::core::ptr::NonNull::new(pending_buf);
         if window.is_null() || prev.is_null() || head.is_null() || pending_buf.is_null() {
             (&mut *s).status = crate::src::deflate::FINISH_STATE;
             strm_ref.msg = crate::src::zutil::z_errmsg[(if (-4 as ::core::ffi::c_int)
@@ -1904,13 +1907,18 @@ pub unsafe extern "C" fn deflatePrime_ffi(
         let Ok(pending_len) = usize::try_from(s.pending_buf_size) else {
             return crate::zlib_h::Z_BUF_ERROR;
         };
-        if pending_len != 0 && s.pending_buf.is_null() {
+        if pending_len != 0 && s.pending_buf.is_none() {
             return crate::zlib_h::Z_BUF_ERROR;
         }
         let pending_buf = if pending_len == 0 {
             &mut []
         } else {
-            ::core::slice::from_raw_parts_mut(s.pending_buf, pending_len)
+            ::core::slice::from_raw_parts_mut(
+                s.pending_buf
+                    .expect("validated deflate pending buffer")
+                    .as_ptr(),
+                pending_len,
+            )
         };
         crate::src::trees::flush_bits_state(s, pending_buf);
         value = step.value;
@@ -2050,13 +2058,19 @@ macro_rules! deflate_params_at_boundary {
                 let Ok(pending_len) = usize::try_from((&*s).pending_buf_size) else {
                     break 'deflate_params_result crate::zlib_h::Z_STREAM_ERROR;
                 };
-                if pending_len != 0 && (&*s).pending_buf.is_null() {
+                if pending_len != 0 && (&*s).pending_buf.is_none() {
                     break 'deflate_params_result crate::zlib_h::Z_STREAM_ERROR;
                 }
                 let pending_buf = if pending_len == 0 {
                     &mut []
                 } else {
-                    ::core::slice::from_raw_parts_mut((&*s).pending_buf, pending_len)
+                    ::core::slice::from_raw_parts_mut(
+                        (&*s)
+                            .pending_buf
+                            .expect("validated deflate pending buffer")
+                            .as_ptr(),
+                        pending_len,
+                    )
                 };
                 let Some(mut window_hash) =
                     crate::src::deflate::deflate_window_hash_buffers_at_boundary!(&mut *s)
@@ -2937,7 +2951,7 @@ fn flush_pending(
     if pending_end > pending_buf.len() {
         return (strm.avail_out, Some(s.pending));
     }
-    let Some(pending_address) = (s.pending_buf as usize).checked_add(s.pending_out) else {
+    let Some(pending_address) = (pending_buf.as_ptr() as usize).checked_add(s.pending_out) else {
         return (strm.avail_out, Some(s.pending));
     };
     let Some(output_buf) = output.remaining_mut() else {
@@ -3810,13 +3824,19 @@ pub unsafe extern "C" fn deflate_ffi(
         let Ok(pending_len) = usize::try_from((*state).pending_buf_size) else {
             return crate::zlib_h::Z_STREAM_ERROR;
         };
-        if pending_len != 0 && (*state).pending_buf.is_null() {
+        if pending_len != 0 && (*state).pending_buf.is_none() {
             return crate::zlib_h::Z_STREAM_ERROR;
         }
         let pending_buf = if pending_len == 0 {
             &mut []
         } else {
-            ::core::slice::from_raw_parts_mut((*state).pending_buf, pending_len)
+            ::core::slice::from_raw_parts_mut(
+                (*state)
+                    .pending_buf
+                    .expect("validated deflate pending buffer")
+                    .as_ptr(),
+                pending_len,
+            )
         };
         let Some(mut window_hash) = deflate_window_hash_buffers_at_boundary!(&mut *state) else {
             return crate::zlib_h::Z_STREAM_ERROR;
@@ -3878,8 +3898,8 @@ pub fn deflateEnd(strm: &mut crate::zlib_h::z_stream) -> ::core::ffi::c_int {
             );
             snapshot
         };
-        if !pending_buf.is_null() {
-            zfree(opaque, pending_buf as crate::stdlib::voidpf);
+        if let Some(pending_buf) = pending_buf {
+            zfree(opaque, pending_buf.as_ptr() as crate::stdlib::voidpf);
         }
         if let Some(head) = head {
             zfree(opaque, head.as_ptr() as crate::stdlib::voidpf);
@@ -3947,12 +3967,15 @@ pub unsafe extern "C" fn deflateCopy_ffi(
         dest_state.hash_size,
         ::core::mem::size_of::<crate::src::deflate::Pos>() as crate::stdlib::uInt,
     ) as *mut crate::src::deflate::Posf);
-    dest_state.pending_buf = zalloc(opaque, dest_state.lit_bufsize, 4 as crate::stdlib::uInt)
-        as *mut crate::zutil_h::uchf as *mut crate::stdlib::Bytef;
+    dest_state.pending_buf =
+        ::core::ptr::NonNull::new(
+            zalloc(opaque, dest_state.lit_bufsize, 4 as crate::stdlib::uInt)
+                as *mut crate::zutil_h::uchf as *mut crate::stdlib::Bytef,
+        );
     if dest_state.window.is_none()
         || dest_state.prev.is_none()
         || dest_state.head.is_none()
-        || dest_state.pending_buf.is_null()
+        || dest_state.pending_buf.is_none()
     {
         deflateEnd(&mut *dest);
         return crate::zlib_h::Z_MEM_ERROR;
@@ -3976,7 +3999,7 @@ pub unsafe extern "C" fn deflateCopy_ffi(
     if (window_len != 0 && source_state.window.is_none())
         || (prev_capacity != 0 && source_state.prev.is_none())
         || (head_len != 0 && source_state.head.is_none())
-        || (pending_capacity != 0 && source_state.pending_buf.is_null())
+        || (pending_capacity != 0 && source_state.pending_buf.is_none())
     {
         deflateEnd(&mut *dest);
         return crate::zlib_h::Z_STREAM_ERROR;
@@ -4106,12 +4129,24 @@ pub unsafe extern "C" fn deflateCopy_ffi(
     let src_pending = if pending_capacity == 0 {
         &[]
     } else {
-        ::core::slice::from_raw_parts(source_state.pending_buf, pending_capacity)
+        ::core::slice::from_raw_parts(
+            source_state
+                .pending_buf
+                .expect("validated source deflate pending buffer")
+                .as_ptr(),
+            pending_capacity,
+        )
     };
     let dst_pending = if pending_capacity == 0 {
         &mut []
     } else {
-        ::core::slice::from_raw_parts_mut(dest_state.pending_buf, pending_capacity)
+        ::core::slice::from_raw_parts_mut(
+            dest_state
+                .pending_buf
+                .expect("validated destination deflate pending buffer")
+                .as_ptr(),
+            pending_capacity,
+        )
     };
     if !deflate_copy_owned_buffers(
         dst_window,

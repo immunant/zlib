@@ -5194,13 +5194,18 @@ pub unsafe extern "C" fn _tr_stored_block_ffi(
     let Ok(stored_len) = usize::try_from(stored_len) else {
         return;
     };
-    if (pending_len != 0 && s.pending_buf.is_null()) || (stored_len != 0 && buf.is_null()) {
+    if (pending_len != 0 && s.pending_buf.is_none()) || (stored_len != 0 && buf.is_null()) {
         return;
     }
     let pending_buf = if pending_len == 0 {
         &mut []
     } else {
-        ::core::slice::from_raw_parts_mut(s.pending_buf, pending_len)
+        ::core::slice::from_raw_parts_mut(
+            s.pending_buf
+                .expect("validated deflate pending buffer")
+                .as_ptr(),
+            pending_len,
+        )
     };
     let stored = if stored_len == 0 {
         &[]
@@ -5220,13 +5225,18 @@ pub unsafe extern "C" fn _tr_stored_block_ffi(
 #[export_name = "_tr_flush_bits"]
 
 pub unsafe extern "C" fn _tr_flush_bits_ffi(mut s: *mut crate::src::deflate::deflate_state) {
-    if s.is_null() || (*s).pending_buf.is_null() {
+    if s.is_null() || (*s).pending_buf.is_none() {
         return;
     }
     let Ok(pending_len) = usize::try_from((*s).pending_buf_size) else {
         return;
     };
-    let pending_buf = ::core::slice::from_raw_parts_mut((*s).pending_buf, pending_len);
+    let pending_buf = ::core::slice::from_raw_parts_mut(
+        (*s).pending_buf
+            .expect("validated deflate pending buffer")
+            .as_ptr(),
+        pending_len,
+    );
     flush_bits_state(&mut *s, pending_buf);
 }
 #[export_name = "_tr_align"]
@@ -5239,13 +5249,18 @@ pub unsafe extern "C" fn _tr_align_ffi(mut s: *mut crate::src::deflate::deflate_
     let Ok(pending_len) = usize::try_from(s.pending_buf_size) else {
         return;
     };
-    if pending_len != 0 && s.pending_buf.is_null() {
+    if pending_len != 0 && s.pending_buf.is_none() {
         return;
     }
     let pending_buf = if pending_len == 0 {
         &mut []
     } else {
-        ::core::slice::from_raw_parts_mut(s.pending_buf, pending_len)
+        ::core::slice::from_raw_parts_mut(
+            s.pending_buf
+                .expect("validated deflate pending buffer")
+                .as_ptr(),
+            pending_len,
+        )
     };
     tr_align_state(pending_buf, &mut s.pending, &mut s.bi_buf, &mut s.bi_valid);
 }
@@ -5579,13 +5594,19 @@ pub unsafe extern "C" fn _tr_flush_block_ffi(
     let Ok(stored_len_usize) = usize::try_from(stored_len) else {
         return;
     };
-    if pending_len != 0 && state.pending_buf.is_null() {
+    if pending_len != 0 && state.pending_buf.is_none() {
         return;
     }
     let pending_and_symbols = if pending_len == 0 {
         &mut []
     } else {
-        ::core::slice::from_raw_parts_mut(state.pending_buf, pending_len)
+        ::core::slice::from_raw_parts_mut(
+            state
+                .pending_buf
+                .expect("validated deflate pending buffer")
+                .as_ptr(),
+            pending_len,
+        )
     };
     let stored = if buf.is_null() {
         None
@@ -5680,13 +5701,19 @@ pub unsafe extern "C" fn _tr_tally_ffi(
     let Some(symbol_end) = state.sym_start.checked_add(symbol_len) else {
         return 0;
     };
-    if symbol_end > pending_len || (pending_len != 0 && state.pending_buf.is_null()) {
+    if symbol_end > pending_len || (pending_len != 0 && state.pending_buf.is_none()) {
         return 0;
     }
     let pending_buf = if pending_len == 0 {
         &mut []
     } else {
-        ::core::slice::from_raw_parts_mut(state.pending_buf, pending_len)
+        ::core::slice::from_raw_parts_mut(
+            state
+                .pending_buf
+                .expect("validated deflate pending buffer")
+                .as_ptr(),
+            pending_len,
+        )
     };
     let Some(symbols) = pending_buf.get_mut(state.sym_start..symbol_end) else {
         return 0;
