@@ -71,16 +71,37 @@ struct GzPosition {
     skip: crate::stdlib::off64_t,
 }
 
-fn gz_tell_position(position: &GzPosition) -> crate::stdlib::off64_t {
-    if position.mode != crate::gzguts_h::GZ_READ && position.mode != crate::gzguts_h::GZ_WRITE {
-        return -1 as crate::stdlib::off64_t;
+impl GzPosition {
+    fn active(&self) -> bool {
+        self.mode == crate::gzguts_h::GZ_READ || self.mode == crate::gzguts_h::GZ_WRITE
     }
-    position.pos
-        + if position.past != 0 {
-            0 as crate::stdlib::off64_t
-        } else {
-            position.skip
+
+    fn tell(&self) -> crate::stdlib::off64_t {
+        if !self.active() {
+            return -1 as crate::stdlib::off64_t;
         }
+        self.pos
+            + if self.past != 0 {
+                0 as crate::stdlib::off64_t
+            } else {
+                self.skip
+            }
+    }
+
+    fn offset(
+        &self,
+        current: crate::stdlib::off64_t,
+        buffered_input: crate::stdlib::uInt,
+    ) -> crate::stdlib::off64_t {
+        if !self.active() || current == -1 as crate::stdlib::off64_t {
+            return -1 as crate::stdlib::off64_t;
+        }
+        if self.mode == crate::gzguts_h::GZ_READ {
+            current - buffered_input as crate::stdlib::off64_t
+        } else {
+            current
+        }
+    }
 }
 
 pub fn gzeof(mode: ::core::ffi::c_int, past: ::core::ffi::c_int) -> ::core::ffi::c_int {
@@ -563,7 +584,7 @@ pub unsafe extern "C" fn gzseek_ffi(
     gzseek(file, offset, whence)
 }
 fn gztell64(position: &GzPosition) -> crate::stdlib::off64_t {
-    gz_tell_position(position)
+    position.tell()
 }
 #[export_name = "gztell64"]
 
@@ -602,27 +623,25 @@ pub unsafe extern "C" fn gztell_ffi(mut file: crate::zlib_h::gzFile) -> crate::s
     })
 }
 pub unsafe extern "C" fn gzoffset64(mut file: crate::zlib_h::gzFile) -> crate::stdlib::off64_t {
-    let mut offset: crate::stdlib::off64_t = 0;
     if file.is_null() {
         return -1 as crate::stdlib::off64_t;
     }
     let state = &*(file as crate::gzguts_h::gz_statep);
-    let mode = state.mode;
-    if mode != crate::gzguts_h::GZ_READ && mode != crate::gzguts_h::GZ_WRITE {
+    let position = GzPosition {
+        mode: state.mode,
+        pos: 0 as crate::stdlib::off64_t,
+        past: 0 as ::core::ffi::c_int,
+        skip: 0 as crate::stdlib::off64_t,
+    };
+    if !position.active() {
         return -1 as crate::stdlib::off64_t;
     }
-    offset = crate::stdlib::lseek64(
+    let offset = crate::stdlib::lseek64(
         state.fd,
         0 as crate::stdlib::__off64_t,
         crate::stdlib::SEEK_CUR,
     ) as crate::stdlib::off64_t;
-    if offset == -1 as crate::stdlib::off64_t {
-        return -1 as crate::stdlib::off64_t;
-    }
-    if mode == crate::gzguts_h::GZ_READ {
-        offset -= state.strm.avail_in as crate::stdlib::off64_t;
-    }
-    return offset;
+    position.offset(offset, state.strm.avail_in)
 }
 #[export_name = "gzoffset64"]
 
