@@ -2491,11 +2491,17 @@ pub(crate) fn bit_output(state: BitOutputState<'_>, action: BitOutputAction) {
     }
 }
 
+// This is the tree-level bit-output operation.  It deliberately receives the
+// already bounded, pointer-free view so tree callers do not need access to
+// callback-backed deflate storage.
+pub(crate) fn bi_flush_or_windup(state: BitOutputState<'_>, action: BitOutputAction) {
+    bit_output(state, action);
+}
+
 // The export boundary validates and borrows the opaque state.  Keep the
-// callback-backed pending-buffer projection here, so the implementation owns
-// the bounded view and the export remains only a conversion-and-dispatch
-// boundary.
-pub(crate) unsafe fn bi_flush_or_windup(
+// callback-backed pending-buffer projection in this named adapter, so the
+// export remains only a conversion-and-dispatch boundary.
+unsafe fn bit_output_from_deflate_state(
     state: &mut crate::src::deflate::deflate_state,
     action: BitOutputAction,
 ) {
@@ -2506,7 +2512,7 @@ pub(crate) unsafe fn bi_flush_or_windup(
             .as_ptr(),
         state.pending_buf_size as usize,
     );
-    bit_output(
+    bi_flush_or_windup(
         BitOutputState {
             pending_buf,
             pending: &mut state.pending,
@@ -3275,7 +3281,7 @@ pub unsafe extern "C" fn _tr_flush_bits_ffi(mut s: *mut crate::src::deflate::def
     let Some(state) = s.as_mut() else {
         return;
     };
-    bi_flush_or_windup(state, BitOutputAction::Flush)
+    bit_output_from_deflate_state(state, BitOutputAction::Flush)
 }
 #[export_name = "_tr_align"]
 
@@ -3283,7 +3289,7 @@ pub unsafe extern "C" fn _tr_align_ffi(mut s: *mut crate::src::deflate::deflate_
     let Some(state) = s.as_mut() else {
         return;
     };
-    bi_flush_or_windup(state, BitOutputAction::Align)
+    bit_output_from_deflate_state(state, BitOutputAction::Align)
 }
 fn compress_block(
     pending_buf: &mut [crate::stdlib::Bytef],
