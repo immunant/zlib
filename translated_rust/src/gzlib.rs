@@ -63,6 +63,7 @@ pub use crate::zlib_h::Z_HUFFMAN_ONLY;
 pub use crate::zlib_h::Z_MEM_ERROR;
 pub use crate::zlib_h::Z_OK;
 pub use crate::zlib_h::Z_RLE;
+use ::std::sync::Mutex;
 
 #[derive(Copy, Clone)]
 struct GzOpenMode {
@@ -179,6 +180,95 @@ fn gz_fd_path(fd: ::core::ffi::c_int) -> Option<GzFdPath> {
     write!(&mut path, "<fd:{}>", fd).ok()?;
     path.bytes[path.len] = 0;
     Some(path)
+}
+
+struct GzOwnedBuffers {
+    input: Vec<crate::stdlib::Bytef>,
+    output: Vec<crate::stdlib::Bytef>,
+}
+
+static GZ_OWNED_BUFFERS: Mutex<Vec<(usize, GzOwnedBuffers)>> = Mutex::new(Vec::new());
+
+fn gz_state_key(state: &crate::gzguts_h::gz_state) -> usize {
+    state as *const crate::gzguts_h::gz_state as usize
+}
+
+pub(crate) fn gz_store_owned_buffers(
+    state: &crate::gzguts_h::gz_state,
+    input: Vec<crate::stdlib::Bytef>,
+    output: Vec<crate::stdlib::Bytef>,
+) {
+    let mut buffers = GZ_OWNED_BUFFERS
+        .lock()
+        .expect("gz buffer registry poisoned");
+    let key = gz_state_key(state);
+    if let Some((_, old_buffers)) = buffers
+        .iter_mut()
+        .find(|(stored_key, _)| *stored_key == key)
+    {
+        *old_buffers = GzOwnedBuffers { input, output };
+    } else {
+        buffers.push((key, GzOwnedBuffers { input, output }));
+    }
+}
+
+pub(crate) fn gz_remove_owned_buffers(state: &crate::gzguts_h::gz_state) {
+    let mut buffers = GZ_OWNED_BUFFERS
+        .lock()
+        .expect("gz buffer registry poisoned");
+    let key = gz_state_key(state);
+    if let Some(pos) = buffers
+        .iter()
+        .position(|(stored_key, _)| *stored_key == key)
+    {
+        buffers.swap_remove(pos);
+    }
+}
+
+pub(crate) fn gz_with_input_buffer_mut<R>(
+    state: &mut crate::gzguts_h::gz_state,
+    f: impl FnOnce(&mut crate::gzguts_h::gz_state, &mut [crate::stdlib::Bytef]) -> R,
+) -> R {
+    let mut buffers = GZ_OWNED_BUFFERS
+        .lock()
+        .expect("gz buffer registry poisoned");
+    let (_, buffers) = buffers
+        .iter_mut()
+        .find(|(stored_key, _)| *stored_key == gz_state_key(state))
+        .expect("gz input buffer missing");
+    f(state, &mut buffers.input)
+}
+
+pub(crate) fn gz_with_output_buffer_mut<R>(
+    state: &mut crate::gzguts_h::gz_state,
+    f: impl FnOnce(&mut crate::gzguts_h::gz_state, &mut [crate::stdlib::Bytef]) -> R,
+) -> R {
+    let mut buffers = GZ_OWNED_BUFFERS
+        .lock()
+        .expect("gz buffer registry poisoned");
+    let (_, buffers) = buffers
+        .iter_mut()
+        .find(|(stored_key, _)| *stored_key == gz_state_key(state))
+        .expect("gz output buffer missing");
+    f(state, &mut buffers.output)
+}
+
+pub(crate) fn gz_with_buffers_mut<R>(
+    state: &mut crate::gzguts_h::gz_state,
+    f: impl FnOnce(
+        &mut crate::gzguts_h::gz_state,
+        &mut [crate::stdlib::Bytef],
+        &mut [crate::stdlib::Bytef],
+    ) -> R,
+) -> R {
+    let mut buffers = GZ_OWNED_BUFFERS
+        .lock()
+        .expect("gz buffer registry poisoned");
+    let (_, buffers) = buffers
+        .iter_mut()
+        .find(|(stored_key, _)| *stored_key == gz_state_key(state))
+        .expect("gz buffers missing");
+    f(state, &mut buffers.input, &mut buffers.output)
 }
 
 fn gz_reset_before_error(state: &mut crate::gzguts_h::gz_state) {

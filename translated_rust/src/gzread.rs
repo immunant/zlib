@@ -13,7 +13,12 @@ pub(crate) use crate::src::gzlib::gz_error_with_os_error;
 pub(crate) use crate::src::gzlib::gz_file_completed_items;
 pub(crate) use crate::src::gzlib::gz_file_request_len;
 pub use crate::src::gzlib::gz_io_chunk_len;
+pub(crate) use crate::src::gzlib::gz_remove_owned_buffers;
+pub(crate) use crate::src::gzlib::gz_store_owned_buffers;
 pub use crate::src::gzlib::gz_uInt_fits_int;
+pub(crate) use crate::src::gzlib::gz_with_buffers_mut;
+pub(crate) use crate::src::gzlib::gz_with_input_buffer_mut;
+pub(crate) use crate::src::gzlib::gz_with_output_buffer_mut;
 pub use crate::src::gzlib::gz_z_size_to_uInt_chunk;
 
 pub use crate::stdlib::EAGAIN;
@@ -63,6 +68,12 @@ enum GzLoadReadResult {
     Eof,
 }
 
+struct GzLoadOutcome {
+    ret: ::core::ffi::c_int,
+    have: ::core::ffi::c_uint,
+    errno: ::core::ffi::c_int,
+}
+
 fn gz_alloc_byte_vec(len: usize) -> Option<Vec<crate::stdlib::Bytef>> {
     let mut buf = Vec::new();
     buf.try_reserve_exact(len).ok()?;
@@ -95,30 +106,25 @@ fn gz_load_read_result(
     }
 }
 
-fn gz_load(
-    state: &mut crate::gzguts_h::gz_state,
-    buf: &mut [crate::stdlib::Bytef],
-    have: &mut ::core::ffi::c_uint,
-) -> ::core::ffi::c_int {
+fn gz_load(fd: ::core::ffi::c_int, buf: &mut [crate::stdlib::Bytef]) -> GzLoadOutcome {
     let mut ret: ::core::ffi::c_int = 0;
     let mut get: ::core::ffi::c_uint = 0;
     let len = buf.len() as ::core::ffi::c_uint;
-    state.again = 0 as ::core::ffi::c_int;
-    *have = 0 as ::core::ffi::c_uint;
+    let mut have = 0 as ::core::ffi::c_uint;
     loop {
-        get = gz_io_chunk_len(len.wrapping_sub(*have));
+        get = gz_io_chunk_len(len.wrapping_sub(have));
         ret = unsafe {
             crate::stdlib::read(
-                state.fd,
-                buf[*have as usize..].as_mut_ptr() as *mut ::core::ffi::c_void,
+                fd,
+                buf[have as usize..].as_mut_ptr() as *mut ::core::ffi::c_void,
                 get as crate::__stddef_size_t_h::size_t,
             )
         } as ::core::ffi::c_int;
         if ret <= 0 as ::core::ffi::c_int {
             break;
         }
-        *have = (*have).wrapping_add(ret as ::core::ffi::c_uint);
-        if !(*have < len) {
+        have = have.wrapping_add(ret as ::core::ffi::c_uint);
+        if !(have < len) {
             break;
         }
     }
@@ -127,7 +133,17 @@ fn gz_load(
     } else {
         0 as ::core::ffi::c_int
     };
-    match gz_load_read_result(ret, *have, errno) {
+    GzLoadOutcome { ret, have, errno }
+}
+
+fn gz_apply_load_outcome(
+    state: &mut crate::gzguts_h::gz_state,
+    outcome: GzLoadOutcome,
+    have: &mut ::core::ffi::c_uint,
+) -> ::core::ffi::c_int {
+    state.again = 0 as ::core::ffi::c_int;
+    *have = outcome.have;
+    match gz_load_read_result(outcome.ret, outcome.have, outcome.errno) {
         GzLoadReadResult::Ok => {}
         GzLoadReadResult::RetryAfterPartial => {
             state.again = 1 as ::core::ffi::c_int;
@@ -137,7 +153,7 @@ fn gz_load(
             if retryable {
                 state.again = 1 as ::core::ffi::c_int;
             }
-            gz_error_with_os_error(state, crate::zlib_h::Z_ERRNO, errno);
+            gz_error_with_os_error(state, crate::zlib_h::Z_ERRNO, outcome.errno);
             return -1 as ::core::ffi::c_int;
         }
         GzLoadReadResult::Eof => {
@@ -175,21 +191,19 @@ fn gz_avail(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
         return -1 as ::core::ffi::c_int;
     }
     if state.eof == 0 as ::core::ffi::c_int {
-        let input = unsafe {
-            ::core::slice::from_raw_parts_mut(
-                state.in_0 as *mut crate::stdlib::Bytef,
-                state.size as usize,
-            )
-        };
-        if let Some(next_offset) = gz_buffered_input_next_offset(
-            state.strm.next_in as usize,
-            state.in_0 as usize,
-            state.strm.avail_in as usize,
-        ) {
-            gz_compact_input_buffer(input, next_offset, state.strm.avail_in as usize);
-        }
-        let load_start = state.strm.avail_in as usize;
-        if gz_load(state, &mut input[load_start..], &mut got) == -1 as ::core::ffi::c_int {
+        let outcome = gz_with_input_buffer_mut(state, |state, input| {
+            let input = &mut input[..state.size as usize];
+            if let Some(next_offset) = gz_buffered_input_next_offset(
+                state.strm.next_in as usize,
+                input.as_ptr() as usize,
+                state.strm.avail_in as usize,
+            ) {
+                gz_compact_input_buffer(input, next_offset, state.strm.avail_in as usize);
+            }
+            let load_start = state.strm.avail_in as usize;
+            gz_load(state.fd, &mut input[load_start..])
+        });
+        if gz_apply_load_outcome(state, outcome, &mut got) == -1 as ::core::ffi::c_int {
             return -1 as ::core::ffi::c_int;
         }
         state.strm.avail_in = state.strm.avail_in.wrapping_add(got);
@@ -265,42 +279,44 @@ fn gz_look(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
             return -1 as ::core::ffi::c_int;
         }
         state.in_0 = input_buf.as_mut_ptr();
-        ::core::mem::forget(input_buf);
         state.out = output_buf.as_mut_ptr();
-        ::core::mem::forget(output_buf);
+        gz_store_owned_buffers(state, input_buf, output_buf);
         state.size = state.want;
     }
-    let reset_junk = if state.direct == -1 as ::core::ffi::c_int
-        || state.junk == 0 as ::core::ffi::c_int
-    {
-        Some((state.junk != -1 as ::core::ffi::c_int) as ::core::ffi::c_int)
-    } else {
-        if gz_avail(state) == -1 as ::core::ffi::c_int {
-            return -1 as ::core::ffi::c_int;
-        }
-        if gz_look_needs_more_header_input(state.strm.avail_in, state.again) {
-            return 0 as ::core::ffi::c_int;
-        }
-        let input = unsafe {
-            &*::core::ptr::slice_from_raw_parts(state.strm.next_in, state.strm.avail_in as usize)
-        };
-        let gzip_header = input.len() > 3 && {
-            let header = [input[0], input[1], input[2], input[3]];
-            gz_is_gzip_header(header)
-        };
-        if gzip_header {
-            Some(1 as ::core::ffi::c_int)
+    let reset_junk =
+        if state.direct == -1 as ::core::ffi::c_int || state.junk == 0 as ::core::ffi::c_int {
+            Some((state.junk != -1 as ::core::ffi::c_int) as ::core::ffi::c_int)
         } else {
-            state.x.next = state.out;
-            let output =
-                unsafe { &mut *::core::ptr::slice_from_raw_parts_mut(state.x.next, input.len()) };
-            output.copy_from_slice(input);
-            state.x.have = state.strm.avail_in as ::core::ffi::c_uint;
-            state.strm.avail_in = 0 as crate::stdlib::uInt;
-            state.how = crate::gzguts_h::COPY;
-            return 0 as ::core::ffi::c_int;
-        }
-    };
+            if gz_avail(state) == -1 as ::core::ffi::c_int {
+                return -1 as ::core::ffi::c_int;
+            }
+            if gz_look_needs_more_header_input(state.strm.avail_in, state.again) {
+                return 0 as ::core::ffi::c_int;
+            }
+            let gzip_header = gz_with_buffers_mut(state, |state, input_buf, output_buf| {
+                let input_offset =
+                    (state.strm.next_in as usize).wrapping_sub(input_buf.as_ptr() as usize);
+                let input_len = state.strm.avail_in as usize;
+                let input = &input_buf[input_offset..input_offset + input_len];
+                let gzip_header = input.len() > 3 && {
+                    let header = [input[0], input[1], input[2], input[3]];
+                    gz_is_gzip_header(header)
+                };
+                if !gzip_header {
+                    state.x.next = output_buf.as_mut_ptr();
+                    output_buf[..input.len()].copy_from_slice(input);
+                    state.x.have = state.strm.avail_in as ::core::ffi::c_uint;
+                    state.strm.avail_in = 0 as crate::stdlib::uInt;
+                    state.how = crate::gzguts_h::COPY;
+                }
+                gzip_header
+            });
+            if gzip_header {
+                Some(1 as ::core::ffi::c_int)
+            } else {
+                return 0 as ::core::ffi::c_int;
+            }
+        };
     if let Some(junk) = reset_junk {
         unsafe {
             crate::src::inflate::inflateReset_ffi(
@@ -411,13 +427,10 @@ fn gz_fetch(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
             crate::gzguts_h::COPY => {
                 let mut loaded = 0 as ::core::ffi::c_uint;
                 let len = state.size << 1 as ::core::ffi::c_int;
-                let ret = unsafe {
-                    let out = ::core::slice::from_raw_parts_mut(
-                        state.out as *mut crate::stdlib::Bytef,
-                        len as usize,
-                    );
-                    gz_load(state, out, &mut loaded)
-                };
+                let outcome = gz_with_output_buffer_mut(state, |state, output| {
+                    gz_load(state.fd, &mut output[..len as usize])
+                });
+                let ret = gz_apply_load_outcome(state, outcome, &mut loaded);
                 state.x.have = loaded;
                 if ret == -1 as ::core::ffi::c_int {
                     return -1 as ::core::ffi::c_int;
@@ -493,13 +506,12 @@ fn gz_read(
         n = gz_z_size_to_uInt_chunk(len);
         if state.x.have != 0 {
             n = gz_read_buffered_copy_len(len, state.x.have);
-            unsafe {
-                crate::stdlib::memcpy(
-                    output[output_pos..].as_mut_ptr() as *mut ::core::ffi::c_void,
-                    state.x.next as *const ::core::ffi::c_void,
-                    n as crate::__stddef_size_t_h::size_t,
-                );
-            }
+            gz_with_output_buffer_mut(state, |state, output_buf| {
+                let next_offset =
+                    (state.x.next as usize).wrapping_sub(output_buf.as_ptr() as usize);
+                output[output_pos..output_pos + n as usize]
+                    .copy_from_slice(&output_buf[next_offset..next_offset + n as usize]);
+            });
             gz_advance_buffered_read_cursor(state, n);
             if state.err != crate::zlib_h::Z_OK {
                 err = -1 as ::core::ffi::c_int;
@@ -518,11 +530,9 @@ fn gz_read(
                 step = GzReadStep::NeedMoreInput;
             } else {
                 if state.how == crate::gzguts_h::COPY {
-                    err = gz_load(
-                        state,
-                        &mut output[output_pos..output_pos + n as usize],
-                        &mut n,
-                    );
+                    let outcome =
+                        gz_load(state.fd, &mut output[output_pos..output_pos + n as usize]);
+                    err = gz_apply_load_outcome(state, outcome, &mut n);
                 } else {
                     state.strm.avail_out = n as crate::stdlib::uInt;
                     state.strm.next_out = output[output_pos..].as_mut_ptr();
@@ -1023,13 +1033,7 @@ pub unsafe extern "C" fn gzclose_r_ffi(mut file: crate::zlib_h::gzFile) -> ::cor
         crate::src::inflate::inflateEnd_ffi(
             &raw mut state.strm as *mut _ as *mut crate::zlib_h::z_stream_s,
         );
-        let output_len = (state.size << 1 as ::core::ffi::c_int) as usize;
-        drop(Vec::from_raw_parts(state.out, output_len, output_len));
-        drop(Vec::from_raw_parts(
-            state.in_0,
-            state.size as usize,
-            state.size as usize,
-        ));
+        gz_remove_owned_buffers(state);
     }
     err = gzclose_read_status(state.err);
     crate::src::gzlib::gz_error_clear(state, crate::zlib_h::Z_OK);

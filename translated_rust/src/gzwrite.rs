@@ -11,7 +11,10 @@ pub(crate) use crate::src::gzlib::gz_file_completed_items;
 pub(crate) use crate::src::gzlib::gz_file_request_len;
 pub use crate::src::gzlib::gz_io_chunk_len;
 pub use crate::src::gzlib::gz_io_chunk_limit;
+pub(crate) use crate::src::gzlib::gz_remove_owned_buffers;
+pub(crate) use crate::src::gzlib::gz_store_owned_buffers;
 pub use crate::src::gzlib::gz_uInt_fits_int;
+pub(crate) use crate::src::gzlib::gz_with_input_buffer_mut;
 pub use crate::src::gzlib::gz_z_size_to_uInt_chunk;
 
 pub use crate::stdlib::EAGAIN;
@@ -106,11 +109,13 @@ fn gz_init(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
         state.strm.next_in = ::core::ptr::null_mut::<crate::stdlib::Bytef>();
     }
     state.in_0 = input_buf.as_mut_ptr();
-    ::core::mem::forget(input_buf);
-    if let Some(mut output_buf) = output_buf {
+    let output_buf = if let Some(mut output_buf) = output_buf {
         state.out = output_buf.as_mut_ptr();
-        ::core::mem::forget(output_buf);
-    }
+        output_buf
+    } else {
+        Vec::new()
+    };
+    gz_store_owned_buffers(state, input_buf, output_buf);
     state.size = state.want;
     if state.direct == 0 {
         gz_reset_write_output(state);
@@ -576,16 +581,17 @@ pub unsafe extern "C" fn gzwrite_ffi(
     } else {
         ::core::slice::from_raw_parts(buf as *const crate::stdlib::Bytef, len as usize)
     };
-    let mut empty_input_buf = [];
-    let input_buf = if input.is_empty() {
-        &mut empty_input_buf[..]
-    } else {
-        if state.size == 0 as ::core::ffi::c_uint && gz_init(state) == -1 as ::core::ffi::c_int {
-            return 0 as ::core::ffi::c_int;
-        }
-        ::core::slice::from_raw_parts_mut(state.in_0, state.size as usize)
-    };
-    return gz_write(state, input_buf, input) as ::core::ffi::c_int;
+    if input.is_empty() {
+        let mut empty_input_buf = [];
+        return gz_write(state, &mut empty_input_buf[..], input) as ::core::ffi::c_int;
+    }
+    if state.size == 0 as ::core::ffi::c_uint && gz_init(state) == -1 as ::core::ffi::c_int {
+        return 0 as ::core::ffi::c_int;
+    }
+    return gz_with_input_buffer_mut(state, |state, input_buf| {
+        let input_buf = &mut input_buf[..state.size as usize];
+        gz_write(state, input_buf, input) as ::core::ffi::c_int
+    });
 }
 #[export_name = "gzfwrite"]
 
@@ -616,8 +622,10 @@ pub unsafe extern "C" fn gzfwrite_ffi(
         if state.size == 0 as ::core::ffi::c_uint && gz_init(state) == -1 as ::core::ffi::c_int {
             return 0 as crate::stdlib::z_size_t;
         }
-        let input_buf = ::core::slice::from_raw_parts_mut(state.in_0, state.size as usize);
-        gz_write(state, input_buf, input)
+        gz_with_input_buffer_mut(state, |state, input_buf| {
+            let input_buf = &mut input_buf[..state.size as usize];
+            gz_write(state, input_buf, input)
+        })
     } else {
         0 as crate::stdlib::z_size_t
     };
@@ -640,8 +648,10 @@ pub unsafe extern "C" fn gzputc_ffi(
     if state.size == 0 as ::core::ffi::c_uint && gz_init(state) == -1 as ::core::ffi::c_int {
         return -1 as ::core::ffi::c_int;
     }
-    let input_buf = ::core::slice::from_raw_parts_mut(state.in_0, state.size as usize);
-    return gzputc_impl(state, input_buf, c);
+    return gz_with_input_buffer_mut(state, |state, input_buf| {
+        let input_buf = &mut input_buf[..state.size as usize];
+        gzputc_impl(state, input_buf, c)
+    });
 }
 fn gzputs_len_fits_int(len: crate::stdlib::z_size_t) -> bool {
     (len as ::core::ffi::c_int) >= 0 as ::core::ffi::c_int
@@ -704,16 +714,17 @@ pub unsafe extern "C" fn gzputs_ffi(
     let Some(len) = gzputs_len_or_error(state, input) else {
         return -1 as ::core::ffi::c_int;
     };
-    let mut empty_input_buf = [];
-    let input_buf = if input.is_empty() {
-        &mut empty_input_buf[..]
-    } else {
-        if state.size == 0 as ::core::ffi::c_uint && gz_init(state) == -1 as ::core::ffi::c_int {
-            return -1 as ::core::ffi::c_int;
-        }
-        ::core::slice::from_raw_parts_mut(state.in_0, state.size as usize)
-    };
-    return gzputs_impl(state, input_buf, input, len);
+    if input.is_empty() {
+        let mut empty_input_buf = [];
+        return gzputs_impl(state, &mut empty_input_buf[..], input, len);
+    }
+    if state.size == 0 as ::core::ffi::c_uint && gz_init(state) == -1 as ::core::ffi::c_int {
+        return -1 as ::core::ffi::c_int;
+    }
+    return gz_with_input_buffer_mut(state, |state, input_buf| {
+        let input_buf = &mut input_buf[..state.size as usize];
+        gzputs_impl(state, input_buf, input, len)
+    });
 }
 fn gzflush_valid_flush(flush: ::core::ffi::c_int) -> bool {
     flush >= 0 as ::core::ffi::c_int && flush <= crate::zlib_h::Z_FINISH
@@ -740,8 +751,11 @@ pub unsafe extern "C" fn gzflush_ffi(
         if state.size == 0 as ::core::ffi::c_uint && gz_init(state) == -1 as ::core::ffi::c_int {
             return state.err;
         }
-        let input_buf = ::core::slice::from_raw_parts_mut(state.in_0, state.size as usize);
-        if gz_zero(state, input_buf) == -1 as ::core::ffi::c_int {
+        if gz_with_input_buffer_mut(state, |state, input_buf| {
+            let input_buf = &mut input_buf[..state.size as usize];
+            gz_zero(state, input_buf)
+        }) == -1 as ::core::ffi::c_int
+        {
             return state.err;
         }
     }
@@ -798,8 +812,11 @@ pub unsafe extern "C" fn gzsetparams_ffi(
         if state.size == 0 as ::core::ffi::c_uint && gz_init(state) == -1 as ::core::ffi::c_int {
             return state.err;
         }
-        let input_buf = ::core::slice::from_raw_parts_mut(state.in_0, state.size as usize);
-        if gz_zero(state, input_buf) == -1 as ::core::ffi::c_int {
+        if gz_with_input_buffer_mut(state, |state, input_buf| {
+            let input_buf = &mut input_buf[..state.size as usize];
+            gz_zero(state, input_buf)
+        }) == -1 as ::core::ffi::c_int
+        {
             return state.err;
         }
     }
@@ -833,8 +850,10 @@ pub unsafe extern "C" fn gzclose_w_ffi(mut file: crate::zlib_h::gzFile) -> ::cor
         if state.size == 0 as ::core::ffi::c_uint && gz_init(state) == -1 as ::core::ffi::c_int {
             true
         } else {
-            let input_buf = ::core::slice::from_raw_parts_mut(state.in_0, state.size as usize);
-            gz_zero(state, input_buf) == -1 as ::core::ffi::c_int
+            gz_with_input_buffer_mut(state, |state, input_buf| {
+                let input_buf = &mut input_buf[..state.size as usize];
+                gz_zero(state, input_buf)
+            }) == -1 as ::core::ffi::c_int
         }
     } else {
         false
@@ -847,14 +866,8 @@ pub unsafe extern "C" fn gzclose_w_ffi(mut file: crate::zlib_h::gzFile) -> ::cor
             crate::src::deflate::deflateEnd_ffi(
                 &raw mut state.strm as *mut _ as *mut crate::zlib_h::z_stream_s,
             );
-            drop(Vec::from_raw_parts(
-                state.out,
-                state.size as usize,
-                state.size as usize,
-            ));
         }
-        let input_len = (state.size << 1 as ::core::ffi::c_int) as usize;
-        drop(Vec::from_raw_parts(state.in_0, input_len, input_len));
+        gz_remove_owned_buffers(state);
     }
     crate::src::gzlib::gz_error_clear(state, crate::zlib_h::Z_OK);
     crate::stdlib::free(state.path as *mut ::core::ffi::c_void);
