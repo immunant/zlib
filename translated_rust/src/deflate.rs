@@ -641,7 +641,7 @@ impl<'a> DeflateWorkingSet<'a> {
     /// Refill the bounded window and rebuild its hash chains.  The caller
     /// provides only a call-scoped input view and scalar stream progress;
     /// this working set retains the callback-backed storage borrows.
-    fn refill(
+    pub(crate) fn refill(
         &mut self,
         state: &mut internal_state,
         input: &[crate::stdlib::Bytef],
@@ -658,6 +658,25 @@ impl<'a> DeflateWorkingSet<'a> {
             self.window,
             self.head,
             self.prev,
+        )
+    }
+
+    /// Insert the dictionary's current three-byte sequence through the same
+    /// bounded window and hash-chain views used for refill.
+    pub(crate) fn dictionary_insert_hashes(
+        &mut self,
+        state: &mut internal_state,
+    ) -> Option<crate::stdlib::uInt> {
+        deflate_dictionary_insert_hashes(
+            self.window,
+            self.head,
+            self.prev,
+            state.strstart,
+            state.lookahead,
+            &mut state.ins_h,
+            state.hash_shift,
+            state.hash_mask,
+            state.w_mask,
         )
     }
 }
@@ -1998,7 +2017,7 @@ fn fill_window_reinsert(
 }
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
-struct FillWindowInputProgress {
+pub(crate) struct FillWindowInputProgress {
     avail_in: crate::stdlib::uInt,
     total_in: crate::stdlib::uLong,
     adler: crate::stdlib::uLong,
@@ -2577,35 +2596,83 @@ pub unsafe extern "C" fn deflateSetDictionary_ffi(
     }
     avail = (*strm).avail_in as ::core::ffi::c_uint;
     next = (*strm).next_in as *mut ::core::ffi::c_uchar;
-    (*strm).avail_in = dictLength;
-    (*strm).next_in = dictionary as *mut crate::stdlib::Bytef;
-    fill_window(s);
+    // The dictionary pointer was checked non-null at entry, and tail
+    // selection only advances it within that supplied dictionary.  Keep this
+    // view local to the exported boundary; the safe refill core never sees a
+    // raw caller pointer.
+    let dictionary_input = core::slice::from_raw_parts(dictionary, dictLength as usize);
+    let window = core::slice::from_raw_parts_mut((*s).window, window_len);
+    let head = core::slice::from_raw_parts_mut((*s).head, head_len);
+    let prev = core::slice::from_raw_parts_mut((*s).prev, prev_len);
+    let Some(mut working) = DeflateWorkingSet::for_refill(&*s, window, head, prev) else {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    };
+    let mut dictionary_cursor = 0usize;
+    let mut dictionary_avail = dictLength;
+    let mut dictionary_total_in = (*strm).total_in;
+    let mut dictionary_adler = (*strm).adler;
+    let Some(remaining) = dictionary_input.get(dictionary_cursor..) else {
+        (*strm).next_in = next as *mut crate::stdlib::Bytef;
+        (*strm).avail_in = avail as crate::stdlib::uInt;
+        (*s).wrap = wrap;
+        return crate::zlib_h::Z_STREAM_ERROR;
+    };
+    let progress = working.refill(
+        &mut *s,
+        remaining,
+        dictionary_avail,
+        dictionary_total_in,
+        dictionary_adler,
+    );
+    let Some(cursor) = dictionary_cursor.checked_add(progress.consumed) else {
+        (*strm).next_in = next as *mut crate::stdlib::Bytef;
+        (*strm).avail_in = avail as crate::stdlib::uInt;
+        (*s).wrap = wrap;
+        return crate::zlib_h::Z_STREAM_ERROR;
+    };
+    dictionary_cursor = cursor;
+    dictionary_avail = progress.avail_in;
+    dictionary_total_in = progress.total_in;
+    dictionary_adler = progress.adler;
     while (*s).lookahead >= crate::zutil_h::MIN_MATCH as crate::stdlib::uInt {
-        // `fill_window()` may update the state before each iteration, so make
-        // fresh short-lived views and release them before the next refill.
-        let window = core::slice::from_raw_parts((*s).window, window_len);
-        let head = core::slice::from_raw_parts_mut((*s).head, head_len);
-        let prev = core::slice::from_raw_parts_mut((*s).prev, prev_len);
-        let Some(strstart) = deflate_dictionary_insert_hashes(
-            window,
-            head,
-            prev,
-            (*s).strstart,
-            (*s).lookahead,
-            &mut (*s).ins_h,
-            (*s).hash_shift,
-            (*s).hash_mask,
-            (*s).w_mask,
-        ) else {
+        let Some(strstart) = working.dictionary_insert_hashes(&mut *s) else {
             (*strm).next_in = next as *mut crate::stdlib::Bytef;
             (*strm).avail_in = avail as crate::stdlib::uInt;
+            (*strm).total_in = dictionary_total_in;
+            (*strm).adler = dictionary_adler;
             (*s).wrap = wrap;
             return crate::zlib_h::Z_STREAM_ERROR;
         };
         (*s).strstart = strstart;
         (*s).lookahead =
             (crate::zutil_h::MIN_MATCH - 1 as ::core::ffi::c_int) as crate::stdlib::uInt;
-        fill_window(s);
+        let Some(remaining) = dictionary_input.get(dictionary_cursor..) else {
+            (*strm).next_in = next as *mut crate::stdlib::Bytef;
+            (*strm).avail_in = avail as crate::stdlib::uInt;
+            (*strm).total_in = dictionary_total_in;
+            (*strm).adler = dictionary_adler;
+            (*s).wrap = wrap;
+            return crate::zlib_h::Z_STREAM_ERROR;
+        };
+        let progress = working.refill(
+            &mut *s,
+            remaining,
+            dictionary_avail,
+            dictionary_total_in,
+            dictionary_adler,
+        );
+        let Some(cursor) = dictionary_cursor.checked_add(progress.consumed) else {
+            (*strm).next_in = next as *mut crate::stdlib::Bytef;
+            (*strm).avail_in = avail as crate::stdlib::uInt;
+            (*strm).total_in = dictionary_total_in;
+            (*strm).adler = dictionary_adler;
+            (*s).wrap = wrap;
+            return crate::zlib_h::Z_STREAM_ERROR;
+        };
+        dictionary_cursor = cursor;
+        dictionary_avail = progress.avail_in;
+        dictionary_total_in = progress.total_in;
+        dictionary_adler = progress.adler;
     }
     (
         (*s).strstart,
@@ -2618,6 +2685,8 @@ pub unsafe extern "C" fn deflateSetDictionary_ffi(
     ) = deflate_dictionary_state_after_load((*s).strstart, (*s).lookahead);
     (*strm).next_in = next as *mut crate::stdlib::Bytef;
     (*strm).avail_in = avail as crate::stdlib::uInt;
+    (*strm).total_in = dictionary_total_in;
+    (*strm).adler = dictionary_adler;
     (*s).wrap = wrap;
     return crate::zlib_h::Z_OK;
 }
