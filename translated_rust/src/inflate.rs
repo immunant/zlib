@@ -2857,12 +2857,22 @@ pub unsafe extern "C" fn inflate_ffi(
     };
     inflate(strm, flush)
 }
-// This is the pointer-free half of ending a normal inflate stream.  Its
-// callback-owned state record stays live until the ABI adapter completes the
-// paired `zfree` call below, but its Rust-owned history must be released
-// first, exactly as it was when the state record's drop glue ran at teardown.
-fn inflate_end_release_owned_state(normal: &mut InflateNormalState) {
-    drop(normal.owned_window.take());
+// Ending a normal inflate stream has a pointer-free half: consume the Rust
+// history owner before the ABI adapter releases the callback-owned state
+// record.  Keeping that ordering in this owner makes the callback boundary
+// responsible only for its original allocation handle and paired `zfree`.
+struct InflateEndOwner<'state> {
+    normal: &'state mut InflateNormalState,
+}
+
+impl<'state> InflateEndOwner<'state> {
+    fn from_normal(normal: &'state mut InflateNormalState) -> Self {
+        Self { normal }
+    }
+
+    fn release(self) {
+        drop(self.normal.owned_window.take());
+    }
 }
 
 pub unsafe fn inflateEnd(stream: &mut crate::zlib_h::z_stream_s) -> ::core::ffi::c_int {
@@ -2878,7 +2888,7 @@ pub unsafe fn inflateEnd(stream: &mut crate::zlib_h::z_stream_s) -> ::core::ffi:
     let Some((stream, state)) = inflate_stream_and_state(stream) else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
-    inflate_end_release_owned_state(&mut state.normal);
+    InflateEndOwner::from_normal(&mut state.normal).release();
     let zfree = stream.zfree.expect("non-null function pointer");
     let opaque = stream.opaque;
     zfree(opaque, state_handle.as_ptr().cast());
