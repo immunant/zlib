@@ -3833,6 +3833,44 @@ fn gen_bitlen_node_plan(
     }
 }
 
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+struct GenBitlenOverflowNode {
+    bit_length: crate::zutil_h::ush,
+    frequency: crate::zutil_h::ush,
+}
+
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+enum GenBitlenOverflowReassignment {
+    SkipNode,
+    UnchangedLength,
+    Rewrite {
+        bit_length: crate::zutil_h::ush,
+        opt_len_delta: crate::zutil_h::ulg,
+    },
+}
+
+fn gen_bitlen_overflow_reassignment(
+    node: Option<GenBitlenOverflowNode>,
+    target_length: ::core::ffi::c_int,
+) -> GenBitlenOverflowReassignment {
+    let Some(node) = node else {
+        return GenBitlenOverflowReassignment::SkipNode;
+    };
+
+    if node.bit_length as ::core::ffi::c_uint == target_length as ::core::ffi::c_uint {
+        GenBitlenOverflowReassignment::UnchangedLength
+    } else {
+        GenBitlenOverflowReassignment::Rewrite {
+            bit_length: target_length as crate::zutil_h::ush,
+            opt_len_delta: bit_length_correction(
+                target_length as crate::zutil_h::ulg,
+                node.bit_length as crate::zutil_h::ulg,
+                node.frequency as crate::zutil_h::ulg,
+            ),
+        }
+    }
+}
+
 fn tally_symbol_bytes(
     dist: ::core::ffi::c_uint,
     lc: ::core::ffi::c_uint,
@@ -4183,18 +4221,27 @@ unsafe fn gen_bitlen(
         while n != 0 as ::core::ffi::c_int {
             h -= 1;
             m = (*s).heap[h as usize];
-            if m > max_code {
-                continue;
-            }
-            if (*tree.offset(m as isize)).dl.len as ::core::ffi::c_uint
-                != bits as ::core::ffi::c_uint
-            {
-                (*s).opt_len = (*s).opt_len.wrapping_add(bit_length_correction(
-                    bits as crate::zutil_h::ulg,
-                    (*tree.offset(m as isize)).dl.len as crate::zutil_h::ulg,
-                    (*tree.offset(m as isize)).fc.value as crate::zutil_h::ulg,
-                ));
-                (*tree.offset(m as isize)).dl.len = bits as crate::zutil_h::ush;
+            let reassignment = if m > max_code {
+                gen_bitlen_overflow_reassignment(None, bits)
+            } else {
+                gen_bitlen_overflow_reassignment(
+                    Some(GenBitlenOverflowNode {
+                        bit_length: (*tree.offset(m as isize)).dl.len,
+                        frequency: (*tree.offset(m as isize)).fc.value,
+                    }),
+                    bits,
+                )
+            };
+            match reassignment {
+                GenBitlenOverflowReassignment::SkipNode => continue,
+                GenBitlenOverflowReassignment::UnchangedLength => {}
+                GenBitlenOverflowReassignment::Rewrite {
+                    bit_length,
+                    opt_len_delta,
+                } => {
+                    (*s).opt_len = (*s).opt_len.wrapping_add(opt_len_delta);
+                    (*tree.offset(m as isize)).dl.len = bit_length;
+                }
             }
             n -= 1;
         }
@@ -5447,15 +5494,16 @@ mod tests {
         bit_length_correction, bl_order, bl_tree_header_bit_length, block_bit_length_bytes,
         block_header_bits, canonical_codes_for_lengths, clamped_tree_bit_length, classify_tree_run,
         combined_tree_frequency, detect_data_type_from_ltree, dist_code_index,
-        gen_bitlen_node_plan, heap_node_precedes, last_nonzero_bl_code_rank,
-        mark_bl_code_nonzero_at_rank, next_code_for_len, next_codes, pending_cursor_after_bytes,
-        pqdownheap_child_to_promote, rebalance_overflowed_bit_lengths, reset_block_trees,
-        select_block_encoding, static_bl_desc, static_d_desc, static_l_desc,
+        gen_bitlen_node_plan, gen_bitlen_overflow_reassignment, heap_node_precedes,
+        last_nonzero_bl_code_rank, mark_bl_code_nonzero_at_rank, next_code_for_len, next_codes,
+        pending_cursor_after_bytes, pqdownheap_child_to_promote, rebalance_overflowed_bit_lengths,
+        reset_block_trees, select_block_encoding, static_bl_desc, static_d_desc, static_l_desc,
         supplemental_tree_node, symbol_buffer_is_full, symbol_triplet_cursors,
         tally_match_tree_indices, tally_symbol_bytes, tally_tree_update, tree_bit_length_cost,
         tree_bit_length_totals_after_node, tree_next_cursor, tree_parent_depth, tree_run_continues,
-        tree_run_extra_bits, tree_run_limits, BlockEncoding, HeapChild, ScanTreeAction,
-        TallyTreeUpdate, BL_CODE_ORDER_LEN, END_BLOCK, MAX_BITS,
+        tree_run_extra_bits, tree_run_limits, BlockEncoding, GenBitlenOverflowNode,
+        GenBitlenOverflowReassignment, HeapChild, ScanTreeAction, TallyTreeUpdate,
+        BL_CODE_ORDER_LEN, END_BLOCK, MAX_BITS,
     };
 
     fn ltree_with_frequency(
@@ -5548,6 +5596,45 @@ mod tests {
         assert!(!plan.overflowed);
         assert_eq!(plan.count_index, Some(5));
         assert_eq!(plan.totals, Some((22, 20)));
+    }
+
+    #[test]
+    fn gen_bitlen_overflow_reassignment_skips_non_symbol_nodes() {
+        assert_eq!(
+            gen_bitlen_overflow_reassignment(None, 5),
+            GenBitlenOverflowReassignment::SkipNode,
+        );
+    }
+
+    #[test]
+    fn gen_bitlen_overflow_reassignment_leaves_matching_lengths_unchanged() {
+        assert_eq!(
+            gen_bitlen_overflow_reassignment(
+                Some(GenBitlenOverflowNode {
+                    bit_length: 5,
+                    frequency: 9,
+                }),
+                5,
+            ),
+            GenBitlenOverflowReassignment::UnchangedLength,
+        );
+    }
+
+    #[test]
+    fn gen_bitlen_overflow_reassignment_rewrites_length_and_reports_cost_delta() {
+        assert_eq!(
+            gen_bitlen_overflow_reassignment(
+                Some(GenBitlenOverflowNode {
+                    bit_length: 3,
+                    frequency: 4,
+                }),
+                6,
+            ),
+            GenBitlenOverflowReassignment::Rewrite {
+                bit_length: 6,
+                opt_len_delta: 12,
+            },
+        );
     }
 
     #[test]

@@ -148,22 +148,6 @@ fn match_copy_layout(
     (match_length / 3, match_length % 3)
 }
 
-fn window_match_start(
-    window_size: ::core::ffi::c_uint,
-    window_next: ::core::ffi::c_uint,
-    distance_back: ::core::ffi::c_uint,
-) -> usize {
-    if window_next == 0 {
-        window_size.wrapping_sub(distance_back) as usize
-    } else if window_next < distance_back {
-        window_size
-            .wrapping_add(window_next)
-            .wrapping_sub(distance_back) as usize
-    } else {
-        window_next.wrapping_sub(distance_back) as usize
-    }
-}
-
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 enum FastLitLenAction {
     Literal,
@@ -235,6 +219,101 @@ struct FastDistance {
     hold: crate::stdlib::uLong,
     bits: ::core::ffi::c_uint,
     source: FastDistanceSource,
+}
+
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+enum FastWindowContinuationSource {
+    Window,
+    Output,
+}
+
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+struct FastWindowCopyPlan {
+    first_window_start: ::core::ffi::c_uint,
+    first_window_length: ::core::ffi::c_uint,
+    wrap_window_start_length: Option<::core::ffi::c_uint>,
+    remaining_length: ::core::ffi::c_uint,
+    continuation_source: FastWindowContinuationSource,
+}
+
+fn fast_window_copy_plan(
+    window_size: ::core::ffi::c_uint,
+    window_next: ::core::ffi::c_uint,
+    distance_back: ::core::ffi::c_uint,
+    match_length: ::core::ffi::c_uint,
+) -> FastWindowCopyPlan {
+    if window_next == 0 {
+        let first_window_start = window_size.wrapping_sub(distance_back);
+        if distance_back < match_length {
+            FastWindowCopyPlan {
+                first_window_start,
+                first_window_length: distance_back,
+                wrap_window_start_length: None,
+                remaining_length: match_length.wrapping_sub(distance_back),
+                continuation_source: FastWindowContinuationSource::Output,
+            }
+        } else {
+            FastWindowCopyPlan {
+                first_window_start,
+                first_window_length: 0,
+                wrap_window_start_length: None,
+                remaining_length: match_length,
+                continuation_source: FastWindowContinuationSource::Window,
+            }
+        }
+    } else if window_next < distance_back {
+        let first_window_start = window_size
+            .wrapping_add(window_next)
+            .wrapping_sub(distance_back);
+        let first_window_length = distance_back.wrapping_sub(window_next);
+        if first_window_length < match_length {
+            let remaining_length = match_length.wrapping_sub(first_window_length);
+            if window_next < remaining_length {
+                FastWindowCopyPlan {
+                    first_window_start,
+                    first_window_length,
+                    wrap_window_start_length: Some(window_next),
+                    remaining_length: remaining_length.wrapping_sub(window_next),
+                    continuation_source: FastWindowContinuationSource::Output,
+                }
+            } else {
+                FastWindowCopyPlan {
+                    first_window_start,
+                    first_window_length,
+                    wrap_window_start_length: Some(0),
+                    remaining_length,
+                    continuation_source: FastWindowContinuationSource::Window,
+                }
+            }
+        } else {
+            FastWindowCopyPlan {
+                first_window_start,
+                first_window_length: 0,
+                wrap_window_start_length: None,
+                remaining_length: match_length,
+                continuation_source: FastWindowContinuationSource::Window,
+            }
+        }
+    } else {
+        let first_window_start = window_next.wrapping_sub(distance_back);
+        if distance_back < match_length {
+            FastWindowCopyPlan {
+                first_window_start,
+                first_window_length: distance_back,
+                wrap_window_start_length: None,
+                remaining_length: match_length.wrapping_sub(distance_back),
+                continuation_source: FastWindowContinuationSource::Output,
+            }
+        } else {
+            FastWindowCopyPlan {
+                first_window_start,
+                first_window_length: 0,
+                wrap_window_start_length: None,
+                remaining_length: match_length,
+                continuation_source: FastWindowContinuationSource::Window,
+            }
+        }
+    }
 }
 
 fn finish_fast_distance(
@@ -463,31 +542,28 @@ pub unsafe extern "C" fn inflate_fast(
                             (*state).mode = crate::src::inflate::BAD;
                             break;
                         }
-                        from = window.wrapping_add(window_match_start(wsize, wnext, op));
-                        if wnext == 0 as ::core::ffi::c_uint {
-                            if op < len {
-                                len = len.wrapping_sub(op);
-                                loop {
-                                    let c2rust_fresh8 = from;
-                                    from = from.wrapping_add(1);
-                                    let c2rust_fresh9 = out;
-                                    out = out.wrapping_add(1);
-                                    (output_produced, output_remaining) = output_cursor_after_write(
-                                        output_produced,
-                                        output_remaining,
-                                    );
-                                    *c2rust_fresh9 = *c2rust_fresh8;
-                                    op = op.wrapping_sub(1);
-                                    if !(op != 0) {
-                                        break;
-                                    }
+                        let copy_plan = fast_window_copy_plan(wsize, wnext, op, len);
+                        from = window.wrapping_add(copy_plan.first_window_start as usize);
+                        if copy_plan.first_window_length != 0 {
+                            op = copy_plan.first_window_length;
+                            loop {
+                                let c2rust_fresh8 = from;
+                                from = from.wrapping_add(1);
+                                let c2rust_fresh9 = out;
+                                out = out.wrapping_add(1);
+                                (output_produced, output_remaining) =
+                                    output_cursor_after_write(output_produced, output_remaining);
+                                *c2rust_fresh9 = *c2rust_fresh8;
+                                op = op.wrapping_sub(1);
+                                if !(op != 0) {
+                                    break;
                                 }
-                                from = out.wrapping_sub(dist as usize);
                             }
-                        } else if wnext < op {
-                            op = op.wrapping_sub(wnext);
-                            if op < len {
-                                len = len.wrapping_sub(op);
+                        }
+                        if let Some(wrap_window_start_length) = copy_plan.wrap_window_start_length {
+                            from = window;
+                            if wrap_window_start_length != 0 {
+                                op = wrap_window_start_length;
                                 loop {
                                     let c2rust_fresh10 = from;
                                     from = from.wrapping_add(1);
@@ -503,49 +579,11 @@ pub unsafe extern "C" fn inflate_fast(
                                         break;
                                     }
                                 }
-                                from = window;
-                                if wnext < len {
-                                    op = wnext;
-                                    len = len.wrapping_sub(op);
-                                    loop {
-                                        let c2rust_fresh12 = from;
-                                        from = from.wrapping_add(1);
-                                        let c2rust_fresh13 = out;
-                                        out = out.wrapping_add(1);
-                                        (output_produced, output_remaining) =
-                                            output_cursor_after_write(
-                                                output_produced,
-                                                output_remaining,
-                                            );
-                                        *c2rust_fresh13 = *c2rust_fresh12;
-                                        op = op.wrapping_sub(1);
-                                        if !(op != 0) {
-                                            break;
-                                        }
-                                    }
-                                    from = out.wrapping_sub(dist as usize);
-                                }
                             }
-                        } else {
-                            if op < len {
-                                len = len.wrapping_sub(op);
-                                loop {
-                                    let c2rust_fresh14 = from;
-                                    from = from.wrapping_add(1);
-                                    let c2rust_fresh15 = out;
-                                    out = out.wrapping_add(1);
-                                    (output_produced, output_remaining) = output_cursor_after_write(
-                                        output_produced,
-                                        output_remaining,
-                                    );
-                                    *c2rust_fresh15 = *c2rust_fresh14;
-                                    op = op.wrapping_sub(1);
-                                    if !(op != 0) {
-                                        break;
-                                    }
-                                }
-                                from = out.wrapping_sub(dist as usize);
-                            }
+                        }
+                        len = copy_plan.remaining_length;
+                        if copy_plan.continuation_source == FastWindowContinuationSource::Output {
+                            from = out.wrapping_sub(dist as usize);
                         }
                         let (copy_triplets, trailing_bytes) = match_copy_layout(len);
                         for _ in 0..copy_triplets {
@@ -630,11 +668,11 @@ pub unsafe extern "C" fn inflate_fast_ffi(
 mod tests {
     use super::{
         add_and_consume_extra_bits, append_input_byte, bit_mask, code, consume_bits,
-        fast_dist_action, fast_litlen_action, fast_match_uses_window,
+        fast_dist_action, fast_litlen_action, fast_match_uses_window, fast_window_copy_plan,
         fast_window_distance_is_invalid, finish_fast_distance, input_bytes_needed,
         input_remaining_after_read, low_bits, match_copy_layout, output_cursor_after_write,
-        subtable_index, table_index, unread_input_state, window_match_start, FastDistAction,
-        FastDistance, FastDistanceSource, FastLitLenAction,
+        subtable_index, table_index, unread_input_state, FastDistAction, FastDistance,
+        FastDistanceSource, FastLitLenAction, FastWindowContinuationSource, FastWindowCopyPlan,
     };
 
     #[test]
@@ -880,17 +918,124 @@ mod tests {
     }
 
     #[test]
-    fn window_match_start_preserves_window_rewind_branches_and_wrapping() {
-        assert_eq!(window_match_start(32, 0, 5), 27);
-        assert_eq!(window_match_start(32, 7, 12), 27);
-        assert_eq!(window_match_start(32, 12, 5), 7);
+    fn fast_window_copy_plan_preserves_exact_first_segment_boundaries() {
         assert_eq!(
-            window_match_start(::core::ffi::c_uint::MAX, 0, 1),
-            (::core::ffi::c_uint::MAX - 1) as usize,
+            fast_window_copy_plan(32, 0, 5, 5),
+            FastWindowCopyPlan {
+                first_window_start: 27,
+                first_window_length: 0,
+                wrap_window_start_length: None,
+                remaining_length: 5,
+                continuation_source: FastWindowContinuationSource::Window,
+            }
         );
         assert_eq!(
-            window_match_start(0, 1, 2),
-            ::core::ffi::c_uint::MAX as usize
+            fast_window_copy_plan(32, 0, 5, 6),
+            FastWindowCopyPlan {
+                first_window_start: 27,
+                first_window_length: 5,
+                wrap_window_start_length: None,
+                remaining_length: 1,
+                continuation_source: FastWindowContinuationSource::Output,
+            }
+        );
+        assert_eq!(
+            fast_window_copy_plan(32, 12, 5, 5),
+            FastWindowCopyPlan {
+                first_window_start: 7,
+                first_window_length: 0,
+                wrap_window_start_length: None,
+                remaining_length: 5,
+                continuation_source: FastWindowContinuationSource::Window,
+            }
+        );
+        assert_eq!(
+            fast_window_copy_plan(32, 12, 5, 6),
+            FastWindowCopyPlan {
+                first_window_start: 7,
+                first_window_length: 5,
+                wrap_window_start_length: None,
+                remaining_length: 1,
+                continuation_source: FastWindowContinuationSource::Output,
+            }
+        );
+    }
+
+    #[test]
+    fn fast_window_copy_plan_preserves_wrap_segments_and_boundaries() {
+        assert_eq!(
+            fast_window_copy_plan(32, 7, 12, 5),
+            FastWindowCopyPlan {
+                first_window_start: 27,
+                first_window_length: 0,
+                wrap_window_start_length: None,
+                remaining_length: 5,
+                continuation_source: FastWindowContinuationSource::Window,
+            }
+        );
+        assert_eq!(
+            fast_window_copy_plan(32, 7, 12, 6),
+            FastWindowCopyPlan {
+                first_window_start: 27,
+                first_window_length: 5,
+                wrap_window_start_length: Some(0),
+                remaining_length: 1,
+                continuation_source: FastWindowContinuationSource::Window,
+            }
+        );
+        assert_eq!(
+            fast_window_copy_plan(32, 7, 12, 7),
+            FastWindowCopyPlan {
+                first_window_start: 27,
+                first_window_length: 5,
+                wrap_window_start_length: Some(0),
+                remaining_length: 2,
+                continuation_source: FastWindowContinuationSource::Window,
+            }
+        );
+        assert_eq!(
+            fast_window_copy_plan(32, 7, 12, 12),
+            FastWindowCopyPlan {
+                first_window_start: 27,
+                first_window_length: 5,
+                wrap_window_start_length: Some(0),
+                remaining_length: 7,
+                continuation_source: FastWindowContinuationSource::Window,
+            }
+        );
+        assert_eq!(
+            fast_window_copy_plan(32, 7, 12, 13),
+            FastWindowCopyPlan {
+                first_window_start: 27,
+                first_window_length: 5,
+                wrap_window_start_length: Some(7),
+                remaining_length: 1,
+                continuation_source: FastWindowContinuationSource::Output,
+            }
+        );
+    }
+
+    #[test]
+    fn fast_window_copy_plan_preserves_wrapping_start_arithmetic() {
+        assert_eq!(
+            fast_window_copy_plan(::core::ffi::c_uint::MAX, 0, 1, 1),
+            FastWindowCopyPlan {
+                first_window_start: ::core::ffi::c_uint::MAX - 1,
+                first_window_length: 0,
+                wrap_window_start_length: None,
+                remaining_length: 1,
+                continuation_source: FastWindowContinuationSource::Window,
+            }
+        );
+        assert_eq!(
+            fast_window_copy_plan(0, 1, 2, 1),
+            FastWindowCopyPlan {
+                first_window_start: ::core::ffi::c_uint::MAX,
+                first_window_length: 0,
+                wrap_window_start_length: None,
+                remaining_length: 1,
+                continuation_source: FastWindowContinuationSource::Window,
+            }
         );
     }
 }
