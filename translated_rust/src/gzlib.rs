@@ -285,6 +285,52 @@ pub(crate) fn gz_comp_should_reset(flush: ::core::ffi::c_int) -> bool {
     flush == crate::zlib_h::Z_FINISH
 }
 
+// Select the compression-path state transition before entering either the raw
+// direct-write adapter or deflate.  The adapter retains descriptor calls and
+// pointer rebasing; this helper owns the state-only decisions.
+pub(crate) enum GzCompMode {
+    Direct,
+    Idle,
+    Reset,
+    Deflate,
+}
+
+pub(crate) fn gz_comp_mode(
+    state: &crate::gzguts_h::gz_state,
+    flush: ::core::ffi::c_int,
+) -> GzCompMode {
+    if state.direct != 0 {
+        GzCompMode::Direct
+    } else if state.reset != 0 {
+        if state.strm.avail_in == 0 && flush == crate::zlib_h::Z_NO_FLUSH {
+            GzCompMode::Idle
+        } else {
+            GzCompMode::Reset
+        }
+    } else {
+        GzCompMode::Deflate
+    }
+}
+
+pub(crate) fn gz_comp_reset_complete(state: &mut crate::gzguts_h::gz_state) {
+    state.reset = 0;
+}
+
+pub(crate) fn gz_comp_finish(state: &mut crate::gzguts_h::gz_state, flush: ::core::ffi::c_int) {
+    if gz_comp_should_reset(flush) {
+        state.reset = 1;
+    }
+}
+
+// Advance only the count portion of a direct write.  The raw adapter advances
+// `next_in`, since it is the sole owner of that pointer.
+pub(crate) fn gz_direct_write_progress(
+    state: &mut crate::gzguts_h::gz_state,
+    written: ::core::ffi::c_uint,
+) {
+    state.strm.avail_in = gz_remaining_after_write(state.strm.avail_in, written);
+}
+
 // On a non-blocking write failure, gzip reports only the input consumed so
 // far.  Other write failures report no input consumed.
 pub(crate) fn gz_write_result(

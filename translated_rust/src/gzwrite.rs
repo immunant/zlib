@@ -118,39 +118,39 @@ unsafe extern "C" fn gz_comp(
     {
         return -1 as ::core::ffi::c_int;
     }
-    if state.direct != 0 {
-        while state.strm.avail_in != 0 {
-            *crate::stdlib::__errno_location() = 0 as ::core::ffi::c_int;
-            crate::src::gzlib::gz_begin_io(state);
-            put = crate::src::gzlib::gz_syscall_chunk(state.strm.avail_in);
-            writ = crate::stdlib::write(
-                state.fd,
-                state.strm.next_in as *const ::core::ffi::c_void,
-                put as crate::__stddef_size_t_h::size_t,
-            ) as ::core::ffi::c_int;
-            let errno = *crate::stdlib::__errno_location();
-            if let Err(errno) = crate::src::gzlib::gz_io_result(state, writ, errno) {
-                crate::src::gzlib::gz_error(
-                    state,
-                    crate::zlib_h::Z_ERRNO,
-                    crate::stdlib::strerror(errno),
-                );
-                return -1 as ::core::ffi::c_int;
+    match crate::src::gzlib::gz_comp_mode(state, flush) {
+        crate::src::gzlib::GzCompMode::Direct => {
+            while state.strm.avail_in != 0 {
+                *crate::stdlib::__errno_location() = 0 as ::core::ffi::c_int;
+                crate::src::gzlib::gz_begin_io(state);
+                put = crate::src::gzlib::gz_syscall_chunk(state.strm.avail_in);
+                writ = crate::stdlib::write(
+                    state.fd,
+                    state.strm.next_in as *const ::core::ffi::c_void,
+                    put as crate::__stddef_size_t_h::size_t,
+                ) as ::core::ffi::c_int;
+                let errno = *crate::stdlib::__errno_location();
+                if let Err(errno) = crate::src::gzlib::gz_io_result(state, writ, errno) {
+                    crate::src::gzlib::gz_error(
+                        state,
+                        crate::zlib_h::Z_ERRNO,
+                        crate::stdlib::strerror(errno),
+                    );
+                    return -1 as ::core::ffi::c_int;
+                }
+                crate::src::gzlib::gz_direct_write_progress(state, writ as ::core::ffi::c_uint);
+                state.strm.next_in = state.strm.next_in.offset(writ as isize);
             }
-            state.strm.avail_in = crate::src::gzlib::gz_remaining_after_write(
-                state.strm.avail_in,
-                writ as ::core::ffi::c_uint,
-            );
-            state.strm.next_in = state.strm.next_in.offset(writ as isize);
-        }
-        return 0 as ::core::ffi::c_int;
-    }
-    if state.reset != 0 {
-        if state.strm.avail_in == 0 as crate::stdlib::uInt && flush == crate::zlib_h::Z_NO_FLUSH {
             return 0 as ::core::ffi::c_int;
         }
-        crate::src::deflate::deflateReset(&mut state.strm);
-        state.reset = 0 as ::core::ffi::c_int;
+        crate::src::gzlib::GzCompMode::Idle => {
+            return 0 as ::core::ffi::c_int;
+        }
+        crate::src::gzlib::GzCompMode::Reset => {
+            crate::src::deflate::deflateReset(&mut state.strm);
+            crate::src::gzlib::gz_comp_reset_complete(state);
+        }
+        crate::src::gzlib::GzCompMode::Deflate => {}
     }
     ret = crate::zlib_h::Z_OK;
     loop {
@@ -198,9 +198,7 @@ unsafe extern "C" fn gz_comp(
             break;
         }
     }
-    if crate::src::gzlib::gz_comp_should_reset(flush) {
-        state.reset = 1 as ::core::ffi::c_int;
-    }
+    crate::src::gzlib::gz_comp_finish(state, flush);
     return 0 as ::core::ffi::c_int;
 }
 
