@@ -4445,7 +4445,7 @@ fn deflate_fast(
                     (state.block_start, state.strstart, state.window)
                 };
                 crate::src::trees::_tr_flush_block(
-                    s as *mut crate::src::deflate::internal_state,
+                    s,
                     if block_start >= 0 as ::core::ffi::c_long {
                         window.wrapping_add(block_start as ::core::ffi::c_uint as usize)
                             as *mut crate::stdlib::charf
@@ -4482,7 +4482,7 @@ fn deflate_fast(
                 (state.block_start, state.window, state.strstart)
             };
             crate::src::trees::_tr_flush_block(
-                s as *mut crate::src::deflate::internal_state,
+                s,
                 if block_start >= 0 as ::core::ffi::c_long {
                     window.wrapping_add(block_start as ::core::ffi::c_uint as usize)
                         as *mut crate::stdlib::charf
@@ -4513,7 +4513,7 @@ fn deflate_fast(
                 (state.block_start, state.window, state.strstart)
             };
             crate::src::trees::_tr_flush_block(
-                s as *mut crate::src::deflate::internal_state,
+                s,
                 if block_start >= 0 as ::core::ffi::c_long {
                     window.wrapping_add(block_start as ::core::ffi::c_uint as usize)
                         as *mut crate::stdlib::charf
@@ -4749,7 +4749,7 @@ fn deflate_slow(
                         (state.block_start, state.strstart, state.window)
                     };
                     crate::src::trees::_tr_flush_block(
-                        s as *mut crate::src::deflate::internal_state,
+                        s,
                         if block_start >= 0 as ::core::ffi::c_long {
                             window.wrapping_add(block_start as ::core::ffi::c_uint as usize)
                                 as *mut crate::stdlib::charf
@@ -4805,7 +4805,7 @@ fn deflate_slow(
                         (state.block_start, state.strstart, state.window)
                     };
                     crate::src::trees::_tr_flush_block(
-                        s as *mut crate::src::deflate::internal_state,
+                        s,
                         if block_start >= 0 as ::core::ffi::c_long {
                             window.wrapping_add(block_start as ::core::ffi::c_uint as usize)
                                 as *mut crate::stdlib::charf
@@ -4890,7 +4890,7 @@ fn deflate_slow(
                 (state.block_start, state.window, state.strstart)
             };
             crate::src::trees::_tr_flush_block(
-                s as *mut crate::src::deflate::internal_state,
+                s,
                 if block_start >= 0 as ::core::ffi::c_long {
                     window.wrapping_add(block_start as ::core::ffi::c_uint as usize)
                         as *mut crate::stdlib::charf
@@ -4921,7 +4921,7 @@ fn deflate_slow(
                 (state.block_start, state.window, state.strstart)
             };
             crate::src::trees::_tr_flush_block(
-                s as *mut crate::src::deflate::internal_state,
+                s,
                 if block_start >= 0 as ::core::ffi::c_long {
                     window.wrapping_add(block_start as ::core::ffi::c_uint as usize)
                         as *mut crate::stdlib::charf
@@ -5289,7 +5289,7 @@ fn deflate_rle(
                     (state.block_start, state.strstart, state.window)
                 };
                 crate::src::trees::_tr_flush_block(
-                    s as *mut crate::src::deflate::internal_state,
+                    s,
                     if block_start >= 0 as ::core::ffi::c_long {
                         window.wrapping_add(block_start as ::core::ffi::c_uint as usize)
                             as *mut crate::stdlib::charf
@@ -5320,7 +5320,7 @@ fn deflate_rle(
                 (state.block_start, state.strstart, state.window)
             };
             crate::src::trees::_tr_flush_block(
-                s as *mut crate::src::deflate::internal_state,
+                s,
                 if block_start >= 0 as ::core::ffi::c_long {
                     window.wrapping_add(block_start as ::core::ffi::c_uint as usize)
                         as *mut crate::stdlib::charf
@@ -5347,7 +5347,7 @@ fn deflate_rle(
                 (state.block_start, state.strstart, state.window)
             };
             crate::src::trees::_tr_flush_block(
-                s as *mut crate::src::deflate::internal_state,
+                s,
                 if block_start >= 0 as ::core::ffi::c_long {
                     window.wrapping_add(block_start as ::core::ffi::c_uint as usize)
                         as *mut crate::stdlib::charf
@@ -5436,7 +5436,7 @@ fn deflate_huff(
                     (state.block_start, state.strstart, state.window)
                 };
                 crate::src::trees::_tr_flush_block(
-                    s as *mut crate::src::deflate::internal_state,
+                    s,
                     if block_start >= 0 as ::core::ffi::c_long {
                         window.wrapping_add(block_start as ::core::ffi::c_uint as usize)
                             as *mut crate::stdlib::charf
@@ -5467,7 +5467,7 @@ fn deflate_huff(
                 (state.block_start, state.strstart, state.window)
             };
             crate::src::trees::_tr_flush_block(
-                s as *mut crate::src::deflate::internal_state,
+                s,
                 if block_start >= 0 as ::core::ffi::c_long {
                     window.wrapping_add(block_start as ::core::ffi::c_uint as usize)
                         as *mut crate::stdlib::charf
@@ -5494,7 +5494,7 @@ fn deflate_huff(
                 (state.block_start, state.strstart, state.window)
             };
             crate::src::trees::_tr_flush_block(
-                s as *mut crate::src::deflate::internal_state,
+                s,
                 if block_start >= 0 as ::core::ffi::c_long {
                     window.wrapping_add(block_start as ::core::ffi::c_uint as usize)
                         as *mut crate::stdlib::charf

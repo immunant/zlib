@@ -5548,22 +5548,18 @@ fn tr_flush_block_state(
 
 /// Compatibility adapter for the legacy deflate block-flush boundary.
 ///
-/// Rust callers do not need an unsafe-function contract: the raw state and
-/// buffer adoption remains tightly scoped while the actual tree work is
-/// delegated to `tr_flush_block_state`.
+/// Rust callers pass an already-validated state reference; raw buffer lends
+/// remain tightly scoped while the actual tree work is delegated to
+/// `tr_flush_block_state`.
 pub fn _tr_flush_block(
-    mut s: *mut crate::src::deflate::deflate_state,
+    state: &mut crate::src::deflate::deflate_state,
     mut buf: *mut crate::stdlib::charf,
     mut stored_len: crate::zutil_h::ulg,
     mut last: ::core::ffi::c_int,
 ) {
-    // Raw state and buffer conversion is retained only at this transitional
+    // Raw buffer and stream-field lends are retained only at this transitional
     // compatibility boundary. Everything after the lends is slice-based.
     unsafe {
-        if s.is_null() {
-            return;
-        }
-        let state = &mut *s;
         let Ok(pending_len) = usize::try_from(state.pending_buf_size) else {
             return;
         };
@@ -5605,7 +5601,10 @@ pub unsafe extern "C" fn _tr_flush_block_ffi(
     mut stored_len: crate::zutil_h::ulg,
     mut last: ::core::ffi::c_int,
 ) {
-    _tr_flush_block(s, buf, stored_len, last)
+    let Some(state) = s.as_mut() else {
+        return;
+    };
+    _tr_flush_block(state, buf, stored_len, last)
 }
 pub fn _tr_tally(
     symbols: &mut [crate::zutil_h::uch],
