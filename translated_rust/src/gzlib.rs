@@ -1351,14 +1351,16 @@ fn gz_open(
     gz_open_init(state_ref);
     for &mode in mode.to_bytes() {
         if !gz_open_mode_byte(state_ref, &mut options, mode) {
-            // SAFETY: this is the still-owned state allocation.
-            unsafe { crate::stdlib::free(state as *mut ::core::ffi::c_void) };
+            // This state uses zlib's default allocator, so its safe matching
+            // adapter can release the still-owned allocation.
+            crate::src::zutil::zcfree(::core::ptr::null_mut(), state as crate::stdlib::voidpf);
             return ::core::ptr::null_mut::<crate::zlib_h::gzFile_s>();
         }
     }
     if !gz_open_finish_mode(state_ref) {
-        // SAFETY: this is the still-owned state allocation.
-        unsafe { crate::stdlib::free(state as *mut ::core::ffi::c_void) };
+        // This state uses zlib's default allocator, so its safe matching
+        // adapter can release the still-owned allocation.
+        crate::src::zutil::zcfree(::core::ptr::null_mut(), state as crate::stdlib::voidpf);
         return ::core::ptr::null_mut::<crate::zlib_h::gzFile_s>();
     }
     state_ref.path = crate::stdlib::malloc(
@@ -1366,8 +1368,9 @@ fn gz_open(
             .wrapping_add(1 as crate::__stddef_size_t_h::size_t),
     ) as *mut ::core::ffi::c_char;
     if state_ref.path.is_null() {
-        // SAFETY: this is the still-owned state allocation.
-        unsafe { crate::stdlib::free(state as *mut ::core::ffi::c_void) };
+        // This state uses zlib's default allocator, so its safe matching
+        // adapter can release the still-owned allocation.
+        crate::src::zutil::zcfree(::core::ptr::null_mut(), state as crate::stdlib::voidpf);
         return ::core::ptr::null_mut::<crate::zlib_h::gzFile_s>();
     }
     // SAFETY: the owned path allocation has room for the path and terminator,
@@ -1414,11 +1417,13 @@ fn gz_open(
         }
     }
     if state_ref.fd == -1 as ::core::ffi::c_int {
-        // SAFETY: both allocations are still owned by this failed open.
-        unsafe {
-            crate::stdlib::free(state_ref.path as *mut ::core::ffi::c_void);
-            crate::stdlib::free(state as *mut ::core::ffi::c_void);
-        }
+        // Both allocations are still owned by this failed open and use
+        // zlib's default allocator. Preserve C's path-then-state order.
+        crate::src::zutil::zcfree(
+            ::core::ptr::null_mut(),
+            state_ref.path as crate::stdlib::voidpf,
+        );
+        crate::src::zutil::zcfree(::core::ptr::null_mut(), state as crate::stdlib::voidpf);
         return ::core::ptr::null_mut::<crate::zlib_h::gzFile_s>();
     }
     match gz_open_position_plan(state_ref) {
@@ -1973,8 +1978,9 @@ pub fn gz_error(
 ) {
     let plan = gz_error_plan(state.err, !state.msg.is_null(), state.again, err);
     if plan.release_message {
-        // SAFETY: the state owns its previous non-MEM_ERROR message.
-        unsafe { crate::stdlib::free(state.msg as *mut ::core::ffi::c_void) };
+        // The state owns its previous default-allocator message, so release
+        // it through the matching safe zlib adapter.
+        crate::src::zutil::zcfree(::core::ptr::null_mut(), state.msg as crate::stdlib::voidpf);
     }
     gz_error_apply(state, err, &plan);
     let Some(msg) = msg else {
