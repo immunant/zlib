@@ -2917,6 +2917,58 @@ fn deflate_update(
     }
 }
 
+/// Run one update against the four buffers supplied by a custom allocator.
+///
+/// Default-pair streams use `DeflateOwnedStorage` and never enter this
+/// bridge.  Keeping the three legacy buffer views together makes the custom
+/// allocator boundary explicit: callers supply only typed state, stream, and
+/// borrowed caller buffers, while this adapter is solely responsible for
+/// proving the callback-owned workspace geometry before the safe strategy
+/// dispatcher sees it.
+fn update_callback_deflate_workspace(
+    state: &mut crate::src::deflate::deflate_state,
+    strm: &mut crate::zlib_h::z_stream,
+    input: &[crate::stdlib::Bytef],
+    output: &mut [crate::stdlib::Bytef],
+    pending_buf: &mut [crate::stdlib::Bytef],
+    flush: ::core::ffi::c_int,
+) -> Option<block_state> {
+    if state.window.is_null() || state.pending_buf.is_null() {
+        return None;
+    }
+    // Callback allocations retain their ABI pointer representation. Keep all
+    // conversions to safe workspace slices at this one named ownership
+    // boundary until the allocator facade can own those allocations directly.
+    unsafe {
+        let window = ::core::slice::from_raw_parts_mut(state.window, state.window_size as usize);
+        let mut head = if state.head.is_null() {
+            None
+        } else {
+            Some(::core::slice::from_raw_parts_mut(
+                state.head,
+                state.hash_size as usize,
+            ))
+        };
+        let prev = if state.prev.is_null() {
+            None
+        } else {
+            Some(::core::slice::from_raw_parts_mut(
+                state.prev,
+                state.w_size as usize,
+            ))
+        };
+        let mut workspace = DeflateWorkspace {
+            window,
+            head: head.as_deref_mut(),
+            prev,
+            pending_buf,
+            input,
+            output,
+        };
+        deflate_update(state, strm, &mut workspace, flush)
+    }
+}
+
 pub fn deflate(
     strm: &mut crate::zlib_h::z_stream,
     mut flush: ::core::ffi::c_int,
@@ -3288,7 +3340,7 @@ pub fn deflate(
         // This is the last raw stream/storage bridge for custom and mixed
         // allocator workspaces. The named safe update below owns level and
         // strategy selection for both allocation modes.
-        let (bstate, mut head) = if using_owned_workspace {
+        let bstate = if using_owned_workspace {
             let Some(output) = output_tail(strm, &mut output_buffer) else {
                 return crate::zlib_h::Z_STREAM_ERROR;
             };
@@ -3299,47 +3351,22 @@ pub fn deflate(
             else {
                 return crate::zlib_h::Z_STREAM_ERROR;
             };
-            (bstate, None)
+            bstate
         } else {
-            unsafe {
-                if state.window.is_null() || state.pending_buf.is_null() {
-                    return crate::zlib_h::Z_STREAM_ERROR;
-                }
-                let window =
-                    ::core::slice::from_raw_parts_mut(state.window, state.window_size as usize);
-                let mut head = if state.head.is_null() {
-                    None
-                } else {
-                    Some(::core::slice::from_raw_parts_mut(
-                        state.head,
-                        state.hash_size as usize,
-                    ))
-                };
-                let prev = if state.prev.is_null() {
-                    None
-                } else {
-                    Some(::core::slice::from_raw_parts_mut(
-                        state.prev,
-                        state.w_size as usize,
-                    ))
-                };
-                let Some(output) = output_tail(strm, &mut output_buffer) else {
-                    return crate::zlib_h::Z_STREAM_ERROR;
-                };
-                let mut workspace = DeflateWorkspace {
-                    window,
-                    head: head.as_deref_mut(),
-                    prev,
-                    pending_buf: &mut pending_buffer,
-                    input,
-                    output,
-                };
-                let Some(bstate) = deflate_update(state, strm, &mut workspace, flush) else {
-                    return crate::zlib_h::Z_STREAM_ERROR;
-                };
-                drop(workspace);
-                (bstate, head)
-            }
+            let Some(output) = output_tail(strm, &mut output_buffer) else {
+                return crate::zlib_h::Z_STREAM_ERROR;
+            };
+            let Some(bstate) = update_callback_deflate_workspace(
+                state,
+                strm,
+                input,
+                output,
+                &mut pending_buffer,
+                flush,
+            ) else {
+                return crate::zlib_h::Z_STREAM_ERROR;
+            };
+            bstate
         };
         if bstate as ::core::ffi::c_uint
             == finish_started as ::core::ffi::c_int as ::core::ffi::c_uint
@@ -3373,10 +3400,10 @@ pub fn deflate(
                     let cleared = if using_owned_workspace {
                         clear_owned_full_flush_hash(state)
                     } else {
-                        let Some(head) = head.as_deref_mut() else {
-                            return crate::zlib_h::Z_STREAM_ERROR;
-                        };
-                        clear_full_flush_hash(state, head)
+                        with_callback_deflate_head(state, |state, head| {
+                            clear_full_flush_hash(state, head)
+                        })
+                        .unwrap_or(false)
                     };
                     if !cleared {
                         return crate::zlib_h::Z_STREAM_ERROR;
