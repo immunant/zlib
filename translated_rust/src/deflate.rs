@@ -392,6 +392,7 @@ struct DeflateLayout {
 // are the exact `(items, size)` requests made to a custom zalloc callback, so
 // later owner-backed storage can preserve allocation pairing and timing rather
 // than collapsing the four buffers into an unobservable byte count.
+#[derive(Clone, Copy)]
 struct DeflateAllocation {
     items: crate::stdlib::uInt,
     size: crate::stdlib::uInt,
@@ -414,6 +415,7 @@ impl DeflateAllocation {
     }
 }
 
+#[derive(Clone, Copy)]
 struct DeflateStorageLayout {
     window: DeflateAllocation,
     prev: DeflateAllocation,
@@ -440,6 +442,11 @@ enum DeflateStorageSlot {
 // including during partial initialization and failed deep-copy setup.
 #[derive(Clone, Copy)]
 struct DeflateCallbackOwnership {
+    // Keep the exact request geometry with the release ledger.  Callback
+    // storage is still represented by provenance-carrying handles at the ABI
+    // boundary, but every temporary typed view must use these immutable
+    // allocation descriptors rather than mutable codec cursor/size fields.
+    storage: DeflateStorageLayout,
     state: bool,
     window: bool,
     prev: bool,
@@ -448,14 +455,19 @@ struct DeflateCallbackOwnership {
 }
 
 impl DeflateCallbackOwnership {
-    fn new_state() -> Self {
+    fn new_state(storage: DeflateStorageLayout) -> Self {
         Self {
+            storage,
             state: true,
             window: false,
             prev: false,
             head: false,
             pending: false,
         }
+    }
+
+    fn storage(&self) -> DeflateStorageLayout {
+        self.storage
     }
 
     fn record_storage(&mut self, slot: DeflateStorageSlot, allocated: bool) {
@@ -1245,7 +1257,7 @@ pub unsafe fn deflateInit2_(
         pending_buf_size: initial_state.pending_buf_size,
         pending_out: initial_state.pending_out,
         pending: initial_state.pending,
-        callback_ownership: DeflateCallbackOwnership::new_state(),
+        callback_ownership: DeflateCallbackOwnership::new_state(storage),
         wrap: initial_state.wrap,
         gzhead: None,
         gzindex: initial_state.gzindex,
@@ -1514,6 +1526,7 @@ unsafe fn deflate_stream_and_state<'stream>(
     if !deflate_state_status_is_valid(state.status) {
         return None;
     }
+    let storage_layout = state.callback_ownership.storage();
     let storage = match projection {
         DeflateStorageProjection::None => DeflateCallbackStorage {
             window: None,
@@ -1526,22 +1539,34 @@ unsafe fn deflate_stream_and_state<'stream>(
             prev: None,
             head: Some(::core::slice::from_raw_parts_mut(
                 state.head.expect("initialized head table").as_ptr(),
-                state.hash_size as usize,
+                storage_layout
+                    .head
+                    .element_len::<crate::src::deflate::Posf>()
+                    .expect("validated head allocation geometry"),
             )),
             pending: None,
         },
         DeflateStorageProjection::Dictionary => DeflateCallbackStorage {
             window: Some(::core::slice::from_raw_parts_mut(
                 state.window.expect("initialized window").as_ptr(),
-                state.window_size as usize,
+                storage_layout
+                    .window
+                    .byte_len()
+                    .expect("validated window allocation geometry"),
             )),
             prev: Some(::core::slice::from_raw_parts_mut(
                 state.prev.expect("initialized prev table").as_ptr(),
-                state.w_size as usize,
+                storage_layout
+                    .prev
+                    .element_len::<crate::src::deflate::Posf>()
+                    .expect("validated prev allocation geometry"),
             )),
             head: Some(::core::slice::from_raw_parts_mut(
                 state.head.expect("initialized head table").as_ptr(),
-                state.hash_size as usize,
+                storage_layout
+                    .head
+                    .element_len::<crate::src::deflate::Posf>()
+                    .expect("validated head allocation geometry"),
             )),
             pending: None,
         },
@@ -5090,7 +5115,7 @@ unsafe fn deflate_copy_from_abi_boundary(
         pending_buf_size: payload.pending_buf_size,
         pending_out: payload.pending_out,
         pending: payload.pending,
-        callback_ownership: DeflateCallbackOwnership::new_state(),
+        callback_ownership: DeflateCallbackOwnership::new_state(storage),
         wrap: payload.wrap,
         gzhead: payload.gzhead,
         gzindex: payload.gzindex,
