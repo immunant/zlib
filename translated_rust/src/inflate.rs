@@ -1078,7 +1078,11 @@ pub fn inflate(
         let mut header = state_ref.head.as_mut();
         let state = state_ref;
         let mut next: *mut ::core::ffi::c_uchar = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
-        let mut put: *mut ::core::ffi::c_uchar = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
+        // The caller-owned output span is established once above. Keep its
+        // cursor as an index so output-to-output match expansion can stay in
+        // checked slice operations; only callback-owned history remains a
+        // raw boundary below.
+        let mut put_index: usize = 0;
         let mut have: ::core::ffi::c_uint = 0;
         let mut left: ::core::ffi::c_uint = 0;
         let mut hold: ::core::ffi::c_ulong = 0;
@@ -1144,7 +1148,6 @@ pub fn inflate(
         // literal, stored-block, fast-path, history, and checksum handling
         // can use checked slice access instead of rebuilding raw views.
         let output = ::core::slice::from_raw_parts_mut(output_start, strm.avail_out as usize);
-        put = output_start as *mut ::core::ffi::c_uchar;
         left = strm.avail_out as ::core::ffi::c_uint;
         next = strm.next_in as *mut ::core::ffi::c_uchar;
         have = strm.avail_in as ::core::ffi::c_uint;
@@ -1541,8 +1544,11 @@ pub fn inflate(
                                                                                                     let Some(destination) = output.get_mut(output_index) else {
                                                                                                         return crate::zlib_h::Z_STREAM_ERROR;
                                                                                                     };
-                                                                                                    put = put.wrapping_add(1);
                                                                                                     *destination = state.length as ::core::ffi::c_uchar;
+                                                                                                    let Some(next_put_index) = output_index.checked_add(1) else {
+                                                                                                        return crate::zlib_h::Z_STREAM_ERROR;
+                                                                                                    };
+                                                                                                    put_index = next_put_index;
                                                                                                     left = left.wrapping_sub(1);
                                                                                                     state.mode = crate::src::inflate::LEN;
                                                                                                     continue '_inf_leave;
@@ -1728,7 +1734,7 @@ pub fn inflate(
                                                                                             }
                                                                                         }
                                                                                         if state.havedict == 0 as ::core::ffi::c_int {
-                                                                                        strm.next_out = put as *mut crate::stdlib::Bytef;
+                                                                                        strm.next_out = output.as_mut_ptr().wrapping_add(put_index);
                                                                                         strm.avail_out = left as crate::stdlib::uInt;
                                                                                         strm.next_in = next as *mut crate::stdlib::Bytef;
                                                                                         strm.avail_in = have as crate::stdlib::uInt;
@@ -2077,9 +2083,7 @@ pub fn inflate(
                                                                                 );
                                                                             left = left
                                                                                 .wrapping_sub(copy);
-                                                                            put = put.wrapping_add(
-                                                                                copy as usize,
-                                                                            );
+                                                                            put_index = output_end;
                                                                             state.length = state
                                                                                 .length
                                                                                 .wrapping_sub(copy);
@@ -2313,7 +2317,7 @@ pub fn inflate(
                                             if have >= 6 as ::core::ffi::c_uint
                                                 && left >= 258 as ::core::ffi::c_uint
                                             {
-                                                strm.next_out = put as *mut crate::stdlib::Bytef;
+                                                strm.next_out = output.as_mut_ptr().wrapping_add(put_index);
                                                 strm.avail_out = left as crate::stdlib::uInt;
                                                 strm.next_in = next as *mut crate::stdlib::Bytef;
                                                 strm.avail_in = have as crate::stdlib::uInt;
@@ -2351,7 +2355,13 @@ pub fn inflate(
                                                     fast_input,
                                                     output,
                                                 );
-                                                put = strm.next_out as *mut ::core::ffi::c_uchar;
+                                                let Some(next_put_index) = output
+                                                    .len()
+                                                    .checked_sub(strm.avail_out as usize)
+                                                else {
+                                                    return crate::zlib_h::Z_STREAM_ERROR;
+                                                };
+                                                put_index = next_put_index;
                                                 left = strm.avail_out as ::core::ffi::c_uint;
                                                 next = strm.next_in as *mut ::core::ffi::c_uchar;
                                                 have = strm.avail_in as ::core::ffi::c_uint;
@@ -2818,7 +2828,8 @@ pub fn inflate(
             if left == 0 as ::core::ffi::c_uint {
                 break;
             }
-            copy = out.wrapping_sub(left);
+            let produced_before_match = out.wrapping_sub(left);
+            copy = produced_before_match;
             if state.offset > copy {
                 copy = state.offset.wrapping_sub(copy);
                 if copy > state.whave {
@@ -2849,33 +2860,61 @@ pub fn inflate(
                     copy = state.length;
                 }
             } else {
-                // `state.offset` has already been validated against the
-                // produced output, so this bounded backward cursor move does
-                // not need raw-pointer offset arithmetic.
-                from = put.wrapping_sub(state.offset as usize);
+                // The validated backward match source is an output index, so
+                // overlapping DEFLATE expansion can remain slice-based.
                 copy = state.length;
             }
             if copy > left {
                 copy = left;
             }
+            let Some(copy_len) = usize::try_from(copy).ok() else {
+                return crate::zlib_h::Z_STREAM_ERROR;
+            };
+            if copy_len == 0 {
+                return crate::zlib_h::Z_STREAM_ERROR;
+            }
             left = left.wrapping_sub(copy);
             state.length = state.length.wrapping_sub(copy);
-            loop {
-                let c2rust_fresh30 = from;
-                from = from.wrapping_add(1);
-                let c2rust_fresh31 = put;
-                put = put.wrapping_add(1);
-                *c2rust_fresh31 = *c2rust_fresh30;
-                copy = copy.wrapping_sub(1);
-                if copy == 0 {
-                    break;
+            if state.offset <= produced_before_match {
+                let Some(from_index) = put_index.checked_sub(state.offset as usize) else {
+                    return crate::zlib_h::Z_STREAM_ERROR;
+                };
+                let Some(from_end) = from_index.checked_add(copy_len) else {
+                    return crate::zlib_h::Z_STREAM_ERROR;
+                };
+                let Some(put_end) = put_index.checked_add(copy_len) else {
+                    return crate::zlib_h::Z_STREAM_ERROR;
+                };
+                if from_end > output.len() || put_end > output.len() {
+                    return crate::zlib_h::Z_STREAM_ERROR;
+                }
+                // Read and write one byte at a time so an overlapping source
+                // repeats forward exactly like the original DEFLATE loop.
+                for index in 0..copy_len {
+                    let byte = output[from_index + index];
+                    output[put_index + index] = byte;
+                }
+                put_index = put_end;
+            } else {
+                for _ in 0..copy_len {
+                    let c2rust_fresh30 = from;
+                    from = from.wrapping_add(1);
+                    let byte = *c2rust_fresh30;
+                    let Some(destination) = output.get_mut(put_index) else {
+                        return crate::zlib_h::Z_STREAM_ERROR;
+                    };
+                    *destination = byte;
+                    let Some(next_put_index) = put_index.checked_add(1) else {
+                        return crate::zlib_h::Z_STREAM_ERROR;
+                    };
+                    put_index = next_put_index;
                 }
             }
             if state.length == 0 as ::core::ffi::c_uint {
                 state.mode = crate::src::inflate::LEN;
             }
         }
-        strm.next_out = put as *mut crate::stdlib::Bytef;
+        strm.next_out = output.as_mut_ptr().wrapping_add(put_index);
         strm.avail_out = left as crate::stdlib::uInt;
         strm.next_in = next as *mut crate::stdlib::Bytef;
         strm.avail_in = have as crate::stdlib::uInt;
