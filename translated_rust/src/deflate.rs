@@ -66,7 +66,6 @@ pub type tree_desc = crate::src::deflate::tree_desc_s;
 #[repr(C)]
 
 pub struct tree_desc_s {
-    pub dyn_tree: *mut crate::src::deflate::ct_data,
     pub max_code: ::core::ffi::c_int,
     pub stat_desc: StaticTreeKind,
 }
@@ -986,7 +985,7 @@ pub unsafe extern "C" fn deflateResetKeep(
         crate::src::adler32::adler32(0 as crate::stdlib::uLong, None)
     };
     (*s).last_flush = -2 as ::core::ffi::c_int;
-    crate::src::trees::_tr_init(s as *mut crate::src::deflate::internal_state);
+    crate::src::trees::_tr_init(&mut *s);
     return crate::zlib_h::Z_OK;
 }
 #[export_name = "deflateResetKeep"]
@@ -2195,12 +2194,6 @@ pub unsafe extern "C" fn deflateCopy(
         (*ss).sym_buf as *const ::core::ffi::c_void,
         (*ss).sym_next as crate::__stddef_size_t_h::size_t,
     );
-    (*ds).l_desc.dyn_tree = &raw mut (*ds).dyn_ltree as *mut crate::src::deflate::ct_data_s
-        as *mut crate::src::deflate::ct_data;
-    (*ds).d_desc.dyn_tree = &raw mut (*ds).dyn_dtree as *mut crate::src::deflate::ct_data_s
-        as *mut crate::src::deflate::ct_data;
-    (*ds).bl_desc.dyn_tree = &raw mut (*ds).bl_tree as *mut crate::src::deflate::ct_data_s
-        as *mut crate::src::deflate::ct_data;
     return crate::zlib_h::Z_OK;
 }
 #[export_name = "deflateCopy"]
