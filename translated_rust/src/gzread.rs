@@ -934,7 +934,9 @@ pub unsafe extern "C" fn gzfread_ffi(
     };
     return gzfread_completed_items(len, size, gz_read(state, destination));
 }
-pub unsafe extern "C" fn gzgetc(mut file: crate::zlib_h::gzFile) -> ::core::ffi::c_int {
+#[export_name = "gzgetc"]
+
+pub unsafe extern "C" fn gzgetc_ffi(mut file: crate::zlib_h::gzFile) -> ::core::ffi::c_int {
     let mut buf: [::core::ffi::c_uchar; 1] = [0; 1];
     if file.is_null() {
         return -1 as ::core::ffi::c_int;
@@ -952,21 +954,37 @@ pub unsafe extern "C" fn gzgetc(mut file: crate::zlib_h::gzFile) -> ::core::ffi:
         }
         return *c2rust_fresh2 as ::core::ffi::c_int;
     }
-    return if gz_read(state, &mut buf) < 1 as crate::stdlib::z_size_t {
+    if gz_read(state, &mut buf) < 1 as crate::stdlib::z_size_t {
         -1 as ::core::ffi::c_int
     } else {
         buf[0 as ::core::ffi::c_int as usize] as ::core::ffi::c_int
-    };
-}
-#[export_name = "gzgetc"]
-
-pub unsafe extern "C" fn gzgetc_ffi(mut file: crate::zlib_h::gzFile) -> ::core::ffi::c_int {
-    gzgetc(file)
+    }
 }
 #[export_name = "gzgetc_"]
 
 pub unsafe extern "C" fn gzgetc__ffi(mut file: crate::zlib_h::gzFile) -> ::core::ffi::c_int {
-    gzgetc(file)
+    let mut buf: [::core::ffi::c_uchar; 1] = [0; 1];
+    if file.is_null() {
+        return -1 as ::core::ffi::c_int;
+    }
+    let state = &mut *(file as crate::gzguts_h::gz_statep);
+    if !gzread_state_is_valid(state.mode, state.err, state.again) {
+        return -1 as ::core::ffi::c_int;
+    }
+    crate::src::gzlib::gz_error_clear(state);
+    if state.x.have != 0 {
+        let c2rust_fresh2 = state.x.next;
+        state.x.next = state.x.next.offset(1);
+        if !gzgetc_buffer_commit_state(state) {
+            return -1 as ::core::ffi::c_int;
+        }
+        return *c2rust_fresh2 as ::core::ffi::c_int;
+    }
+    if gz_read(state, &mut buf) < 1 as crate::stdlib::z_size_t {
+        -1 as ::core::ffi::c_int
+    } else {
+        buf[0 as ::core::ffi::c_int as usize] as ::core::ffi::c_int
+    }
 }
 
 /// Describe where an ungot byte belongs in the existing read buffer without
