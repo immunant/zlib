@@ -491,28 +491,60 @@ pub unsafe extern "C" fn inflateReset2_ffi(
     let mut state = InflateState(state);
     inflate_reset2_impl(strm, &mut state, windowBits)
 }
-pub unsafe extern "C" fn inflateInit2_(
-    mut strm: crate::zlib_h::z_streamp,
+/// Allocate and install an inflater state through the stream's ABI allocator.
+///
+/// The callback owns the returned storage, so this is deliberately the only
+/// constructor that writes an `inflate_state` into callback-provided memory.
+unsafe fn inflate_allocate_state(
+    strm: &mut crate::zlib_h::z_stream_s,
+) -> Result<*mut crate::src::inflate::inflate_state, ::core::ffi::c_int> {
+    let Some(zalloc) = strm.zalloc else {
+        return Err(crate::zlib_h::Z_STREAM_ERROR);
+    };
+    let state = zalloc(
+        strm.opaque,
+        1 as crate::stdlib::uInt,
+        ::core::mem::size_of::<crate::src::inflate::inflate_state>() as crate::stdlib::uInt,
+    )
+    .cast::<crate::src::inflate::inflate_state>();
+    if state.is_null() {
+        return Err(crate::zlib_h::Z_MEM_ERROR);
+    }
+    state.write(new_inflate_state());
+    strm.state = state.cast::<crate::src::deflate::internal_state>();
+    Ok(state)
+}
+
+/// Drop and return an inflater state to the allocator that created it.
+///
+/// Callers invoke this only for a state installed by `inflate_allocate_state`,
+/// after ensuring that the stream still carries a matching free callback.
+unsafe fn inflate_release_state(
+    strm: &mut crate::zlib_h::z_stream_s,
+    state: *mut crate::src::inflate::inflate_state,
+) {
+    let zfree = strm
+        .zfree
+        .expect("initialized inflate stream has a free callback");
+    ::core::ptr::drop_in_place(state);
+    zfree(strm.opaque, state.cast());
+    strm.state = ::core::ptr::null_mut::<crate::src::deflate::internal_state>();
+}
+
+pub unsafe fn inflateInit2_(
+    strm: &mut crate::zlib_h::z_stream_s,
     mut windowBits: ::core::ffi::c_int,
-    mut version: *const ::core::ffi::c_char,
+    version: Option<::core::ffi::c_char>,
     mut stream_size: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
-    let mut ret: ::core::ffi::c_int = 0;
-    let mut state: *mut crate::src::inflate::inflate_state =
-        ::core::ptr::null_mut::<crate::src::inflate::inflate_state>();
-    if version.is_null()
-        || *version.offset(0 as isize) as ::core::ffi::c_int
-            != crate::zlib_h::ZLIB_VERSION[0 as usize] as ::core::ffi::c_int
+    if version != Some(crate::zlib_h::ZLIB_VERSION[0 as usize])
         || stream_size != ::core::mem::size_of::<crate::zlib_h::z_stream>() as ::core::ffi::c_int
     {
         return crate::zlib_h::Z_VERSION_ERROR;
     }
-    if strm.is_null() {
-        return crate::zlib_h::Z_STREAM_ERROR;
-    }
-    (*strm).msg = ::core::ptr::null_mut::<::core::ffi::c_char>();
-    if (*strm).zalloc.is_none() {
-        (*strm).zalloc = Some(
+    strm.msg = ::core::ptr::null_mut::<::core::ffi::c_char>();
+    if strm.zalloc.is_none() {
+        strm.zalloc = Some(
             crate::src::zutil::zcalloc
                 as unsafe extern "C" fn(
                     crate::stdlib::voidpf,
@@ -520,39 +552,26 @@ pub unsafe extern "C" fn inflateInit2_(
                     ::core::ffi::c_uint,
                 ) -> crate::stdlib::voidpf,
         ) as crate::zlib_h::alloc_func;
-        (*strm).opaque = ::core::ptr::null_mut::<::core::ffi::c_void>();
+        strm.opaque = ::core::ptr::null_mut::<::core::ffi::c_void>();
     }
-    if (*strm).zfree.is_none() {
-        (*strm).zfree = Some(
+    if strm.zfree.is_none() {
+        strm.zfree = Some(
             crate::src::zutil::zcfree
                 as unsafe extern "C" fn(crate::stdlib::voidpf, crate::stdlib::voidpf) -> (),
         ) as crate::zlib_h::free_func;
     }
-    state = Some((*strm).zalloc.expect("non-null function pointer"))
-        .expect("non-null function pointer")(
-        (*strm).opaque,
-        1 as crate::stdlib::uInt,
-        ::core::mem::size_of::<crate::src::inflate::inflate_state>() as crate::stdlib::uInt,
-    ) as *mut crate::src::inflate::inflate_state;
-    if state.is_null() {
-        return crate::zlib_h::Z_MEM_ERROR;
-    }
-    state.write(new_inflate_state());
-    (*strm).state = state as *mut crate::src::deflate::internal_state;
+    let state = match inflate_allocate_state(strm) {
+        Ok(state) => state,
+        Err(error) => return error,
+    };
     let state = &mut *state;
     state.mode = crate::src::inflate::HEAD;
     let mut state = InflateState(state);
-    ret = inflate_reset2_impl(&mut *strm, &mut state, windowBits);
+    let ret = inflate_reset2_impl(strm, &mut state, windowBits);
     if ret != crate::zlib_h::Z_OK {
-        let state_ptr = state.0 as *mut crate::src::inflate::inflate_state;
-        ::core::ptr::drop_in_place(state_ptr);
-        Some((*strm).zfree.expect("non-null function pointer")).expect("non-null function pointer")(
-            (*strm).opaque,
-            state_ptr as crate::stdlib::voidpf,
-        );
-        (*strm).state = ::core::ptr::null_mut::<crate::src::deflate::internal_state>();
+        inflate_release_state(strm, state.0);
     }
-    return ret;
+    ret
 }
 #[export_name = "inflateInit2_"]
 
@@ -562,7 +581,10 @@ pub unsafe extern "C" fn inflateInit2__ffi(
     mut version: *const ::core::ffi::c_char,
     mut stream_size: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
-    inflateInit2_(strm, windowBits, version, stream_size)
+    let Some(strm) = strm.as_mut() else {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    };
+    inflateInit2_(strm, windowBits, version.as_ref().copied(), stream_size)
 }
 #[export_name = "inflateInit_"]
 
@@ -571,7 +593,15 @@ pub unsafe extern "C" fn inflateInit__ffi(
     mut version: *const ::core::ffi::c_char,
     mut stream_size: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
-    inflateInit2_(strm, crate::zutil_h::DEF_WBITS, version, stream_size)
+    let Some(strm) = strm.as_mut() else {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    };
+    inflateInit2_(
+        strm,
+        crate::zutil_h::DEF_WBITS,
+        version.as_ref().copied(),
+        stream_size,
+    )
 }
 fn inflate_prime_impl(
     mode: crate::src::inflate::inflate_mode,
