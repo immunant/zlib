@@ -895,103 +895,114 @@ unsafe fn deflateStateCheck(strm: crate::zlib_h::z_streamp) -> ::core::ffi::c_in
     let state = &*(strm.state as *const crate::src::deflate::deflate_state);
     (!deflate_state_valid(strm, state)) as ::core::ffi::c_int
 }
-pub unsafe extern "C" fn deflateSetDictionary(
-    mut strm: crate::zlib_h::z_streamp,
-    mut dictionary: *const crate::stdlib::Bytef,
-    mut dictLength: crate::stdlib::uInt,
+fn deflate_set_dictionary(
+    strm: &mut crate::zlib_h::z_stream,
+    state: &mut crate::src::deflate::deflate_state,
+    dictionary: &[crate::stdlib::Bytef],
+    window: &mut [crate::stdlib::Bytef],
+    head: &mut [crate::src::deflate::Posf],
+    prev: &mut [crate::src::deflate::Posf],
 ) -> ::core::ffi::c_int {
-    let mut s: *mut crate::src::deflate::deflate_state =
-        ::core::ptr::null_mut::<crate::src::deflate::deflate_state>();
-    let mut str: crate::stdlib::uInt = 0;
-    let mut n: crate::stdlib::uInt = 0;
-    let mut wrap: ::core::ffi::c_int = 0;
-    let mut avail: ::core::ffi::c_uint = 0;
-    let mut next: *mut ::core::ffi::c_uchar = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
-    if deflateStateCheck(strm) != 0 || dictionary.is_null() {
-        return crate::zlib_h::Z_STREAM_ERROR;
-    }
-    s = (*strm).state as *mut crate::src::deflate::deflate_state;
-    wrap = (*s).wrap;
-    if wrap == 2 as ::core::ffi::c_int
-        || wrap == 1 as ::core::ffi::c_int && (*s).status != crate::src::deflate::INIT_STATE
-        || (*s).lookahead != 0
+    if !deflate_state_valid(strm, state)
+        || window.len() < state.window_size as usize
+        || head.len() < state.hash_size as usize
+        || prev.len() < state.w_size as usize
     {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    if wrap == 1 as ::core::ffi::c_int {
-        (*strm).adler = crate::src::adler32::adler32(
-            (*strm).adler,
-            Some(::core::slice::from_raw_parts(
-                dictionary,
-                dictLength as crate::stdlib::z_size_t,
-            )),
-        );
+    let wrap = state.wrap;
+    if wrap == 2
+        || wrap == 1 && state.status != crate::src::deflate::INIT_STATE
+        || state.lookahead != 0
+    {
+        return crate::zlib_h::Z_STREAM_ERROR;
     }
-    (*s).wrap = 0 as ::core::ffi::c_int;
-    if dictLength >= (*s).w_size {
-        if wrap == 0 as ::core::ffi::c_int {
-            *(*s)
-                .head
-                .offset((*s).hash_size.wrapping_sub(1 as crate::stdlib::uInt) as isize) =
-                NIL as crate::src::deflate::Posf;
-            crate::stdlib::memset(
-                (*s).head as *mut ::core::ffi::c_void,
-                0 as ::core::ffi::c_int,
-                ((*s).hash_size.wrapping_sub(1 as crate::stdlib::uInt)
-                    as crate::__stddef_size_t_h::size_t)
-                    .wrapping_mul(::core::mem::size_of::<crate::src::deflate::Posf>()),
+    if wrap == 1 {
+        strm.adler = crate::src::adler32::adler32(strm.adler, Some(dictionary));
+    }
+    state.wrap = 0;
+    let dictionary = if dictionary.len() >= state.w_size as usize {
+        if wrap == 0 {
+            head[..state.hash_size as usize].fill(NIL as crate::src::deflate::Posf);
+            state.slid = 0;
+            state.strstart = 0;
+            state.block_start = 0;
+            state.insert = 0;
+        }
+        &dictionary[dictionary.len() - state.w_size as usize..]
+    } else {
+        dictionary
+    };
+    let avail = strm.avail_in;
+    let next = strm.next_in;
+    strm.avail_in = dictionary.len() as crate::stdlib::uInt;
+    strm.next_in = dictionary.as_ptr().cast_mut();
+    let result = (|| {
+        let Some(input) = dictionary.get(
+            dictionary
+                .len()
+                .checked_sub(strm.avail_in as usize)
+                .ok_or(crate::zlib_h::Z_STREAM_ERROR)?..,
+        ) else {
+            return Err(crate::zlib_h::Z_STREAM_ERROR);
+        };
+        fill_window(state, strm, window, head, prev, input);
+        while state.lookahead >= crate::zutil_h::MIN_MATCH as crate::stdlib::uInt {
+            let mut string = state.strstart;
+            let count = state.lookahead.wrapping_sub(
+                (crate::zutil_h::MIN_MATCH - 1) as crate::stdlib::uInt,
             );
-            (*s).slid = 0 as ::core::ffi::c_int;
-            (*s).strstart = 0 as crate::stdlib::uInt;
-            (*s).block_start = 0 as ::core::ffi::c_long;
-            (*s).insert = 0 as crate::stdlib::uInt;
-        }
-        dictionary = dictionary.offset(dictLength.wrapping_sub((*s).w_size) as isize);
-        dictLength = (*s).w_size;
-    }
-    avail = (*strm).avail_in as ::core::ffi::c_uint;
-    next = (*strm).next_in as *mut ::core::ffi::c_uchar;
-    (*strm).avail_in = dictLength;
-    (*strm).next_in = dictionary as *mut crate::stdlib::Bytef;
-    fill_window_from_raw!(s);
-    while (*s).lookahead >= crate::zutil_h::MIN_MATCH as crate::stdlib::uInt {
-        str = (*s).strstart;
-        n = (*s).lookahead.wrapping_sub(
-            (crate::zutil_h::MIN_MATCH - 1 as ::core::ffi::c_int) as crate::stdlib::uInt,
-        );
-        loop {
-            (*s).ins_h = ((*s).ins_h << (*s).hash_shift
-                ^ *(*s).window.offset(
-                    str.wrapping_add(3 as crate::stdlib::uInt)
-                        .wrapping_sub(1 as crate::stdlib::uInt) as isize,
-                ) as crate::stdlib::uInt)
-                & (*s).hash_mask;
-            *(*s).prev.offset((str & (*s).w_mask) as isize) =
-                *(*s).head.offset((*s).ins_h as isize);
-            *(*s).head.offset((*s).ins_h as isize) =
-                str as crate::src::deflate::Pos as crate::src::deflate::Posf;
-            str = str.wrapping_add(1);
-            n = n.wrapping_sub(1);
-            if n == 0 {
-                break;
+            for _ in 0..count {
+                let Some(&byte) = window.get(
+                    string
+                        .wrapping_add(crate::zutil_h::MIN_MATCH as crate::stdlib::uInt)
+                        .wrapping_sub(1) as usize,
+                ) else {
+                    return Err(crate::zlib_h::Z_STREAM_ERROR);
+                };
+                state.ins_h = (state.ins_h << state.hash_shift ^ byte as crate::stdlib::uInt)
+                    & state.hash_mask;
+                let Some(&previous) = head.get(state.ins_h as usize) else {
+                    return Err(crate::zlib_h::Z_STREAM_ERROR);
+                };
+                let Some(previous_slot) = prev.get_mut((string & state.w_mask) as usize) else {
+                    return Err(crate::zlib_h::Z_STREAM_ERROR);
+                };
+                *previous_slot = previous;
+                let Some(head_slot) = head.get_mut(state.ins_h as usize) else {
+                    return Err(crate::zlib_h::Z_STREAM_ERROR);
+                };
+                *head_slot = string as crate::src::deflate::Posf;
+                string = string.wrapping_add(1);
             }
+            state.strstart = string;
+            state.lookahead = (crate::zutil_h::MIN_MATCH - 1) as crate::stdlib::uInt;
+            let Some(input) = dictionary.get(
+                dictionary
+                    .len()
+                    .checked_sub(strm.avail_in as usize)
+                    .ok_or(crate::zlib_h::Z_STREAM_ERROR)?..,
+            ) else {
+                return Err(crate::zlib_h::Z_STREAM_ERROR);
+            };
+            fill_window(state, strm, window, head, prev, input);
         }
-        (*s).strstart = str;
-        (*s).lookahead =
-            (crate::zutil_h::MIN_MATCH - 1 as ::core::ffi::c_int) as crate::stdlib::uInt;
-        fill_window_from_raw!(s);
+        state.strstart = state.strstart.wrapping_add(state.lookahead);
+        state.block_start = state.strstart as ::core::ffi::c_long;
+        state.insert = state.lookahead;
+        state.lookahead = 0;
+        state.prev_length = (crate::zutil_h::MIN_MATCH - 1) as crate::stdlib::uInt;
+        state.match_length = state.prev_length;
+        state.match_available = 0;
+        Ok(())
+    })();
+    strm.next_in = next;
+    strm.avail_in = avail;
+    state.wrap = wrap;
+    match result {
+        Ok(()) => crate::zlib_h::Z_OK,
+        Err(error) => error,
     }
-    (*s).strstart = (*s).strstart.wrapping_add((*s).lookahead);
-    (*s).block_start = (*s).strstart as ::core::ffi::c_long;
-    (*s).insert = (*s).lookahead;
-    (*s).lookahead = 0 as crate::stdlib::uInt;
-    (*s).prev_length = (crate::zutil_h::MIN_MATCH - 1 as ::core::ffi::c_int) as crate::stdlib::uInt;
-    (*s).match_length = (*s).prev_length;
-    (*s).match_available = 0 as ::core::ffi::c_int;
-    (*strm).next_in = next as *mut crate::stdlib::Bytef;
-    (*strm).avail_in = avail as crate::stdlib::uInt;
-    (*s).wrap = wrap;
-    return crate::zlib_h::Z_OK;
 }
 #[export_name = "deflateSetDictionary"]
 
@@ -1000,7 +1011,20 @@ pub unsafe extern "C" fn deflateSetDictionary_ffi(
     mut dictionary: *const crate::stdlib::Bytef,
     mut dictLength: crate::stdlib::uInt,
 ) -> ::core::ffi::c_int {
-    deflateSetDictionary(strm, dictionary, dictLength)
+    // Validate the ABI handle before borrowing its state or storage.
+    if deflateStateCheck(strm) != 0 || dictionary.is_null() {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    }
+    let strm = &mut *strm;
+    let state = &mut *(strm.state as *mut crate::src::deflate::deflate_state);
+    if state.window.is_null() || state.head.is_null() || state.prev.is_null() {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    }
+    let dictionary = ::core::slice::from_raw_parts(dictionary, dictLength as usize);
+    let window = ::core::slice::from_raw_parts_mut(state.window, state.window_size as usize);
+    let head = ::core::slice::from_raw_parts_mut(state.head, state.hash_size as usize);
+    let prev = ::core::slice::from_raw_parts_mut(state.prev, state.w_size as usize);
+    deflate_set_dictionary(strm, state, dictionary, window, head, prev)
 }
 fn deflate_dictionary_len(
     strm: Option<&crate::zlib_h::z_stream_s>,
