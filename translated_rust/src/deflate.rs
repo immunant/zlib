@@ -3960,6 +3960,7 @@ fn deflate_stored(
         // admission.  The planner is scalar-only, so this avoids a separate raw
         // stream adoption before the loop without changing when input is read.
         let mut used: ::core::ffi::c_uint = 0;
+        let mut remaining_avail_in: crate::stdlib::uInt = 0;
         let mut first_block = true;
         loop {
             let (initial_avail_in, plan) = {
@@ -3979,6 +3980,7 @@ fn deflate_stored(
                     ),
                 )
             };
+            remaining_avail_in = initial_avail_in;
             if first_block {
                 used = initial_avail_in;
                 first_block = false;
@@ -4068,7 +4070,8 @@ fn deflate_stored(
                 let state = &mut *s;
                 let stream = state.strm;
                 let strm = &mut *stream;
-                read_buf(stream, strm.next_out, len, state.wrap);
+                let progress = read_buf(stream, strm.next_out, len, state.wrap);
+                remaining_avail_in = progress.avail_in;
                 // `read_buf()` consumed at most the requested `len` bytes, so
                 // this is a cursor update only; no pointer dereference is needed.
                 strm.next_out = strm.next_out.wrapping_add(len as usize);
@@ -4079,11 +4082,6 @@ fn deflate_stored(
                 break;
             }
         }
-        let remaining_avail_in = {
-            let state = &mut *s;
-            let strm = &mut *state.strm;
-            strm.avail_in
-        };
         used = stored_input_consumed(used, remaining_avail_in);
         if used != 0 {
             let state = &mut *s;
