@@ -467,15 +467,7 @@ pub unsafe extern "C" fn gzseek64(
         }
     }
     if (*state).mode == crate::gzguts_h::GZ_READ {
-        n = if ::core::mem::size_of::<::core::ffi::c_int>()
-            == ::core::mem::size_of::<crate::stdlib::off64_t>()
-            && (*state).x.have > gz_intmax()
-            || (*state).x.have as crate::stdlib::off64_t > offset
-        {
-            offset as ::core::ffi::c_uint
-        } else {
-            (*state).x.have
-        };
+        n = gz_skip_chunk((*state).x.have, offset);
         (*state).x.have = (*state).x.have.wrapping_sub(n);
         (*state).x.next = (*state).x.next.offset(n as isize);
         (*state).x.pos += n as crate::stdlib::off64_t;
@@ -724,6 +716,22 @@ pub unsafe extern "C" fn gz_error_ffi(
 ) {
     gz_error(state, err, msg)
 }
+
+pub fn gz_skip_chunk(
+    available: ::core::ffi::c_uint,
+    skip: crate::stdlib::off64_t,
+) -> ::core::ffi::c_uint {
+    if (::core::mem::size_of::<::core::ffi::c_int>()
+        == ::core::mem::size_of::<crate::stdlib::off64_t>()
+        && available > gz_intmax())
+        || available as crate::stdlib::off64_t > skip
+    {
+        skip as ::core::ffi::c_uint
+    } else {
+        available
+    }
+}
+
 pub extern "C" fn gz_intmax() -> ::core::ffi::c_uint {
     return crate::limits_h::INT_MAX as ::core::ffi::c_uint;
 }

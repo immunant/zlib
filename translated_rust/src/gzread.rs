@@ -365,15 +365,7 @@ unsafe extern "C" fn gz_skip(mut state: crate::gzguts_h::gz_statep) -> ::core::f
     let mut n: ::core::ffi::c_uint = 0;
     loop {
         if (*state).x.have != 0 {
-            n = if ::core::mem::size_of::<::core::ffi::c_int>()
-                == ::core::mem::size_of::<crate::stdlib::off64_t>()
-                && (*state).x.have > crate::src::gzlib::gz_intmax()
-                || (*state).x.have as crate::stdlib::off64_t > (*state).skip
-            {
-                (*state).skip as ::core::ffi::c_uint
-            } else {
-                (*state).x.have
-            };
+            n = crate::src::gzlib::gz_skip_chunk((*state).x.have, (*state).skip);
             (*state).x.have = (*state).x.have.wrapping_sub(n);
             (*state).x.next = (*state).x.next.offset(n as isize);
             (*state).x.pos += n as crate::stdlib::off64_t;
