@@ -4610,6 +4610,56 @@ fn tree_run_step_after_increment(
     )
 }
 
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+struct TreeRunEmission {
+    current_len: ::core::ffi::c_int,
+    count: ::core::ffi::c_int,
+    action: ScanTreeAction,
+}
+
+fn tree_run_emissions(
+    tree: &[crate::src::deflate::ct_data],
+    max_code: ::core::ffi::c_int,
+) -> Option<Vec<TreeRunEmission>> {
+    let max_code = usize::try_from(max_code).ok()?;
+    let sentinel_index = max_code.checked_add(1)?;
+    if sentinel_index >= tree.len() {
+        return None;
+    }
+
+    let mut next_len = tree.first()?.dl.value as ::core::ffi::c_int;
+    let (mut previous_len, mut count, mut max_count, mut min_count) =
+        initial_tree_run_state(next_len);
+    let mut emissions = Vec::new();
+
+    for index in 0..=max_code {
+        let current_len = next_len;
+        next_len = tree[index + 1].dl.value as ::core::ffi::c_int;
+        let (incremented_count, step) = tree_run_step_after_increment(
+            count,
+            max_count,
+            min_count,
+            current_len,
+            next_len,
+            previous_len,
+        );
+        count = incremented_count;
+        if let Some(action) = step.action {
+            emissions.push(TreeRunEmission {
+                current_len,
+                count,
+                action,
+            });
+        }
+        count = step.count;
+        previous_len = step.previous_len;
+        max_count = step.max_count;
+        min_count = step.min_count;
+    }
+
+    Some(emissions)
+}
+
 fn tally_scan_tree_action(
     bl_tree: &mut [crate::src::deflate::ct_data],
     current_len: ::core::ffi::c_int,
@@ -4713,30 +4763,16 @@ fn scan_tree(
     let Some(sentinel_index) = max_code.checked_add(1) else {
         return;
     };
-    let Some(first) = tree.first() else {
-        return;
-    };
     if sentinel_index >= tree.len() {
         return;
     }
 
-    let mut nextlen = first.dl.value as ::core::ffi::c_int;
-    let (mut prevlen, mut count, mut max_count, mut min_count) = initial_tree_run_state(nextlen);
     tree[sentinel_index].dl.value = 0xffff as crate::zutil_h::ush;
-
-    for index in 0..=max_code {
-        let curlen = nextlen;
-        nextlen = tree[index + 1].dl.value as ::core::ffi::c_int;
-        let (incremented_count, step) =
-            tree_run_step_after_increment(count, max_count, min_count, curlen, nextlen, prevlen);
-        count = incremented_count;
-        if let Some(action) = step.action {
-            tally_scan_tree_action(bl_tree, curlen, action);
-        }
-        count = step.count;
-        prevlen = step.previous_len;
-        max_count = step.max_count;
-        min_count = step.min_count;
+    let Some(emissions) = tree_run_emissions(tree, max_code as ::core::ffi::c_int) else {
+        return;
+    };
+    for emission in emissions {
+        tally_scan_tree_action(bl_tree, emission.current_len, emission.action);
     }
 }
 
@@ -5773,11 +5809,11 @@ mod tests {
         tally_match_tree_indices, tally_scan_tree_action, tally_symbol_bytes, tally_tree_update,
         tree_bit_length_cost, tree_bit_length_totals_after_node, tree_code_count,
         tree_heap_has_pair, tree_initial_leaf_plan, tree_next_cursor, tree_parent_depth,
-        tree_run_continues, tree_run_extra_bits, tree_run_limits, tree_run_step,
-        tree_run_step_after_increment, BlockEncoding, CompressedBlockSymbol, GenBitlenOverflowNode,
-        GenBitlenOverflowReassignment, HeapChild, ScanTreeAction, TallyTreeUpdate,
-        TreeInitialLeafPlan, TreeRunStep, BL_CODE_ORDER_LEN, END_BLOCK, MAX_BITS, REPZ_11_138,
-        REPZ_3_10, REP_3_6,
+        tree_run_continues, tree_run_emissions, tree_run_extra_bits, tree_run_limits,
+        tree_run_step, tree_run_step_after_increment, BlockEncoding, CompressedBlockSymbol,
+        GenBitlenOverflowNode, GenBitlenOverflowReassignment, HeapChild, ScanTreeAction,
+        TallyTreeUpdate, TreeInitialLeafPlan, TreeRunEmission, TreeRunStep, BL_CODE_ORDER_LEN,
+        END_BLOCK, MAX_BITS, REPZ_11_138, REPZ_3_10, REP_3_6,
     };
 
     fn ltree_with_frequency(
@@ -6040,6 +6076,33 @@ mod tests {
                 }
             )
         );
+    }
+
+    #[test]
+    fn tree_run_emissions_preserve_run_boundaries_and_counts() {
+        let empty = crate::src::deflate::ct_data {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 { value: 0 },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 { value: 0 },
+        };
+        let mut tree = [empty; 5];
+        tree[0].dl.value = 5;
+        tree[1].dl.value = 5;
+        tree[2].dl.value = 5;
+        tree[3].dl.value = 5;
+        tree[4].dl.value = 0xffff;
+
+        assert_eq!(
+            tree_run_emissions(&tree, 3),
+            Some(vec![TreeRunEmission {
+                current_len: 5,
+                count: 4,
+                action: ScanTreeAction::RepeatLength {
+                    emit_length_once: true,
+                },
+            }])
+        );
+        assert_eq!(tree_run_emissions(&tree, -1), None);
+        assert_eq!(tree_run_emissions(&tree[..4], 3), None);
     }
 
     #[test]
