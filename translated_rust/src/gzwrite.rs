@@ -646,13 +646,6 @@ fn write(&mut self, input: &[u8]) -> crate::stdlib::z_size_t {
 }
 }
 
-unsafe fn gz_write(
-    state: &mut crate::gzguts_h::gz_state,
-    input: &[u8],
-) -> crate::stdlib::z_size_t {
-    (GzCompressor { state }).write(input)
-}
-
 fn gzwrite_impl(
     compressor: &mut GzCompressor<'_>,
     buf: &[u8],
@@ -698,21 +691,21 @@ pub unsafe extern "C" fn gzwrite_ffi(
     };
     gzwrite(state, buf)
 }
-unsafe fn gzfwrite(
-    state: &mut crate::gzguts_h::gz_state,
+fn gzfwrite_impl(
+    compressor: &mut GzCompressor<'_>,
     input: Option<&[u8]>,
     size: crate::stdlib::z_size_t,
     nitems: crate::stdlib::z_size_t,
 ) -> crate::stdlib::z_size_t {
-    if state.mode != crate::gzguts_h::GZ_WRITE
-        || state.err != crate::zlib_h::Z_OK && state.again == 0
+    if compressor.state.mode != crate::gzguts_h::GZ_WRITE
+        || compressor.state.err != crate::zlib_h::Z_OK && compressor.state.again == 0
     {
         return 0 as crate::stdlib::z_size_t;
     }
-    crate::src::gzlib::gz_error_state(state, crate::zlib_h::Z_OK, None);
+    crate::src::gzlib::gz_error_state(compressor.state, crate::zlib_h::Z_OK, None);
     let Some(len) = nitems.checked_mul(size) else {
         crate::src::gzlib::gz_error_state(
-            state,
+            compressor.state,
             crate::zlib_h::Z_STREAM_ERROR,
             Some(c"request does not fit in a size_t"),
         );
@@ -724,7 +717,7 @@ unsafe fn gzfwrite(
         let Some(input) = input.filter(|input| input.len() == len) else {
             return 0;
         };
-        gz_write(state, input).wrapping_div(size)
+        compressor.write(input).wrapping_div(size)
     }
 }
 #[export_name = "gzfwrite"]
@@ -744,7 +737,7 @@ pub unsafe extern "C" fn gzfwrite_ffi(
         Some(_) if buf.is_null() => None,
         Some(len) => Some(::core::slice::from_raw_parts(buf as *const u8, len)),
     };
-    gzfwrite(state, input, size, nitems)
+    gzfwrite_impl(&mut GzCompressor { state }, input, size, nitems)
 }
 fn gzputc_impl(
     compressor: &mut GzCompressor<'_>,
