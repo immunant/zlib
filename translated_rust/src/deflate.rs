@@ -430,13 +430,39 @@ enum DeflateStorageSlot {
     Pending,
 }
 
+// Allocation success is independent of the callback-owned handles that are
+// published into `internal_state`.  Keep that result as a pointer-free value
+// so an eventual owner-backed allocator can retain the exact callback order
+// without making its completion decision by inspecting raw storage.
+struct DeflateStorageResults {
+    window: bool,
+    prev: bool,
+    head: bool,
+    pending: bool,
+}
+
+impl DeflateStorageResults {
+    fn record(&mut self, slot: DeflateStorageSlot, allocated: bool) {
+        match slot {
+            DeflateStorageSlot::Window => self.window = allocated,
+            DeflateStorageSlot::Prev => self.prev = allocated,
+            DeflateStorageSlot::Head => self.head = allocated,
+            DeflateStorageSlot::Pending => self.pending = allocated,
+        }
+    }
+
+    fn is_complete(&self) -> bool {
+        self.window && self.prev && self.head && self.pending
+    }
+}
+
 // Each allocator result must be installed before the next callback: custom
 // allocators can inspect the stream re-entrantly.  Keep that one raw state
 // projection in this boundary helper so the pointer-free allocation plan has
 // one ordered publication boundary.
 unsafe fn publish_deflate_storage(
     state: *mut crate::src::deflate::internal_state,
-    slot: DeflateStorageSlot,
+    slot: &DeflateStorageSlot,
     allocation: crate::stdlib::voidpf,
 ) {
     let state = &mut *state;
@@ -573,14 +599,19 @@ impl DeflateStorageLayout {
 // transaction can reuse this pointer-free schedule unchanged.
 fn request_deflate_storage(
     storage: &DeflateStorageLayout,
-    mut request: impl FnMut(DeflateStorageSlot, &DeflateAllocation) -> bool,
-) -> bool {
-    let mut complete = true;
+    mut request: impl FnMut(&DeflateStorageSlot, &DeflateAllocation) -> bool,
+) -> DeflateStorageResults {
+    let mut results = DeflateStorageResults {
+        window: false,
+        prev: false,
+        head: false,
+        pending: false,
+    };
     for (slot, allocation) in storage.callback_requests() {
-        let allocated = request(slot, allocation);
-        complete &= allocated;
+        let allocated = request(&slot, allocation);
+        results.record(slot, allocated);
     }
-    complete
+    results
 }
 
 fn deflate_layout(
@@ -1008,7 +1039,7 @@ pub unsafe extern "C" fn deflateInit2_(
     // callback: a caller allocator may observe the stream re-entrantly.
     // Each callback result is instead published through a short projection,
     // and all work after the final callback uses an ordinary Rust borrow.
-    let storage_complete = request_deflate_storage(&storage, |slot, request| {
+    let storage_results = request_deflate_storage(&storage, |slot, request| {
         let allocation = Some(stream.zalloc.expect("non-null function pointer"))
             .expect("non-null function pointer")(
             stream.opaque, request.items, request.size
@@ -1025,7 +1056,7 @@ pub unsafe extern "C" fn deflateInit2_(
         .byte_len()
         .expect("validated pending allocation geometry")
         as crate::zutil_h::ulg;
-    if !storage_complete
+    if !storage_results.is_complete()
         || state.window.is_none()
         || state.prev.is_none()
         || state.head.is_none()
@@ -3800,7 +3831,7 @@ pub unsafe extern "C" fn deflateCopy(
     // Preserve the source implementation's callback-visible order.  Reload
     // the callback and opaque value for every request: a re-entrant custom
     // allocator is allowed to inspect or update the stream between calls.
-    let storage_complete = request_deflate_storage(&storage, |slot, request| {
+    let storage_results = request_deflate_storage(&storage, |slot, request| {
         let allocation = Some(dest.zalloc.expect("non-null function pointer"))
             .expect("non-null function pointer")(
             dest.opaque, request.items, request.size
@@ -3821,7 +3852,7 @@ pub unsafe extern "C" fn deflateCopy(
         }
         !allocation.is_null()
     });
-    if !storage_complete
+    if !storage_results.is_complete()
         || ds.window.is_none()
         || ds.prev.is_none()
         || ds.head.is_none()
