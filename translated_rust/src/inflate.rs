@@ -713,6 +713,14 @@ pub unsafe extern "C" fn inflatePrime_ffi(
         InflatePrimeUpdate::StreamError => crate::zlib_h::Z_STREAM_ERROR,
     }
 }
+
+fn inflate_can_use_fast_path(
+    available_input: ::core::ffi::c_uint,
+    available_output: ::core::ffi::c_uint,
+) -> bool {
+    available_input >= 6 && available_output >= 258
+}
+
 unsafe extern "C" fn updatewindow(
     mut strm: crate::zlib_h::z_streamp,
     mut produced_start: *const crate::stdlib::Bytef,
@@ -1704,7 +1712,7 @@ pub unsafe extern "C" fn inflate(
         }
         match c2rust_current_block {
             12354422184948796071 => {
-                if have >= 6 as ::core::ffi::c_uint && left >= 258 as ::core::ffi::c_uint {
+                if inflate_can_use_fast_path(have, left) {
                     (*strm).next_out = put as *mut crate::stdlib::Bytef;
                     (*strm).avail_out = left as crate::stdlib::uInt;
                     (*strm).next_in = next as *mut crate::stdlib::Bytef;
@@ -2735,19 +2743,32 @@ mod tests {
     use super::{
         apply_window_update, copy_dictionary_from_window, dynamic_code_length_repeat_fits,
         dynamic_header_counts, inflateSyncPoint_ffi, inflate_block_header,
-        inflate_codes_used_offset_value, inflate_copy_progress, inflate_data_type_value,
-        inflate_dictionary_is_allowed, inflate_get_dictionary_result, inflate_header_crc_enabled,
-        inflate_header_wrap_allows_capture, inflate_mark_progress, inflate_mark_value,
-        inflate_mode_data_type_flags, inflate_mode_is_valid, inflate_needs_buffer_error,
-        inflate_prime_update, inflate_reset2_params, inflate_should_update_window,
-        inflate_state_metadata_is_valid, inflate_stream_has_allocator_callbacks,
-        inflate_sync_input_progress, inflate_sync_normalized_wrap, inflate_sync_point_value,
-        inflate_sync_remaining_input, inflate_sync_search_core, inflate_undermine_core,
-        inflate_validate_core, inflate_validate_wrap, initial_window_metadata, stored_block_length,
-        syncsearch_safe, window_needs_allocation, window_update_plan, InflateBlockKind,
-        InflateCopyProgress, InflatePrimeUpdate, InflateSyncSearch, BAD, CHECK, CODE_LENGTH_ORDER,
-        COPY_, COPY_1, DICT, HEAD, LEN_, MATCH, STORED, SYNC, TYPE,
+        inflate_can_use_fast_path, inflate_codes_used_offset_value, inflate_copy_progress,
+        inflate_data_type_value, inflate_dictionary_is_allowed, inflate_get_dictionary_result,
+        inflate_header_crc_enabled, inflate_header_wrap_allows_capture, inflate_mark_progress,
+        inflate_mark_value, inflate_mode_data_type_flags, inflate_mode_is_valid,
+        inflate_needs_buffer_error, inflate_prime_update, inflate_reset2_params,
+        inflate_should_update_window, inflate_state_metadata_is_valid,
+        inflate_stream_has_allocator_callbacks, inflate_sync_input_progress,
+        inflate_sync_normalized_wrap, inflate_sync_point_value, inflate_sync_remaining_input,
+        inflate_sync_search_core, inflate_undermine_core, inflate_validate_core,
+        inflate_validate_wrap, initial_window_metadata, stored_block_length, syncsearch_safe,
+        window_needs_allocation, window_update_plan, InflateBlockKind, InflateCopyProgress,
+        InflatePrimeUpdate, InflateSyncSearch, BAD, CHECK, CODE_LENGTH_ORDER, COPY_, COPY_1, DICT,
+        HEAD, LEN_, MATCH, STORED, SYNC, TYPE,
     };
+
+    #[test]
+    fn inflate_fast_path_requires_input_and_output_boundaries() {
+        assert!(!inflate_can_use_fast_path(5, 258));
+        assert!(!inflate_can_use_fast_path(6, 257));
+        assert!(inflate_can_use_fast_path(6, 258));
+        assert!(inflate_can_use_fast_path(7, 259));
+        assert!(inflate_can_use_fast_path(
+            ::core::ffi::c_uint::MAX,
+            ::core::ffi::c_uint::MAX
+        ));
+    }
 
     #[test]
     fn inflate_data_type_value_sets_expected_flags() {

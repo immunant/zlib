@@ -251,19 +251,26 @@ fn gz_read_chunk_len(
     chunk
 }
 
-fn gz_read_drain_buffered(
+struct GzReadDrainPlan {
+    remaining_have: ::core::ffi::c_uint,
+    err: ::core::ffi::c_int,
+    next_advance: usize,
+}
+
+fn gz_read_drain_plan(
     have: ::core::ffi::c_uint,
     state_err: ::core::ffi::c_int,
     chunk_len: ::core::ffi::c_uint,
-) -> (::core::ffi::c_uint, ::core::ffi::c_int) {
-    (
-        have.wrapping_sub(chunk_len),
-        if state_err == crate::zlib_h::Z_OK {
+) -> GzReadDrainPlan {
+    GzReadDrainPlan {
+        remaining_have: have.wrapping_sub(chunk_len),
+        err: if state_err == crate::zlib_h::Z_OK {
             0
         } else {
             -1
         },
-    )
+        next_advance: chunk_len as usize,
+    }
 }
 
 fn gz_read_needs_fetch(
@@ -1534,16 +1541,19 @@ mod tests {
     }
 
     #[test]
-    fn gz_read_drain_buffered_updates_healthy_buffer_state() {
-        assert_eq!(gz_read_drain_buffered(7, crate::zlib_h::Z_OK, 3), (4, 0));
+    fn gz_read_drain_plan_updates_healthy_buffer_state() {
+        let plan = gz_read_drain_plan(7, crate::zlib_h::Z_OK, 3);
+        assert_eq!(plan.remaining_have, 4);
+        assert_eq!(plan.err, 0);
+        assert_eq!(plan.next_advance, 3);
     }
 
     #[test]
-    fn gz_read_drain_buffered_wraps_and_reports_state_errors() {
-        assert_eq!(
-            gz_read_drain_buffered(0, crate::zlib_h::Z_DATA_ERROR, 1),
-            (::core::ffi::c_uint::MAX, -1)
-        );
+    fn gz_read_drain_plan_wraps_and_reports_state_errors() {
+        let plan = gz_read_drain_plan(0, crate::zlib_h::Z_DATA_ERROR, 1);
+        assert_eq!(plan.remaining_have, ::core::ffi::c_uint::MAX);
+        assert_eq!(plan.err, -1);
+        assert_eq!(plan.next_advance, 1);
     }
 
     #[test]
@@ -2024,13 +2034,20 @@ unsafe extern "C" fn gz_read(
             (*state).size,
         ) {
             GzReadAction::DrainBuffered => {
+                let (next, have, state_err) = {
+                    let state_ref = &mut *state;
+                    (state_ref.x.next, state_ref.x.have, state_ref.err)
+                };
+                let plan = gz_read_drain_plan(have, state_err, n);
                 crate::stdlib::memcpy(
                     buf as *mut ::core::ffi::c_void,
-                    (*state).x.next as *const ::core::ffi::c_void,
+                    next as *const ::core::ffi::c_void,
                     n as crate::__stddef_size_t_h::size_t,
                 );
-                (*state).x.next = (*state).x.next.wrapping_add(n as usize);
-                ((*state).x.have, err) = gz_read_drain_buffered((*state).x.have, (*state).err, n);
+                let state_ref = &mut *state;
+                state_ref.x.next = state_ref.x.next.wrapping_add(plan.next_advance);
+                state_ref.x.have = plan.remaining_have;
+                err = plan.err;
                 true
             }
             GzReadAction::StopAtEof => break,

@@ -3691,6 +3691,28 @@ fn block_bit_length_bytes(bit_length: crate::zutil_h::ulg) -> crate::zutil_h::ul
     bit_length.wrapping_add(3).wrapping_add(7) >> 3
 }
 
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+enum BlockEncoding {
+    Stored,
+    Static,
+    Dynamic,
+}
+
+fn select_block_encoding(
+    stored_len: crate::zutil_h::ulg,
+    opt_lenb: crate::zutil_h::ulg,
+    static_lenb: crate::zutil_h::ulg,
+    has_stored_buffer: bool,
+) -> BlockEncoding {
+    if stored_len.wrapping_add(4) <= opt_lenb && has_stored_buffer {
+        BlockEncoding::Stored
+    } else if static_lenb == opt_lenb {
+        BlockEncoding::Static
+    } else {
+        BlockEncoding::Dynamic
+    }
+}
+
 fn bi_windup_core(
     bi_buf: &mut crate::zutil_h::ush,
     bi_valid: &mut ::core::ffi::c_int,
@@ -4996,9 +5018,10 @@ pub unsafe extern "C" fn _tr_flush_block(
         static_lenb = stored_len.wrapping_add(5 as crate::zutil_h::ulg);
         opt_lenb = static_lenb;
     }
-    if stored_len.wrapping_add(4 as crate::zutil_h::ulg) <= opt_lenb && !buf.is_null() {
+    let encoding = select_block_encoding(stored_len, opt_lenb, static_lenb, !buf.is_null());
+    if encoding == BlockEncoding::Stored {
         _tr_stored_block(s, buf, stored_len, last);
-    } else if static_lenb == opt_lenb {
+    } else if encoding == BlockEncoding::Static {
         let mut len: ::core::ffi::c_int = 3 as ::core::ffi::c_int;
         if (*s).bi_valid > crate::src::deflate::Buf_size - len {
             let mut val: ::core::ffi::c_int =
@@ -5129,9 +5152,10 @@ mod tests {
     use super::{
         bi_flush_core, bi_reverse, bi_windup_core, bl_order, block_bit_length_bytes,
         detect_data_type_from_ltree, dist_code_index, heap_node_precedes, next_code_for_len,
-        next_codes, pending_cursor_after_bytes, reset_block_trees, static_bl_desc, static_d_desc,
-        static_l_desc, symbol_triplet_cursors, tally_match_tree_indices, tally_symbol_bytes,
-        tree_next_cursor, tree_run_limits, END_BLOCK, MAX_BITS,
+        next_codes, pending_cursor_after_bytes, reset_block_trees, select_block_encoding,
+        static_bl_desc, static_d_desc, static_l_desc, symbol_triplet_cursors,
+        tally_match_tree_indices, tally_symbol_bytes, tree_next_cursor, tree_run_limits,
+        BlockEncoding, END_BLOCK, MAX_BITS,
     };
 
     fn ltree_with_frequency(
@@ -5334,6 +5358,30 @@ mod tests {
         assert_eq!(tally_match_tree_indices(256, 255), (285, 15));
         assert_eq!(tally_match_tree_indices(257, 255), (285, 16));
         assert_eq!(tally_match_tree_indices(32_768, 255), (285, 29));
+    }
+
+    #[test]
+    fn select_block_encoding_preserves_priority_and_wrapping() {
+        assert_eq!(
+            select_block_encoding(6, 10, 10, true),
+            BlockEncoding::Stored
+        );
+        assert_eq!(
+            select_block_encoding(6, 10, 10, false),
+            BlockEncoding::Static
+        );
+        assert_eq!(
+            select_block_encoding(7, 10, 10, true),
+            BlockEncoding::Static
+        );
+        assert_eq!(
+            select_block_encoding(7, 10, 9, false),
+            BlockEncoding::Dynamic
+        );
+        assert_eq!(
+            select_block_encoding(crate::zutil_h::ulg::MAX - 2, 1, 2, true),
+            BlockEncoding::Stored
+        );
     }
 
     #[test]
