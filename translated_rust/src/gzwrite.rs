@@ -199,10 +199,6 @@ fn gz_buffered_have(
         .wrapping_add(avail_in as usize) as ::core::ffi::c_uint
 }
 
-fn gzputc_can_buffer(have: ::core::ffi::c_uint, size: ::core::ffi::c_uint) -> bool {
-    have < size
-}
-
 fn gz_write_chunk_len(remaining: crate::stdlib::z_size_t) -> ::core::ffi::c_uint {
     if ::core::ffi::c_uint::MAX as crate::stdlib::z_size_t > remaining {
         remaining as ::core::ffi::c_uint
@@ -743,16 +739,13 @@ pub unsafe extern "C" fn gzputc(
     mut file: crate::zlib_h::gzFile,
     mut c: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
-    let mut have: ::core::ffi::c_uint = 0;
-    let mut buf: [::core::ffi::c_uchar; 1] = [0; 1];
+    let buf = [c as ::core::ffi::c_uchar];
     let mut state: crate::gzguts_h::gz_statep =
         ::core::ptr::null_mut::<crate::gzguts_h::gz_state>();
-    let mut strm: crate::zlib_h::z_streamp = ::core::ptr::null_mut::<crate::zlib_h::z_stream>();
     if file.is_null() {
         return -1 as ::core::ffi::c_int;
     }
     state = file as crate::gzguts_h::gz_statep;
-    strm = &raw mut (*state).strm as crate::zlib_h::z_streamp;
     if !gz_write_state_is_usable((*state).mode, (*state).err, (*state).again) {
         return -1 as ::core::ffi::c_int;
     }
@@ -761,29 +754,9 @@ pub unsafe extern "C" fn gzputc(
         crate::zlib_h::Z_OK,
         ::core::ptr::null::<::core::ffi::c_char>(),
     );
-    if gz_has_pending_skip((*state).skip) && gz_zero(state) == -1 as ::core::ffi::c_int {
-        return -1 as ::core::ffi::c_int;
-    }
-    if gz_buffer_is_initialized((*state).size) {
-        if (*strm).avail_in == 0 as crate::stdlib::uInt {
-            (*strm).next_in = (*state).in_0 as *mut crate::stdlib::Bytef;
-        }
-        have = gz_buffered_have(
-            (*state).in_0 as usize,
-            (*strm).next_in as usize,
-            (*strm).avail_in,
-        );
-        if gzputc_can_buffer(have, (*state).size) {
-            *(*state).in_0.offset(have as isize) = c as ::core::ffi::c_uchar;
-            (*strm).avail_in = (*strm).avail_in.wrapping_add(1);
-            (*state).x.pos += 1;
-            return gzputc_result(c);
-        }
-    }
-    buf[0 as ::core::ffi::c_int as usize] = c as ::core::ffi::c_uchar;
     if gz_write(
         state,
-        &raw mut buf as *mut ::core::ffi::c_uchar as crate::stdlib::voidpc,
+        buf.as_ptr() as crate::stdlib::voidpc,
         1 as crate::stdlib::z_size_t,
     ) != 1 as crate::stdlib::z_size_t
     {
@@ -981,7 +954,7 @@ mod tests {
         gz_write_needs_pending_flush, gz_write_state_is_usable, gz_write_uses_buffered_path,
         gz_zero_apply_progress, gz_zero_chunk_len, gz_zero_needs_initialization,
         gz_zero_needs_pending_flush, gzclose_mode_is_writable, gzclose_w_result,
-        gzflush_mode_is_valid, gzfwrite_len, gzfwrite_result, gzputc_can_buffer, gzputc_result,
+        gzflush_mode_is_valid, gzfwrite_len, gzfwrite_result, gzputc_result,
         gzputs_len_fits_int, gzputs_result, gzsetparams_settings_match,
         gzsetparams_state_is_usable, gzwrite_len_fits_int,
     };
@@ -1473,14 +1446,6 @@ mod tests {
             ),
             5
         );
-    }
-
-    #[test]
-    fn gzputc_can_buffer_only_when_space_remains() {
-        assert!(gzputc_can_buffer(0, 1));
-        assert!(gzputc_can_buffer(1023, 1024));
-        assert!(!gzputc_can_buffer(1024, 1024));
-        assert!(!gzputc_can_buffer(::core::ffi::c_uint::MAX, 0));
     }
 
     #[test]
