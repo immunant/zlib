@@ -241,6 +241,20 @@ impl InflateOwnedWindow {
         })
     }
 
+    /// Attach this owned history allocation to an already-initialized state.
+    /// The checked scalar/window agreement is established before exposing the
+    /// legacy nullable handle, and the owning vector remains in place for the
+    /// rest of the stream lifetime.  This is the ownership facade's future
+    /// handoff point; it must not be replaced with a slice made from an
+    /// allocator-reported capacity.
+    fn bind_state_window(&mut self, state: &mut inflate_state) -> bool {
+        if !self.matches_state(state) {
+            return false;
+        }
+        state.window = ::core::ptr::NonNull::new(self.bytes.as_mut_ptr());
+        state.window.is_some()
+    }
+
     /// Deep-copy exactly the initialized history retained by `inflateCopy`.
     /// This gives the future allocator-preserving owner a pointer-free copy
     /// route; live ABI-backed streams still use the existing callback bridge.

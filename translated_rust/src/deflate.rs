@@ -209,6 +209,29 @@ impl DeflateOwnedStorage {
             && state.sym_buf == state.lit_bufsize as usize
     }
 
+    /// Attach this owned allocation to an already-initialized deflate state.
+    ///
+    /// This is deliberately the one place where the eventual ownership
+    /// facade recreates the legacy buffer handles.  It first proves that the
+    /// state geometry and all four `Vec`s agree, so callers cannot derive a
+    /// buffer view from a capacity advertised by an unrelated state.  The
+    /// vectors are retained by `self` and are never resized after this handoff,
+    /// keeping the established handles stable for the resumable legacy
+    /// strategy engine.
+    fn bind_state_buffers(
+        &mut self,
+        state: &mut crate::src::deflate::deflate_state,
+    ) -> bool {
+        if !self.matches_state(state) {
+            return false;
+        }
+        state.window = self.window.as_mut_ptr();
+        state.prev = self.prev.as_mut_ptr();
+        state.head = self.head.as_mut_ptr();
+        state.pending_buf = self.pending_buf.as_mut_ptr();
+        true
+    }
+
     /// Construct the pointer-free strategy view only after its resumable
     /// state metadata agrees with the owned buffers.  This is the direct
     /// hand-off the callback-preserving allocator facade will use; current
