@@ -180,6 +180,44 @@ struct DeflateOwnedStorage {
     pending_buf: Vec<crate::stdlib::Bytef>,
 }
 
+impl DeflateOwnedStorage {
+    /// Check that an owned workspace still has exactly the geometry advertised
+    /// by a deflate state.  The eventual allocator facade must make this
+    /// check before handing owned buffers to the legacy strategy engine: the
+    /// scalar state remains resumable across calls, while the buffers are no
+    /// longer raw allocation handles.
+    fn matches_state(&self, state: &crate::src::deflate::deflate_state) -> bool {
+        let storage = DeflateStorageLayout::from_state(state);
+        let Some(window_bytes) = storage.window_bytes() else {
+            return false;
+        };
+        let Some(pending_bytes) = storage.pending_byte_len() else {
+            return false;
+        };
+        self.window.len() == window_bytes
+            && self.prev.len() == storage.window_items as usize
+            && self.head.len() == storage.hash_items as usize
+            && self.pending_buf.len() == pending_bytes
+            && usize::try_from(state.window_size).ok() == Some(window_bytes)
+            && usize::try_from(state.pending_buf_size).ok() == Some(pending_bytes)
+            && state.sym_buf == state.lit_bufsize as usize
+    }
+
+    /// Construct the pointer-free strategy view only after its resumable
+    /// state metadata agrees with the owned buffers.  This is the direct
+    /// hand-off the callback-preserving allocator facade will use; current
+    /// live streams still enter through the reviewed raw allocation bridge.
+    fn workspace<'a>(
+        &'a mut self,
+        state: &crate::src::deflate::deflate_state,
+        input: &'a [crate::stdlib::Bytef],
+        output: &'a mut [crate::stdlib::Bytef],
+    ) -> Option<DeflateWorkspace<'a>> {
+        self.matches_state(state)
+            .then(|| DeflateWorkspace::from_owned(self, input, output))
+    }
+}
+
 /// All of the byte and item spans that `deflateCopy` must duplicate.  This is
 /// deliberately pointer-free: the legacy allocation and copy boundary uses
 /// these validated lengths, while a later owned-storage conversion can use
