@@ -3974,6 +3974,18 @@ fn dynamic_tree_header_counts(
     )
 }
 
+fn length_extra_bits(
+    length: ::core::ffi::c_int,
+    length_code: usize,
+) -> Option<(::core::ffi::c_int, ::core::ffi::c_int)> {
+    let extra_bits = extra_lbits[length_code];
+    if extra_bits == 0 {
+        None
+    } else {
+        Some((length - base_length[length_code], extra_bits))
+    }
+}
+
 fn bi_windup_core(
     bi_buf: &mut crate::zutil_h::ush,
     bi_valid: &mut ::core::ffi::c_int,
@@ -5195,10 +5207,9 @@ unsafe fn compress_block(
                         as crate::zutil_h::ush;
                     (*s).bi_valid += len_0;
                 }
-                extra = extra_lbits[code as usize];
-                if extra != 0 as ::core::ffi::c_int {
-                    lc -= base_length[code as usize];
-                    let mut len_1: ::core::ffi::c_int = extra;
+                if let Some((extra_value, extra_bits)) = length_extra_bits(lc, code as usize) {
+                    lc = extra_value;
+                    let mut len_1: ::core::ffi::c_int = extra_bits;
                     if bit_buffer_would_overflow((*s).bi_valid, len_1) {
                         let mut val_1: ::core::ffi::c_int = lc;
                         (*s).bi_buf = ((*s).bi_buf as ::core::ffi::c_int
@@ -5529,10 +5540,10 @@ mod tests {
         block_header_bits, canonical_codes_for_lengths, clamped_tree_bit_length, classify_tree_run,
         combined_tree_frequency, detect_data_type_from_ltree, dist_code_index,
         dynamic_tree_header_counts, gen_bitlen_node_plan, gen_bitlen_overflow_reassignment,
-        heap_node_precedes, last_nonzero_bl_code_rank, mark_bl_code_nonzero_at_rank,
-        next_code_for_len, next_codes, pending_cursor_after_bytes, pqdownheap_child_to_promote,
-        rebalance_overflowed_bit_lengths, reset_bit_length_counts, reset_block_trees,
-        select_block_encoding, static_bl_desc, static_d_desc, static_l_desc,
+        heap_node_precedes, last_nonzero_bl_code_rank, length_extra_bits,
+        mark_bl_code_nonzero_at_rank, next_code_for_len, next_codes, pending_cursor_after_bytes,
+        pqdownheap_child_to_promote, rebalance_overflowed_bit_lengths, reset_bit_length_counts,
+        reset_block_trees, select_block_encoding, static_bl_desc, static_d_desc, static_l_desc,
         supplemental_tree_node, supplemental_tree_opt_len, symbol_buffer_is_full,
         symbol_triplet_cursors, tally_match_tree_indices, tally_scan_tree_action,
         tally_symbol_bytes, tally_tree_update, tree_bit_length_cost,
@@ -6161,6 +6172,13 @@ mod tests {
     fn tally_symbol_encoding_preserves_little_endian_distance_bytes() {
         assert_eq!(tally_symbol_bytes(0x1234, 0x56), [0x34, 0x12, 0x56]);
         assert_eq!(tally_symbol_bytes(0x1_00ff, 0x1_0001), [0xff, 0x00, 0x01]);
+    }
+
+    #[test]
+    fn length_extra_bits_skips_fixed_lengths_and_preserves_offsets() {
+        assert_eq!(length_extra_bits(8, 8), Some((0, 1)));
+        assert_eq!(length_extra_bits(9, 8), Some((1, 1)));
+        assert_eq!(length_extra_bits(255, 28), None);
     }
 
     #[test]

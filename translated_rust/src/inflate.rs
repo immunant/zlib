@@ -761,6 +761,14 @@ fn inflate_state_check_impl(
     inflate_state_check_result(true, true, state_is_usable)
 }
 
+fn inflate_align_to_byte_boundary(
+    hold: crate::stdlib::uLong,
+    bits: ::core::ffi::c_uint,
+) -> (crate::stdlib::uLong, ::core::ffi::c_uint) {
+    let discarded_bits = bits & 7 as ::core::ffi::c_uint;
+    (hold >> discarded_bits, bits.wrapping_sub(discarded_bits))
+}
+
 unsafe fn inflateStateCheck(mut strm: crate::zlib_h::z_streamp) -> ::core::ffi::c_int {
     if strm.is_null() {
         return inflate_state_check_impl(None, None, false);
@@ -1317,8 +1325,7 @@ pub unsafe extern "C" fn inflate(
                 c2rust_current_block = 9224094624523183306;
             }
             16193 => {
-                hold >>= bits & 7 as ::core::ffi::c_uint;
-                bits = bits.wrapping_sub(bits & 7 as ::core::ffi::c_uint);
+                (hold, bits) = inflate_align_to_byte_boundary(hold, bits);
                 while bits < 32 as ::core::ffi::c_int as ::core::ffi::c_uint {
                     if have == 0 as ::core::ffi::c_uint {
                         break 's_88;
@@ -1846,8 +1853,7 @@ pub unsafe extern "C" fn inflate(
         match c2rust_current_block {
             9224094624523183306 => {
                 if (*state).last != 0 {
-                    hold >>= bits & 7 as ::core::ffi::c_uint;
-                    bits = bits.wrapping_sub(bits & 7 as ::core::ffi::c_uint);
+                    (hold, bits) = inflate_align_to_byte_boundary(hold, bits);
                     (*state).mode = crate::src::inflate::CHECK;
                     continue;
                 } else {
@@ -3105,15 +3111,15 @@ mod tests {
     use super::{
         apply_window_update, copy_dictionary_from_window, dynamic_code_length_repeat_fits,
         dynamic_code_length_repeat_spec, dynamic_header_counts, gzip_extra_copy_bounds,
-        inflateSyncPoint_ffi, inflate_block_header, inflate_can_use_fast_path,
-        inflate_codes_used_offset_value, inflate_copy_match_from_output, inflate_copy_progress,
-        inflate_data_type_value, inflate_dictionary_id_from_hold, inflate_dictionary_is_allowed,
-        inflate_get_dictionary_result, inflate_gzip_extra_progress, inflate_gzip_flags,
-        inflate_gzip_flags_error, inflate_gzip_flags_validation, inflate_gzip_header_crc_is_valid,
-        inflate_gzip_header_has_comment, inflate_gzip_header_has_extra,
-        inflate_gzip_header_has_name, inflate_gzip_window_bits, inflate_head_skip_mode,
-        inflate_header_crc_enabled, inflate_header_wrap_allows_capture, inflate_is_gzip_header,
-        inflate_mark_progress, inflate_mark_value, inflate_match_copy_plan,
+        inflateSyncPoint_ffi, inflate_align_to_byte_boundary, inflate_block_header,
+        inflate_can_use_fast_path, inflate_codes_used_offset_value, inflate_copy_match_from_output,
+        inflate_copy_progress, inflate_data_type_value, inflate_dictionary_id_from_hold,
+        inflate_dictionary_is_allowed, inflate_get_dictionary_result, inflate_gzip_extra_progress,
+        inflate_gzip_flags, inflate_gzip_flags_error, inflate_gzip_flags_validation,
+        inflate_gzip_header_crc_is_valid, inflate_gzip_header_has_comment,
+        inflate_gzip_header_has_extra, inflate_gzip_header_has_name, inflate_gzip_window_bits,
+        inflate_head_skip_mode, inflate_header_crc_enabled, inflate_header_wrap_allows_capture,
+        inflate_is_gzip_header, inflate_mark_progress, inflate_mark_value, inflate_match_copy_plan,
         inflate_match_is_complete, inflate_mode_data_type_flags, inflate_mode_is_valid,
         inflate_mode_on_entry, inflate_needs_buffer_error, inflate_output_checksum,
         inflate_prime_update, inflate_reset2_discards_window, inflate_reset2_params,
@@ -3151,6 +3157,14 @@ mod tests {
                 remaining: 5,
             }
         );
+    }
+
+    #[test]
+    fn inflate_alignment_discards_only_partial_low_bytes() {
+        assert_eq!(inflate_align_to_byte_boundary(0x1234, 0), (0x1234, 0));
+        assert_eq!(inflate_align_to_byte_boundary(0x1234, 8), (0x1234, 8));
+        assert_eq!(inflate_align_to_byte_boundary(0x1234, 11), (0x246, 8));
+        assert_eq!(inflate_align_to_byte_boundary(0x1234, 7), (0x24, 0));
     }
 
     #[test]

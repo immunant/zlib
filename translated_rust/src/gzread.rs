@@ -122,6 +122,17 @@ fn gz_load_decision(
     }
 }
 
+fn gz_load_read_result(
+    ret: ::core::ffi::c_int,
+    errno: ::core::ffi::c_int,
+) -> Result<::core::ffi::c_uint, ::core::ffi::c_int> {
+    if ret < 0 {
+        Err(errno)
+    } else {
+        Ok(ret as ::core::ffi::c_uint)
+    }
+}
+
 fn gz_load_read_len(
     len: ::core::ffi::c_uint,
     have: ::core::ffi::c_uint,
@@ -664,11 +675,12 @@ unsafe fn gz_load(
             buf.wrapping_add(have as usize) as *mut ::core::ffi::c_void,
             get as crate::__stddef_size_t_h::size_t,
         ) as ::core::ffi::c_int;
-        let read = if ret < 0 {
-            Err(*crate::stdlib::__errno_location())
+        let errno = if ret < 0 {
+            *crate::stdlib::__errno_location()
         } else {
-            Ok(ret as ::core::ffi::c_uint)
+            0
         };
+        let read = gz_load_read_result(ret, errno);
         let decision = gz_load_decision(have, len, read);
         gz_load_apply_flags(&mut state_ref.eof, &mut state_ref.again, &decision);
         have = decision.have;
@@ -1450,6 +1462,17 @@ unsafe fn gz_skip(mut state: crate::gzguts_h::gz_statep) -> ::core::ffi::c_int {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn gz_load_read_result_preserves_signed_read_results() {
+        assert_eq!(gz_load_read_result(-1, 5), Err(5));
+        assert_eq!(gz_load_read_result(0, 0), Ok(0));
+        assert_eq!(gz_load_read_result(17, 0), Ok(17));
+        assert_eq!(
+            gz_load_read_result(::core::ffi::c_int::MAX, 0),
+            Ok(::core::ffi::c_int::MAX as ::core::ffi::c_uint),
+        );
+    }
 
     #[test]
     fn gz_load_apply_flags_sets_only_requested_flags() {
