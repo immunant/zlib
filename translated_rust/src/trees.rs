@@ -4247,20 +4247,17 @@ pub unsafe extern "C" fn _tr_stored_block_ffi(
     mut last: ::core::ffi::c_int,
 ) {
     let s = &mut *s;
-    let pending_buf = ::core::slice::from_raw_parts_mut(s.pending_buf, s.pending_buf_size as usize);
     let buf = if stored_len == 0 {
         &[]
     } else {
         ::core::slice::from_raw_parts(buf as *const crate::stdlib::Bytef, stored_len as usize)
     };
-    _tr_stored_block(s, pending_buf, buf, last)
+    s.with_pending(|state, pending_buf| _tr_stored_block(state, pending_buf, buf, last))
 }
 #[export_name = "_tr_flush_bits"]
 
 pub unsafe extern "C" fn _tr_flush_bits_ffi(mut s: *mut crate::src::deflate::deflate_state) {
-    let pending_buf =
-        ::core::slice::from_raw_parts_mut((*s).pending_buf, (*s).pending_buf_size as usize);
-    bi_flush(&mut *s, pending_buf)
+    (&mut *s).with_pending(|state, pending_buf| bi_flush(state, pending_buf))
 }
 pub fn _tr_align(
     s: &mut crate::src::deflate::deflate_state,
@@ -4282,8 +4279,7 @@ pub fn _tr_align(
 
 pub unsafe extern "C" fn _tr_align_ffi(mut s: *mut crate::src::deflate::deflate_state) {
     let s = &mut *s;
-    let pending_buf = ::core::slice::from_raw_parts_mut(s.pending_buf, s.pending_buf_size as usize);
-    _tr_align(s, pending_buf)
+    s.with_pending(|state, pending_buf| _tr_align(state, pending_buf))
 }
 fn compress_block(
     s: &mut crate::src::deflate::deflate_state,
@@ -4460,8 +4456,6 @@ pub unsafe extern "C" fn _tr_flush_block(
     last: ::core::ffi::c_int,
 ) {
     let s = &mut *s;
-    let pending_buf =
-        ::core::slice::from_raw_parts_mut(s.pending_buf, s.pending_buf_size as usize);
     // Keep a snapshot while block encoding mutates the rest of the state.
     // The symbols themselves are Rust-owned storage, not a raw alias.
     let sym_buf = s.symbol_slice()[..s.sym_next as usize].to_vec();
@@ -4474,7 +4468,9 @@ pub unsafe extern "C" fn _tr_flush_block(
         ))
     };
     let data_type = &mut (*s.strm).data_type;
-    tr_flush_block_safe(s, pending_buf, &sym_buf, stored, last, data_type);
+    s.with_pending(|state, pending_buf| {
+        tr_flush_block_safe(state, pending_buf, &sym_buf, stored, last, data_type)
+    });
 }
 #[export_name = "_tr_flush_block"]
 
