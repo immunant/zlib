@@ -593,16 +593,32 @@ pub fn gzputc(
     }
     return c & 0xff as ::core::ffi::c_int;
 }
+
+// Keep the public null-handle result with the implementation dispatch. The
+// ABI adapter only binds a non-null handle before this stateful operation.
+fn gzputc_ffi_dispatch(
+    state: Option<&mut crate::gzguts_h::gz_state>,
+    c: ::core::ffi::c_int,
+) -> ::core::ffi::c_int {
+    match state {
+        Some(state) => gzputc(state, c),
+        None => -1,
+    }
+}
 #[export_name = "gzputc"]
 
 pub unsafe extern "C" fn gzputc_ffi(
     mut file: crate::zlib_h::gzFile,
     mut c: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
-    if file.is_null() {
-        return -1 as ::core::ffi::c_int;
-    }
-    gzputc(&mut *(file as crate::gzguts_h::gz_statep), c)
+    let state = if file.is_null() {
+        None
+    } else {
+        // SAFETY: a non-null gzip handle identifies the state bound by this
+        // ABI entry. The dispatcher owns the public null-handle result.
+        Some(unsafe { &mut *(file as crate::gzguts_h::gz_statep) })
+    };
+    gzputc_ffi_dispatch(state, c)
 }
 // Once the dispatcher has accepted the write state and bound the caller's
 // string, the write itself needs only a safe C-string view.
@@ -696,16 +712,33 @@ fn gzflush(
     gz_comp(state, flush);
     return state.err;
 }
+
+// `gzflush` owns write-state validation. Keep only the public null-handle
+// result in this implementation dispatcher, after the ABI adapter has bound
+// the optional gzip state.
+fn gzflush_ffi_dispatch(
+    state: Option<&mut crate::gzguts_h::gz_state>,
+    flush: ::core::ffi::c_int,
+) -> ::core::ffi::c_int {
+    match state {
+        Some(state) => gzflush(state, flush),
+        None => crate::zlib_h::Z_STREAM_ERROR,
+    }
+}
 #[export_name = "gzflush"]
 
 pub unsafe extern "C" fn gzflush_ffi(
     mut file: crate::zlib_h::gzFile,
     mut flush: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
-    if file.is_null() {
-        return crate::zlib_h::Z_STREAM_ERROR;
-    }
-    gzflush(&mut *(file as crate::gzguts_h::gz_statep), flush)
+    let state = if file.is_null() {
+        None
+    } else {
+        // SAFETY: a non-null gzip handle identifies the state bound by this
+        // ABI entry. `gzflush` retains write-state validation.
+        Some(unsafe { &mut *(file as crate::gzguts_h::gz_statep) })
+    };
+    gzflush_ffi_dispatch(state, flush)
 }
 // Parameter selection only needs the already-bound write state. Keep the
 // deflater call scoped to its one C boundary so the surrounding validation,
@@ -742,6 +775,19 @@ pub fn gzsetparams(
     state.strategy = strategy;
     return crate::zlib_h::Z_OK;
 }
+
+// The parameter operation owns all write-state and parameter validation.
+// This dispatcher only maps an absent bound handle to the public result.
+fn gzsetparams_ffi_dispatch(
+    state: Option<&mut crate::gzguts_h::gz_state>,
+    level: ::core::ffi::c_int,
+    strategy: ::core::ffi::c_int,
+) -> ::core::ffi::c_int {
+    match state {
+        Some(state) => gzsetparams(state, level, strategy),
+        None => crate::zlib_h::Z_STREAM_ERROR,
+    }
+}
 #[export_name = "gzsetparams"]
 
 pub unsafe extern "C" fn gzsetparams_ffi(
@@ -749,14 +795,14 @@ pub unsafe extern "C" fn gzsetparams_ffi(
     mut level: ::core::ffi::c_int,
     mut strategy: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
-    if file.is_null() {
-        return crate::zlib_h::Z_STREAM_ERROR;
-    }
-    gzsetparams(
-        &mut *(file as crate::gzguts_h::gz_statep),
-        level,
-        strategy,
-    )
+    let state = if file.is_null() {
+        None
+    } else {
+        // SAFETY: a non-null gzip handle identifies the state bound by this
+        // ABI entry. The safe operation retains parameter validation.
+        Some(unsafe { &mut *(file as crate::gzguts_h::gz_statep) })
+    };
+    gzsetparams_ffi_dispatch(state, level, strategy)
 }
 
 // Once a write handle is known to be valid, finishing sparse output and the
