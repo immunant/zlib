@@ -7,18 +7,38 @@ pub use crate::stdlib::uLong;
 pub use crate::stdlib::voidpf;
 pub use crate::zlib_h::ZLIB_VERSION;
 
+const fn c_chars<const N: usize>(bytes: [u8; N]) -> [::core::ffi::c_char; N] {
+    let mut chars = [0; N];
+    let mut index = 0;
+    while index < N {
+        chars[index] = bytes[index] as ::core::ffi::c_char;
+        index += 1;
+    }
+    chars
+}
+
+static NEED_DICTIONARY: [::core::ffi::c_char; 16] = c_chars(*b"need dictionary\0");
+static STREAM_END: [::core::ffi::c_char; 11] = c_chars(*b"stream end\0");
+static EMPTY_ERROR: [::core::ffi::c_char; 1] = c_chars(*b"\0");
+static FILE_ERROR: [::core::ffi::c_char; 11] = c_chars(*b"file error\0");
+static STREAM_ERROR: [::core::ffi::c_char; 13] = c_chars(*b"stream error\0");
+static DATA_ERROR: [::core::ffi::c_char; 11] = c_chars(*b"data error\0");
+static INSUFFICIENT_MEMORY: [::core::ffi::c_char; 20] = c_chars(*b"insufficient memory\0");
+static BUFFER_ERROR: [::core::ffi::c_char; 13] = c_chars(*b"buffer error\0");
+static INCOMPATIBLE_VERSION: [::core::ffi::c_char; 21] = c_chars(*b"incompatible version\0");
+
 #[no_mangle]
 pub static mut z_errmsg: [*mut ::core::ffi::c_char; 10] = [
-    b"need dictionary\0".as_ptr() as *const ::core::ffi::c_char as *mut ::core::ffi::c_char,
-    b"stream end\0".as_ptr() as *const ::core::ffi::c_char as *mut ::core::ffi::c_char,
-    b"\0".as_ptr() as *const ::core::ffi::c_char as *mut ::core::ffi::c_char,
-    b"file error\0".as_ptr() as *const ::core::ffi::c_char as *mut ::core::ffi::c_char,
-    b"stream error\0".as_ptr() as *const ::core::ffi::c_char as *mut ::core::ffi::c_char,
-    b"data error\0".as_ptr() as *const ::core::ffi::c_char as *mut ::core::ffi::c_char,
-    b"insufficient memory\0".as_ptr() as *const ::core::ffi::c_char as *mut ::core::ffi::c_char,
-    b"buffer error\0".as_ptr() as *const ::core::ffi::c_char as *mut ::core::ffi::c_char,
-    b"incompatible version\0".as_ptr() as *const ::core::ffi::c_char as *mut ::core::ffi::c_char,
-    b"\0".as_ptr() as *const ::core::ffi::c_char as *mut ::core::ffi::c_char,
+    NEED_DICTIONARY.as_ptr() as *mut ::core::ffi::c_char,
+    STREAM_END.as_ptr() as *mut ::core::ffi::c_char,
+    EMPTY_ERROR.as_ptr() as *mut ::core::ffi::c_char,
+    FILE_ERROR.as_ptr() as *mut ::core::ffi::c_char,
+    STREAM_ERROR.as_ptr() as *mut ::core::ffi::c_char,
+    DATA_ERROR.as_ptr() as *mut ::core::ffi::c_char,
+    INSUFFICIENT_MEMORY.as_ptr() as *mut ::core::ffi::c_char,
+    BUFFER_ERROR.as_ptr() as *mut ::core::ffi::c_char,
+    INCOMPATIBLE_VERSION.as_ptr() as *mut ::core::ffi::c_char,
+    EMPTY_ERROR.as_ptr() as *mut ::core::ffi::c_char,
 ];
 
 fn zlib_version() -> &'static [::core::ffi::c_char; 15] {
@@ -81,9 +101,24 @@ fn error_message_index(err: ::core::ffi::c_int) -> usize {
     }
 }
 
+fn error_message(err: ::core::ffi::c_int) -> &'static [::core::ffi::c_char] {
+    match error_message_index(err) {
+        0 => &NEED_DICTIONARY,
+        1 => &STREAM_END,
+        2 => &EMPTY_ERROR,
+        3 => &FILE_ERROR,
+        4 => &STREAM_ERROR,
+        5 => &DATA_ERROR,
+        6 => &INSUFFICIENT_MEMORY,
+        7 => &BUFFER_ERROR,
+        8 => &INCOMPATIBLE_VERSION,
+        _ => &EMPTY_ERROR,
+    }
+}
+
 #[export_name = "zError"]
 pub unsafe extern "C" fn zError_ffi(err: ::core::ffi::c_int) -> *const ::core::ffi::c_char {
-    z_errmsg[error_message_index(err)] as *const ::core::ffi::c_char
+    error_message(err).as_ptr()
 }
 
 enum AllocationRequest {
@@ -133,8 +168,8 @@ pub unsafe extern "C" fn zcfree_ffi(opaque: crate::stdlib::voidpf, ptr: crate::s
 mod tests {
     use super::{
         allocation_byte_count, allocation_request, allocation_uses_malloc, compile_flags_for_sizes,
-        error_message_index, has_error_message_index, size_class, size_flag, size_t,
-        zlib_compile_flags, zlib_version, AllocationRequest,
+        error_message, error_message_index, has_error_message_index, size_class, size_flag, size_t,
+        zlib_compile_flags, zlib_version, AllocationRequest, EMPTY_ERROR,
     };
 
     #[test]
@@ -152,6 +187,13 @@ mod tests {
         assert_eq!(error_message_index(-6), 8);
         assert_eq!(error_message_index(-7), 9);
         assert_eq!(error_message_index(3), 9);
+    }
+
+    #[test]
+    fn error_messages_are_nul_terminated_and_use_canonical_fallback() {
+        assert_eq!(error_message(2).last(), Some(&0));
+        assert_eq!(error_message(-6).last(), Some(&0));
+        assert_eq!(error_message(-7).as_ptr(), EMPTY_ERROR.as_ptr());
     }
 
     #[test]
