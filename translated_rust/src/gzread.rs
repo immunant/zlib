@@ -716,19 +716,34 @@ fn gz_read_buffer_copy_plan(
 /// The adapter supplies both cursor positions as indices, so this core can
 /// validate its ranges and use an ordinary slice copy instead of libc
 /// `memcpy`.
+struct GzReadBufferedCopy {
+    copied: ::core::ffi::c_uint,
+    next_index: usize,
+}
+
 fn gz_read_buffered_copy(
     destination: &mut [u8],
     buffered: &[u8],
     next_index: usize,
     requested: ::core::ffi::c_uint,
     have: ::core::ffi::c_uint,
-) -> Option<::core::ffi::c_uint> {
+) -> Option<GzReadBufferedCopy> {
+    // `x.have` is part of the public gzip prefix and can have been changed
+    // together with `x.next` by an external `gzgetc` macro expansion.  Check
+    // the complete advertised span before copying only its requested prefix,
+    // so a stale prefix cannot leave a corrupt residual cursor for a later
+    // read.
+    let advertised_end = next_index.checked_add(have as usize)?;
+    buffered.get(next_index..advertised_end)?;
     let copied = gz_read_buffer_copy_plan(requested, have) as usize;
     let end = next_index.checked_add(copied)?;
     destination
         .get_mut(..copied)?
         .copy_from_slice(buffered.get(next_index..end)?);
-    Some(copied as ::core::ffi::c_uint)
+    Some(GzReadBufferedCopy {
+        copied: copied as ::core::ffi::c_uint,
+        next_index: end,
+    })
 }
 
 /// Commit a preflighted direct buffered read after its raw cursor has moved.
@@ -848,7 +863,7 @@ fn gzgetc_buffered_take(
     output.get(next_index..end)?;
     Some((
         *output.get(next_index)? as ::core::ffi::c_int,
-        next_index + 1,
+        next_index.checked_add(1)?,
     ))
 }
 
@@ -1081,7 +1096,7 @@ macro_rules! gz_read_at_boundary {
                         else {
                             break 'gz_read_result got;
                         };
-                        let Some(copied) = gz_read_buffered_copy(
+                        let Some(copy) = gz_read_buffered_copy(
                             destination,
                             buffered,
                             next_index,
@@ -1090,8 +1105,8 @@ macro_rules! gz_read_at_boundary {
                         ) else {
                             break 'gz_read_result got;
                         };
-                        n = copied;
-                        state_ref.x.next = buffered.as_ptr().wrapping_add(next_index + n as usize)
+                        n = copy.copied;
+                        state_ref.x.next = buffered.as_ptr().wrapping_add(copy.next_index)
                             as *mut ::core::ffi::c_uchar;
                         if !gz_read_buffer_copy_commit_state(state_ref, n) {
                             break 'gz_read_result got;
