@@ -475,7 +475,10 @@ fn insert_dictionary_strings_state(
     ) else {
         return false;
     };
-    let Some(last) = strstart.checked_add(count).and_then(|end| end.checked_add(1)) else {
+    let Some(last) = strstart
+        .checked_add(count)
+        .and_then(|end| end.checked_add(1))
+    else {
         return false;
     };
     let Ok(max_head_index) = usize::try_from(s.hash_mask) else {
@@ -3448,14 +3451,46 @@ unsafe extern "C" fn deflate_slow(
     return block_done;
 }
 
+fn rle_match_length_state(
+    window: &[crate::stdlib::Byte],
+    strstart: crate::stdlib::uInt,
+    lookahead: crate::stdlib::uInt,
+) -> crate::stdlib::uInt {
+    let Ok(start) = usize::try_from(strstart) else {
+        return 0;
+    };
+    let Ok(lookahead) = usize::try_from(lookahead) else {
+        return 0;
+    };
+    let max_match = crate::zutil_h::MAX_MATCH as usize;
+    let min_match = crate::zutil_h::MIN_MATCH as usize;
+    if start == 0 || lookahead < min_match {
+        return 0;
+    }
+    let run_limit = lookahead.min(max_match);
+    let Some(end) = start.checked_add(run_limit) else {
+        return 0;
+    };
+    if end > window.len() {
+        return 0;
+    }
+    let previous = window[start - 1];
+    let run = window[start..end]
+        .iter()
+        .take_while(|&&byte| byte == previous)
+        .count();
+    if run < min_match {
+        0
+    } else {
+        crate::stdlib::uInt::try_from(run).unwrap_or(0)
+    }
+}
+
 unsafe extern "C" fn deflate_rle(
     mut s: *mut crate::src::deflate::deflate_state,
     mut flush: ::core::ffi::c_int,
 ) -> block_state {
     let mut bflush: ::core::ffi::c_int = 0;
-    let mut prev: crate::stdlib::uInt = 0;
-    let mut scan: *mut crate::stdlib::Bytef = ::core::ptr::null_mut::<crate::stdlib::Bytef>();
-    let mut strend: *mut crate::stdlib::Bytef = ::core::ptr::null_mut::<crate::stdlib::Bytef>();
     loop {
         if (*s).lookahead <= crate::zutil_h::MAX_MATCH as crate::stdlib::uInt {
             fill_window(s);
@@ -3472,68 +3507,18 @@ unsafe extern "C" fn deflate_rle(
         if (*s).lookahead >= crate::zutil_h::MIN_MATCH as crate::stdlib::uInt
             && (*s).strstart > 0 as crate::stdlib::uInt
         {
-            scan = (*s)
-                .window
-                .offset((*s).strstart as isize)
-                .offset(-(1 as ::core::ffi::c_int as isize));
-            prev = *scan as crate::stdlib::uInt;
-            scan = scan.offset(1);
-            if prev == *scan as crate::stdlib::uInt
-                && {
-                    scan = scan.offset(1);
-                    prev == *scan as crate::stdlib::uInt
-                }
-                && {
-                    scan = scan.offset(1);
-                    prev == *scan as crate::stdlib::uInt
-                }
-            {
-                strend = (*s)
-                    .window
-                    .offset((*s).strstart as isize)
-                    .offset(crate::zutil_h::MAX_MATCH as isize);
-                loop {
-                    scan = scan.offset(1);
-                    if !(prev == *scan as crate::stdlib::uInt
-                        && {
-                            scan = scan.offset(1);
-                            prev == *scan as crate::stdlib::uInt
-                        }
-                        && {
-                            scan = scan.offset(1);
-                            prev == *scan as crate::stdlib::uInt
-                        }
-                        && {
-                            scan = scan.offset(1);
-                            prev == *scan as crate::stdlib::uInt
-                        }
-                        && {
-                            scan = scan.offset(1);
-                            prev == *scan as crate::stdlib::uInt
-                        }
-                        && {
-                            scan = scan.offset(1);
-                            prev == *scan as crate::stdlib::uInt
-                        }
-                        && {
-                            scan = scan.offset(1);
-                            prev == *scan as crate::stdlib::uInt
-                        }
-                        && {
-                            scan = scan.offset(1);
-                            prev == *scan as crate::stdlib::uInt
-                        }
-                        && scan < strend)
-                    {
-                        break;
-                    }
-                }
-                (*s).match_length = (crate::zutil_h::MAX_MATCH as crate::stdlib::uInt)
-                    .wrapping_sub(strend.offset_from(scan) as crate::stdlib::uInt);
-                if (*s).match_length > (*s).lookahead {
-                    (*s).match_length = (*s).lookahead;
-                }
+            let Ok(window_len) = usize::try_from((*s).window_size) else {
+                return need_more;
+            };
+            if window_len != 0 && (*s).window.is_null() {
+                return need_more;
             }
+            let window = if window_len == 0 {
+                &[]
+            } else {
+                ::core::slice::from_raw_parts((*s).window, window_len)
+            };
+            (*s).match_length = rle_match_length_state(window, (*s).strstart, (*s).lookahead);
         }
         if (*s).match_length >= crate::zutil_h::MIN_MATCH as crate::stdlib::uInt {
             let mut len: crate::zutil_h::uch =
