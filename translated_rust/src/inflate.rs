@@ -2780,29 +2780,34 @@ pub unsafe extern "C" fn inflateSyncPoint_ffi(
     };
     inflate_sync_point_stream(strm, state)
 }
-pub unsafe extern "C" fn inflateCopy(
-    mut dest: crate::zlib_h::z_streamp,
-    mut source: crate::zlib_h::z_streamp,
+pub fn inflateCopy(
+    dest: Option<&mut crate::zlib_h::z_stream>,
+    source: Option<&crate::zlib_h::z_stream>,
 ) -> ::core::ffi::c_int {
     let mut copy: *mut crate::src::inflate::inflate_state =
         ::core::ptr::null_mut::<crate::src::inflate::inflate_state>();
     let mut window: *mut ::core::ffi::c_uchar = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
-    let Some(source_ref) = source.as_ref() else {
+    let Some(source_ref) = source else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
     if !inflate_stream_has_allocators(source_ref) {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    let Some(state_ref) = (source_ref.state as *const crate::src::inflate::inflate_state).as_ref()
+    // The allocator pair above makes this the one ABI state-handle conversion
+    // in the copy implementation. Keep source validation ahead of any
+    // destination mutation.
+    let Some(state_ref) =
+        (unsafe { (source_ref.state as *const crate::src::inflate::inflate_state).as_ref() })
     else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
-    if !inflate_state_valid(source_ref, state_ref) || dest.is_null() {
+    if !inflate_state_valid(source_ref, state_ref) {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    let state = state_ref as *const crate::src::inflate::inflate_state
-        as *mut crate::src::inflate::inflate_state;
-    let state_codes = &raw mut (*state).codes as *mut crate::src::inftrees::code;
+    let Some(dest_ref) = dest else {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    };
+    let state_codes = ::core::ptr::from_ref(&state_ref.codes).cast_mut();
     let code_size = ::core::mem::size_of::<crate::src::inftrees::code>();
     let code_index = |address: usize| {
         address
@@ -2810,14 +2815,14 @@ pub unsafe extern "C" fn inflateCopy(
             .filter(|bytes| bytes % code_size == 0)
             .map(|bytes| bytes / code_size)
     };
-    let Some(next_index) = code_index((*state).next.addr())
+    let Some(next_index) = code_index(state_ref.next.addr())
         .filter(|index| *index <= crate::src::inftrees::ENOUGH as usize)
     else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
-    let table_indices = match code_index((*state).lencode.addr()) {
+    let table_indices = match code_index(state_ref.lencode.addr()) {
         Some(lencode_index) if lencode_index < crate::src::inftrees::ENOUGH as usize => {
-            let Some(distcode_index) = code_index((*state).distcode.addr())
+            let Some(distcode_index) = code_index(state_ref.distcode.addr())
                 .filter(|index| *index < crate::src::inftrees::ENOUGH as usize)
             else {
                 return crate::zlib_h::Z_STREAM_ERROR;
@@ -2826,59 +2831,54 @@ pub unsafe extern "C" fn inflateCopy(
         }
         _ => None,
     };
-    copy = Some((*source).zalloc.expect("non-null function pointer"))
-        .expect("non-null function pointer")(
-        (*source).opaque,
-        1 as crate::stdlib::uInt,
-        ::core::mem::size_of::<crate::src::inflate::inflate_state>() as crate::stdlib::uInt,
-    ) as *mut crate::src::inflate::inflate_state;
+    copy = unsafe {
+        Some(source_ref.zalloc.expect("non-null function pointer"))
+            .expect("non-null function pointer")(
+            source_ref.opaque,
+            1 as crate::stdlib::uInt,
+            ::core::mem::size_of::<crate::src::inflate::inflate_state>() as crate::stdlib::uInt,
+        ) as *mut crate::src::inflate::inflate_state
+    };
     if copy.is_null() {
         return crate::zlib_h::Z_MEM_ERROR;
     }
     window = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
-    if !(*state).window.is_null() {
-        window = Some((*source).zalloc.expect("non-null function pointer"))
-            .expect("non-null function pointer")(
-            (*source).opaque,
-            (1 as crate::stdlib::uInt) << (*state).wbits,
-            ::core::mem::size_of::<::core::ffi::c_uchar>() as crate::stdlib::uInt,
-        ) as *mut ::core::ffi::c_uchar;
-        if window.is_null() {
-            Some((*source).zfree.expect("non-null function pointer"))
+    if !state_ref.window.is_null() {
+        window = unsafe {
+            Some(source_ref.zalloc.expect("non-null function pointer"))
                 .expect("non-null function pointer")(
-                (*source).opaque,
-                copy as crate::stdlib::voidpf,
-            );
+                source_ref.opaque,
+                (1 as crate::stdlib::uInt) << state_ref.wbits,
+                ::core::mem::size_of::<::core::ffi::c_uchar>() as crate::stdlib::uInt,
+            ) as *mut ::core::ffi::c_uchar
+        };
+        if window.is_null() {
+            unsafe {
+                Some(source_ref.zfree.expect("non-null function pointer"))
+                    .expect("non-null function pointer")(source_ref.opaque, copy.cast());
+            }
             return crate::zlib_h::Z_MEM_ERROR;
         }
     }
-    crate::stdlib::memcpy(
-        dest as *mut ::core::ffi::c_void,
-        source as *const ::core::ffi::c_void,
-        ::core::mem::size_of::<crate::zlib_h::z_stream>(),
-    );
-    crate::stdlib::memcpy(
-        copy as *mut ::core::ffi::c_void,
-        state as *const ::core::ffi::c_void,
-        ::core::mem::size_of::<crate::src::inflate::inflate_state>(),
-    );
-    (*copy).strm = dest;
+    *dest_ref = *source_ref;
+    let copy_ref = unsafe { &mut *copy };
+    *copy_ref = *state_ref;
+    copy_ref.strm = ::core::ptr::from_mut(dest_ref);
     if let Some((lencode_index, distcode_index)) = table_indices {
-        let copy_codes = &raw mut (*copy).codes as *mut crate::src::inftrees::code;
-        (*copy).lencode = copy_codes.wrapping_add(lencode_index);
-        (*copy).distcode = copy_codes.wrapping_add(distcode_index);
+        let copy_codes = ::core::ptr::from_mut(&mut copy_ref.codes).cast::<crate::src::inftrees::code>();
+        copy_ref.lencode = copy_codes.wrapping_add(lencode_index);
+        copy_ref.distcode = copy_codes.wrapping_add(distcode_index);
     }
-    (*copy).next =
-        (&raw mut (*copy).codes as *mut crate::src::inftrees::code).wrapping_add(next_index);
+    copy_ref.next = ::core::ptr::from_mut(&mut copy_ref.codes)
+        .cast::<crate::src::inftrees::code>()
+        .wrapping_add(next_index);
     if !window.is_null() {
-        crate::stdlib::memcpy(
-            window as *mut ::core::ffi::c_void,
-            (*state).window as *const ::core::ffi::c_void,
-            (*state).whave as crate::__stddef_size_t_h::size_t,
-        );
+        unsafe {
+            ::core::ptr::copy_nonoverlapping(state_ref.window, window, state_ref.whave as usize);
+        }
     }
-    (*copy).window = window;
-    (*dest).state = copy as *mut crate::src::deflate::internal_state;
+    copy_ref.window = window;
+    dest_ref.state = copy.cast::<crate::src::deflate::internal_state>();
     return crate::zlib_h::Z_OK;
 }
 #[export_name = "inflateCopy"]
@@ -2887,6 +2887,8 @@ pub unsafe extern "C" fn inflateCopy_ffi(
     mut dest: crate::zlib_h::z_streamp,
     mut source: crate::zlib_h::z_streamp,
 ) -> ::core::ffi::c_int {
+    let source = source.as_ref();
+    let dest = dest.as_mut();
     inflateCopy(dest, source)
 }
 fn inflate_undermine(
