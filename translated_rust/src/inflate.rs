@@ -1348,6 +1348,14 @@ struct InflateDecoderResult {
     publication: Option<HeaderPublication>,
 }
 
+// Both the public bounded decoder and the exported fast-path symbol need the
+// same stream/state association.  Keep their selector pointer-free so that
+// all ABI cursor construction and publication remains at this one adapter.
+pub(crate) enum InflateStreamRequest {
+    Decode(::core::ffi::c_int),
+    Fast(::core::ffi::c_uint),
+}
+
 // One normal-inflate dispatch owns every value the decoder is allowed to
 // observe: the resumable Rust state, bounded caller cursors, the scoped
 // header-output facade, and scalar stream accounting.  It deliberately does
@@ -3059,10 +3067,61 @@ fn inflate(request: InflateStreamOwner<'_, '_, '_, '_, '_>) -> InflateDecoderRes
 // adapter republishes ABI state.
 pub(crate) unsafe fn inflate_from_stream(
     strm: &mut crate::zlib_h::z_stream_s,
-    flush: ::core::ffi::c_int,
+    request: InflateStreamRequest,
 ) -> ::core::ffi::c_int {
     let Some((strm, state)) = inflate_stream_and_state(strm) else {
         return crate::zlib_h::Z_STREAM_ERROR;
+    };
+    if let InflateStreamRequest::Fast(start) = request {
+        if strm.avail_in != 0 && strm.next_in.is_null() {
+            return crate::zlib_h::Z_STREAM_ERROR;
+        }
+        let input = if strm.avail_in == 0 {
+            &[]
+        } else {
+            ::core::slice::from_raw_parts(strm.next_in, strm.avail_in as usize)
+        };
+        let written = start.wrapping_sub(strm.avail_out) as usize;
+        let output_start = strm.next_out.wrapping_sub(written);
+        let output = if start == 0 {
+            &mut []
+        } else {
+            if output_start.is_null() {
+                return crate::zlib_h::Z_STREAM_ERROR;
+            }
+            ::core::slice::from_raw_parts_mut(output_start, start as usize)
+        };
+        // The direct fast export now shares the same pointer-free normal
+        // owner as the full decoder.  This adapter owns its one ABI cursor
+        // projection and publishes only after the bounded request ends.
+        let fast_state = state.decoder.normal.fast_state();
+        let Some(owner) = InflateNormalStreamOwner::new(input, output, written, fast_state) else {
+            return crate::zlib_h::Z_STREAM_ERROR;
+        };
+        let update = owner.run_fast();
+        strm.next_in = strm.next_in.wrapping_add(update.input_used);
+        strm.avail_in = update.input_remaining as crate::stdlib::uInt;
+        strm.next_out = output_start.wrapping_add(update.output_used);
+        strm.avail_out = update.output_remaining as crate::stdlib::uInt;
+        state.decoder.normal.apply_fast_update(&update);
+        strm.msg = match update.exit {
+            crate::src::inffast::FastExit::Continue | crate::src::inffast::FastExit::Type => {
+                strm.msg
+            }
+            crate::src::inffast::FastExit::InvalidDistance => {
+                INFLATE_ERROR_MESSAGES[17].as_ptr().cast_mut().cast()
+            }
+            crate::src::inffast::FastExit::InvalidCode => {
+                b"invalid literal/length or distance code\0"
+                    .as_ptr()
+                    .cast_mut()
+                    .cast()
+            }
+        };
+        return crate::zlib_h::Z_OK;
+    }
+    let InflateStreamRequest::Decode(flush) = request else {
+        unreachable!("fast request returned from its ABI projection");
     };
     if strm.next_out.is_null() || (strm.next_in.is_null() && strm.avail_in != 0) {
         return crate::zlib_h::Z_STREAM_ERROR;
@@ -3192,7 +3251,7 @@ pub unsafe extern "C" fn inflate_ffi(
     let Some(strm) = strm.as_mut() else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
-    inflate_from_stream(strm, flush)
+    inflate_from_stream(strm, InflateStreamRequest::Decode(flush))
 }
 // Ending a normal inflate stream has a pointer-free half: consume the Rust
 // history owner before the ABI adapter releases the callback-owned state

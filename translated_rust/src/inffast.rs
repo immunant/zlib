@@ -378,68 +378,6 @@ pub(crate) fn inflate_fast_from_views(
     completion.result
 }
 
-// The only raw stream/state and cursor projection for the direct ABI entry
-// point.  The decoder/publication seam below receives an owned bounded
-// facade, so the future pointer-free inflate stream owner can replace this
-// adapter without reopening the fast decoder or its cursor accounting.
-pub(crate) unsafe fn inflate_fast_from_abi_stream(
-    stream: &mut crate::zlib_h::z_stream_s,
-    start: ::core::ffi::c_uint,
-) {
-    let Some((strm, state)) = crate::src::inflate::inflate_stream_and_state(stream) else {
-        return;
-    };
-    let input = if strm.avail_in == 0 {
-        &[]
-    } else {
-        if strm.next_in.is_null() {
-            return;
-        }
-        core::slice::from_raw_parts(strm.next_in, strm.avail_in as usize)
-    };
-    let written = start.wrapping_sub(strm.avail_out) as usize;
-    let output_start = strm.next_out.wrapping_sub(written);
-    let output = if start == 0 {
-        &mut []
-    } else {
-        if output_start.is_null() {
-            return;
-        }
-        core::slice::from_raw_parts_mut(output_start, start as usize)
-    };
-    let fast_state = state.decoder.normal.fast_state();
-    // Use the same pointer-free transaction as normal inflate.  This keeps
-    // the raw ABI cursor projection here while ensuring both fast callers
-    // consume and account for an identical bounded request.
-    let owner =
-        crate::src::inflate::InflateNormalStreamOwner::new(input, output, written, fast_state);
-    let Some(owner) = owner else {
-        return;
-    };
-    let update = owner.run_fast();
-    strm.next_in = strm.next_in.wrapping_add(update.input_used);
-    strm.avail_in = update.input_remaining as crate::stdlib::uInt;
-    strm.next_out = output_start.wrapping_add(update.output_used);
-    strm.avail_out = update.output_remaining as crate::stdlib::uInt;
-    state.decoder.normal.apply_fast_update(&update);
-    match update.exit {
-        FastExit::Continue => {}
-        FastExit::Type => {}
-        FastExit::InvalidDistance => {
-            strm.msg = b"invalid distance too far back\0"
-                .as_ptr()
-                .cast_mut()
-                .cast();
-        }
-        FastExit::InvalidCode => {
-            strm.msg = b"invalid literal/length or distance code\0"
-                .as_ptr()
-                .cast_mut()
-                .cast();
-        }
-    }
-}
-
 // The normal inflate owner also dispatches directly through the same
 // pointer-free request/completion seam.
 pub(crate) fn inflate_fast(request: InflateFastRequest<'_, '_, '_>) -> InflateFastCompletion {
@@ -454,5 +392,8 @@ pub unsafe extern "C" fn inflate_fast_ffi(
     let Some(stream) = strm.as_mut() else {
         return;
     };
-    inflate_fast_from_abi_stream(stream, start)
+    crate::src::inflate::inflate_from_stream(
+        stream,
+        crate::src::inflate::InflateStreamRequest::Fast(start),
+    );
 }
