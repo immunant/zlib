@@ -154,13 +154,6 @@ fn gz_initialize_buffers(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::
     0
 }
 
-/// Legacy state setup entry retained for callers that still carry the stream
-/// across an unsafe boundary.  Buffer initialization itself does not require
-/// that boundary.
-unsafe fn gz_init(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
-    gz_initialize_buffers(state)
-}
-
 impl GzCompressor<'_> {
     fn compress(
         &mut self,
@@ -337,7 +330,7 @@ impl GzCompressor<'_> {
             }
         }
         let mut ret = crate::zlib_h::Z_OK;
-        // On the first compressed call, `gz_init` below establishes the output
+        // On the first compressed call, the buffer initializer below establishes the output
         // cursor.  Subsequent calls must drain that cursor before another deflate
         // step, exactly as before.
         let mut buffers_ready = state.size != 0;
@@ -453,7 +446,7 @@ fn gz_zero_impl(compressor: &mut GzCompressor<'_>) -> ::core::ffi::c_int {
                 state.size
             };
             if first {
-                // `gz_init` sizes this staging buffer before `size` becomes
+                // The buffer initializer sizes this staging buffer before `size` becomes
                 // non-zero, and `n` is bounded by that size above.
                 state.in_0[..n as usize].fill(0);
                 first = false;
@@ -489,7 +482,7 @@ unsafe fn gz_write(state: &mut crate::gzguts_h::gz_state, input: &[u8]) -> crate
         return 0 as crate::stdlib::z_size_t;
     }
     if state.size == 0 as ::core::ffi::c_uint
-        && gz_init(state) == -1 as ::core::ffi::c_int
+        && gz_initialize_buffers(state) == -1 as ::core::ffi::c_int
     {
         return 0 as crate::stdlib::z_size_t;
     }
