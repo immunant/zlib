@@ -2395,101 +2395,208 @@ pub unsafe extern "C" fn deflateEnd_ffi(mut strm: crate::zlib_h::z_streamp) -> :
     };
     deflateEnd(strm)
 }
-pub unsafe extern "C" fn deflateCopy(
-    mut dest: crate::zlib_h::z_streamp,
-    mut source: crate::zlib_h::z_streamp,
+fn deflate_copy_state_is_valid(
+    strm: &crate::zlib_h::z_stream_s,
+    state: &crate::src::deflate::deflate_state,
+) -> bool {
+    let Ok(window_size) = usize::try_from(state.window_size) else {
+        return false;
+    };
+    let Ok(w_size) = usize::try_from(state.w_size) else {
+        return false;
+    };
+    let Ok(hash_size) = usize::try_from(state.hash_size) else {
+        return false;
+    };
+    let Ok(pending_size) = usize::try_from(state.pending_buf_size) else {
+        return false;
+    };
+    let Ok(high_water) = usize::try_from(state.high_water) else {
+        return false;
+    };
+    let Ok(pending) = usize::try_from(state.pending) else {
+        return false;
+    };
+
+    deflate_params_stream_is_valid(strm)
+        && deflate_params_state_is_valid(strm, state)
+        && !state.window.is_null()
+        && window_size == w_size.saturating_mul(2)
+        && high_water <= window_size
+        && state.head.as_ref().is_some_and(|head| head.len() == hash_size)
+        && state.prev.as_ref().is_some_and(|prev| prev.len() == w_size)
+        && state.pending_buf.as_ref().is_some_and(|buffer| {
+            state.pending_out <= buffer.len()
+                && pending <= buffer.len().saturating_sub(state.pending_out)
+                && buffer.len() == pending_size
+        })
+}
+
+fn deflate_copy_state(
+    source: &crate::src::deflate::deflate_state,
+    stream: &mut crate::zlib_h::z_stream_s,
+    head: Vec<crate::src::deflate::Posf>,
+    prev: Vec<crate::src::deflate::Posf>,
+    pending: Vec<crate::stdlib::Bytef>,
+    gzhead: u64,
+) -> crate::src::deflate::deflate_state {
+    crate::src::deflate::internal_state {
+        strm: core::ptr::from_mut(stream),
+        status: source.status,
+        pending_buf: Some(pending),
+        pending_buf_size: source.pending_buf_size,
+        pending_out: source.pending_out,
+        pending: source.pending,
+        wrap: source.wrap,
+        gzhead,
+        gzindex: source.gzindex,
+        method: source.method,
+        last_flush: source.last_flush,
+        w_size: source.w_size,
+        w_bits: source.w_bits,
+        w_mask: source.w_mask,
+        // The implementation installs the independently allocated window
+        // immediately after building this fully owned state value.
+        window: source.window,
+        window_size: source.window_size,
+        prev: Some(prev),
+        head: Some(head),
+        ins_h: source.ins_h,
+        hash_size: source.hash_size,
+        hash_bits: source.hash_bits,
+        hash_mask: source.hash_mask,
+        hash_shift: source.hash_shift,
+        block_start: source.block_start,
+        match_length: source.match_length,
+        prev_match: source.prev_match,
+        match_available: source.match_available,
+        strstart: source.strstart,
+        match_start: source.match_start,
+        lookahead: source.lookahead,
+        prev_length: source.prev_length,
+        max_chain_length: source.max_chain_length,
+        max_lazy_match: source.max_lazy_match,
+        level: source.level,
+        strategy: source.strategy,
+        good_match: source.good_match,
+        nice_match: source.nice_match,
+        dyn_ltree: source.dyn_ltree,
+        dyn_dtree: source.dyn_dtree,
+        bl_tree: source.bl_tree,
+        l_desc: source.l_desc,
+        d_desc: source.d_desc,
+        bl_desc: source.bl_desc,
+        bl_count: source.bl_count,
+        heap: source.heap,
+        heap_len: source.heap_len,
+        heap_max: source.heap_max,
+        depth: source.depth,
+        sym_buf: source.lit_bufsize as usize,
+        lit_bufsize: source.lit_bufsize,
+        sym_next: source.sym_next,
+        sym_end: source.sym_end,
+        opt_len: source.opt_len,
+        static_len: source.static_len,
+        matches: source.matches,
+        insert: source.insert,
+        bi_buf: source.bi_buf,
+        bi_valid: source.bi_valid,
+        bi_used: source.bi_used,
+        high_water: source.high_water,
+        slid: source.slid,
+    }
+}
+
+unsafe fn deflate_copy_impl(
+    dest: &mut crate::zlib_h::z_stream_s,
+    source: &crate::zlib_h::z_stream_s,
 ) -> ::core::ffi::c_int {
-    let mut ds: *mut crate::src::deflate::deflate_state =
-        ::core::ptr::null_mut::<crate::src::deflate::deflate_state>();
-    let mut ss: *mut crate::src::deflate::deflate_state =
-        ::core::ptr::null_mut::<crate::src::deflate::deflate_state>();
-    if deflateStateCheck(source) != 0 || dest.is_null() {
+    // Validate the stream before following its state link.  The state borrow
+    // is then retained for the complete snapshot preparation below.
+    if !deflate_params_stream_is_valid(source) {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    ss = (*source).state as *mut crate::src::deflate::deflate_state;
-    let gzhead = gzip_header_clone((*ss).gzhead);
-    let Some(head) = (*ss).head.as_deref() else {
+    let Some(source_state) = source.state.as_ref() else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
-    if head.len() != (*ss).hash_size as usize {
+    if !deflate_copy_state_is_valid(source, source_state) {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
+
+    let Some(head) = source_state.head.as_deref() else {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    };
     let Some(head_copy) = clone_head_table(head) else {
         return crate::zlib_h::Z_MEM_ERROR;
     };
-    let Some(source_prev) = (*ss).prev.as_deref() else {
+    let Some(prev) = source_state.prev.as_deref() else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
-    let Some(prev_copy) = clone_prev_table(source_prev) else {
+    let Some(prev_copy) = clone_prev_table(prev) else {
         return crate::zlib_h::Z_MEM_ERROR;
     };
-    let Some(source_pending) = (*ss).pending_buf.as_deref() else {
+    let Some(source_pending) = source_state.pending_buf.as_deref() else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
     let Some(mut pending_copy) = allocate_pending_buffer(source_pending.len()) else {
         return crate::zlib_h::Z_MEM_ERROR;
     };
     pending_copy.copy_from_slice(source_pending);
-    crate::stdlib::memcpy(
-        dest as *mut ::core::ffi::c_void,
-        source as *const ::core::ffi::c_void,
-        ::core::mem::size_of::<crate::zlib_h::z_stream>(),
-    );
-    ds = Some((*dest).zalloc.expect("non-null function pointer"))
-        .expect("non-null function pointer")(
-        (*dest).opaque,
-        1 as crate::stdlib::uInt,
+    let gzhead = gzip_header_clone(source_state.gzhead);
+
+    // `z_stream_s` is an ABI carrier and intentionally Copy.  Its state
+    // field is replaced below only after the duplicate allocation succeeds.
+    *dest = *source;
+    let zalloc = dest.zalloc.expect("validated source allocator");
+    let zfree = dest.zfree.expect("validated source deallocator");
+    let state_memory = zalloc(
+        dest.opaque,
+        1,
         ::core::mem::size_of::<crate::src::deflate::deflate_state>() as crate::stdlib::uInt,
-    ) as *mut crate::src::deflate::deflate_state;
-    if ds.is_null() {
+    )
+    .cast::<crate::src::deflate::deflate_state>();
+    if state_memory.is_null() {
         return crate::zlib_h::Z_MEM_ERROR;
     }
-    crate::stdlib::memset(
-        ds as *mut ::core::ffi::c_void,
-        0 as ::core::ffi::c_int,
-        ::core::mem::size_of::<crate::src::deflate::deflate_state>(),
-    );
-    (*dest).state = ds as *mut crate::src::deflate::internal_state;
-    crate::stdlib::memcpy(
-        ds as *mut ::core::ffi::c_void,
-        ss as *const ::core::ffi::c_void,
-        ::core::mem::size_of::<crate::src::deflate::deflate_state>(),
-    );
-    // The bytewise state copy above is needed for the ABI allocator-backed
-    // fields. Give the copied stream its own owned header snapshot.
-    (*ds).gzhead = gzip_header_store(gzhead);
-    (*ds).strm = dest;
-    // `memcpy` copied the source vector's representation.  Replace that
-    // representation without dropping it, then install the independent
-    // cloned table prepared above.
-    ::core::ptr::write(::core::ptr::addr_of_mut!((*ds).head), Some(head_copy));
-    ::core::ptr::write(
-        ::core::ptr::addr_of_mut!((*ds).pending_buf),
-        Some(pending_copy),
-    );
-    ::core::ptr::write(::core::ptr::addr_of_mut!((*ds).prev), Some(prev_copy));
-    (*ds).window = Some((*dest).zalloc.expect("non-null function pointer"))
-        .expect("non-null function pointer")(
-        (*dest).opaque,
-        (*ds).w_size,
-        (2 as usize).wrapping_mul(::core::mem::size_of::<crate::stdlib::Byte>())
-            as crate::stdlib::uInt,
-    ) as *mut crate::stdlib::Bytef;
-    if (*ds).window.is_null()
-        || (*ds).prev.as_ref().is_none_or(|prev| prev.len() != (*ds).w_size as usize)
-        || (*ds).head.as_ref().is_none_or(|head| head.len() != (*ds).hash_size as usize)
-        || (*ds).pending_buf.is_none()
-    {
-        deflateEnd_from_stream_pointer(dest);
+    let window = zalloc(dest.opaque, source_state.w_size, 2).cast::<crate::stdlib::Bytef>();
+    if window.is_null() {
+        zfree(dest.opaque, state_memory.cast());
+        dest.state = ::core::ptr::null_mut();
         return crate::zlib_h::Z_MEM_ERROR;
     }
-    crate::stdlib::memcpy(
-        (*ds).window as *mut ::core::ffi::c_void,
-        (*ss).window as *const ::core::ffi::c_void,
-        (*ss).high_water as crate::__stddef_size_t_h::size_t,
+
+    let high_water = source_state.high_water as usize;
+    let source_window = core::slice::from_raw_parts(source_state.window, high_water);
+    let destination_window = core::slice::from_raw_parts_mut(window, high_water);
+    destination_window.copy_from_slice(source_window);
+
+    let copied_state = deflate_copy_state(
+        source_state,
+        dest,
+        head_copy,
+        prev_copy,
+        pending_copy,
+        gzip_header_store(gzhead),
     );
-    (*ds).sym_buf = (*ds).lit_bufsize as usize;
-    return crate::zlib_h::Z_OK;
+    let mut copied_state = copied_state;
+    copied_state.window = window;
+    core::ptr::write(state_memory, copied_state);
+    dest.state = state_memory;
+    crate::zlib_h::Z_OK
+}
+
+/// Convert ABI stream pointers once before the copy implementation borrows
+/// either stream.  Keeping this adapter separate leaves the exported symbol
+/// as a one-call dispatch while all copy validation remains in the
+/// implementation.
+unsafe fn deflateCopy(
+    dest: crate::zlib_h::z_streamp,
+    source: crate::zlib_h::z_streamp,
+) -> ::core::ffi::c_int {
+    if dest.is_null() || source.is_null() || dest == source {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    }
+    deflate_copy_impl(&mut *dest, &*source)
 }
 #[export_name = "deflateCopy"]
 
