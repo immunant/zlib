@@ -490,6 +490,15 @@ struct GzReadResetFields {
     junk: ::core::ffi::c_int,
 }
 
+// This is the pointer-free part of gzip's embedded codec stream that reset
+// and seek transitions currently own.  Keeping it as a separate value starts
+// the stream-owner split without letting an ABI `z_stream` leak into those
+// safe transitions; later work can extend the same projection with the other
+// codec scalars and buffer views.
+struct GzCodecInput {
+    available: crate::stdlib::uInt,
+}
+
 struct GzResetFields {
     have: ::core::ffi::c_uint,
     read: Option<GzReadResetFields>,
@@ -497,7 +506,7 @@ struct GzResetFields {
     again: ::core::ffi::c_int,
     skip: crate::stdlib::off64_t,
     pos: crate::stdlib::off64_t,
-    avail_in: crate::stdlib::uInt,
+    codec_input: GzCodecInput,
 }
 
 // The reset transition deliberately excludes the ABI cursors themselves.
@@ -516,7 +525,7 @@ struct GzResetState {
     err: ::core::ffi::c_int,
     msg: Option<Box<[u8]>>,
     pos: crate::stdlib::off64_t,
-    avail_in: crate::stdlib::uInt,
+    codec_input: GzCodecInput,
 }
 
 // This is the mutable, pointer-free portion of a gzip reset projection.  It
@@ -535,7 +544,7 @@ struct GzResetTarget<'a> {
     err: &'a mut ::core::ffi::c_int,
     msg: &'a mut Option<Box<[u8]>>,
     pos: &'a mut crate::stdlib::off64_t,
-    avail_in: &'a mut crate::stdlib::uInt,
+    codec_available_input: &'a mut crate::stdlib::uInt,
 }
 
 // `gzrewind` needs the same reset projection as the other gzip state
@@ -567,7 +576,7 @@ impl GzResetState {
         self.skip = fields.skip;
         gz_clear_error(&mut self.msg, &mut self.err);
         self.pos = fields.pos;
-        self.avail_in = fields.avail_in;
+        self.codec_input = fields.codec_input;
     }
 }
 
@@ -585,7 +594,9 @@ fn reset_gz_target(mode: ::core::ffi::c_int, target: GzResetTarget<'_>) {
         err: *target.err,
         msg: target.msg.take(),
         pos: *target.pos,
-        avail_in: *target.avail_in,
+        codec_input: GzCodecInput {
+            available: *target.codec_available_input,
+        },
     });
     store_gz_reset_target(target, reset);
 }
@@ -605,7 +616,7 @@ fn store_gz_reset_target(target: GzResetTarget<'_>, reset: GzResetState) {
     *target.err = reset.err;
     *target.msg = reset.msg;
     *target.pos = reset.pos;
-    *target.avail_in = reset.avail_in;
+    *target.codec_available_input = reset.codec_input.available;
 }
 
 fn gz_reset_fields(mode: ::core::ffi::c_int) -> GzResetFields {
@@ -622,7 +633,7 @@ fn gz_reset_fields(mode: ::core::ffi::c_int) -> GzResetFields {
         again: 0,
         skip: 0,
         pos: 0,
-        avail_in: 0,
+        codec_input: GzCodecInput { available: 0 },
     }
 }
 
@@ -794,7 +805,7 @@ impl GzOpenConfig {
             err: crate::zlib_h::Z_OK,
             msg: None,
             pos: 0,
-            avail_in: 0,
+            codec_input: GzCodecInput { available: 0 },
         });
         GzOpenState {
             fd,
@@ -933,7 +944,7 @@ unsafe fn gz_open(path: &[u8], fd: ::core::ffi::c_int, mode: &[u8]) -> crate::zl
         msg: None,
         strm: crate::zlib_h::z_stream {
             next_in: ::core::ptr::null_mut(),
-            avail_in: initial.reset.avail_in,
+            avail_in: initial.reset.codec_input.available,
             total_in: 0,
             next_out: ::core::ptr::null_mut(),
             avail_out: 0,
@@ -1084,7 +1095,7 @@ fn gzseek64_state<'a>(
             state.reset.past = 0;
             state.reset.skip = 0;
             gz_clear_error(&mut state.reset.msg, &mut state.reset.err);
-            state.reset.avail_in = 0;
+            state.reset.codec_input.available = 0;
             state.reset.pos = position;
             return (state.reset.pos, state, 0);
         }
@@ -1155,7 +1166,7 @@ pub unsafe extern "C" fn gzrewind_ffi(mut file: crate::zlib_h::gzFile) -> ::core
             err: &mut state.err,
             msg: &mut state.msg,
             pos: &mut state.x.pos,
-            avail_in: &mut state.strm.avail_in,
+            codec_available_input: &mut state.strm.avail_in,
         },
     })
 }
@@ -1200,7 +1211,9 @@ pub unsafe extern "C" fn gzseek64(
                 err: state.err,
                 msg: state.msg.take(),
                 pos: state.x.pos,
-                avail_in: state.strm.avail_in,
+                codec_input: GzCodecInput {
+                    available: state.strm.avail_in,
+                },
             },
             fd: state.fd.as_ref(),
             start: state.start,
@@ -1222,7 +1235,7 @@ pub unsafe extern "C" fn gzseek64(
             err: &mut state.err,
             msg: &mut state.msg,
             pos: &mut state.x.pos,
-            avail_in: &mut state.strm.avail_in,
+            codec_available_input: &mut state.strm.avail_in,
         },
         reset.reset,
     );
