@@ -1471,25 +1471,18 @@ pub unsafe extern "C" fn deflateBound_z_ffi(
 ) -> crate::stdlib::z_size_t {
     deflateBound_z(strm, sourceLen)
 }
-pub unsafe extern "C" fn deflateBound(
+#[export_name = "deflateBound"]
+pub unsafe extern "C" fn deflateBound_ffi(
     mut strm: crate::zlib_h::z_streamp,
     mut sourceLen: crate::stdlib::uLong,
 ) -> crate::stdlib::uLong {
     let mut bound: crate::stdlib::z_size_t =
         deflateBound_z(strm, sourceLen as crate::stdlib::z_size_t);
-    return if bound != bound {
+    if bound != bound {
         -1 as ::core::ffi::c_int as crate::stdlib::uLong
     } else {
         bound as crate::stdlib::uLong
-    };
-}
-#[export_name = "deflateBound"]
-
-pub unsafe extern "C" fn deflateBound_ffi(
-    mut strm: crate::zlib_h::z_streamp,
-    mut sourceLen: crate::stdlib::uLong,
-) -> crate::stdlib::uLong {
-    deflateBound(strm, sourceLen)
+    }
 }
 
 fn short_msb_bytes(b: crate::stdlib::uInt) -> [crate::stdlib::Byte; 2] {
