@@ -3817,17 +3817,16 @@ pub unsafe extern "C" fn deflateCopy(
         1 as crate::stdlib::uInt,
         ::core::mem::size_of::<crate::src::deflate::deflate_state>() as crate::stdlib::uInt,
     ) as *mut crate::src::deflate::deflate_state;
-    if ds.is_null() {
+    let Some(mut ds) = ::core::ptr::NonNull::new(ds) else {
         return crate::zlib_h::Z_MEM_ERROR;
-    }
-    dest.state = ds as *mut crate::src::deflate::internal_state;
+    };
+    dest.state = ds.as_ptr() as *mut crate::src::deflate::internal_state;
     // Publish an explicit initialized snapshot rather than byte-copying a
     // Rust value out of callback-owned storage.  The allocation handles are
     // retained until their replacements are installed below, preserving the
     // C copy path's callback-visible allocation order.  Header registration
     // is independently deep-copied before any callback can observe `ds`.
-    ::core::ptr::write(
-        ds,
+    ds.write(
         crate::src::deflate::internal_state {
             data_type: payload.data_type,
             status: payload.status,
@@ -3892,7 +3891,7 @@ pub unsafe extern "C" fn deflateCopy(
             slid: payload.slid,
         },
     );
-    let ds = &mut *ds;
+    let ds = &mut *ds.as_ptr();
     // Preserve the source implementation's callback-visible order.  Reload
     // the callback and opaque value for every request: a re-entrant custom
     // allocator is allowed to inspect or update the stream between calls.
