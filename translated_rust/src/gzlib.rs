@@ -1086,15 +1086,9 @@ fn gzrewind(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
         return -1 as ::core::ffi::c_int;
     }
     gz_reset(state);
-    // SAFETY: this bound state owns the error record; a null message does not
-    // dereference caller memory.
-    unsafe {
-        gz_error(
-            state,
-            crate::zlib_h::Z_OK,
-            ::core::ptr::null::<::core::ffi::c_char>(),
-        );
-    }
+    // `gz_reset` has already restored the read-side flags. Clearing the
+    // owned error record can stay in the reference-bound helper.
+    gzclearerr(state);
     0 as ::core::ffi::c_int
 }
 #[export_name = "gzrewind"]
