@@ -160,28 +160,26 @@ pub(crate) enum DecodeTable {
 
 /// Return the active decode table as a bounded view.
 ///
-/// Fixed tables have their own immutable storage; dynamic tables always live
-/// in the state's code arena.  Keeping that distinction here avoids raw table
-/// entry dereferences in the fast decoder.
+/// Fixed tables have their own immutable storage; dynamic tables are indices
+/// into the state's code arena. Keeping that distinction here avoids raw
+/// interior table pointers in the decoder state.
 pub(crate) fn decode_table(
     state: &crate::src::inflate::inflate_state,
     kind: DecodeTable,
 ) -> Option<&[crate::src::inftrees::code]> {
-    let (pointer, fixed) = match kind {
-        DecodeTable::LiteralLength => (state.lencode, &crate::src::inftrees::lenfix[..]),
-        DecodeTable::Distance => (state.distcode, &crate::src::inftrees::distfix[..]),
+    let table = match kind {
+        DecodeTable::LiteralLength => state.lencode.clone(),
+        DecodeTable::Distance => state.distcode.clone(),
     };
-    if pointer == fixed.as_ptr() {
-        return Some(fixed);
+    match table {
+        crate::src::inflate::InflateTableRef::FixedLiteralLength => {
+            Some(&crate::src::inftrees::lenfix[..])
+        }
+        crate::src::inflate::InflateTableRef::FixedDistance => {
+            Some(&crate::src::inftrees::distfix[..])
+        }
+        crate::src::inflate::InflateTableRef::Dynamic(index) => state.codes.get(index..),
     }
-
-    let codes = &state.codes;
-    let byte_offset = pointer.addr().checked_sub(codes.as_ptr().addr())?;
-    let code_size = ::core::mem::size_of::<crate::src::inftrees::code>();
-    if byte_offset % code_size != 0 {
-        return None;
-    }
-    codes.get(byte_offset / code_size..)
 }
 
 /// Copy one validated decode-table entry.
@@ -198,6 +196,21 @@ pub(crate) fn decode_table_entry(
     decode_table(state, kind)
         .and_then(|table| table.get(index))
         .map(crate::src::inftrees::copy_code)
+}
+
+/// Return zlib's invalid-code marker when an internal table selector is not
+/// usable. The normal decoder then follows its existing data-error path
+/// instead of allowing a panic to cross the ABI boundary.
+pub(crate) fn decode_table_entry_or_invalid(
+    state: &crate::src::inflate::inflate_state,
+    kind: DecodeTable,
+    index: usize,
+) -> crate::src::inftrees::code {
+    decode_table_entry(state, kind, index).unwrap_or(crate::src::inftrees::code {
+        op: 64,
+        bits: 0,
+        val: 0,
+    })
 }
 
 pub fn inflate_fast(

@@ -435,8 +435,8 @@ pub unsafe fn inflateBack(
                         state.lens[ORDER[c2rust_fresh5 as usize] as usize] =
                             0 as ::core::ffi::c_ushort;
                     }
-                    state.next = &raw mut state.codes as *mut crate::src::inftrees::code;
-                    state.lencode = state.next as *const crate::src::inftrees::code;
+                    state.next = 0;
+                    state.lencode = crate::src::inflate::InflateTableRef::Dynamic(state.next);
                     state.lenbits = 7 as ::core::ffi::c_uint;
                     ret = match crate::src::inftrees::inflate_table(
                         crate::src::inftrees::CODES,
@@ -446,8 +446,7 @@ pub unsafe fn inflateBack(
                         &mut (&mut state.work)[..19],
                     ) {
                         Ok(used) => {
-                            state.next = (&raw mut state.codes as *mut crate::src::inftrees::code)
-                                .wrapping_add(used);
+                            state.next = used;
                             0
                         }
                         Err(error) => error,
@@ -670,8 +669,8 @@ pub unsafe fn inflateBack(
                             state.mode = crate::src::inflate::BAD;
                             continue;
                         } else {
-                            state.next = &raw mut state.codes as *mut crate::src::inftrees::code;
-                            state.lencode = state.next as *const crate::src::inftrees::code;
+                            state.next = 0;
+                            state.lencode = crate::src::inflate::InflateTableRef::Dynamic(state.next);
                             state.lenbits = 9 as ::core::ffi::c_uint;
                             ret = match crate::src::inftrees::inflate_table(
                                 crate::src::inftrees::LENS,
@@ -681,9 +680,7 @@ pub unsafe fn inflateBack(
                                 &mut (&mut state.work)[..state.nlen as usize],
                             ) {
                                 Ok(used) => {
-                                    state.next = (&raw mut state.codes
-                                        as *mut crate::src::inftrees::code)
-                                        .wrapping_add(used);
+                                    state.next = used;
                                     0
                                 }
                                 Err(error) => error,
@@ -695,15 +692,9 @@ pub unsafe fn inflateBack(
                                 state.mode = crate::src::inflate::BAD;
                                 continue;
                             } else {
-                                state.distcode = state.next as *const crate::src::inftrees::code;
+                                state.distcode = crate::src::inflate::InflateTableRef::Dynamic(state.next);
                                 state.distbits = 6 as ::core::ffi::c_uint;
-                                let table_start =
-                                    &raw mut state.codes as *mut crate::src::inftrees::code;
-                                // `next` was set from this fixed code arena after the
-                                // literal/length table build, so its address delta is a
-                                // whole number of `code` entries within that arena.
-                                let table_used = state.next.addr().wrapping_sub(table_start.addr())
-                                    / ::core::mem::size_of::<crate::src::inftrees::code>();
+                                let table_used = state.next;
                                 ret = match crate::src::inftrees::inflate_table(
                                     crate::src::inftrees::DISTS,
                                     &(&state.lens)
@@ -713,7 +704,7 @@ pub unsafe fn inflateBack(
                                     &mut (&mut state.work)[..state.ndist as usize],
                                 ) {
                                     Ok(used) => {
-                                        state.next = table_start.wrapping_add(table_used + used);
+                                        state.next = table_used + used;
                                         0
                                     }
                                     Err(error) => error,

@@ -3242,9 +3242,9 @@ pub unsafe extern "C" fn inflate_table_ffi(
     }
 }
 pub fn inflate_fixed(state: &mut crate::src::inflate::inflate_state) {
-    state.lencode = &raw const lenfix[0];
+    state.lencode = crate::src::inflate::InflateTableRef::FixedLiteralLength;
     state.lenbits = 9 as ::core::ffi::c_uint;
-    state.distcode = &raw const distfix[0];
+    state.distcode = crate::src::inflate::InflateTableRef::FixedDistance;
     state.distbits = 5 as ::core::ffi::c_uint;
 }
 #[export_name = "inflate_fixed"]

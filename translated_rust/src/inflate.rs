@@ -106,8 +106,14 @@ fn stream_identity(strm: &crate::zlib_h::z_stream) -> usize {
     ::core::ptr::from_ref(strm).addr()
 }
 
-#[repr(C)]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) enum InflateTableRef {
+    FixedLiteralLength,
+    FixedDistance,
+    Dynamic(usize),
+}
 
+#[repr(C)]
 pub struct inflate_state {
     pub strm: usize,
     pub mode: crate::src::inflate::inflate_mode,
@@ -129,15 +135,15 @@ pub struct inflate_state {
     pub length: ::core::ffi::c_uint,
     pub offset: ::core::ffi::c_uint,
     pub extra: ::core::ffi::c_uint,
-    pub lencode: *const crate::src::inftrees::code,
-    pub distcode: *const crate::src::inftrees::code,
+    pub(crate) lencode: InflateTableRef,
+    pub(crate) distcode: InflateTableRef,
     pub lenbits: ::core::ffi::c_uint,
     pub distbits: ::core::ffi::c_uint,
     pub ncode: ::core::ffi::c_uint,
     pub nlen: ::core::ffi::c_uint,
     pub ndist: ::core::ffi::c_uint,
     pub have: ::core::ffi::c_uint,
-    pub next: *mut crate::src::inftrees::code,
+    pub next: usize,
     pub lens: [::core::ffi::c_ushort; 320],
     pub work: [::core::ffi::c_ushort; 288],
     pub codes: [crate::src::inftrees::code; 1444],
@@ -168,8 +174,8 @@ fn copy_inflate_state(source: &inflate_state) -> inflate_state {
         length: source.length,
         offset: source.offset,
         extra: source.extra,
-        lencode: source.lencode,
-        distcode: source.distcode,
+        lencode: source.lencode.clone(),
+        distcode: source.distcode.clone(),
         lenbits: source.lenbits,
         distbits: source.distbits,
         ncode: source.ncode,
@@ -272,9 +278,9 @@ pub fn inflateResetKeep(
     state.head = ::core::ptr::null_mut::<crate::zlib_h::gz_header>();
     state.hold = 0 as ::core::ffi::c_ulong;
     state.bits = 0 as ::core::ffi::c_uint;
-    state.next = state.codes.as_mut_ptr();
-    state.distcode = state.next;
-    state.lencode = state.distcode;
+    state.next = 0;
+    state.distcode = InflateTableRef::Dynamic(state.next);
+    state.lencode = state.distcode.clone();
     state.sane = 1 as ::core::ffi::c_int;
     state.back = -1 as ::core::ffi::c_int;
     return crate::zlib_h::Z_OK;
@@ -1304,9 +1310,9 @@ pub fn inflate(
                                                                                             (*state).lens[ORDER[c2rust_fresh16 as usize] as usize] = 0
                                                                                                 as ::core::ffi::c_ushort;
                                                                                         }
-                                                                                            (*state).next = &raw mut (*state).codes as *mut crate::src::inftrees::code;
-                                                                                            (*state).distcode = (*state).next as *const crate::src::inftrees::code;
-                                                                                            (*state).lencode = (*state).distcode;
+                                                                                            (*state).next = 0;
+                                                                                            (*state).distcode = InflateTableRef::Dynamic((*state).next);
+                                                                                            (*state).lencode = (*state).distcode.clone();
                                                                                             (*state).lenbits = 7 as ::core::ffi::c_uint;
                                                                                             ret = match crate::src::inftrees::inflate_table(
                                                                                             crate::src::inftrees::CODES,
@@ -1316,7 +1322,7 @@ pub fn inflate(
                                                                                             &mut (&mut (*state).work)[..19],
                                                                                         ) {
                                                                                             Ok(used) => {
-                                                                                                (*state).next = (&raw mut (*state).codes as *mut crate::src::inftrees::code).wrapping_add(used);
+                                                                                                (*state).next = used;
                                                                                                 0
                                                                                             }
                                                                                             Err(error) => error,
@@ -1411,13 +1417,13 @@ pub fn inflate(
                                                                                     )
                                                                             {
                                                                                 loop {
-                                                                                    here = crate::src::inftrees::copy_code(&*(*state)
-                                                                                        .lencode
-                                                                                        .wrapping_offset(
+                                                                                    here = crate::src::inffast::decode_table_entry_or_invalid(
+                                                                                        &*state,
+                                                                                        crate::src::inffast::DecodeTable::LiteralLength,
                                                                                         (hold as ::core::ffi::c_uint
                                                                                             & ((1 as ::core::ffi::c_uint) << (*state).lenbits)
-                                                                                                .wrapping_sub(1 as ::core::ffi::c_uint)) as isize,
-                                                                                        ));
+                                                                                                .wrapping_sub(1 as ::core::ffi::c_uint)) as usize,
+                                                                                    );
                                                                                     if here.bits as ::core::ffi::c_uint <= bits {
                                                                                     break;
                                                                                 }
@@ -1590,8 +1596,8 @@ pub fn inflate(
                                                                             (*state).mode = crate::src::inflate::BAD;
                                                                             continue '_inf_leave;
                                                                         } else {
-                                                                            (*state).next = &raw mut (*state).codes as *mut crate::src::inftrees::code;
-                                                                            (*state).lencode = (*state).next as *const crate::src::inftrees::code;
+                                                                            (*state).next = 0;
+                                                                            (*state).lencode = InflateTableRef::Dynamic((*state).next);
                                                                             (*state).lenbits = 9 as ::core::ffi::c_uint;
                                                                             ret = match crate::src::inftrees::inflate_table(
                                                                                 crate::src::inftrees::LENS,
@@ -1601,7 +1607,7 @@ pub fn inflate(
                                                                                 &mut (&mut (*state).work)[..(*state).nlen as usize],
                                                                             ) {
                                                                                 Ok(used) => {
-                                                                                    (*state).next = (&raw mut (*state).codes as *mut crate::src::inftrees::code).wrapping_add(used);
+                                                                                    (*state).next = used;
                                                                                     0
                                                                                 }
                                                                                 Err(error) => error,
@@ -1612,17 +1618,9 @@ pub fn inflate(
                                                                                 (*state).mode = crate::src::inflate::BAD;
                                                                                 continue '_inf_leave;
                                                                             } else {
-                                                                                (*state).distcode = (*state).next as *const crate::src::inftrees::code;
+                                                                                (*state).distcode = InflateTableRef::Dynamic((*state).next);
                                                                                 (*state).distbits = 6 as ::core::ffi::c_uint;
-                                                                                let table_start = &raw mut (*state).codes as *mut crate::src::inftrees::code;
-                                                                                // `next` was set from this fixed code arena after the
-                                                                                // literal/length table build, so its address delta is a
-                                                                                // whole number of `code` entries within that arena.
-                                                                                let table_used = (*state)
-                                                                                    .next
-                                                                                    .addr()
-                                                                                    .wrapping_sub(table_start.addr())
-                                                                                    / ::core::mem::size_of::<crate::src::inftrees::code>();
+                                                                                let table_used = (*state).next;
                                                                                 ret = match crate::src::inftrees::inflate_table(
                                                                                     crate::src::inftrees::DISTS,
                                                                                     &(&(*state).lens)[(*state).nlen as usize..((*state).nlen + (*state).ndist) as usize],
@@ -1631,7 +1629,7 @@ pub fn inflate(
                                                                                     &mut (&mut (*state).work)[..(*state).ndist as usize],
                                                                                 ) {
                                                                                     Ok(used) => {
-                                                                                        (*state).next = table_start.wrapping_add(table_used + used);
+                                                                                        (*state).next = table_used + used;
                                                                                         0
                                                                                     }
                                                                                     Err(error) => error,
@@ -1956,15 +1954,17 @@ pub fn inflate(
                                             } else {
                                                 (*state).back = 0 as ::core::ffi::c_int;
                                                 loop {
-                                                    here = crate::src::inftrees::copy_code(&*(*state).lencode.wrapping_offset(
+                                                    here = crate::src::inffast::decode_table_entry_or_invalid(
+                                                        &*state,
+                                                        crate::src::inffast::DecodeTable::LiteralLength,
                                                         (hold as ::core::ffi::c_uint
                                                             & ((1 as ::core::ffi::c_uint)
                                                                 << (*state).lenbits)
                                                                 .wrapping_sub(
                                                                     1 as ::core::ffi::c_uint,
                                                                 ))
-                                                            as isize,
-                                                    ));
+                                                            as usize,
+                                                    );
                                                     if here.bits as ::core::ffi::c_uint <= bits {
                                                         break;
                                                     }
@@ -1988,7 +1988,9 @@ pub fn inflate(
                                                 {
                                                     last = here;
                                                     loop {
-                                                        here = crate::src::inftrees::copy_code(&*(*state).lencode.wrapping_offset(
+                                                        here = crate::src::inffast::decode_table_entry_or_invalid(
+                                                        &*state,
+                                                        crate::src::inffast::DecodeTable::LiteralLength,
                                                         (last.val as ::core::ffi::c_uint)
                                                             .wrapping_add(
                                                             (hold as ::core::ffi::c_uint
@@ -2002,8 +2004,8 @@ pub fn inflate(
                                                                     ))
                                                                 >> last.bits as ::core::ffi::c_int,
                                                         )
-                                                            as isize,
-                                                        ));
+                                                            as usize,
+                                                        );
                                                         if (last.bits as ::core::ffi::c_int
                                                             + here.bits as ::core::ffi::c_int)
                                                             as ::core::ffi::c_uint
@@ -2199,12 +2201,14 @@ pub fn inflate(
                                 break 'c_2325;
                             }
                             loop {
-                                here = crate::src::inftrees::copy_code(&*(*state).distcode.wrapping_offset(
+                                here = crate::src::inffast::decode_table_entry_or_invalid(
+                                    &*state,
+                                    crate::src::inffast::DecodeTable::Distance,
                                     (hold as ::core::ffi::c_uint
                                         & ((1 as ::core::ffi::c_uint) << (*state).distbits)
                                             .wrapping_sub(1 as ::core::ffi::c_uint))
-                                    as isize,
-                                ));
+                                    as usize,
+                                );
                                 if here.bits as ::core::ffi::c_uint <= bits {
                                     break;
                                 }
@@ -2224,7 +2228,9 @@ pub fn inflate(
                             {
                                 last = here;
                                 loop {
-                                    here = crate::src::inftrees::copy_code(&*(*state).distcode.wrapping_offset(
+                                    here = crate::src::inffast::decode_table_entry_or_invalid(
+                                        &*state,
+                                        crate::src::inffast::DecodeTable::Distance,
                                         (last.val as ::core::ffi::c_uint).wrapping_add(
                                             (hold as ::core::ffi::c_uint
                                                 & ((1 as ::core::ffi::c_uint)
@@ -2232,8 +2238,8 @@ pub fn inflate(
                                                         + last.op as ::core::ffi::c_int)
                                                     .wrapping_sub(1 as ::core::ffi::c_uint))
                                                 >> last.bits as ::core::ffi::c_int,
-                                        ) as isize,
-                                    ));
+                                        ) as usize,
+                                    );
                                     if (last.bits as ::core::ffi::c_int
                                         + here.bits as ::core::ffi::c_int)
                                         as ::core::ffi::c_uint
@@ -2908,8 +2914,6 @@ fn initialize_inflate_copy(
     dest: &mut crate::zlib_h::z_stream,
     source: &crate::zlib_h::z_stream,
     source_state: &crate::src::inflate::inflate_state,
-    table_indices: Option<(usize, usize)>,
-    next_index: usize,
 ) -> ::core::ffi::c_int {
     let copy = unsafe {
         Some(source.zalloc.expect("validated allocator"))
@@ -2944,15 +2948,6 @@ fn initialize_inflate_copy(
     let copy_ref = unsafe { &mut *copy };
     *copy_ref = copy_inflate_state(source_state);
     copy_ref.strm = stream_identity(dest);
-    if let Some((lencode_index, distcode_index)) = table_indices {
-        let copy_codes =
-            ::core::ptr::from_mut(&mut copy_ref.codes).cast::<crate::src::inftrees::code>();
-        copy_ref.lencode = copy_codes.wrapping_add(lencode_index);
-        copy_ref.distcode = copy_codes.wrapping_add(distcode_index);
-    }
-    copy_ref.next = ::core::ptr::from_mut(&mut copy_ref.codes)
-        .cast::<crate::src::inftrees::code>()
-        .wrapping_add(next_index);
     if !window.is_null() {
         unsafe {
             ::core::ptr::copy_nonoverlapping(
@@ -2991,31 +2986,17 @@ pub fn inflateCopy(
     let Some(dest_ref) = dest else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
-    let state_codes = ::core::ptr::from_ref(&state_ref.codes).cast_mut();
-    let code_size = ::core::mem::size_of::<crate::src::inftrees::code>();
-    let code_index = |address: usize| {
-        address
-            .checked_sub(state_codes.addr())
-            .filter(|bytes| bytes % code_size == 0)
-            .map(|bytes| bytes / code_size)
+    let valid_table_ref = |table: &InflateTableRef| match table {
+        InflateTableRef::FixedLiteralLength | InflateTableRef::FixedDistance => true,
+        InflateTableRef::Dynamic(index) => *index < crate::src::inftrees::ENOUGH as usize,
     };
-    let Some(next_index) = code_index(state_ref.next.addr())
-        .filter(|index| *index <= crate::src::inftrees::ENOUGH as usize)
-    else {
+    if state_ref.next > crate::src::inftrees::ENOUGH as usize
+        || !valid_table_ref(&state_ref.lencode)
+        || !valid_table_ref(&state_ref.distcode)
+    {
         return crate::zlib_h::Z_STREAM_ERROR;
-    };
-    let table_indices = match code_index(state_ref.lencode.addr()) {
-        Some(lencode_index) if lencode_index < crate::src::inftrees::ENOUGH as usize => {
-            let Some(distcode_index) = code_index(state_ref.distcode.addr())
-                .filter(|index| *index < crate::src::inftrees::ENOUGH as usize)
-            else {
-                return crate::zlib_h::Z_STREAM_ERROR;
-            };
-            Some((lencode_index, distcode_index))
-        }
-        _ => None,
-    };
-    initialize_inflate_copy(dest_ref, source_ref, state_ref, table_indices, next_index)
+    }
+    initialize_inflate_copy(dest_ref, source_ref, state_ref)
 }
 #[export_name = "inflateCopy"]
 
@@ -3154,12 +3135,7 @@ fn inflate_codes_used(state: Option<&crate::src::inflate::inflate_state>) -> ::c
     let Some(state) = state else {
         return -1 as ::core::ffi::c_int as ::core::ffi::c_ulong;
     };
-    return state
-        .next
-        .addr()
-        .wrapping_sub(state.codes.as_ptr().addr())
-        .wrapping_div(::core::mem::size_of::<crate::src::inftrees::code>())
-        as ::core::ffi::c_ulong;
+    return state.next as ::core::ffi::c_ulong;
 }
 fn inflate_codes_used_stream(
     strm: &crate::zlib_h::z_stream,
