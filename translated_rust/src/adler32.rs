@@ -23,21 +23,20 @@ fn update_bounded_block(mut adler: u64, mut sum2: u64, block: &[Bytef]) -> (u64,
     let mut groups = block.chunks_exact(16);
     for group in &mut groups {
         for &byte in group {
-            adler = adler.wrapping_add(byte as u64);
-            sum2 = sum2.wrapping_add(adler);
+            adler += byte as u64;
+            sum2 += adler;
         }
     }
     for &byte in groups.remainder() {
-        adler = adler.wrapping_add(byte as u64);
-        sum2 = sum2.wrapping_add(adler);
+        adler += byte as u64;
+        sum2 += adler;
     }
 
     (adler, sum2)
 }
 
-fn reduce(adler: &mut u64, sum2: &mut u64) {
-    *adler %= BASE_U64;
-    *sum2 %= BASE_U64;
+fn reduce(adler: u64, sum2: u64) -> (u64, u64) {
+    (adler % BASE_U64, sum2 % BASE_U64)
 }
 
 pub fn adler32_z(adler: uLong, buf: &[Bytef]) -> uLong {
@@ -47,10 +46,10 @@ pub fn adler32_z(adler: uLong, buf: &[Bytef]) -> uLong {
 
     for block in buf.chunks(NMAX_USIZE) {
         (adler, sum2) = update_bounded_block(adler, sum2, block);
-        reduce(&mut adler, &mut sum2);
+        (adler, sum2) = reduce(adler, sum2);
     }
 
-    reduce(&mut adler, &mut sum2);
+    (adler, sum2) = reduce(adler, sum2);
 
     (adler | sum2 << 16) as uLong
 }
@@ -66,14 +65,10 @@ fn adler32_combine_(adler1: uLong, adler2: uLong, len2: off64_t) -> uLong {
 
     let rem = (len2 % BASE as off64_t) as u64;
     let mut sum1 = adler1 as u64 & 0xffff;
-    let mut sum2 = rem.wrapping_mul(sum1) % BASE_U64;
+    let mut sum2 = rem * sum1 % BASE_U64;
 
-    sum1 = sum1.wrapping_add((adler2 as u64 & 0xffff).wrapping_add(BASE_U64 - 1));
-    sum2 = sum2.wrapping_add(
-        ((adler1 as u64 >> 16) & 0xffff)
-            .wrapping_add((adler2 as u64 >> 16) & 0xffff)
-            .wrapping_add(BASE_U64 - rem),
-    );
+    sum1 += (adler2 as u64 & 0xffff) + BASE_U64 - 1;
+    sum2 += ((adler1 as u64 >> 16) & 0xffff) + ((adler2 as u64 >> 16) & 0xffff) + BASE_U64 - rem;
 
     if sum1 >= BASE_U64 {
         sum1 -= BASE_U64;
@@ -167,5 +162,31 @@ mod tests {
             let buf = &input[..len];
             assert_eq!(adler32_z(seed, buf), reference_adler32(seed, buf));
         }
+    }
+
+    #[test]
+    fn combines_checksums_for_concatenated_input() {
+        let first = b"first part";
+        let second = b" and second part";
+        let mut combined_input = first.to_vec();
+        combined_input.extend_from_slice(second);
+
+        let first_adler = adler32(1, first);
+        let second_adler = adler32(1, second);
+        let expected = adler32(1, &combined_input);
+
+        assert_eq!(
+            adler32_combine(first_adler, second_adler, second.len() as off_t),
+            expected
+        );
+        assert_eq!(
+            adler32_combine64(first_adler, second_adler, second.len() as off64_t),
+            expected
+        );
+    }
+
+    #[test]
+    fn rejects_negative_combine_lengths() {
+        assert_eq!(adler32_combine64(1, 1, -1), 0xffff_ffff);
     }
 }
