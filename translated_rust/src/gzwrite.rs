@@ -292,7 +292,7 @@ unsafe fn gz_init(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
     // The write-side input allocation is owned storage.  Retain its empty
     // cursor as an index/count now, so later buffered writes need not recover
     // it from the embedded stream's temporary `next_in` projection.
-    state.buffers.input_cursor = Some(crate::src::gzlib::GzCodecInput::empty());
+    state.buffers.write_owner = Some(crate::src::gzlib::GzWriteOwner::new());
     if state.direct == 0 {
         state.strm.zalloc = None;
         state.strm.zfree = None;
@@ -322,12 +322,14 @@ unsafe fn gz_init(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
         // Successful initialization, rather than buffer allocation or
         // compressed mode, is the lifecycle proof needed by close.  Install
         // the pointer-free owner before any later setup can publish cursors.
-        state.buffers.deflate_state = Some(crate::src::gzlib::GzEmbeddedDeflateState::new(
-            0,
-            0,
-            state.strm.total_in,
-            state.strm.total_out,
-        ));
+        state.buffers.write_owner.as_mut().unwrap().set_deflater(
+            crate::src::gzlib::GzEmbeddedDeflateState::new(
+                0,
+                0,
+                state.strm.total_in,
+                state.strm.total_out,
+            ),
+        );
         state.strm.next_in = ::core::ptr::null_mut::<crate::stdlib::Bytef>();
     }
     if state.direct == 0 {
@@ -379,12 +381,14 @@ unsafe fn gz_init(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
         state.strm.avail_out = call.output_available();
         state.strm.next_out = call.output_mut().as_mut_ptr();
         state.x.next = state.strm.next_out as *mut ::core::ffi::c_uchar;
-        state.buffers.deflate_state = Some(crate::src::gzlib::GzEmbeddedDeflateState::new(
-            0,
-            state.strm.avail_out,
-            state.strm.total_in,
-            state.strm.total_out,
-        ));
+        state.buffers.write_owner.as_mut().unwrap().set_deflater(
+            crate::src::gzlib::GzEmbeddedDeflateState::new(
+                0,
+                state.strm.avail_out,
+                state.strm.total_in,
+                state.strm.total_out,
+            ),
+        );
     }
     return 0 as ::core::ffi::c_int;
 }
@@ -540,7 +544,12 @@ unsafe fn gz_comp(
         // `gz_init()` installs this tag immediately after `deflateInit2_()`
         // succeeds.  Do not recreate it from allocation state here: that
         // would allow a failed setup to masquerade as an initialized codec.
-        let Some(persisted) = state.buffers.deflate_state else {
+        let Some(persisted) = state
+            .buffers
+            .write_owner
+            .as_ref()
+            .and_then(crate::src::gzlib::GzWriteOwner::deflater)
+        else {
             return -1;
         };
         let codec_state = crate::src::gzlib::GzEmbeddedDeflateState::new(
@@ -561,7 +570,12 @@ unsafe fn gz_comp(
                     None => return -1,
                 },
                 None => {
-                    let Some(cursor) = state.buffers.input_cursor.as_ref() else {
+                    let Some(cursor) = state
+                        .buffers
+                        .write_owner
+                        .as_ref()
+                        .map(crate::src::gzlib::GzWriteOwner::input)
+                    else {
                         return -1;
                     };
                     let Some(buffer) = state.buffers.input.as_deref() else {
@@ -613,15 +627,30 @@ unsafe fn gz_comp(
         state.strm.avail_out = codec_state.output_available();
         state.strm.total_in = codec_state.total_in();
         state.strm.total_out = codec_state.total_out();
-        state.buffers.deflate_state = Some(codec_state);
+        state
+            .buffers
+            .write_owner
+            .as_mut()
+            .unwrap()
+            .set_deflater(codec_state);
         if external_input.is_none() {
-            let Some(cursor) = state.buffers.input_cursor.as_ref() else {
+            let Some(cursor) = state
+                .buffers
+                .write_owner
+                .as_ref()
+                .map(crate::src::gzlib::GzWriteOwner::input)
+            else {
                 return -1;
             };
             let Some(cursor) = cursor.after_codec(snapshot.remaining_input) else {
                 return -1;
             };
-            state.buffers.input_cursor = Some(cursor);
+            state
+                .buffers
+                .write_owner
+                .as_mut()
+                .unwrap()
+                .set_input(cursor);
         }
         if ret == crate::zlib_h::Z_STREAM_ERROR {
             crate::src::gzlib::GzErrorState {
@@ -692,13 +721,21 @@ unsafe fn gz_zero(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
         else {
             return -1;
         };
-        state.buffers.input_cursor = Some(cursor);
+        state
+            .buffers
+            .write_owner
+            .as_mut()
+            .unwrap()
+            .set_input(cursor);
         staged_zero = Some(step);
         needs_compress = true;
     }
 }
 
-unsafe fn gz_write_from_state(
+// This is the only ABI-shaped write adapter.  The persistent `GzWriteOwner`
+// supplies the owned input cursor and deflater lifecycle; the adapter merely
+// projects those bounded requests through the legacy gzip/deflate state.
+unsafe fn gzip_write_state_adapter(
     state: &mut crate::gzguts_h::gz_state,
     transaction: GzWriteTransaction<'_>,
 ) -> crate::stdlib::z_size_t {
@@ -718,8 +755,9 @@ unsafe fn gz_write_from_state(
                     &mut state.buffers.input.as_deref_mut().unwrap()[..state.buffers.size as usize];
                 let cursor = state
                     .buffers
-                    .input_cursor
-                    .take()
+                    .write_owner
+                    .as_mut()
+                    .map(crate::src::gzlib::GzWriteOwner::take_input)
                     .unwrap_or_else(crate::src::gzlib::GzCodecInput::empty);
                 let Some(mut buffered) = crate::src::gzlib::GzBufferedInput::from_index(
                     buffer,
@@ -739,7 +777,12 @@ unsafe fn gz_write_from_state(
                 (copy, cursor)
             };
             state.strm.avail_in = cursor.available();
-            state.buffers.input_cursor = Some(cursor);
+            state
+                .buffers
+                .write_owner
+                .as_mut()
+                .unwrap()
+                .set_input(cursor);
             state.x.pos += copy as crate::stdlib::off64_t;
             if request.advance(copy).is_none() {
                 return 0;
@@ -754,9 +797,9 @@ unsafe fn gz_write_from_state(
     } else {
         if state
             .buffers
-            .input_cursor
+            .write_owner
             .as_ref()
-            .is_some_and(|cursor| cursor.available() != 0)
+            .is_some_and(|owner| owner.input().available() != 0)
             && gz_comp(state, crate::zlib_h::Z_NO_FLUSH, None) == -1 as ::core::ffi::c_int
         {
             return 0 as crate::stdlib::z_size_t;
@@ -847,7 +890,7 @@ unsafe fn gzwrite(state: &mut crate::gzguts_h::gz_state, input: &[u8]) -> ::core
     let Some(transaction) = gz_write(input) else {
         return 0;
     };
-    return gz_write_from_state(state, transaction) as ::core::ffi::c_int;
+    return gzip_write_state_adapter(state, transaction) as ::core::ffi::c_int;
 }
 #[export_name = "gzwrite"]
 
@@ -910,7 +953,7 @@ unsafe fn gzfwrite(
         let Some(transaction) = gz_write(input) else {
             return 0;
         };
-        gz_write_from_state(state, transaction).wrapping_div(size)
+        gzip_write_state_adapter(state, transaction).wrapping_div(size)
     } else {
         0 as crate::stdlib::z_size_t
     };
@@ -956,7 +999,7 @@ unsafe fn gzputc(
         path: state.path.as_deref(),
     }
     .clear();
-    // `gz_write_from_state()` owns the ABI-state portion of the whole write
+    // `gzip_write_state_adapter()` owns the ABI-state portion of the whole write
     // transaction: initialization, pending
     // forward-seek zero fill, bounded input buffering, and the embedded
     // deflate dispatch.  Feeding it the one-byte slice preserves the full
@@ -965,7 +1008,7 @@ unsafe fn gzputc(
     let Some(transaction) = gz_write(&buf) else {
         return -1;
     };
-    if gz_write_from_state(state, transaction) != 1 as crate::stdlib::z_size_t {
+    if gzip_write_state_adapter(state, transaction) != 1 as crate::stdlib::z_size_t {
         return -1 as ::core::ffi::c_int;
     }
     return c & 0xff as ::core::ffi::c_int;
@@ -1015,7 +1058,7 @@ unsafe fn gzputs(state: &mut crate::gzguts_h::gz_state, text: &[u8]) -> ::core::
         return -1 as ::core::ffi::c_int;
     }
     let put = gz_write(text)
-        .map(|transaction| gz_write_from_state(state, transaction))
+        .map(|transaction| gzip_write_state_adapter(state, transaction))
         .unwrap_or(0);
     return if len != 0 && put == 0 as crate::stdlib::z_size_t {
         -1 as ::core::ffi::c_int
@@ -1110,9 +1153,9 @@ unsafe fn gzsetparams(
     if state.buffers.size != 0 {
         if state
             .buffers
-            .input_cursor
+            .write_owner
             .as_ref()
-            .is_some_and(|cursor| cursor.available() != 0)
+            .is_some_and(|owner| owner.input().available() != 0)
             && gz_comp(state, crate::zlib_h::Z_BLOCK, None) == -1 as ::core::ffi::c_int
         {
             return state.err;

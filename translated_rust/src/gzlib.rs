@@ -104,7 +104,7 @@ impl crate::gzguts_h::GzBuffers {
             output: None,
             input_cursor: None,
             inflate_state: None,
-            deflate_state: None,
+            write_owner: None,
             output_cursor: None,
         }
     }
@@ -129,7 +129,7 @@ impl crate::gzguts_h::GzBuffers {
             output,
             input_cursor: None,
             inflate_state: None,
-            deflate_state: None,
+            write_owner: None,
             output_cursor: None,
         })
     }
@@ -147,7 +147,7 @@ impl crate::gzguts_h::GzBuffers {
             output: Some(output),
             input_cursor: Some(GzCodecInput::empty()),
             inflate_state: None,
-            deflate_state: None,
+            write_owner: None,
             output_cursor: None,
         })
     }
@@ -172,17 +172,17 @@ impl crate::gzguts_h::GzBuffers {
         self.output = None;
         self.input_cursor = None;
         self.inflate_state = None;
-        self.deflate_state = None;
+        self.write_owner = None;
         self.output_cursor = None;
         self.size = 0;
     }
 
     // A compressed gzip writer owns an initialized embedded deflater exactly
-    // when this tag is present.  Close consumes it before releasing either
-    // paired buffer, so allocation state alone can never authorize a codec
-    // teardown.
+    // when its write owner carries one. Close consumes that lifecycle before
+    // releasing either paired buffer, so allocation state alone can never
+    // authorize a codec teardown.
     pub(crate) fn take_embedded_deflater(&mut self) -> Option<GzEmbeddedDeflateState> {
-        self.deflate_state.take()
+        self.write_owner.as_mut()?.take_deflater()
     }
 
     // The completed read cursor belongs to the output allocation.  Keep the
@@ -333,6 +333,15 @@ pub(crate) struct GzEmbeddedDeflateState {
     output_available: crate::stdlib::uInt,
     total_in: crate::stdlib::uLong,
     total_out: crate::stdlib::uLong,
+}
+
+// Persistent write state is entirely pointer-free: the input cursor stays
+// tied to the owned gzip allocation and the embedded deflater retains only
+// scalar progress.  The ABI `z_stream` is projected for one dispatch at a
+// time by the surrounding adapter.
+pub(crate) struct GzWriteOwner {
+    input: GzCodecInput,
+    deflater: Option<GzEmbeddedDeflateState>,
 }
 
 pub(crate) struct GzCodecOutputView<'a> {
@@ -912,6 +921,39 @@ impl GzEmbeddedDeflateState {
 
     pub(crate) fn total_out(&self) -> crate::stdlib::uLong {
         self.total_out
+    }
+}
+
+impl GzWriteOwner {
+    pub(crate) fn new() -> Self {
+        Self {
+            input: GzCodecInput::empty(),
+            deflater: None,
+        }
+    }
+
+    pub(crate) fn input(&self) -> &GzCodecInput {
+        &self.input
+    }
+
+    pub(crate) fn take_input(&mut self) -> GzCodecInput {
+        core::mem::replace(&mut self.input, GzCodecInput::empty())
+    }
+
+    pub(crate) fn set_input(&mut self, input: GzCodecInput) {
+        self.input = input;
+    }
+
+    pub(crate) fn deflater(&self) -> Option<GzEmbeddedDeflateState> {
+        self.deflater
+    }
+
+    pub(crate) fn set_deflater(&mut self, deflater: GzEmbeddedDeflateState) {
+        self.deflater = Some(deflater);
+    }
+
+    pub(crate) fn take_deflater(&mut self) -> Option<GzEmbeddedDeflateState> {
+        self.deflater.take()
     }
 }
 
@@ -2173,7 +2215,7 @@ unsafe fn gz_open(path: GzOpenPath<'_>, mode: &[u8]) -> Option<Box<crate::gzguts
                 output: None,
                 input_cursor: None,
                 inflate_state: None,
-                deflate_state: None,
+                write_owner: None,
                 output_cursor: None,
             },
             direct: initial.direct,

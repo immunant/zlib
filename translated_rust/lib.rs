@@ -52,12 +52,11 @@ pub mod gzguts_h {
         // and counter state with the paired buffers.  `strm` remains the ABI
         // call projection until the codec owner can replace it completely.
         pub(crate) inflate_state: Option<crate::src::gzlib::GzEmbeddedInflateState>,
-        // Presence is the embedded-deflater lifecycle tag: it is installed
-        // immediately after successful initialization and consumed before
-        // the paired write buffers are released.  The ABI `strm` is still
-        // only the temporary codec projection, not persistent progress
-        // ownership.
-        pub(crate) deflate_state: Option<crate::src::gzlib::GzEmbeddedDeflateState>,
+        // The write-side owner keeps the checked input cursor and embedded
+        // deflater lifecycle together.  `strm` remains only the temporary
+        // ABI projection for a codec call; no write transition recovers its
+        // persistent cursor from that projection.
+        pub(crate) write_owner: Option<crate::src::gzlib::GzWriteOwner>,
         // A completed inflate pass produces bytes in `output`.  Retain that
         // checked output cursor with its owner as well, rather than making
         // the ABI `x.next` pointer the only record of where those bytes are.
