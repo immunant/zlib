@@ -173,7 +173,7 @@ pub(crate) static INFLATE_ERROR_MESSAGES: [&[u8]; 18] = [
 /// Validate the scalar portion of an inflate stream/state relationship.
 /// Pointer validation remains at the ABI adapter, while this core documents
 /// the complete set of modes accepted by zlib without pointer access.
-fn inflate_state_values_are_valid(
+pub(crate) fn inflate_state_values_are_valid(
     has_zalloc: bool,
     has_zfree: bool,
     state_matches_stream: bool,
@@ -185,17 +185,9 @@ fn inflate_state_values_are_valid(
         && (crate::src::inflate::HEAD..=crate::src::inflate::SYNC).contains(&mode)
 }
 
-/// Bound one stored-block transfer by the decoder's remaining input and
-/// output. The ABI loops keep their cursors at the boundary; this core owns
-/// only the scalar progress calculation.
-pub(crate) fn inflate_stored_copy_len(
-    remaining: ::core::ffi::c_uint,
-    available_input: ::core::ffi::c_uint,
-    available_output: ::core::ffi::c_uint,
-) -> ::core::ffi::c_uint {
-    remaining.min(available_input).min(available_output)
-}
-
+// The large legacy decoder still calls this transitional adapter. Every
+// other stream validation site uses `inflate_state_check_at_boundary!`, which
+// keeps its raw adoptions in the FFI boundary that owns the stream.
 pub(crate) unsafe extern "C" fn inflateStateCheck(
     mut strm: crate::zlib_h::z_streamp,
 ) -> ::core::ffi::c_int {
@@ -219,13 +211,51 @@ pub(crate) unsafe extern "C" fn inflateStateCheck(
         1
     }
 }
+
+/// Bound one stored-block transfer by the decoder's remaining input and
+/// output. The ABI loops keep their cursors at the boundary; this core owns
+/// only the scalar progress calculation.
+pub(crate) fn inflate_stored_copy_len(
+    remaining: ::core::ffi::c_uint,
+    available_input: ::core::ffi::c_uint,
+    available_output: ::core::ffi::c_uint,
+) -> ::core::ffi::c_uint {
+    remaining.min(available_input).min(available_output)
+}
+
+// This is expanded only in existing ABI/codec boundaries. It keeps raw
+// stream/state adoption at those boundaries, while the validity decision
+// itself remains the pointer-free scalar core above.
+macro_rules! inflate_state_check_at_boundary {
+    ($strm:expr) => {{
+        let strm = $strm;
+        if strm.is_null() {
+            1
+        } else {
+            let strm_ref = &*strm;
+            let state = strm_ref.state as *mut crate::src::inflate::inflate_state;
+            if state.is_null() {
+                1
+            } else {
+                let state = &*state;
+                (!crate::src::inflate::inflate_state_values_are_valid(
+                    strm_ref.zalloc.is_some(),
+                    strm_ref.zfree.is_some(),
+                    state.strm == strm,
+                    state.mode,
+                )) as ::core::ffi::c_int
+            }
+        }
+    }};
+}
+pub(crate) use inflate_state_check_at_boundary;
 // These reset/init transitions manipulate caller-owned stream state and may
 // invoke its allocator.  Expand them only at ABI boundaries until that state
 // has an owned Rust representation.
 macro_rules! inflate_reset_keep_at_boundary {
     ($strm:expr $(,)?) => {{
         let strm = $strm;
-        if crate::src::inflate::inflateStateCheck(strm) != 0 {
+        if crate::src::inflate::inflate_state_check_at_boundary!(strm) != 0 {
             crate::zlib_h::Z_STREAM_ERROR
         } else {
             let state = (*strm).state as *mut crate::src::inflate::inflate_state;
@@ -259,7 +289,7 @@ pub(crate) use inflate_reset_keep_at_boundary;
 macro_rules! inflate_reset_at_boundary {
     ($strm:expr $(,)?) => {{
         let strm = $strm;
-        if crate::src::inflate::inflateStateCheck(strm) != 0 {
+        if crate::src::inflate::inflate_state_check_at_boundary!(strm) != 0 {
             crate::zlib_h::Z_STREAM_ERROR
         } else {
             let state = (*strm).state as *mut crate::src::inflate::inflate_state;
@@ -276,7 +306,7 @@ macro_rules! inflate_reset2_at_boundary {
     ($strm:expr, $window_bits:expr $(,)?) => {{
         let strm = $strm;
         let mut window_bits = $window_bits;
-        if crate::src::inflate::inflateStateCheck(strm) != 0 {
+        if crate::src::inflate::inflate_state_check_at_boundary!(strm) != 0 {
             crate::zlib_h::Z_STREAM_ERROR
         } else if window_bits < -15 as ::core::ffi::c_int {
             crate::zlib_h::Z_STREAM_ERROR
@@ -460,7 +490,7 @@ pub unsafe extern "C" fn inflatePrime_ffi(
     mut bits: ::core::ffi::c_int,
     mut value: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
-    if inflateStateCheck(strm) != 0 {
+    if crate::src::inflate::inflate_state_check_at_boundary!(strm) != 0 {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
     let state = (*strm).state as *mut crate::src::inflate::inflate_state;
@@ -2575,7 +2605,7 @@ pub unsafe extern "C" fn inflate_ffi(
 macro_rules! inflate_end_at_boundary {
     ($strm:expr $(,)?) => {{
         let strm = $strm;
-        if crate::src::inflate::inflateStateCheck(strm) != 0 {
+        if crate::src::inflate::inflate_state_check_at_boundary!(strm) != 0 {
             crate::zlib_h::Z_STREAM_ERROR
         } else {
             let state = (*strm).state as *mut crate::src::inflate::inflate_state;
@@ -2631,7 +2661,7 @@ pub unsafe extern "C" fn inflateGetDictionary_ffi(
 ) -> ::core::ffi::c_int {
     let mut state: *mut crate::src::inflate::inflate_state =
         ::core::ptr::null_mut::<crate::src::inflate::inflate_state>();
-    if inflateStateCheck(strm) != 0 {
+    if crate::src::inflate::inflate_state_check_at_boundary!(strm) != 0 {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
     state = (*strm).state as *mut crate::src::inflate::inflate_state;
@@ -2669,7 +2699,7 @@ pub unsafe extern "C" fn inflateSetDictionary_ffi(
         ::core::ptr::null_mut::<crate::src::inflate::inflate_state>();
     let mut dictid: ::core::ffi::c_ulong = 0;
     let mut ret: ::core::ffi::c_int = 0;
-    if inflateStateCheck(strm) != 0 {
+    if crate::src::inflate::inflate_state_check_at_boundary!(strm) != 0 {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
     state = (*strm).state as *mut crate::src::inflate::inflate_state;
@@ -2713,7 +2743,7 @@ pub unsafe extern "C" fn inflateGetHeader_ffi(
 ) -> ::core::ffi::c_int {
     let mut state: *mut crate::src::inflate::inflate_state =
         ::core::ptr::null_mut::<crate::src::inflate::inflate_state>();
-    if inflateStateCheck(strm) != 0 {
+    if crate::src::inflate::inflate_state_check_at_boundary!(strm) != 0 {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
     state = (*strm).state as *mut crate::src::inflate::inflate_state;
@@ -2843,7 +2873,7 @@ pub unsafe extern "C" fn inflateSync_ffi(mut strm: crate::zlib_h::z_streamp) -> 
     let mut in_0: ::core::ffi::c_ulong = 0;
     let mut out: ::core::ffi::c_ulong = 0;
     let mut buf: [::core::ffi::c_uchar; 4] = [0; 4];
-    if inflateStateCheck(strm) != 0 {
+    if crate::src::inflate::inflate_state_check_at_boundary!(strm) != 0 {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
     let state = (*strm).state as *mut crate::src::inflate::inflate_state;
@@ -2897,7 +2927,7 @@ pub unsafe extern "C" fn inflateSyncPoint_ffi(
 ) -> ::core::ffi::c_int {
     let mut state: *mut crate::src::inflate::inflate_state =
         ::core::ptr::null_mut::<crate::src::inflate::inflate_state>();
-    if inflateStateCheck(strm) != 0 {
+    if crate::src::inflate::inflate_state_check_at_boundary!(strm) != 0 {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
     state = (*strm).state as *mut crate::src::inflate::inflate_state;
@@ -2913,7 +2943,7 @@ pub unsafe extern "C" fn inflateCopy_ffi(
     let mut copy: *mut crate::src::inflate::inflate_state =
         ::core::ptr::null_mut::<crate::src::inflate::inflate_state>();
     let mut window: *mut ::core::ffi::c_uchar = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
-    if inflateStateCheck(source) != 0 || dest.is_null() {
+    if crate::src::inflate::inflate_state_check_at_boundary!(source) != 0 || dest.is_null() {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
     state = (*source).state as *mut crate::src::inflate::inflate_state;
@@ -3006,7 +3036,7 @@ pub unsafe extern "C" fn inflateUndermine_ffi(
 ) -> ::core::ffi::c_int {
     let mut state: *mut crate::src::inflate::inflate_state =
         ::core::ptr::null_mut::<crate::src::inflate::inflate_state>();
-    if inflateStateCheck(strm) != 0 {
+    if crate::src::inflate::inflate_state_check_at_boundary!(strm) != 0 {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
     state = (*strm).state as *mut crate::src::inflate::inflate_state;
@@ -3020,7 +3050,7 @@ pub unsafe extern "C" fn inflateValidate_ffi(
 ) -> ::core::ffi::c_int {
     let mut state: *mut crate::src::inflate::inflate_state =
         ::core::ptr::null_mut::<crate::src::inflate::inflate_state>();
-    if inflateStateCheck(strm) != 0 {
+    if crate::src::inflate::inflate_state_check_at_boundary!(strm) != 0 {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
     state = (*strm).state as *mut crate::src::inflate::inflate_state;
@@ -3033,7 +3063,7 @@ pub unsafe extern "C" fn inflateMark_ffi(
 ) -> ::core::ffi::c_long {
     let mut state: *mut crate::src::inflate::inflate_state =
         ::core::ptr::null_mut::<crate::src::inflate::inflate_state>();
-    if inflateStateCheck(strm) != 0 {
+    if crate::src::inflate::inflate_state_check_at_boundary!(strm) != 0 {
         return -((1 as ::core::ffi::c_long) << 16 as ::core::ffi::c_int);
     }
     state = (*strm).state as *mut crate::src::inflate::inflate_state;
@@ -3045,7 +3075,7 @@ pub unsafe extern "C" fn inflateCodesUsed_ffi(
 ) -> ::core::ffi::c_ulong {
     let mut state: *mut crate::src::inflate::inflate_state =
         ::core::ptr::null_mut::<crate::src::inflate::inflate_state>();
-    if inflateStateCheck(strm) != 0 {
+    if crate::src::inflate::inflate_state_check_at_boundary!(strm) != 0 {
         return -1 as ::core::ffi::c_int as ::core::ffi::c_ulong;
     }
     state = (*strm).state as *mut crate::src::inflate::inflate_state;
