@@ -1535,17 +1535,27 @@ pub unsafe extern "C" fn deflateBound_z_ffi(
 ) -> crate::stdlib::z_size_t {
     deflateBound_z(strm, sourceLen)
 }
+
+// The legacy ABI narrows `z_size_t` to `uLong`. Keep the overflow result
+// policy independent of the raw stream boundary so both entry points only
+// need to obtain the size bound.
+fn deflate_bound_result(bound: crate::stdlib::z_size_t) -> crate::stdlib::uLong {
+    let result = bound as crate::stdlib::uLong;
+    if result as crate::stdlib::z_size_t != bound {
+        -1 as ::core::ffi::c_int as crate::stdlib::uLong
+    } else {
+        result
+    }
+}
+
 pub unsafe extern "C" fn deflateBound(
     mut strm: crate::zlib_h::z_streamp,
     mut sourceLen: crate::stdlib::uLong,
 ) -> crate::stdlib::uLong {
-    let mut bound: crate::stdlib::z_size_t =
-        deflateBound_z(strm, sourceLen as crate::stdlib::z_size_t);
-    return if bound != bound {
-        -1 as ::core::ffi::c_int as crate::stdlib::uLong
-    } else {
-        bound as crate::stdlib::uLong
-    };
+    deflate_bound_result(deflateBound_z(
+        strm,
+        sourceLen as crate::stdlib::z_size_t,
+    ))
 }
 #[export_name = "deflateBound"]
 
