@@ -2213,123 +2213,150 @@ fn deflate_bound_lengths(
     (fixedlen, storelen)
 }
 
-pub unsafe extern "C" fn deflateBound_z(
-    mut strm: crate::zlib_h::z_streamp,
-    mut sourceLen: crate::stdlib::z_size_t,
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+struct DeflateBoundGzipHeader {
+    has_extra: bool,
+    extra_len: crate::stdlib::uInt,
+    name_len: Option<crate::stdlib::z_size_t>,
+    comment_len: Option<crate::stdlib::z_size_t>,
+    has_header_crc: bool,
+}
+
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+struct DeflateBoundState {
+    wrap: ::core::ffi::c_int,
+    strstart: crate::stdlib::uInt,
+    w_bits: crate::stdlib::uInt,
+    hash_bits: crate::stdlib::uInt,
+    level: ::core::ffi::c_int,
+    gzip_header: Option<DeflateBoundGzipHeader>,
+}
+
+fn deflate_bound_wrapped_add(
+    bound: crate::stdlib::z_size_t,
+    extra: crate::stdlib::z_size_t,
 ) -> crate::stdlib::z_size_t {
-    let mut s: *mut crate::src::deflate::deflate_state =
-        ::core::ptr::null_mut::<crate::src::deflate::deflate_state>();
-    let fixedlen: crate::stdlib::z_size_t;
-    let storelen: crate::stdlib::z_size_t;
-    let mut wraplen: crate::stdlib::z_size_t = 0;
-    let mut bound: crate::stdlib::z_size_t = 0;
-    (fixedlen, storelen) = deflate_bound_lengths(sourceLen);
-    if deflateStateCheck(strm) != 0 {
-        bound = if fixedlen > storelen {
-            fixedlen
-        } else {
-            storelen
-        };
-        return if bound.wrapping_add(18 as crate::stdlib::z_size_t) < bound {
-            -1 as ::core::ffi::c_int as crate::stdlib::z_size_t
-        } else {
-            bound.wrapping_add(18 as crate::stdlib::z_size_t)
-        };
-    }
-    s = (*strm).state as *mut crate::src::deflate::deflate_state;
-    match if (*s).wrap < 0 as ::core::ffi::c_int {
-        -(*s).wrap
+    let bound_with_extra = bound.wrapping_add(extra);
+    if bound_with_extra < bound {
+        -1_i32 as crate::stdlib::z_size_t
     } else {
-        (*s).wrap
-    } {
-        0 => {
-            wraplen = 0 as crate::stdlib::z_size_t;
-        }
-        1 => {
-            wraplen = (6 as ::core::ffi::c_int
-                + (if (*s).strstart != 0 {
-                    4 as ::core::ffi::c_int
-                } else {
-                    0 as ::core::ffi::c_int
-                })) as crate::stdlib::z_size_t;
-        }
-        2 => {
-            wraplen = 18 as crate::stdlib::z_size_t;
-            if !(*s).gzhead.is_null() {
-                let mut str: *mut crate::stdlib::Bytef =
-                    ::core::ptr::null_mut::<crate::stdlib::Bytef>();
-                if !(*(*s).gzhead).extra.is_null() {
-                    wraplen = wraplen.wrapping_add(
-                        (2 as crate::stdlib::uInt).wrapping_add((*(*s).gzhead).extra_len)
-                            as crate::stdlib::z_size_t,
-                    );
-                }
-                str = (*(*s).gzhead).name;
-                if !str.is_null() {
-                    loop {
-                        wraplen = wraplen.wrapping_add(1);
-                        let c2rust_fresh63 = str;
-                        str = str.wrapping_add(1);
-                        if !(*c2rust_fresh63 != 0) {
-                            break;
-                        }
-                    }
-                }
-                str = (*(*s).gzhead).comment;
-                if !str.is_null() {
-                    loop {
-                        wraplen = wraplen.wrapping_add(1);
-                        let c2rust_fresh64 = str;
-                        str = str.wrapping_add(1);
-                        if !(*c2rust_fresh64 != 0) {
-                            break;
-                        }
-                    }
-                }
-                if (*(*s).gzhead).hcrc != 0 {
-                    wraplen = wraplen.wrapping_add(2 as crate::stdlib::z_size_t);
-                }
-            }
-        }
-        _ => {
-            wraplen = 18 as crate::stdlib::z_size_t;
-        }
+        bound_with_extra
     }
-    if (*s).w_bits != 15 as crate::stdlib::uInt
-        || (*s).hash_bits
-            != (8 as ::core::ffi::c_int + 7 as ::core::ffi::c_int) as crate::stdlib::uInt
-    {
-        bound = if (*s).w_bits <= (*s).hash_bits && (*s).level != 0 {
-            fixedlen
-        } else {
-            storelen
-        };
-        return if bound.wrapping_add(wraplen) < bound {
-            -1 as ::core::ffi::c_int as crate::stdlib::z_size_t
-        } else {
-            bound.wrapping_add(wraplen)
-        };
+}
+
+fn deflate_bound_gzip_wrapper_len(
+    header: Option<DeflateBoundGzipHeader>,
+) -> crate::stdlib::z_size_t {
+    let Some(header) = header else {
+        return 18;
+    };
+
+    let mut length = 18_usize;
+    if header.has_extra {
+        length = length.wrapping_add(2).wrapping_add(header.extra_len as usize);
     }
-    bound = sourceLen
-        .wrapping_add(sourceLen >> 12 as ::core::ffi::c_int)
-        .wrapping_add(sourceLen >> 14 as ::core::ffi::c_int)
-        .wrapping_add(sourceLen >> 25 as ::core::ffi::c_int)
-        .wrapping_add(13 as crate::stdlib::z_size_t)
-        .wrapping_sub(6 as crate::stdlib::z_size_t)
-        .wrapping_add(wraplen);
-    return if bound < sourceLen {
-        -1 as ::core::ffi::c_int as crate::stdlib::z_size_t
+    if let Some(name_len) = header.name_len {
+        length = length.wrapping_add(name_len).wrapping_add(1);
+    }
+    if let Some(comment_len) = header.comment_len {
+        length = length.wrapping_add(comment_len).wrapping_add(1);
+    }
+    if header.has_header_crc {
+        length = length.wrapping_add(2);
+    }
+    length
+}
+
+fn deflate_bound_z_core(
+    source_len: crate::stdlib::z_size_t,
+    state: Option<DeflateBoundState>,
+) -> crate::stdlib::z_size_t {
+    let (fixed_len, stored_len) = deflate_bound_lengths(source_len);
+    let Some(state) = state else {
+        return deflate_bound_wrapped_add(fixed_len.max(stored_len), 18);
+    };
+
+    let wrap_len = match state.wrap.wrapping_abs() {
+        0 => 0,
+        1 => 6 + if state.strstart != 0 { 4 } else { 0 },
+        2 => deflate_bound_gzip_wrapper_len(state.gzip_header),
+        _ => 18,
+    };
+    if state.w_bits != 15 || state.hash_bits != 15 {
+        let bound = if state.w_bits <= state.hash_bits && state.level != 0 {
+            fixed_len
+        } else {
+            stored_len
+        };
+        return deflate_bound_wrapped_add(bound, wrap_len);
+    }
+
+    let bound = source_len
+        .wrapping_add(source_len >> 12)
+        .wrapping_add(source_len >> 14)
+        .wrapping_add(source_len >> 25)
+        .wrapping_add(13)
+        .wrapping_sub(6)
+        .wrapping_add(wrap_len);
+    if bound < source_len {
+        -1_i32 as crate::stdlib::z_size_t
     } else {
         bound
-    };
+    }
 }
+
+macro_rules! deflate_bound_state_at_ffi_boundary {
+    ($strm:expr) => {{
+        let strm = $strm;
+        if deflate_state_check_at_ffi_boundary!(strm) {
+            None
+        } else {
+            let state = &*((*strm).state as *mut crate::src::deflate::deflate_state);
+            let gzip_header = if state.gzhead.is_null() {
+                None
+            } else {
+                let header = &*state.gzhead;
+                Some(DeflateBoundGzipHeader {
+                    has_extra: !header.extra.is_null(),
+                    extra_len: header.extra_len,
+                    name_len: if header.name.is_null() {
+                        None
+                    } else {
+                        Some(
+                            crate::stdlib::strlen(header.name as *const ::core::ffi::c_char)
+                                as crate::stdlib::z_size_t,
+                        )
+                    },
+                    comment_len: if header.comment.is_null() {
+                        None
+                    } else {
+                        Some(
+                            crate::stdlib::strlen(header.comment as *const ::core::ffi::c_char)
+                                as crate::stdlib::z_size_t,
+                        )
+                    },
+                    has_header_crc: header.hcrc != 0,
+                })
+            };
+            Some(DeflateBoundState {
+                wrap: state.wrap,
+                strstart: state.strstart,
+                w_bits: state.w_bits,
+                hash_bits: state.hash_bits,
+                level: state.level,
+                gzip_header,
+            })
+        }
+    }};
+}
+
 #[export_name = "deflateBound_z"]
 
 pub unsafe extern "C" fn deflateBound_z_ffi(
     mut strm: crate::zlib_h::z_streamp,
     mut sourceLen: crate::stdlib::z_size_t,
 ) -> crate::stdlib::z_size_t {
-    deflateBound_z(strm, sourceLen)
+    deflate_bound_z_core(sourceLen, deflate_bound_state_at_ffi_boundary!(strm))
 }
 #[export_name = "deflateBound"]
 pub unsafe extern "C" fn deflateBound_ffi(
@@ -2337,7 +2364,7 @@ pub unsafe extern "C" fn deflateBound_ffi(
     mut sourceLen: crate::stdlib::uLong,
 ) -> crate::stdlib::uLong {
     let mut bound: crate::stdlib::z_size_t =
-        deflateBound_z(strm, sourceLen as crate::stdlib::z_size_t);
+        deflateBound_z_ffi(strm, sourceLen as crate::stdlib::z_size_t);
     if bound != bound {
         -1 as ::core::ffi::c_int as crate::stdlib::uLong
     } else {
@@ -4631,7 +4658,8 @@ unsafe fn deflate_huff(
 mod tests {
     use super::{
         can_search_hash_match, clamped_copy_len, deflate_block_len, deflate_block_state_actions,
-        deflate_bound_lengths, deflate_copy_prev_len, deflate_copyright, deflate_dictionary_len,
+        deflate_bound_lengths, deflate_bound_z_core, deflate_copy_prev_len,
+        deflate_copyright, deflate_dictionary_len,
         deflate_dictionary_state_after_load, deflate_distance_tree_code, deflate_fast_match_codes,
         deflate_fast_match_progress, deflate_fast_should_insert_match, deflate_final_flush_action,
         deflate_flush_block_state_after_output, deflate_flush_rank, deflate_huff_literal_progress,
@@ -4663,9 +4691,10 @@ mod tests {
         stored_block_header_bytes, stored_block_is_last, stored_block_length_bytes,
         stored_block_min_size, stored_block_payload_len, stored_block_should_wait,
         stored_insert_after_input, symbol_buffer_is_full, symbol_triplet_cursors, zlib_header,
-        DeflateFastMatchProgress, DeflateFinalFlushAction, DeflateMatchRefillAction,
-        DeflatePreflight, DeflateRleRefillAction, DeflateRleTallyPlan, FlushPendingResult,
-        PendingDrainState, PendingStorageView, ReadBufChecksum, ReadBufResult,
+        DeflateBoundGzipHeader, DeflateBoundState, DeflateFastMatchProgress,
+        DeflateFinalFlushAction, DeflateMatchRefillAction, DeflatePreflight,
+        DeflateRleRefillAction, DeflateRleTallyPlan, FlushPendingResult, PendingDrainState,
+        PendingStorageView, ReadBufChecksum, ReadBufResult,
     };
 
     #[test]
@@ -6176,6 +6205,72 @@ mod tests {
         let max = crate::stdlib::z_size_t::MAX;
 
         assert_eq!(deflate_bound_lengths(max), (max, max));
+    }
+
+    #[test]
+    fn deflate_bound_core_preserves_wrapper_and_configuration_choices() {
+        let default_state = DeflateBoundState {
+            wrap: 0,
+            strstart: 0,
+            w_bits: 15,
+            hash_bits: 15,
+            level: 6,
+            gzip_header: None,
+        };
+        assert_eq!(deflate_bound_z_core(0, None), 25);
+        assert_eq!(deflate_bound_z_core(100, Some(default_state)), 107);
+        assert_eq!(
+            deflate_bound_z_core(
+                100,
+                Some(DeflateBoundState {
+                    wrap: 1,
+                    strstart: 1,
+                    ..default_state
+                }),
+            ),
+            117,
+        );
+        assert_eq!(
+            deflate_bound_z_core(
+                1024,
+                Some(DeflateBoundState {
+                    w_bits: 14,
+                    ..default_state
+                }),
+            ),
+            1162,
+        );
+        assert_eq!(
+            deflate_bound_z_core(
+                1024,
+                Some(DeflateBoundState {
+                    w_bits: 14,
+                    level: 0,
+                    ..default_state
+                }),
+            ),
+            1071,
+        );
+    }
+
+    #[test]
+    fn deflate_bound_core_counts_only_present_gzip_header_fields() {
+        let header = DeflateBoundGzipHeader {
+            has_extra: true,
+            extra_len: 5,
+            name_len: Some(3),
+            comment_len: Some(2),
+            has_header_crc: true,
+        };
+        let state = DeflateBoundState {
+            wrap: 2,
+            strstart: 0,
+            w_bits: 15,
+            hash_bits: 15,
+            level: 6,
+            gzip_header: Some(header),
+        };
+        assert_eq!(deflate_bound_z_core(0, Some(state)), 41);
     }
 
     #[test]
