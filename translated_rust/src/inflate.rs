@@ -954,6 +954,11 @@ pub fn inflate(
     let mut ret: ::core::ffi::c_int = 0;
     let mut hbuf: [::core::ffi::c_uchar; 4] = [0; 4];
     let mut output_capacity: usize = 0;
+    // Name and comment bytes are published together after this synchronous
+    // decode call. Each record describes a bounded prefix of the input range
+    // and its matching caller-provided gzip-header field.
+    let mut header_name_copy: Option<(usize, usize, usize)> = None;
+    let mut header_comment_copy: Option<(usize, usize, usize)> = None;
     static order: [::core::ffi::c_ushort; 19] = [
         16 as ::core::ffi::c_ushort,
         17 as ::core::ffi::c_ushort,
@@ -2357,6 +2362,8 @@ pub fn inflate(
                                 if have == 0 as ::core::ffi::c_uint {
                                     break '_inf_leave;
                                 }
+                                let header_start = state.length as usize;
+                                let mut header_copy_len = 0usize;
                                 copy = 0 as ::core::ffi::c_uint;
                                 loop {
                                     let c2rust_fresh5 = copy;
@@ -2366,18 +2373,11 @@ pub fn inflate(
                                         as ::core::ffi::c_uint;
                                     if let Some(head) = head.as_deref_mut() {
                                         if !head.name.is_null() && state.length < head.name_max {
-                                            // The non-null cursor and length
-                                            // check above bind this one
-                                            // caller-owned header range.
-                                            let name = unsafe {
-                                                ::core::slice::from_raw_parts_mut(
-                                                    head.name,
-                                                    head.name_max as usize,
-                                                )
-                                            };
-                                            name[state.length as usize] =
-                                                len as crate::stdlib::Bytef;
+                                            // Record the bounded prefix for
+                                            // publication with the comment
+                                            // field after this decode call.
                                             state.length = state.length.wrapping_add(1);
+                                            header_copy_len += 1;
                                         }
                                     }
                                     if !(len != 0 && copy < have) {
@@ -2392,6 +2392,11 @@ pub fn inflate(
                                         state,
                                         &input[input_start..input_start + copy as usize],
                                     );
+                                }
+                                let input_start = in_0.wrapping_sub(have) as usize;
+                                if header_copy_len != 0 {
+                                    header_name_copy =
+                                        Some((header_start, input_start, header_copy_len));
                                 }
                                 have = have.wrapping_sub(copy);
                                 next = next.wrapping_add(copy as usize);
@@ -2488,6 +2493,8 @@ pub fn inflate(
                         if have == 0 as ::core::ffi::c_uint {
                             break '_inf_leave;
                         }
+                        let header_start = state.length as usize;
+                        let mut header_copy_len = 0usize;
                         copy = 0 as ::core::ffi::c_uint;
                         loop {
                             let c2rust_fresh7 = copy;
@@ -2497,17 +2504,11 @@ pub fn inflate(
                                 as ::core::ffi::c_uint;
                             if let Some(head) = head.as_deref_mut() {
                                 if !head.comment.is_null() && state.length < head.comm_max {
-                                    // The non-null cursor and length check
-                                    // above bind this one caller-owned
-                                    // header range.
-                                    let comment = unsafe {
-                                        ::core::slice::from_raw_parts_mut(
-                                            head.comment,
-                                            head.comm_max as usize,
-                                        )
-                                    };
-                                    comment[state.length as usize] = len as crate::stdlib::Bytef;
+                                    // Record the bounded prefix for
+                                    // publication at the end of this decode
+                                    // call, after any name bytes.
                                     state.length = state.length.wrapping_add(1);
+                                    header_copy_len += 1;
                                 }
                             }
                             if !(len != 0 && copy < have) {
@@ -2522,6 +2523,11 @@ pub fn inflate(
                                 state,
                                 &input[input_start..input_start + copy as usize],
                             );
+                        }
+                        let input_start = in_0.wrapping_sub(have) as usize;
+                        if header_copy_len != 0 {
+                            header_comment_copy =
+                                Some((header_start, input_start, header_copy_len));
                         }
                         have = have.wrapping_sub(copy);
                         next = next.wrapping_add(copy as usize);
@@ -2619,6 +2625,23 @@ pub fn inflate(
     // The decoder loop is complete. Bind the already-validated stream/state
     // pair once for the publication tail, so cursor updates, the optional
     // window allocation, and final accounting remain reference-bound.
+    if let Some(head) = head.as_deref_mut() {
+        for (comment, copy) in [(false, header_name_copy), (true, header_comment_copy)] {
+            let Some((header_start, input_start, copy_len)) = copy else {
+                continue;
+            };
+            let (cursor, max) = if comment {
+                (head.comment, head.comm_max)
+            } else {
+                (head.name, head.name_max)
+            };
+            // Each record was collected only after this field's non-null
+            // cursor and advertised bound accepted every copied byte.
+            let header = unsafe { ::core::slice::from_raw_parts_mut(cursor, max as usize) };
+            header[header_start..header_start + copy_len]
+                .copy_from_slice(&input[input_start..input_start + copy_len]);
+        }
+    }
     strm.next_out = put as *mut crate::stdlib::Bytef;
     strm.avail_out = left as crate::stdlib::uInt;
     strm.next_in = next as *mut crate::stdlib::Bytef;
