@@ -424,46 +424,26 @@ fn gzip_header_remove(id: u64) {
     }
 }
 
-unsafe fn gzip_header_snapshot(head: crate::zlib_h::gz_headerp) -> Option<GzipHeader> {
-    if head.is_null() {
-        return None;
+fn gzip_header_snapshot(
+    text: ::core::ffi::c_int,
+    time: crate::stdlib::uLong,
+    xflags: ::core::ffi::c_int,
+    os: ::core::ffi::c_int,
+    extra: Option<&[crate::stdlib::Bytef]>,
+    name: Option<&[crate::stdlib::Bytef]>,
+    comment: Option<&[crate::stdlib::Bytef]>,
+    hcrc: ::core::ffi::c_int,
+) -> GzipHeader {
+    GzipHeader {
+        text,
+        time,
+        xflags,
+        os,
+        extra: extra.map(ToOwned::to_owned),
+        name: name.map(ToOwned::to_owned),
+        comment: comment.map(ToOwned::to_owned),
+        hcrc,
     }
-
-    let head = &*head;
-    let extra = if head.extra.is_null() {
-        None
-    } else {
-        Some(::core::slice::from_raw_parts(head.extra, head.extra_len as usize).to_vec())
-    };
-    let name = if head.name.is_null() {
-        None
-    } else {
-        Some(
-            CStr::from_ptr(head.name.cast::<::core::ffi::c_char>())
-                .to_bytes_with_nul()
-                .to_vec(),
-        )
-    };
-    let comment = if head.comment.is_null() {
-        None
-    } else {
-        Some(
-            CStr::from_ptr(head.comment.cast::<::core::ffi::c_char>())
-                .to_bytes_with_nul()
-                .to_vec(),
-        )
-    };
-
-    Some(GzipHeader {
-        text: head.text,
-        time: head.time,
-        xflags: head.xflags,
-        os: head.os,
-        extra,
-        name,
-        comment,
-        hcrc: head.hcrc,
-    })
 }
 
 pub const MIN_LOOKAHEAD: ::core::ffi::c_int =
@@ -1380,7 +1360,27 @@ pub unsafe extern "C" fn deflateSetHeader_ffi(
     let Some(strm) = strm.as_mut() else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
-    deflateSetHeader(strm, || gzip_header_snapshot(head))
+    let header = head.as_ref().map(|head| {
+        let extra = (!head.extra.is_null())
+            .then(|| ::core::slice::from_raw_parts(head.extra, head.extra_len as usize));
+        let name = (!head.name.is_null()).then(|| {
+            CStr::from_ptr(head.name.cast::<::core::ffi::c_char>()).to_bytes_with_nul()
+        });
+        let comment = (!head.comment.is_null()).then(|| {
+            CStr::from_ptr(head.comment.cast::<::core::ffi::c_char>()).to_bytes_with_nul()
+        });
+        gzip_header_snapshot(
+            head.text,
+            head.time,
+            head.xflags,
+            head.os,
+            extra,
+            name,
+            comment,
+            head.hcrc,
+        )
+    });
+    deflateSetHeader(strm, || header)
 }
 pub unsafe extern "C" fn deflatePending(
     mut strm: crate::zlib_h::z_streamp,
