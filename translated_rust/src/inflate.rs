@@ -493,13 +493,13 @@ pub unsafe extern "C" fn inflatePrime_ffi(
     if crate::src::inflate::inflate_state_check_at_boundary!(strm) != 0 {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    let state = (*strm).state as *mut crate::src::inflate::inflate_state;
-    let Ok((hold, held_bits)) = inflate_prime_update((*state).hold, (*state).bits, bits, value)
-    else {
+    let strm = &mut *strm;
+    let state = &mut *(strm.state as *mut crate::src::inflate::inflate_state);
+    let Ok((hold, held_bits)) = inflate_prime_update(state.hold, state.bits, bits, value) else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
-    (*state).hold = hold;
-    (*state).bits = held_bits;
+    state.hold = hold;
+    state.bits = held_bits;
     crate::zlib_h::Z_OK
 }
 /// The two copy operations needed to append decoded bytes to inflate's
@@ -2660,33 +2660,32 @@ pub unsafe extern "C" fn inflateGetDictionary_ffi(
     mut dictionary: *mut crate::stdlib::Bytef,
     mut dictLength: *mut crate::stdlib::uInt,
 ) -> ::core::ffi::c_int {
-    let mut state: *mut crate::src::inflate::inflate_state =
-        ::core::ptr::null_mut::<crate::src::inflate::inflate_state>();
     if crate::src::inflate::inflate_state_check_at_boundary!(strm) != 0 {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    state = (*strm).state as *mut crate::src::inflate::inflate_state;
-    if (*state).whave != 0 && !dictionary.is_null() {
-        let Ok(window_len) = usize::try_from((*state).wsize) else {
+    let strm = &mut *strm;
+    let state = &mut *(strm.state as *mut crate::src::inflate::inflate_state);
+    if state.whave != 0 && !dictionary.is_null() {
+        let Ok(window_len) = usize::try_from(state.wsize) else {
             return crate::zlib_h::Z_STREAM_ERROR;
         };
-        let Ok(wnext) = usize::try_from((*state).wnext) else {
+        let Ok(wnext) = usize::try_from(state.wnext) else {
             return crate::zlib_h::Z_STREAM_ERROR;
         };
-        let Ok(whave) = usize::try_from((*state).whave) else {
+        let Ok(whave) = usize::try_from(state.whave) else {
             return crate::zlib_h::Z_STREAM_ERROR;
         };
-        if (*state).window.is_null() {
+        if state.window.is_null() {
             return crate::zlib_h::Z_STREAM_ERROR;
         }
-        let window = ::core::slice::from_raw_parts((*state).window, window_len);
+        let window = ::core::slice::from_raw_parts(state.window, window_len);
         let output = ::core::slice::from_raw_parts_mut(dictionary, whave);
         if inflate_dictionary_copy(window, wnext, whave, output).is_none() {
             return crate::zlib_h::Z_STREAM_ERROR;
         }
     }
     if !dictLength.is_null() {
-        *dictLength = (*state).whave as crate::stdlib::uInt;
+        *dictLength = state.whave as crate::stdlib::uInt;
     }
     return crate::zlib_h::Z_OK;
 }
@@ -2777,16 +2776,15 @@ pub unsafe extern "C" fn inflateGetHeader_ffi(
     mut strm: crate::zlib_h::z_streamp,
     mut head: crate::zlib_h::gz_headerp,
 ) -> ::core::ffi::c_int {
-    let mut state: *mut crate::src::inflate::inflate_state =
-        ::core::ptr::null_mut::<crate::src::inflate::inflate_state>();
     if crate::src::inflate::inflate_state_check_at_boundary!(strm) != 0 {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    state = (*strm).state as *mut crate::src::inflate::inflate_state;
-    if (*state).wrap & 2 as ::core::ffi::c_int == 0 as ::core::ffi::c_int {
+    let strm = &mut *strm;
+    let state = &mut *(strm.state as *mut crate::src::inflate::inflate_state);
+    if state.wrap & 2 as ::core::ffi::c_int == 0 as ::core::ffi::c_int {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    (*state).head = head;
+    state.head = head;
     (*head).done = 0 as ::core::ffi::c_int;
     return crate::zlib_h::Z_OK;
 }
@@ -2961,13 +2959,12 @@ pub unsafe extern "C" fn inflateSync_ffi(mut strm: crate::zlib_h::z_streamp) -> 
 pub unsafe extern "C" fn inflateSyncPoint_ffi(
     mut strm: crate::zlib_h::z_streamp,
 ) -> ::core::ffi::c_int {
-    let mut state: *mut crate::src::inflate::inflate_state =
-        ::core::ptr::null_mut::<crate::src::inflate::inflate_state>();
     if crate::src::inflate::inflate_state_check_at_boundary!(strm) != 0 {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    state = (*strm).state as *mut crate::src::inflate::inflate_state;
-    inflate_sync_point((*state).mode, (*state).bits)
+    let strm = &mut *strm;
+    let state = &mut *(strm.state as *mut crate::src::inflate::inflate_state);
+    inflate_sync_point(state.mode, state.bits)
 }
 #[export_name = "inflateCopy"]
 pub unsafe extern "C" fn inflateCopy_ffi(
@@ -3066,13 +3063,12 @@ pub unsafe extern "C" fn inflateUndermine_ffi(
     mut strm: crate::zlib_h::z_streamp,
     mut _subvert: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
-    let mut state: *mut crate::src::inflate::inflate_state =
-        ::core::ptr::null_mut::<crate::src::inflate::inflate_state>();
     if crate::src::inflate::inflate_state_check_at_boundary!(strm) != 0 {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    state = (*strm).state as *mut crate::src::inflate::inflate_state;
-    (*state).sane = 1 as ::core::ffi::c_int;
+    let strm = &mut *strm;
+    let state = &mut *(strm.state as *mut crate::src::inflate::inflate_state);
+    state.sane = 1 as ::core::ffi::c_int;
     return crate::zlib_h::Z_DATA_ERROR;
 }
 #[export_name = "inflateValidate"]
@@ -3080,42 +3076,39 @@ pub unsafe extern "C" fn inflateValidate_ffi(
     mut strm: crate::zlib_h::z_streamp,
     mut check: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
-    let mut state: *mut crate::src::inflate::inflate_state =
-        ::core::ptr::null_mut::<crate::src::inflate::inflate_state>();
     if crate::src::inflate::inflate_state_check_at_boundary!(strm) != 0 {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    state = (*strm).state as *mut crate::src::inflate::inflate_state;
-    (*state).wrap = inflate_validate_wrap((*state).wrap, check);
+    let strm = &mut *strm;
+    let state = &mut *(strm.state as *mut crate::src::inflate::inflate_state);
+    state.wrap = inflate_validate_wrap(state.wrap, check);
     crate::zlib_h::Z_OK
 }
 #[export_name = "inflateMark"]
 pub unsafe extern "C" fn inflateMark_ffi(
     mut strm: crate::zlib_h::z_streamp,
 ) -> ::core::ffi::c_long {
-    let mut state: *mut crate::src::inflate::inflate_state =
-        ::core::ptr::null_mut::<crate::src::inflate::inflate_state>();
     if crate::src::inflate::inflate_state_check_at_boundary!(strm) != 0 {
         return -((1 as ::core::ffi::c_long) << 16 as ::core::ffi::c_int);
     }
-    state = (*strm).state as *mut crate::src::inflate::inflate_state;
-    inflate_mark((*state).back, (*state).mode, (*state).length, (*state).was)
+    let strm = &mut *strm;
+    let state = &mut *(strm.state as *mut crate::src::inflate::inflate_state);
+    inflate_mark(state.back, state.mode, state.length, state.was)
 }
 #[export_name = "inflateCodesUsed"]
 pub unsafe extern "C" fn inflateCodesUsed_ffi(
     mut strm: crate::zlib_h::z_streamp,
 ) -> ::core::ffi::c_ulong {
-    let mut state: *mut crate::src::inflate::inflate_state =
-        ::core::ptr::null_mut::<crate::src::inflate::inflate_state>();
     if crate::src::inflate::inflate_state_check_at_boundary!(strm) != 0 {
         return -1 as ::core::ffi::c_int as ::core::ffi::c_ulong;
     }
-    state = (*strm).state as *mut crate::src::inflate::inflate_state;
-    let codes_start = &raw mut (*state).codes as *mut crate::src::inftrees::code as usize;
+    let strm = &mut *strm;
+    let state = &mut *(strm.state as *mut crate::src::inflate::inflate_state);
+    let codes_start = state.codes.as_mut_ptr() as usize;
     inflate_codes_used(
         codes_start,
         crate::src::inftrees::ENOUGH as usize,
-        (*state).next as usize,
+        state.next as usize,
     )
     .unwrap_or(-1 as ::core::ffi::c_int as ::core::ffi::c_ulong)
 }
