@@ -480,69 +480,84 @@ pub unsafe extern "C" fn inflatePrime_ffi(
         value,
     )
 }
+fn update_window(
+    state: &mut crate::src::inflate::inflate_state,
+    window: &mut [u8],
+    input: &[u8],
+) -> Result<(), ()> {
+    let wsize = state.wsize as usize;
+    let mut copy = input.len();
+    let mut wnext = state.wnext as usize;
+    let mut whave = state.whave as usize;
+    if wsize == 0 || window.len() != wsize || wnext > wsize || whave > wsize {
+        return Err(());
+    }
+    if copy >= wsize {
+        let start = input.len().checked_sub(wsize).ok_or(())?;
+        window.copy_from_slice(input.get(start..).ok_or(())?);
+        state.wnext = 0;
+        state.whave = state.wsize;
+        return Ok(());
+    }
+    let dist = wsize.checked_sub(wnext).ok_or(())?.min(copy);
+    let start = input.len().checked_sub(copy).ok_or(())?;
+    let end = start.checked_add(dist).ok_or(())?;
+    window
+        .get_mut(wnext..wnext.checked_add(dist).ok_or(())?)
+        .ok_or(())?
+        .copy_from_slice(input.get(start..end).ok_or(())?);
+    copy -= dist;
+    if copy != 0 {
+        let start = input.len().checked_sub(copy).ok_or(())?;
+        window
+            .get_mut(..copy)
+            .ok_or(())?
+            .copy_from_slice(input.get(start..).ok_or(())?);
+        state.wnext = copy as crate::stdlib::uInt;
+        state.whave = state.wsize;
+    } else {
+        wnext = wnext.checked_add(dist).ok_or(())?;
+        if wnext == wsize {
+            wnext = 0;
+        }
+        if whave < wsize {
+            whave = whave.checked_add(dist).ok_or(())?.min(wsize);
+        }
+        state.wnext = wnext as crate::stdlib::uInt;
+        state.whave = whave as crate::stdlib::uInt;
+    }
+    Ok(())
+}
+
 unsafe extern "C" fn updatewindow(
     mut strm: crate::zlib_h::z_streamp,
     mut end: *const crate::stdlib::Bytef,
     mut copy: ::core::ffi::c_uint,
 ) -> ::core::ffi::c_int {
-    let mut state: *mut crate::src::inflate::inflate_state =
-        ::core::ptr::null_mut::<crate::src::inflate::inflate_state>();
-    let mut dist: ::core::ffi::c_uint = 0;
-    state = (*strm).state as *mut crate::src::inflate::inflate_state;
-    if (*state).window.is_null() {
-        (*state).window = Some((*strm).zalloc.expect("non-null function pointer"))
+    let state = &mut *((*strm).state as *mut crate::src::inflate::inflate_state);
+    if state.window.is_null() {
+        state.window = Some((*strm).zalloc.expect("non-null function pointer"))
             .expect("non-null function pointer")(
             (*strm).opaque,
-            (1 as crate::stdlib::uInt) << (*state).wbits,
+            (1 as crate::stdlib::uInt) << state.wbits,
             ::core::mem::size_of::<::core::ffi::c_uchar>() as crate::stdlib::uInt,
         ) as *mut ::core::ffi::c_uchar;
-        if (*state).window.is_null() {
+        if state.window.is_null() {
             return 1 as ::core::ffi::c_int;
         }
     }
-    if (*state).wsize == 0 as ::core::ffi::c_uint {
-        (*state).wsize = (1 as ::core::ffi::c_uint) << (*state).wbits;
-        (*state).wnext = 0 as ::core::ffi::c_uint;
-        (*state).whave = 0 as ::core::ffi::c_uint;
+    if state.wsize == 0 as ::core::ffi::c_uint {
+        state.wsize = (1 as ::core::ffi::c_uint) << state.wbits;
+        state.wnext = 0 as ::core::ffi::c_uint;
+        state.whave = 0 as ::core::ffi::c_uint;
     }
-    if copy >= (*state).wsize {
-        crate::stdlib::memcpy(
-            (*state).window as *mut ::core::ffi::c_void,
-            end.offset(-((*state).wsize as isize)) as *const ::core::ffi::c_void,
-            (*state).wsize as crate::__stddef_size_t_h::size_t,
-        );
-        (*state).wnext = 0 as ::core::ffi::c_uint;
-        (*state).whave = (*state).wsize;
+    let window = ::core::slice::from_raw_parts_mut(state.window, state.wsize as usize);
+    let input = if copy == 0 {
+        &[]
     } else {
-        dist = (*state).wsize.wrapping_sub((*state).wnext);
-        if dist > copy {
-            dist = copy;
-        }
-        crate::stdlib::memcpy(
-            (*state).window.offset((*state).wnext as isize) as *mut ::core::ffi::c_void,
-            end.offset(-(copy as isize)) as *const ::core::ffi::c_void,
-            dist as crate::__stddef_size_t_h::size_t,
-        );
-        copy = copy.wrapping_sub(dist);
-        if copy != 0 {
-            crate::stdlib::memcpy(
-                (*state).window as *mut ::core::ffi::c_void,
-                end.offset(-(copy as isize)) as *const ::core::ffi::c_void,
-                copy as crate::__stddef_size_t_h::size_t,
-            );
-            (*state).wnext = copy;
-            (*state).whave = (*state).wsize;
-        } else {
-            (*state).wnext = (*state).wnext.wrapping_add(dist);
-            if (*state).wnext == (*state).wsize {
-                (*state).wnext = 0 as ::core::ffi::c_uint;
-            }
-            if (*state).whave < (*state).wsize {
-                (*state).whave = (*state).whave.wrapping_add(dist);
-            }
-        }
-    }
-    return 0 as ::core::ffi::c_int;
+        ::core::slice::from_raw_parts(end.offset(-(copy as isize)), copy as usize)
+    };
+    update_window(state, window, input).is_err() as ::core::ffi::c_int
 }
 pub unsafe extern "C" fn inflate(
     mut strm: crate::zlib_h::z_streamp,
