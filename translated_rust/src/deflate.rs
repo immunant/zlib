@@ -1969,15 +1969,23 @@ pub unsafe extern "C" fn deflate(
                     return crate::zlib_h::Z_OK;
                 }
             }
-            let c2rust_fresh23 = (*s).pending;
-            (*s).pending = (*s).pending.wrapping_add(1);
-            *(*s).pending_buf.offset(c2rust_fresh23 as isize) =
-                ((*strm).adler & 0xff as crate::stdlib::uLong) as crate::stdlib::Byte;
-            let c2rust_fresh24 = (*s).pending;
-            (*s).pending = (*s).pending.wrapping_add(1);
-            *(*s).pending_buf.offset(c2rust_fresh24 as isize) =
-                ((*strm).adler >> 8 as ::core::ffi::c_int & 0xff as crate::stdlib::uLong)
-                    as crate::stdlib::Byte;
+            let hcrc = (*strm).adler;
+            let state = &mut *s;
+            // The preceding capacity check ensures that both HCRC bytes fit
+            // in this exact pending allocation.
+            let pending_buf = ::core::slice::from_raw_parts_mut(
+                state.pending_buf,
+                state.pending_buf_size as usize,
+            );
+            append_pending_bytes(
+                pending_buf,
+                &mut state.pending,
+                &[
+                    (hcrc & 0xff as crate::stdlib::uLong) as crate::stdlib::Byte,
+                    (hcrc >> 8 as ::core::ffi::c_int & 0xff as crate::stdlib::uLong)
+                        as crate::stdlib::Byte,
+                ],
+            );
             (*strm).adler = crate::src::crc32::crc32_z(0 as crate::stdlib::uLong, None);
         }
         (*s).status = crate::src::deflate::BUSY_STATE;
