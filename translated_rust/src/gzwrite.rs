@@ -277,6 +277,29 @@ fn gz_write_buffered_copy_commit_state(
     state.x.pos = state.x.pos.wrapping_add(copied as crate::stdlib::off64_t);
 }
 
+/// Limit one direct-write compression input chunk to the `uInt` range used
+/// by zlib, without touching the caller-owned input cursor.
+fn gz_write_direct_chunk_plan(remaining: crate::stdlib::z_size_t) -> ::core::ffi::c_uint {
+    let max = -1 as ::core::ffi::c_int as ::core::ffi::c_uint;
+    if max as crate::stdlib::z_size_t > remaining {
+        remaining as ::core::ffi::c_uint
+    } else {
+        max
+    }
+}
+
+/// Commit progress reported by a direct-write compression step.  The caller
+/// keeps the raw stream cursor at the boundary; this preserves zlib's
+/// wrapping logical-position arithmetic and returns the remaining input.
+fn gz_write_direct_commit_state(
+    state: &mut crate::gzguts_h::gz_state,
+    remaining: crate::stdlib::z_size_t,
+    consumed: ::core::ffi::c_uint,
+) -> crate::stdlib::z_size_t {
+    state.x.pos = state.x.pos.wrapping_add(consumed as crate::stdlib::off64_t);
+    remaining.wrapping_sub(consumed as crate::stdlib::z_size_t)
+}
+
 unsafe extern "C" fn gz_zero(mut state: crate::gzguts_h::gz_statep) -> ::core::ffi::c_int {
     let mut first: ::core::ffi::c_int = 0;
     let mut ret: ::core::ffi::c_int = 0;
@@ -370,15 +393,11 @@ unsafe extern "C" fn gz_write(
         }
         (*state).strm.next_in = buf as *mut crate::stdlib::Bytef;
         loop {
-            let mut n: ::core::ffi::c_uint = -1 as ::core::ffi::c_int as ::core::ffi::c_uint;
-            if n as crate::stdlib::z_size_t > len {
-                n = len as ::core::ffi::c_uint;
-            }
+            let mut n = gz_write_direct_chunk_plan(len);
             (*state).strm.avail_in = n as crate::stdlib::uInt;
             ret = gz_comp(state, crate::zlib_h::Z_NO_FLUSH);
             n = n.wrapping_sub((*state).strm.avail_in as ::core::ffi::c_uint);
-            (*state).x.pos += n as crate::stdlib::off64_t;
-            len = len.wrapping_sub(n as crate::stdlib::z_size_t);
+            len = gz_write_direct_commit_state(&mut *state, len, n);
             if ret == -1 as ::core::ffi::c_int {
                 return if (*state).again != 0 {
                     put.wrapping_sub(len)
