@@ -4714,17 +4714,6 @@ pub const N: ::core::ffi::c_int = 5 as ::core::ffi::c_int;
 
 pub const W: ::core::ffi::c_int = 8 as ::core::ffi::c_int;
 
-fn byte_swap(mut word: z_word_t) -> z_word_t {
-    return (word & 0xff00000000000000 as z_word_t) >> 56 as ::core::ffi::c_int
-        | (word & 0xff000000000000 as ::core::ffi::c_long as z_word_t) >> 40 as ::core::ffi::c_int
-        | (word & 0xff0000000000 as ::core::ffi::c_long as z_word_t) >> 24 as ::core::ffi::c_int
-        | (word & 0xff00000000 as ::core::ffi::c_long as z_word_t) >> 8 as ::core::ffi::c_int
-        | (word & 0xff000000 as z_word_t) << 8 as ::core::ffi::c_int
-        | (word & 0xff0000 as z_word_t) << 24 as ::core::ffi::c_int
-        | (word & 0xff00 as z_word_t) << 40 as ::core::ffi::c_int
-        | (word & 0xff as z_word_t) << 56 as ::core::ffi::c_int;
-}
-
 pub const POLY: ::core::ffi::c_uint = 0xedb88320 as ::core::ffi::c_uint;
 
 fn next_poly_term(value: crate::stdlib::uLong) -> crate::stdlib::uLong {
@@ -4775,28 +4764,6 @@ fn crc_table_ref() -> &'static [crate::stdlib::z_crc_t; 256] {
 
 pub unsafe extern "C" fn get_crc_table_ffi() -> *const crate::stdlib::z_crc_t {
     crc_table_ref().as_ptr()
-}
-fn crc_word(mut data: z_word_t) -> crate::stdlib::z_crc_t {
-    let mut k: ::core::ffi::c_int = 0;
-    k = 0 as ::core::ffi::c_int;
-    while k < W {
-        data = data >> 8 as ::core::ffi::c_int
-            ^ crc_table[(data & 0xff as z_word_t) as usize] as z_word_t;
-        k += 1;
-    }
-    return data as crate::stdlib::z_crc_t;
-}
-
-fn crc_word_big(mut data: z_word_t) -> z_word_t {
-    let mut k: ::core::ffi::c_int = 0;
-    k = 0 as ::core::ffi::c_int;
-    while k < W {
-        data = data << 8 as ::core::ffi::c_int
-            ^ crc_big_table[(data >> ((W - 1 as ::core::ffi::c_int) << 3 as ::core::ffi::c_int)
-                & 0xff as z_word_t) as usize];
-        k += 1;
-    }
-    return data;
 }
 const CRC32_MASK: crate::stdlib::uLong = 0xffff_ffff;
 

@@ -231,8 +231,13 @@ fn inflate_prime_update(
     }
 
     let requested_bits = requested_bits as ::core::ffi::c_uint;
-    let new_bits = current_bits.wrapping_add(requested_bits);
-    if requested_bits > 16 || new_bits > 32 {
+    if current_bits > 32 || requested_bits > 16 {
+        return InflatePrimeUpdate::StreamError;
+    }
+    let Some(new_bits) = current_bits.checked_add(requested_bits) else {
+        return InflatePrimeUpdate::StreamError;
+    };
+    if new_bits > 32 {
         return InflatePrimeUpdate::StreamError;
     }
 
@@ -2882,6 +2887,14 @@ mod tests {
         );
         assert_eq!(
             inflate_prime_update(0, 20, 16, 0),
+            InflatePrimeUpdate::StreamError
+        );
+        assert_eq!(
+            inflate_prime_update(0, 33, 1, 0),
+            InflatePrimeUpdate::StreamError
+        );
+        assert_eq!(
+            inflate_prime_update(0, ::core::ffi::c_uint::MAX, 1, 0),
             InflatePrimeUpdate::StreamError
         );
     }
