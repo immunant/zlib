@@ -524,11 +524,7 @@ pub unsafe extern "C" fn gzread(
     if !crate::src::gzlib::gz_read_state_is_usable(state) {
         return -1 as ::core::ffi::c_int;
     }
-    crate::src::gzlib::gz_error(
-        state,
-        crate::zlib_h::Z_OK,
-        ::core::ptr::null::<::core::ffi::c_char>(),
-    );
+    crate::src::gzlib::gz_clear_read_error(state);
     if (len as ::core::ffi::c_int) < 0 as ::core::ffi::c_int {
         crate::src::gzlib::gz_error(
             state,
@@ -575,11 +571,7 @@ pub unsafe extern "C" fn gzfread(
     if !crate::src::gzlib::gz_read_state_is_usable(state) {
         return 0 as crate::stdlib::z_size_t;
     }
-    crate::src::gzlib::gz_error(
-        state,
-        crate::zlib_h::Z_OK,
-        ::core::ptr::null::<::core::ffi::c_char>(),
-    );
+    crate::src::gzlib::gz_clear_read_error(state);
     len = nitems.wrapping_mul(size);
     if size != 0 && len.wrapping_div(size) != nitems {
         crate::src::gzlib::gz_error(
@@ -615,11 +607,7 @@ pub unsafe extern "C" fn gzgetc(
     if !crate::src::gzlib::gz_read_state_is_usable(state) {
         return -1 as ::core::ffi::c_int;
     }
-    crate::src::gzlib::gz_error(
-        state,
-        crate::zlib_h::Z_OK,
-        ::core::ptr::null::<::core::ffi::c_char>(),
-    );
+    crate::src::gzlib::gz_clear_read_error(state);
     if state.x.have != 0 {
         let c2rust_fresh2 = state.x.next;
         gz_consume(state, 1);
@@ -668,11 +656,7 @@ pub unsafe extern "C" fn gzungetc(
     if !crate::src::gzlib::gz_read_state_is_usable(state) {
         return -1 as ::core::ffi::c_int;
     }
-    crate::src::gzlib::gz_error(
-        state,
-        crate::zlib_h::Z_OK,
-        ::core::ptr::null::<::core::ffi::c_char>(),
-    );
+    crate::src::gzlib::gz_clear_read_error(state);
     if gz_finish_skip(state) == -1 as ::core::ffi::c_int {
         return -1 as ::core::ffi::c_int;
     }
@@ -743,11 +727,7 @@ pub unsafe extern "C" fn gzgets(
     if !crate::src::gzlib::gz_read_state_is_usable(state) {
         return ::core::ptr::null_mut::<::core::ffi::c_char>();
     }
-    crate::src::gzlib::gz_error(
-        state,
-        crate::zlib_h::Z_OK,
-        ::core::ptr::null::<::core::ffi::c_char>(),
-    );
+    crate::src::gzlib::gz_clear_read_error(state);
     if gz_finish_skip(state) == -1 as ::core::ffi::c_int {
         return ::core::ptr::null_mut::<::core::ffi::c_char>();
     }
@@ -847,11 +827,7 @@ pub unsafe extern "C" fn gzclose_r(
     } else {
         crate::zlib_h::Z_OK
     };
-    crate::src::gzlib::gz_error(
-        state,
-        crate::zlib_h::Z_OK,
-        ::core::ptr::null::<::core::ffi::c_char>(),
-    );
+    crate::src::gzlib::gzclearerr(state);
     let path = state.path;
     let fd = state.fd;
     crate::stdlib::free(path as *mut ::core::ffi::c_void);

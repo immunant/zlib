@@ -1414,6 +1414,19 @@ pub(crate) fn gzclearerr(state: &mut crate::gzguts_h::gz_state) {
         );
     }
 }
+
+// Ordinary read operations clear the owned error record, but unlike the
+// public `gzclearerr()` API they must retain EOF observation.  Reuse the
+// established error-record boundary and restore just the two read markers
+// that public clearing intentionally resets.
+pub(crate) fn gz_clear_read_error(state: &mut crate::gzguts_h::gz_state) {
+    let eof = state.eof;
+    let past = state.past;
+    gzclearerr(state);
+    state.eof = eof;
+    state.past = past;
+}
+
 #[export_name = "gzclearerr"]
 
 pub unsafe extern "C" fn gzclearerr_ffi(mut file: crate::zlib_h::gzFile) {
