@@ -200,6 +200,50 @@ fn gz_open_descriptor_flags(options: GzOpenOptions) -> ::core::ffi::c_int {
         }
 }
 
+/// The synthetic path reported by `gzdopen`.  It is kept in fixed storage so
+/// constructing it cannot introduce a second allocation failure before the
+/// gzip state itself is opened.
+struct GzFdPath {
+    bytes: [u8; 7 + 3 * ::core::mem::size_of::<::core::ffi::c_int>()],
+}
+
+impl GzFdPath {
+    fn new(fd: ::core::ffi::c_int) -> Self {
+        let mut bytes = [0; 7 + 3 * ::core::mem::size_of::<::core::ffi::c_int>()];
+        bytes[..4].copy_from_slice(b"<fd:");
+
+        let value = fd as i64;
+        let magnitude = if value < 0 {
+            bytes[4] = b'-';
+            -value
+        } else {
+            value
+        } as u64;
+        let mut digits = [0; 20];
+        let mut count = 0;
+        let mut remaining = magnitude;
+        loop {
+            digits[count] = b'0' + (remaining % 10) as u8;
+            count += 1;
+            remaining /= 10;
+            if remaining == 0 {
+                break;
+            }
+        }
+
+        let start = if value < 0 { 5 } else { 4 };
+        for (index, digit) in digits[..count].iter().rev().enumerate() {
+            bytes[start + index] = *digit;
+        }
+        bytes[start + count] = b'>';
+        Self { bytes }
+    }
+
+    fn as_c_str(&self) -> &::std::ffi::CStr {
+        ::std::ffi::CStr::from_bytes_until_nul(&self.bytes).unwrap_or_default()
+    }
+}
+
 unsafe extern "C" fn gz_open(
     mut path: *const ::core::ffi::c_void,
     mut fd: ::core::ffi::c_int,
@@ -344,31 +388,15 @@ pub unsafe extern "C" fn gzdopen(
     mut fd: ::core::ffi::c_int,
     mut mode: *const ::core::ffi::c_char,
 ) -> crate::zlib_h::gzFile {
-    let mut path: *mut ::core::ffi::c_char = ::core::ptr::null_mut::<::core::ffi::c_char>();
-    let mut gz: crate::zlib_h::gzFile = ::core::ptr::null_mut::<crate::zlib_h::gzFile_s>();
-    if fd == -1 as ::core::ffi::c_int || {
-        path = crate::stdlib::malloc(
-            (7 as crate::__stddef_size_t_h::size_t).wrapping_add(
-                (3 as crate::__stddef_size_t_h::size_t)
-                    .wrapping_mul(::core::mem::size_of::<::core::ffi::c_int>()),
-            ),
-        ) as *mut ::core::ffi::c_char;
-        path.is_null()
-    } {
+    if fd == -1 as ::core::ffi::c_int {
         return ::core::ptr::null_mut::<crate::zlib_h::gzFile_s>();
     }
-    crate::stdlib::snprintf(
-        path,
-        (7 as crate::__stddef_size_t_h::size_t).wrapping_add(
-            (3 as crate::__stddef_size_t_h::size_t)
-                .wrapping_mul(::core::mem::size_of::<::core::ffi::c_int>()),
-        ),
-        b"<fd:%d>\0".as_ptr() as *const ::core::ffi::c_char,
+    let path = GzFdPath::new(fd);
+    gz_open(
+        path.as_c_str().as_ptr() as *const ::core::ffi::c_void,
         fd,
-    );
-    gz = gz_open(path as *const ::core::ffi::c_void, fd, mode);
-    crate::stdlib::free(path as *mut ::core::ffi::c_void);
-    return gz;
+        mode,
+    )
 }
 #[export_name = "gzdopen"]
 
