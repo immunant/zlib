@@ -490,6 +490,12 @@ fn gz_read_state_ready(state: &crate::gzguts_h::gz_state) -> bool {
             || state.again != 0)
 }
 
+fn gz_shift_pushback_buffer(buf: &mut [crate::stdlib::Bytef], have: usize) -> usize {
+    let next = buf.len() - have;
+    buf.copy_within(0..have, next);
+    next
+}
+
 #[export_name = "gzread"]
 
 pub unsafe extern "C" fn gzread_ffi(
@@ -668,16 +674,12 @@ pub unsafe extern "C" fn gzungetc_ffi(
         return -1 as ::core::ffi::c_int;
     }
     if (*state).x.next == (*state).out {
-        let mut src: *mut ::core::ffi::c_uchar = (*state).out.offset((*state).x.have as isize);
-        let mut dest: *mut ::core::ffi::c_uchar = (*state)
-            .out
-            .offset(((*state).size << 1 as ::core::ffi::c_int) as isize);
-        while src > (*state).out {
-            src = src.offset(-1);
-            dest = dest.offset(-1);
-            *dest = *src;
-        }
-        (*state).x.next = dest;
+        let out = ::core::slice::from_raw_parts_mut(
+            (*state).out as *mut crate::stdlib::Bytef,
+            ((*state).size << 1 as ::core::ffi::c_int) as usize,
+        );
+        let next = gz_shift_pushback_buffer(out, (*state).x.have as usize);
+        (*state).x.next = (*state).out.offset(next as isize);
     }
     (*state).x.have = (*state).x.have.wrapping_add(1);
     (*state).x.next = (*state).x.next.offset(-1);

@@ -167,17 +167,10 @@ unsafe extern "C" fn gz_comp(
             || flush != crate::zlib_h::Z_NO_FLUSH
                 && (flush != crate::zlib_h::Z_FINISH || ret == crate::zlib_h::Z_STREAM_END)
         {
-            while (*strm).next_out > (*state).x.next {
+            while let Some(chunk) = gz_pending_output_chunk(&*state, max) {
                 *crate::stdlib::__errno_location() = 0 as ::core::ffi::c_int;
                 (*state).again = 0 as ::core::ffi::c_int;
-                put = if (*strm).next_out.offset_from((*state).x.next) as ::core::ffi::c_long
-                    > max as ::core::ffi::c_int as ::core::ffi::c_long
-                {
-                    max
-                } else {
-                    (*strm).next_out.offset_from((*state).x.next) as ::core::ffi::c_long
-                        as ::core::ffi::c_uint
-                };
+                put = chunk;
                 writ = crate::stdlib::write(
                     (*state).fd,
                     (*state).x.next as *const ::core::ffi::c_void,
@@ -352,6 +345,23 @@ fn gz_buffered_input_used(state: &crate::gzguts_h::gz_state) -> ::core::ffi::c_u
     (state.strm.next_in as usize)
         .wrapping_add(state.strm.avail_in as usize)
         .wrapping_sub(state.in_0 as usize) as ::core::ffi::c_uint
+}
+
+fn gz_pending_output_chunk(
+    state: &crate::gzguts_h::gz_state,
+    max: ::core::ffi::c_uint,
+) -> Option<::core::ffi::c_uint> {
+    let next_out = state.strm.next_out as usize;
+    let next = state.x.next as usize;
+    if next_out <= next {
+        return None;
+    }
+    let pending = next_out - next;
+    Some(if pending > max as usize {
+        max
+    } else {
+        pending as ::core::ffi::c_uint
+    })
 }
 
 fn gzwrite_len_fits_int(len: ::core::ffi::c_uint) -> bool {
