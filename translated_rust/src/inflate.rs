@@ -717,6 +717,43 @@ fn inflate_code_index(code_start: usize, code_len: usize, cursor: usize) -> Opti
     (index <= code_len).then_some(index)
 }
 
+/// Describe how an `inflateCopy()` boundary must rebase its decode-table
+/// cursors after copying the owning state record.  The compatibility fields
+/// remain address tokens at the ABI boundary; this plan performs their range
+/// validation and index calculation without relational raw-pointer
+/// comparisons or raw-pointer arithmetic.
+#[derive(Copy, Clone)]
+struct InflateCopyCodeCursors {
+    lencode: Option<usize>,
+    distcode: Option<usize>,
+    next: usize,
+}
+
+fn inflate_copy_code_cursors(
+    source_code_start: usize,
+    code_len: usize,
+    lencode: usize,
+    distcode: usize,
+    next: usize,
+) -> InflateCopyCodeCursors {
+    // The original cursor-range test accepted only an actual table element
+    // for `lencode`, not the one-past-end sentinel.  Preserve that detail
+    // before attempting to rebase the paired distance-table cursor.
+    let lencode =
+        inflate_code_index(source_code_start, code_len, lencode).filter(|index| *index < code_len);
+    let distcode = lencode.and_then(|_| inflate_code_index(source_code_start, code_len, distcode));
+    InflateCopyCodeCursors {
+        // zlib's copied state retains its original table tokens when the
+        // paired cursor is malformed.  Only publish rebased table cursors
+        // when both indices passed the existing boundary validation.
+        lencode: distcode.and(lencode),
+        distcode,
+        // The translated implementation reset an invalid `next` cursor to
+        // the start of `codes`; retain that compatibility behavior.
+        next: inflate_code_index(source_code_start, code_len, next).unwrap_or(0),
+    }
+}
+
 /// Resolve the two active decode-table cursors to their bounded table tails.
 /// Fixed tables have stable static storage; dynamic tables live in `codes`.
 /// The codec boundary uses this only to lend the safe fast decoder its table
@@ -3150,35 +3187,20 @@ pub unsafe extern "C" fn inflateCopy_ffi(
     *dest = *source;
     *copy = *state;
     (*copy).strm = dest;
-    if (*state).lencode
-        >= &raw mut (*state).codes as *mut crate::src::inftrees::code
-            as *const crate::src::inftrees::code
-        && (*state).lencode
-            <= (&raw mut (*state).codes as *mut crate::src::inftrees::code)
-                .wrapping_add(crate::src::inftrees::ENOUGH as usize)
-                .wrapping_sub(1) as *const crate::src::inftrees::code
-    {
-        let source_codes = &raw mut (*state).codes as *mut crate::src::inftrees::code;
-        let copy_codes = &raw mut (*copy).codes as *mut crate::src::inftrees::code;
-        let code_start = source_codes as usize;
-        let code_len = crate::src::inftrees::ENOUGH as usize;
-        if let (Some(lencode), Some(distcode)) = (
-            inflate_code_index(code_start, code_len, (*state).lencode as usize),
-            inflate_code_index(code_start, code_len, (*state).distcode as usize),
-        ) {
-            (*copy).lencode = copy_codes.wrapping_add(lencode);
-            (*copy).distcode = copy_codes.wrapping_add(distcode);
-        }
-    }
     let source_codes = &raw mut (*state).codes as *mut crate::src::inftrees::code;
     let copy_codes = &raw mut (*copy).codes as *mut crate::src::inftrees::code;
-    let next = inflate_code_index(
+    let cursors = inflate_copy_code_cursors(
         source_codes as usize,
         crate::src::inftrees::ENOUGH as usize,
+        (*state).lencode as usize,
+        (*state).distcode as usize,
         (*state).next as usize,
-    )
-    .unwrap_or(0);
-    (*copy).next = copy_codes.wrapping_add(next);
+    );
+    if let (Some(lencode), Some(distcode)) = (cursors.lencode, cursors.distcode) {
+        (*copy).lencode = copy_codes.wrapping_add(lencode);
+        (*copy).distcode = copy_codes.wrapping_add(distcode);
+    }
+    (*copy).next = copy_codes.wrapping_add(cursors.next);
     if !window.is_null() {
         let length = (*state).whave as usize;
         let source_window = ::core::slice::from_raw_parts((*state).window, length);
