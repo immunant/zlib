@@ -150,7 +150,6 @@ pub const WIN_INIT: ::core::ffi::c_int = crate::zutil_h::MAX_MATCH;
 pub use crate::__stddef_size_t_h::size_t;
 
 pub use crate::src::adler32::adler32_z as adler32;
-pub use crate::src::crc32::crc32;
 pub use crate::src::crc32::crc32_z;
 pub use crate::src::trees::_dist_code;
 pub use crate::src::trees::_length_code;
