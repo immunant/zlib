@@ -81,7 +81,10 @@ pub type deflate_state = crate::src::deflate::internal_state;
 #[repr(C)]
 
 pub struct internal_state {
-    pub strm: crate::zlib_h::z_streamp,
+    // This is an opaque, nullable identity for the ABI stream. Rust
+    // implementation code compares identities only; the legacy FFI tree
+    // bridge is the sole place that recreates the raw stream handle.
+    pub strm: usize,
     pub status: ::core::ffi::c_int,
     pub pending_buf: *mut crate::stdlib::Bytef,
     pub pending_buf_size: crate::zutil_h::ulg,
@@ -665,7 +668,7 @@ fn initialize_deflate_state_base(
     window_bits: ::core::ffi::c_int,
     mem_level: ::core::ffi::c_int,
 ) {
-    state.strm = ::core::ptr::from_mut(strm);
+    state.strm = stream_identity(strm);
     state.status = crate::src::deflate::INIT_STATE;
     state.wrap = wrap;
     state.gzhead = ::core::ptr::null_mut::<crate::zlib_h::gz_header>();
@@ -683,6 +686,10 @@ fn initialize_deflate_state_base(
         .wrapping_div(crate::zutil_h::MIN_MATCH as crate::stdlib::uInt);
 }
 
+fn stream_identity(strm: &crate::zlib_h::z_stream) -> usize {
+    ::core::ptr::from_ref(strm).addr()
+}
+
 /// The C initializer zeroed its allocator-provided storage before configuring
 /// it.  Construct the equivalent valid Rust value instead, so the named
 /// allocation boundary never treats untyped bytes as an initialized state.
@@ -692,7 +699,7 @@ fn empty_deflate_state() -> crate::src::deflate::deflate_state {
         dl: crate::src::deflate::C2Rust_Unnamed_0 { len: 0 },
     };
     crate::src::deflate::deflate_state {
-        strm: ::core::ptr::null_mut(),
+        strm: 0,
         status: 0,
         pending_buf: ::core::ptr::null_mut(),
         pending_buf_size: 0,
@@ -960,7 +967,7 @@ fn deflate_state_valid(
 ) -> bool {
     strm.zalloc.is_some()
         && strm.zfree.is_some()
-        && state.strm == ::core::ptr::from_ref(strm).cast_mut()
+        && state.strm == stream_identity(strm)
         && (state.status == crate::src::deflate::INIT_STATE
             || state.status == crate::src::deflate::GZIP_STATE
             || state.status == crate::src::deflate::EXTRA_STATE
@@ -1128,7 +1135,7 @@ fn deflate_dictionary_len(
     };
     if strm.zalloc.is_none()
         || strm.zfree.is_none()
-        || state.strm != strm as *const crate::zlib_h::z_stream_s as crate::zlib_h::z_streamp
+        || state.strm != stream_identity(strm)
         || state.status != crate::src::deflate::INIT_STATE
             && state.status != crate::src::deflate::GZIP_STATE
             && state.status != crate::src::deflate::EXTRA_STATE
@@ -1222,7 +1229,7 @@ fn deflate_reset_keep_state_valid(
     strm: &crate::zlib_h::z_stream,
     state: &crate::src::deflate::deflate_state,
 ) -> bool {
-    state.strm == ::core::ptr::from_ref(strm).cast_mut()
+    state.strm == stream_identity(strm)
         && (state.status == crate::src::deflate::INIT_STATE
             || state.status == crate::src::deflate::GZIP_STATE
             || state.status == crate::src::deflate::EXTRA_STATE
@@ -1516,7 +1523,7 @@ pub unsafe extern "C" fn deflateUsed_ffi(
     let Some(state) = (strm.state as *const crate::src::deflate::deflate_state).as_ref() else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
-    if state.strm != strm as *const crate::zlib_h::z_stream_s as crate::zlib_h::z_streamp
+    if state.strm != stream_identity(strm)
         || state.status != crate::src::deflate::INIT_STATE
             && state.status != crate::src::deflate::GZIP_STATE
             && state.status != crate::src::deflate::EXTRA_STATE
@@ -1543,7 +1550,7 @@ fn deflate_prime(
     };
     if strm.zalloc.is_none()
         || strm.zfree.is_none()
-        || state.strm != strm as *const crate::zlib_h::z_stream_s as crate::zlib_h::z_streamp
+        || state.strm != stream_identity(strm)
         || state.status != crate::src::deflate::INIT_STATE
             && state.status != crate::src::deflate::GZIP_STATE
             && state.status != crate::src::deflate::EXTRA_STATE
@@ -2992,7 +2999,7 @@ pub fn deflateCopy(
     dest_stream.state = ds as *mut crate::src::deflate::internal_state;
     let dest_state = unsafe { &mut *ds };
     *dest_state = source_state.clone();
-    dest_state.strm = ::core::ptr::from_mut(dest_stream);
+    dest_state.strm = stream_identity(dest_stream);
     let storage = DeflateStorageLayout::from_state(dest_state);
     dest_state.window = unsafe {
         Some(dest_stream.zalloc.expect("non-null function pointer"))

@@ -4548,8 +4548,11 @@ pub unsafe extern "C" fn _tr_flush_block_ffi(
     mut stored_len: crate::zutil_h::ulg,
     mut last: ::core::ffi::c_int,
 ) {
-    let strm = &mut *(*s).strm;
     let state = &mut *s;
+    if state.strm == 0 {
+        return;
+    }
+    let strm = &mut *::core::ptr::with_exposed_provenance_mut(state.strm);
     let pending_buf =
         ::core::slice::from_raw_parts_mut(state.pending_buf, state.pending_buf_size as usize);
     let source = if buf.is_null() {
