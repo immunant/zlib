@@ -62,6 +62,28 @@ pub use crate::zlib_h::Z_OK;
 pub use crate::zlib_h::Z_RLE;
 
 impl crate::gzguts_h::GzBuffers {
+    // Allocate gzip write storage as the same single owner transaction used
+    // by the read side.  Direct writes intentionally retain only the doubled
+    // input buffer; compressed writes add the output buffer before publishing
+    // either allocation to the ABI-shaped state.
+    pub(crate) fn allocate_write(
+        want: ::core::ffi::c_uint,
+        direct: ::core::ffi::c_int,
+    ) -> Option<Self> {
+        let input = gz_buffer(want << 1)?;
+        let output = if direct == 0 {
+            Some(gz_buffer(want)?)
+        } else {
+            None
+        };
+        Some(Self {
+            size: want,
+            input: Some(input),
+            output,
+            input_cursor: None,
+        })
+    }
+
     // Allocate gzip read storage as one owner transaction.  Keeping the
     // paired buffers together ensures that a failed second allocation drops
     // the first immediately, and lets read initialization publish the owner
