@@ -1185,13 +1185,19 @@ pub unsafe extern "C" fn inflateBackInit__ffi(
     let version_first = unsafe { version.as_ref().copied() };
     inflateBackInit_(strm, windowBits, window, version_first, stream_size)
 }
-pub unsafe extern "C" fn inflateBack(
+pub(crate) fn inflateBack(
     strm: Option<&mut crate::zlib_h::z_stream>,
     mut in_0: crate::zlib_h::in_func,
     mut in_desc: *mut ::core::ffi::c_void,
     mut out: crate::zlib_h::out_func,
     mut out_desc: *mut ::core::ffi::c_void,
 ) -> ::core::ffi::c_int {
+    // SAFETY: this decoder is reached only after the ABI adapter has bound
+    // the stream. Its callback and cursor protocol is validated at the
+    // existing refill, output, and state-check sites below; keeping those raw
+    // operations scoped here avoids exposing an unsafe function contract to
+    // Rust callers of the implementation.
+    unsafe {
     let mut next: *mut ::core::ffi::c_uchar = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
     let mut put: *mut ::core::ffi::c_uchar = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
     let mut have: ::core::ffi::c_uint = 0;
@@ -1801,6 +1807,7 @@ pub unsafe extern "C" fn inflateBack(
     strm.next_in = next as *mut crate::stdlib::Bytef;
     inflate_back_publish_available_input(strm, have);
     return ret;
+    }
 }
 #[export_name = "inflateBack"]
 
