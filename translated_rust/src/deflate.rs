@@ -709,49 +709,51 @@ fn slide_window_state(
     Some(more.wrapping_add(wsize))
 }
 
-unsafe fn read_buf(
+fn read_buf(
     mut strm: crate::zlib_h::z_streamp,
     mut buf: *mut crate::stdlib::Bytef,
     mut size: ::core::ffi::c_uint,
     wrap: ::core::ffi::c_int,
 ) -> ReadBufProgress {
-    if strm.is_null() {
-        return ReadBufProgress::default();
-    }
-    let strm = &mut *strm;
-    let len = strm.avail_in.min(size);
-    if len == 0 {
-        return ReadBufProgress {
-            copied: 0,
-            avail_in: strm.avail_in,
-        };
-    }
-    if strm.next_in.is_null() || buf.is_null() {
-        return ReadBufProgress {
-            copied: 0,
-            avail_in: strm.avail_in,
-        };
-    }
-    let input = ::core::slice::from_raw_parts(strm.next_in, len as usize);
-    let output = ::core::slice::from_raw_parts_mut(buf, len as usize);
-    let (len, adler, avail_in, total_in) = read_buf_progress_state(
-        input,
-        output,
-        wrap,
-        strm.adler,
-        strm.avail_in,
-        strm.total_in,
-    );
-    strm.avail_in = avail_in;
-    strm.adler = adler;
-    // `len` is bounded by the validated input slice above.  Preserve the
-    // translated cursor arithmetic without performing an unsafe raw-pointer
-    // offset in this private adapter.
-    strm.next_in = strm.next_in.wrapping_add(len as usize);
-    strm.total_in = total_in;
-    ReadBufProgress {
-        copied: len,
-        avail_in,
+    unsafe {
+        if strm.is_null() {
+            return ReadBufProgress::default();
+        }
+        let strm = &mut *strm;
+        let len = strm.avail_in.min(size);
+        if len == 0 {
+            return ReadBufProgress {
+                copied: 0,
+                avail_in: strm.avail_in,
+            };
+        }
+        if strm.next_in.is_null() || buf.is_null() {
+            return ReadBufProgress {
+                copied: 0,
+                avail_in: strm.avail_in,
+            };
+        }
+        let input = ::core::slice::from_raw_parts(strm.next_in, len as usize);
+        let output = ::core::slice::from_raw_parts_mut(buf, len as usize);
+        let (len, adler, avail_in, total_in) = read_buf_progress_state(
+            input,
+            output,
+            wrap,
+            strm.adler,
+            strm.avail_in,
+            strm.total_in,
+        );
+        strm.avail_in = avail_in;
+        strm.adler = adler;
+        // `len` is bounded by the validated input slice above.  Preserve the
+        // translated cursor arithmetic without performing an unsafe raw-pointer
+        // offset in this private adapter.
+        strm.next_in = strm.next_in.wrapping_add(len as usize);
+        strm.total_in = total_in;
+        ReadBufProgress {
+            copied: len,
+            avail_in,
+        }
     }
 }
 
