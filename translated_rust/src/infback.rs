@@ -1003,40 +1003,49 @@ pub unsafe extern "C" fn inflateBack_ffi(
     }
     result
 }
-/// Release the Rust-owned portions of a back-inflater state.
-///
-/// The allocation itself remains owned by the ABI allocator, so the exported
-/// boundary returns it only after this safe cleanup has released the window.
-fn inflate_back_end_impl(state: &mut crate::src::inflate::inflate_state) -> ::core::ffi::c_int {
-    state.window = None;
-    crate::zlib_h::Z_OK
+/// The allocator pairing selected when `inflateBackInit_()` installed the
+/// state.  The callback itself stays at the ABI boundary; codec cleanup only
+/// needs to know whether the Rust owner or that callback owns the allocation.
+#[derive(Copy, Clone)]
+enum InflateBackStateOwner {
+    Default,
+    Callback,
 }
 
-/// Return the ABI-owned state allocation after the safe state cleanup.
+/// Validate the stream allocator pairing before state cleanup begins.
 ///
-/// This is intentionally separate from the exported wrapper: it is the one
-/// place that still knows the callback pair and raw allocation address.
-unsafe fn inflate_back_end_boundary(
-    strm: &mut crate::zlib_h::z_stream_s,
-    state: &mut crate::src::inflate::inflate_state,
-) -> ::core::ffi::c_int {
+/// This is deliberately implementation logic rather than wrapper logic, so
+/// malformed streams are rejected before either owner is released.
+fn inflate_back_state_owner(
+    strm: &crate::zlib_h::z_stream_s,
+) -> Result<InflateBackStateOwner, ::core::ffi::c_int> {
     if (strm.zalloc.is_some() && strm.zfree.is_none())
         || (strm.zalloc.is_none() && strm.zfree.is_some())
     {
-        return crate::zlib_h::Z_STREAM_ERROR;
+        return Err(crate::zlib_h::Z_STREAM_ERROR);
     }
-    let end = inflate_back_end_impl(state);
-    if end != crate::zlib_h::Z_STREAM_ERROR {
-        // Safe cleanup released the state's only owned member.  This callback
-        // owns and frees the allocation itself.
-        if let Some(zfree) = strm.zfree {
-            zfree(strm.opaque, core::ptr::from_mut(state).cast());
-        } else {
-            crate::src::inflate::release_default_inflate_state(core::ptr::from_mut(state).addr());
+    Ok(if strm.zfree.is_some() {
+        InflateBackStateOwner::Callback
+    } else {
+        InflateBackStateOwner::Default
+    })
+}
+
+/// Release the Rust-owned portions of a back-inflater state and report an
+/// opaque callback allocation that the ABI wrapper must return to `zfree`.
+fn inflate_back_end_impl(
+    state: &mut crate::src::inflate::inflate_state,
+    owner: InflateBackStateOwner,
+) -> Option<usize> {
+    let state_address = core::ptr::from_mut(state).addr();
+    state.window = None;
+    match owner {
+        InflateBackStateOwner::Default => {
+            crate::src::inflate::release_default_inflate_state(state_address);
+            None
         }
-        strm.state = core::ptr::null_mut();
+        InflateBackStateOwner::Callback => Some(state_address),
     }
-    end
 }
 
 #[export_name = "inflateBackEnd"]
@@ -1054,5 +1063,16 @@ pub unsafe extern "C" fn inflateBackEnd_ffi(
     else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
-    unsafe { inflate_back_end_boundary(strm, state) }
+    let owner = match inflate_back_state_owner(strm) {
+        Ok(owner) => owner,
+        Err(error) => return error,
+    };
+    let callback_allocation = inflate_back_end_impl(state, owner);
+    strm.state = core::ptr::null_mut();
+    if let Some(address) = callback_allocation {
+        let allocation = core::ptr::with_exposed_provenance_mut::<core::ffi::c_void>(address);
+        let zfree = strm.zfree.expect("allocator pairing was validated");
+        zfree(strm.opaque, allocation);
+    }
+    crate::zlib_h::Z_OK
 }
