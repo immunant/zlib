@@ -2887,8 +2887,10 @@ pub unsafe extern "C" fn inflate_table(
     };
     let mut next: *mut crate::src::inftrees::code =
         ::core::ptr::null_mut::<crate::src::inftrees::code>();
-    let mut base: *const ::core::ffi::c_ushort = ::core::ptr::null::<::core::ffi::c_ushort>();
-    let mut extra: *const ::core::ffi::c_ushort = ::core::ptr::null::<::core::ffi::c_ushort>();
+    // The base and extra tables are immutable local data.  Keep them as
+    // slices so table selection and lookup do not manufacture raw pointers.
+    let mut base: Option<&[::core::ffi::c_ushort]> = None;
+    let mut extra: Option<&[::core::ffi::c_ushort]> = None;
     let mut match_0: ::core::ffi::c_uint = 0 as ::core::ffi::c_uint;
     let mut count: [::core::ffi::c_ushort; 16] = [0; 16];
     let mut offs: [::core::ffi::c_ushort; 16] = [0; 16];
@@ -3111,13 +3113,13 @@ pub unsafe extern "C" fn inflate_table(
             match_0 = 20 as ::core::ffi::c_uint;
         }
         1 => {
-            base = &raw const lbase as *const ::core::ffi::c_ushort;
-            extra = &raw const lext as *const ::core::ffi::c_ushort;
+            base = Some(&lbase);
+            extra = Some(&lext);
             match_0 = 257 as ::core::ffi::c_uint;
         }
         2 => {
-            base = &raw const dbase as *const ::core::ffi::c_ushort;
-            extra = &raw const dext as *const ::core::ffi::c_ushort;
+            base = Some(&dbase);
+            extra = Some(&dext);
         }
         _ => {}
     }
@@ -3148,14 +3150,20 @@ pub unsafe extern "C" fn inflate_table(
             here.op = 0 as ::core::ffi::c_int as ::core::ffi::c_uchar;
             here.val = *work.wrapping_offset(sym as isize);
         } else if *work.wrapping_offset(sym as isize) as ::core::ffi::c_uint >= match_0 {
-            here.op = *extra.wrapping_offset(
-                (*work.wrapping_offset(sym as isize) as ::core::ffi::c_uint).wrapping_sub(match_0)
-                    as isize,
-            ) as ::core::ffi::c_uchar;
-            here.val = *base.wrapping_offset(
-                (*work.wrapping_offset(sym as isize) as ::core::ffi::c_uint).wrapping_sub(match_0)
-                    as isize,
-            );
+            let index = (*work.wrapping_offset(sym as isize) as ::core::ffi::c_uint)
+                .wrapping_sub(match_0) as usize;
+            if let (Some(base), Some(extra)) = (base, extra) {
+                if let Some((&base, &extra)) = base.get(index).zip(extra.get(index)) {
+                    here.op = extra as ::core::ffi::c_uchar;
+                    here.val = base;
+                } else {
+                    here.op = 64 as ::core::ffi::c_uchar;
+                    here.val = 0 as ::core::ffi::c_ushort;
+                }
+            } else {
+                here.op = 64 as ::core::ffi::c_uchar;
+                here.val = 0 as ::core::ffi::c_ushort;
+            }
         } else {
             here.op = (32 as ::core::ffi::c_int + 64 as ::core::ffi::c_int) as ::core::ffi::c_uchar;
             here.val = 0 as ::core::ffi::c_ushort;
