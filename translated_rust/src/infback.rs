@@ -176,6 +176,31 @@ enum InflateBackMatchSource {
     Behind(usize),
 }
 
+#[derive(Debug, PartialEq, Eq)]
+enum InflateBackCodeLengthRepeat {
+    Previous {
+        extra_bits: ::core::ffi::c_uint,
+    },
+    Zero {
+        extra_bits: ::core::ffi::c_uint,
+        base: ::core::ffi::c_uint,
+    },
+}
+
+fn inflate_back_code_length_repeat(symbol: ::core::ffi::c_ushort) -> InflateBackCodeLengthRepeat {
+    match symbol {
+        16 => InflateBackCodeLengthRepeat::Previous { extra_bits: 2 },
+        17 => InflateBackCodeLengthRepeat::Zero {
+            extra_bits: 3,
+            base: 3,
+        },
+        _ => InflateBackCodeLengthRepeat::Zero {
+            extra_bits: 7,
+            base: 11,
+        },
+    }
+}
+
 fn inflate_back_match_copy_plan(
     window_size: ::core::ffi::c_uint,
     offset: ::core::ffi::c_uint,
@@ -578,39 +603,42 @@ pub unsafe extern "C" fn inflateBack(
                                 (*state).have = (*state).have.wrapping_add(1);
                                 (*state).lens[c2rust_fresh7 as usize] = here.val;
                             } else {
-                                if here.val as ::core::ffi::c_int == 16 as ::core::ffi::c_int {
-                                    while bits
-                                        < (here.bits as ::core::ffi::c_int
-                                            + 2 as ::core::ffi::c_int)
-                                            as ::core::ffi::c_uint
-                                    {
-                                        if have == 0 as ::core::ffi::c_uint {
-                                            have = in_0.expect("non-null function pointer")(
-                                                in_desc,
-                                                &raw mut next,
-                                            );
-                                            if have == 0 as ::core::ffi::c_uint {
-                                                next =
-                                                    ::core::ptr::null_mut::<::core::ffi::c_uchar>();
-                                                ret = crate::zlib_h::Z_BUF_ERROR;
-                                                break 's_69;
-                                            }
-                                        }
-                                        let input_byte = *next;
-                                        next = next.wrapping_add(1);
-                                        (have, hold, bits) = inflate_back_consume_input_byte(
-                                            have, hold, bits, input_byte,
-                                        );
+                                let repeat = inflate_back_code_length_repeat(here.val);
+                                let extra_bits = match &repeat {
+                                    InflateBackCodeLengthRepeat::Previous { extra_bits }
+                                    | InflateBackCodeLengthRepeat::Zero { extra_bits, .. } => {
+                                        *extra_bits
                                     }
-                                    hold >>= here.bits as ::core::ffi::c_int;
-                                    bits = bits.wrapping_sub(here.bits as ::core::ffi::c_uint);
-                                    if (*state).have == 0 as ::core::ffi::c_uint {
-                                        (*strm).msg = b"invalid bit length repeat\0".as_ptr()
-                                            as *const ::core::ffi::c_char
-                                            as *mut ::core::ffi::c_char;
-                                        (*state).mode = crate::src::inflate::BAD;
-                                        break;
-                                    } else {
+                                };
+                                while bits < here.bits as ::core::ffi::c_uint + extra_bits {
+                                    if have == 0 as ::core::ffi::c_uint {
+                                        have = in_0.expect("non-null function pointer")(
+                                            in_desc,
+                                            &raw mut next,
+                                        );
+                                        if have == 0 as ::core::ffi::c_uint {
+                                            next = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
+                                            ret = crate::zlib_h::Z_BUF_ERROR;
+                                            break 's_69;
+                                        }
+                                    }
+                                    let input_byte = *next;
+                                    next = next.wrapping_add(1);
+                                    (have, hold, bits) = inflate_back_consume_input_byte(
+                                        have, hold, bits, input_byte,
+                                    );
+                                }
+                                hold >>= here.bits as ::core::ffi::c_int;
+                                bits = bits.wrapping_sub(here.bits as ::core::ffi::c_uint);
+                                match repeat {
+                                    InflateBackCodeLengthRepeat::Previous { extra_bits } => {
+                                        if (*state).have == 0 as ::core::ffi::c_uint {
+                                            (*strm).msg = b"invalid bit length repeat\0".as_ptr()
+                                                as *const ::core::ffi::c_char
+                                                as *mut ::core::ffi::c_char;
+                                            (*state).mode = crate::src::inflate::BAD;
+                                            break;
+                                        }
                                         len = (*state).lens[(*state)
                                             .have
                                             .wrapping_sub(1 as ::core::ffi::c_uint)
@@ -618,90 +646,22 @@ pub unsafe extern "C" fn inflateBack(
                                             as ::core::ffi::c_uint;
                                         copy = (3 as ::core::ffi::c_uint).wrapping_add(
                                             hold as ::core::ffi::c_uint
-                                                & ((1 as ::core::ffi::c_uint)
-                                                    << 2 as ::core::ffi::c_int)
+                                                & ((1 as ::core::ffi::c_uint) << extra_bits)
                                                     .wrapping_sub(1 as ::core::ffi::c_uint),
                                         );
-                                        hold >>= 2 as ::core::ffi::c_int;
-                                        bits = bits.wrapping_sub(
-                                            2 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                                        );
+                                        hold >>= extra_bits;
+                                        bits = bits.wrapping_sub(extra_bits);
                                     }
-                                } else if here.val as ::core::ffi::c_int == 17 as ::core::ffi::c_int
-                                {
-                                    while bits
-                                        < (here.bits as ::core::ffi::c_int
-                                            + 3 as ::core::ffi::c_int)
-                                            as ::core::ffi::c_uint
-                                    {
-                                        if have == 0 as ::core::ffi::c_uint {
-                                            have = in_0.expect("non-null function pointer")(
-                                                in_desc,
-                                                &raw mut next,
-                                            );
-                                            if have == 0 as ::core::ffi::c_uint {
-                                                next =
-                                                    ::core::ptr::null_mut::<::core::ffi::c_uchar>();
-                                                ret = crate::zlib_h::Z_BUF_ERROR;
-                                                break 's_69;
-                                            }
-                                        }
-                                        let input_byte = *next;
-                                        next = next.wrapping_add(1);
-                                        (have, hold, bits) = inflate_back_consume_input_byte(
-                                            have, hold, bits, input_byte,
+                                    InflateBackCodeLengthRepeat::Zero { extra_bits, base } => {
+                                        len = 0 as ::core::ffi::c_uint;
+                                        copy = base.wrapping_add(
+                                            hold as ::core::ffi::c_uint
+                                                & ((1 as ::core::ffi::c_uint) << extra_bits)
+                                                    .wrapping_sub(1 as ::core::ffi::c_uint),
                                         );
+                                        hold >>= extra_bits;
+                                        bits = bits.wrapping_sub(extra_bits);
                                     }
-                                    hold >>= here.bits as ::core::ffi::c_int;
-                                    bits = bits.wrapping_sub(here.bits as ::core::ffi::c_uint);
-                                    len = 0 as ::core::ffi::c_uint;
-                                    copy = (3 as ::core::ffi::c_uint).wrapping_add(
-                                        hold as ::core::ffi::c_uint
-                                            & ((1 as ::core::ffi::c_uint)
-                                                << 3 as ::core::ffi::c_int)
-                                                .wrapping_sub(1 as ::core::ffi::c_uint),
-                                    );
-                                    hold >>= 3 as ::core::ffi::c_int;
-                                    bits = bits.wrapping_sub(
-                                        3 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                                    );
-                                } else {
-                                    while bits
-                                        < (here.bits as ::core::ffi::c_int
-                                            + 7 as ::core::ffi::c_int)
-                                            as ::core::ffi::c_uint
-                                    {
-                                        if have == 0 as ::core::ffi::c_uint {
-                                            have = in_0.expect("non-null function pointer")(
-                                                in_desc,
-                                                &raw mut next,
-                                            );
-                                            if have == 0 as ::core::ffi::c_uint {
-                                                next =
-                                                    ::core::ptr::null_mut::<::core::ffi::c_uchar>();
-                                                ret = crate::zlib_h::Z_BUF_ERROR;
-                                                break 's_69;
-                                            }
-                                        }
-                                        let input_byte = *next;
-                                        next = next.wrapping_add(1);
-                                        (have, hold, bits) = inflate_back_consume_input_byte(
-                                            have, hold, bits, input_byte,
-                                        );
-                                    }
-                                    hold >>= here.bits as ::core::ffi::c_int;
-                                    bits = bits.wrapping_sub(here.bits as ::core::ffi::c_uint);
-                                    len = 0 as ::core::ffi::c_uint;
-                                    copy = (11 as ::core::ffi::c_uint).wrapping_add(
-                                        hold as ::core::ffi::c_uint
-                                            & ((1 as ::core::ffi::c_uint)
-                                                << 7 as ::core::ffi::c_int)
-                                                .wrapping_sub(1 as ::core::ffi::c_uint),
-                                    );
-                                    hold >>= 7 as ::core::ffi::c_int;
-                                    bits = bits.wrapping_sub(
-                                        7 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                                    );
                                 }
                                 if (*state).have.wrapping_add(copy)
                                     > (*state).nlen.wrapping_add((*state).ndist)
@@ -1130,11 +1090,12 @@ pub unsafe extern "C" fn inflateBackEnd_ffi(
 mod tests {
     use super::{
         inflate_back_align_to_byte_boundary, inflate_back_block_header,
-        inflate_back_consume_input_byte, inflate_back_copy_count,
+        inflate_back_code_length_repeat, inflate_back_consume_input_byte, inflate_back_copy_count,
         inflate_back_distance_exceeds_window, inflate_back_finish_flush_status,
         inflate_back_init_metadata_is_valid, inflate_back_match_copy_plan,
         inflate_back_stored_block_length, inflate_back_window_bits_are_valid,
-        inflate_back_window_size, InflateBackBlockKind, InflateBackMatchSource,
+        inflate_back_window_size, InflateBackBlockKind, InflateBackCodeLengthRepeat,
+        InflateBackMatchSource,
     };
 
     #[test]
@@ -1258,6 +1219,39 @@ mod tests {
         assert_eq!(
             inflate_back_match_copy_plan(32, 20, 0, 7),
             (InflateBackMatchSource::Behind(20), 0)
+        );
+    }
+
+    #[test]
+    fn inflate_back_code_length_repeat_maps_repeat_symbols() {
+        assert_eq!(
+            inflate_back_code_length_repeat(16),
+            InflateBackCodeLengthRepeat::Previous { extra_bits: 2 }
+        );
+        assert_eq!(
+            inflate_back_code_length_repeat(17),
+            InflateBackCodeLengthRepeat::Zero {
+                extra_bits: 3,
+                base: 3,
+            }
+        );
+        assert_eq!(
+            inflate_back_code_length_repeat(18),
+            InflateBackCodeLengthRepeat::Zero {
+                extra_bits: 7,
+                base: 11,
+            }
+        );
+    }
+
+    #[test]
+    fn inflate_back_code_length_repeat_preserves_other_symbol_fallback() {
+        assert_eq!(
+            inflate_back_code_length_repeat(19),
+            InflateBackCodeLengthRepeat::Zero {
+                extra_bits: 7,
+                base: 11,
+            }
         );
     }
 

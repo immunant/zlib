@@ -643,6 +643,10 @@ fn gz_open_fd_plan(fd: ::core::ffi::c_int, oflag: ::core::ffi::c_int) -> GzOpenF
     }
 }
 
+fn gz_open_fd_succeeded(fd: ::core::ffi::c_int) -> bool {
+    fd != -1 as ::core::ffi::c_int
+}
+
 fn gz_open_path_buffer_len(len: crate::stdlib::z_size_t) -> crate::stdlib::z_size_t {
     (len as crate::stdlib::z_size_t).wrapping_add(1 as crate::stdlib::z_size_t)
 }
@@ -718,7 +722,7 @@ unsafe fn gz_open(
             (*state).fd = fd;
         }
     }
-    if (*state).fd == -1 as ::core::ffi::c_int {
+    if !gz_open_fd_succeeded((*state).fd) {
         crate::stdlib::free((*state).path as *mut ::core::ffi::c_void);
         crate::stdlib::free(state as *mut ::core::ffi::c_void);
         return ::core::ptr::null_mut::<crate::zlib_h::gzFile_s>();
@@ -1229,14 +1233,14 @@ mod tests {
         gz_clear_read_flags, gz_errno_is_retryable, gz_error_clears_buffer,
         gz_error_message_allocation_len, gz_error_needs_message_allocation, gz_error_plan,
         gz_is_read_mode, gz_is_read_or_write_mode, gz_legacy_offset_result, gz_lseek_succeeded,
-        gz_open_fd_plan, gz_open_has_required_inputs, gz_open_offset_plan, gz_open_path_buffer_len,
-        gz_open_recorded_offset, gz_parse_open_mode, gz_position_after_skip, gz_post_open_metadata,
-        gz_prepare_open, gz_request_len, gz_reset_core, gzbuffer_can_set_want,
-        gzbuffer_normalized_want, gzclearerr_core, gzdopen_has_valid_descriptor,
-        gzdopen_path_buffer_len, gzeof_result, gzerror_core, gzoffset64_adjust_for_buffered_read,
-        gzoffset64_result, gzrewind_request_is_valid, gzseek_adjust_offset,
-        gzseek_can_fast_forward, gzseek_clears_pending_skip, gzseek_effective_skip,
-        gzseek_error_allows_positioning, gzseek_fast_forward_lseek_offset,
+        gz_open_fd_plan, gz_open_fd_succeeded, gz_open_has_required_inputs, gz_open_offset_plan,
+        gz_open_path_buffer_len, gz_open_recorded_offset, gz_parse_open_mode,
+        gz_position_after_skip, gz_post_open_metadata, gz_prepare_open, gz_request_len,
+        gz_reset_core, gzbuffer_can_set_want, gzbuffer_normalized_want, gzclearerr_core,
+        gzdopen_has_valid_descriptor, gzdopen_path_buffer_len, gzeof_result, gzerror_core,
+        gzoffset64_adjust_for_buffered_read, gzoffset64_result, gzrewind_request_is_valid,
+        gzseek_adjust_offset, gzseek_can_fast_forward, gzseek_clears_pending_skip,
+        gzseek_effective_skip, gzseek_error_allows_positioning, gzseek_fast_forward_lseek_offset,
         gzseek_fast_forward_reset, gzseek_finish_fast_forward, gzseek_plan_read_buffer_consumption,
         gzseek_plan_remaining_offset, gzseek_plan_request, gzseek_read_buffer_consumed,
         gzseek_read_buffer_plan_for_mode, gzseek_read_buffer_uses_requested_offset,
@@ -2233,6 +2237,14 @@ mod tests {
         assert_ne!(gz_open_fd_plan(-2, 0), GzOpenFdPlan::OpenPath);
         assert_ne!(gz_open_fd_plan(0, 0), GzOpenFdPlan::OpenPath);
         assert_ne!(gz_open_fd_plan(17, 0), GzOpenFdPlan::OpenPath);
+    }
+
+    #[test]
+    fn gz_open_fd_succeeded_rejects_only_the_open_failure_sentinel() {
+        assert!(!gz_open_fd_succeeded(-1));
+        assert!(gz_open_fd_succeeded(-2));
+        assert!(gz_open_fd_succeeded(0));
+        assert!(gz_open_fd_succeeded(17));
     }
 
     #[test]

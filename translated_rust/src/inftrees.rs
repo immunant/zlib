@@ -3015,6 +3015,36 @@ fn next_huffman_code(mut huff: u32, length: u32) -> u32 {
     huff
 }
 
+fn write_replicated_table_entries(
+    table_cursor: TableCursor,
+    table: &mut [crate::src::inftrees::code],
+    table_offset: usize,
+    huff: u32,
+    drop_bits: u32,
+    curr: u32,
+    length: u32,
+    here: crate::src::inftrees::code,
+) -> Result<u32, ::core::ffi::c_int> {
+    let bits = length.checked_sub(drop_bits).ok_or(1)?;
+    let increment = 1u32.checked_shl(bits).ok_or(1)?;
+    let table_size = 1u32.checked_shl(curr).ok_or(1)?;
+    let huff_offset = huff >> drop_bits;
+    let mut fill = table_size;
+
+    loop {
+        fill = fill.checked_sub(increment).ok_or(1)?;
+        let entry_offset =
+            usize::try_from(huff_offset.checked_add(fill).ok_or(1)?).map_err(|_| 1)?;
+        let entry = table_cursor
+            .entry_mut(table, table_offset, entry_offset)
+            .ok_or(1)?;
+        *entry = here;
+        if fill == 0 {
+            return Ok(table_size);
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum SymbolAdvance {
     Next { symbol: usize, length: u32 },
@@ -3236,21 +3266,19 @@ pub fn inflate_table_safe(
             return -1;
         };
 
-        let increment = 1u32 << (length - drop_bits);
-        let mut fill = 1u32 << curr;
-        let next_table_size = fill;
-        loop {
-            fill -= increment;
-            let Some(entry) =
-                table_cursor.entry_mut(table, next, ((huff >> drop_bits) + fill) as usize)
-            else {
-                return 1;
-            };
-            *entry = here;
-            if fill == 0 {
-                break;
-            }
-        }
+        let next_table_size = match write_replicated_table_entries(
+            table_cursor,
+            table,
+            next,
+            huff,
+            drop_bits,
+            curr,
+            length,
+            here,
+        ) {
+            Ok(table_size) => table_size,
+            Err(error) => return error,
+        };
 
         huff = next_huffman_code(huff, length);
 
@@ -3424,6 +3452,59 @@ mod tests {
     fn next_huffman_code_leaves_invalid_lengths_unchanged() {
         assert_eq!(next_huffman_code(0b1010, 0), 0b1010);
         assert_eq!(next_huffman_code(0b1010, 32), 0b1010);
+    }
+
+    #[test]
+    fn replicated_entries_fill_each_matching_decode_slot() {
+        let sentinel = code {
+            op: 7,
+            bits: 8,
+            val: 9,
+        };
+        let here = code {
+            op: 3,
+            bits: 2,
+            val: 42,
+        };
+        let mut table = [sentinel; 6];
+        let cursor = TableCursor::new(0, table.len()).expect("valid cursor");
+
+        assert_eq!(
+            write_replicated_table_entries(cursor, &mut table, 0, 0b110, 1, 2, 2, here),
+            Ok(4)
+        );
+        assert_eq!(table[3].op, here.op);
+        assert_eq!(table[3].bits, here.bits);
+        assert_eq!(table[3].val, here.val);
+        assert_eq!(table[5].op, here.op);
+        assert_eq!(table[5].bits, here.bits);
+        assert_eq!(table[5].val, here.val);
+        for &index in &[0, 1, 2, 4] {
+            assert_eq!(table[index].op, sentinel.op);
+            assert_eq!(table[index].bits, sentinel.bits);
+            assert_eq!(table[index].val, sentinel.val);
+        }
+    }
+
+    #[test]
+    fn replicated_entries_reject_an_out_of_bounds_first_slot() {
+        let sentinel = code {
+            op: 7,
+            bits: 8,
+            val: 9,
+        };
+        let mut table = [sentinel; 6];
+        let cursor = TableCursor::new(0, table.len()).expect("valid cursor");
+
+        assert_eq!(
+            write_replicated_table_entries(cursor, &mut table, 0, 0b110, 0, 2, 2, sentinel),
+            Err(1)
+        );
+        for entry in table {
+            assert_eq!(entry.op, sentinel.op);
+            assert_eq!(entry.bits, sentinel.bits);
+            assert_eq!(entry.val, sentinel.val);
+        }
     }
 
     #[test]
