@@ -1256,9 +1256,21 @@ fn gzungetc_buffer_insert(
     size: crate::stdlib::uInt,
 ) -> Result<(usize, GzUngetcBufferPlan), GzUngetcBufferPlan> {
     let plan = gzungetc_buffer_plan(c, have, size, next_index == 0);
-    match plan {
+    let capacity = match plan {
         GzUngetcBufferPlan::InvalidCharacter | GzUngetcBufferPlan::Full => return Err(plan),
+        GzUngetcBufferPlan::Empty { capacity } | GzUngetcBufferPlan::Buffered { capacity, .. } => {
+            capacity as usize
+        }
+    };
+    // An ungetc buffer uses the output allocation's leading `capacity`
+    // bytes. Besides checking the cursor itself, ensure its buffered range
+    // fits there before the mutation below can write a byte.
+    if capacity > output.len() {
+        return Err(plan);
+    }
+    match plan {
         GzUngetcBufferPlan::Empty { .. } | GzUngetcBufferPlan::Buffered { .. } => {}
+        GzUngetcBufferPlan::InvalidCharacter | GzUngetcBufferPlan::Full => return Err(plan),
     };
     if let GzUngetcBufferPlan::Empty { capacity } = plan {
         let Some(index) = (capacity as usize).checked_sub(1) else {
@@ -1273,6 +1285,14 @@ fn gzungetc_buffer_insert(
     let GzUngetcBufferPlan::Buffered { shift_to_end, .. } = plan else {
         return Err(plan);
     };
+    if !shift_to_end
+        && next_index
+            .checked_add(have as usize)
+            .filter(|end| *end <= capacity)
+            .is_none()
+    {
+        return Err(plan);
+    }
     let cursor = if shift_to_end {
         let Some(start) = gzungetc_shift_to_end(output, have) else {
             return Err(plan);
