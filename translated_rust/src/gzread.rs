@@ -874,19 +874,17 @@ pub unsafe extern "C" fn gzfread_ffi(
     mut nitems: crate::stdlib::z_size_t,
     mut file: crate::zlib_h::gzFile,
 ) -> crate::stdlib::z_size_t {
-    let mut state: crate::gzguts_h::gz_statep =
-        ::core::ptr::null_mut::<crate::gzguts_h::gz_state>();
     if file.is_null() {
         return 0 as crate::stdlib::z_size_t;
     }
-    state = file as crate::gzguts_h::gz_statep;
-    if !gz_read_state_ready(&*state) {
+    let state = &mut *(file as crate::gzguts_h::gz_statep);
+    if !gz_read_state_ready(state) {
         return 0 as crate::stdlib::z_size_t;
     }
-    crate::src::gzlib::gz_error_clear(&mut *state, crate::zlib_h::Z_OK);
+    crate::src::gzlib::gz_error_clear(state, crate::zlib_h::Z_OK);
     let Some(len) = gz_file_request_len(size, nitems) else {
         crate::src::gzlib::gz_error_static(
-            &mut *state,
+            state,
             crate::zlib_h::Z_STREAM_ERROR,
             b"request does not fit in a size_t\0",
         );
@@ -894,7 +892,7 @@ pub unsafe extern "C" fn gzfread_ffi(
     };
     let completed = if len != 0 {
         let output = ::core::slice::from_raw_parts_mut(buf as *mut crate::stdlib::Bytef, len);
-        gz_read(&mut *state, output)
+        gz_read(state, output)
     } else {
         0 as crate::stdlib::z_size_t
     };

@@ -570,19 +570,17 @@ pub unsafe extern "C" fn gzfwrite_ffi(
     mut nitems: crate::stdlib::z_size_t,
     mut file: crate::zlib_h::gzFile,
 ) -> crate::stdlib::z_size_t {
-    let mut state: crate::gzguts_h::gz_statep =
-        ::core::ptr::null_mut::<crate::gzguts_h::gz_state>();
     if file.is_null() {
         return 0 as crate::stdlib::z_size_t;
     }
-    state = file as crate::gzguts_h::gz_statep;
-    if !gz_write_state_ready(&*state) {
+    let state = &mut *(file as crate::gzguts_h::gz_statep);
+    if !gz_write_state_ready(state) {
         return 0 as crate::stdlib::z_size_t;
     }
-    crate::src::gzlib::gz_error_clear(&mut *state, crate::zlib_h::Z_OK);
+    crate::src::gzlib::gz_error_clear(state, crate::zlib_h::Z_OK);
     let Some(len) = gz_file_request_len(size, nitems) else {
         crate::src::gzlib::gz_error_static(
-            &mut *state,
+            state,
             crate::zlib_h::Z_STREAM_ERROR,
             b"request does not fit in a size_t\0",
         );
@@ -590,7 +588,7 @@ pub unsafe extern "C" fn gzfwrite_ffi(
     };
     let completed = if len != 0 {
         let input = ::core::slice::from_raw_parts(buf as *const crate::stdlib::Bytef, len);
-        gz_write(&mut *state, input)
+        gz_write(state, input)
     } else {
         0 as crate::stdlib::z_size_t
     };
@@ -650,27 +648,25 @@ pub unsafe extern "C" fn gzputs_ffi(
 ) -> ::core::ffi::c_int {
     let mut len: crate::stdlib::z_size_t = 0;
     let mut put: crate::stdlib::z_size_t = 0;
-    let mut state: crate::gzguts_h::gz_statep =
-        ::core::ptr::null_mut::<crate::gzguts_h::gz_state>();
     if file.is_null() {
         return -1 as ::core::ffi::c_int;
     }
-    state = file as crate::gzguts_h::gz_statep;
-    if !gz_write_state_ready(&*state) {
+    let state = &mut *(file as crate::gzguts_h::gz_statep);
+    if !gz_write_state_ready(state) {
         return -1 as ::core::ffi::c_int;
     }
-    crate::src::gzlib::gz_error_clear(&mut *state, crate::zlib_h::Z_OK);
+    crate::src::gzlib::gz_error_clear(state, crate::zlib_h::Z_OK);
     let input = ::core::ffi::CStr::from_ptr(s).to_bytes();
     len = input.len() as crate::stdlib::z_size_t;
     if !gzputs_len_fits_int(len) {
         crate::src::gzlib::gz_error_static(
-            &mut *state,
+            state,
             crate::zlib_h::Z_STREAM_ERROR,
             b"string length does not fit in int\0",
         );
         return -1 as ::core::ffi::c_int;
     }
-    put = gz_write(&mut *state, input);
+    put = gz_write(state, input);
     return gzputs_return_value(len, put);
 }
 fn gzflush_valid_flush(flush: ::core::ffi::c_int) -> bool {

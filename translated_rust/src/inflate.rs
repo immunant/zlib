@@ -2419,23 +2419,19 @@ pub unsafe extern "C" fn inflate_ffi(
 #[export_name = "inflateEnd"]
 
 pub unsafe extern "C" fn inflateEnd_ffi(mut strm: crate::zlib_h::z_streamp) -> ::core::ffi::c_int {
-    let mut state: *mut crate::src::inflate::inflate_state =
-        ::core::ptr::null_mut::<crate::src::inflate::inflate_state>();
     if inflate_state_check_raw!(strm) != 0 {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    state = (*strm).state as *mut crate::src::inflate::inflate_state;
-    if !(*state).window.is_null() {
-        Some((*strm).zfree.expect("non-null function pointer")).expect("non-null function pointer")(
-            (*strm).opaque,
-            (*state).window as crate::stdlib::voidpf,
-        );
+    let strm_ref = &mut *strm;
+    let state_ptr = strm_ref.state as *mut crate::src::inflate::inflate_state;
+    let state = &mut *state_ptr;
+    let zfree = strm_ref.zfree.expect("non-null function pointer");
+    let opaque = strm_ref.opaque;
+    if !state.window.is_null() {
+        zfree(opaque, state.window as crate::stdlib::voidpf);
     }
-    Some((*strm).zfree.expect("non-null function pointer")).expect("non-null function pointer")(
-        (*strm).opaque,
-        (*strm).state as crate::stdlib::voidpf,
-    );
-    (*strm).state = ::core::ptr::null_mut::<crate::src::deflate::internal_state>();
+    zfree(opaque, state_ptr as crate::stdlib::voidpf);
+    strm_ref.state = ::core::ptr::null_mut::<crate::src::deflate::internal_state>();
     return crate::zlib_h::Z_OK;
 }
 pub fn inflateGetDictionary(
