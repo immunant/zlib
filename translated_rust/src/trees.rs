@@ -2931,15 +2931,15 @@ fn scan_tree_lengths(
     }
 }
 
-unsafe extern "C" fn send_tree(
+unsafe fn send_tree(
     mut s: *mut crate::src::deflate::deflate_state,
-    mut tree: *mut crate::src::deflate::ct_data,
+    tree: &[crate::src::deflate::ct_data_s],
     mut max_code: ::core::ffi::c_int,
 ) {
     let mut n: ::core::ffi::c_int = 0;
     let mut prevlen: ::core::ffi::c_int = -1 as ::core::ffi::c_int;
     let mut curlen: ::core::ffi::c_int = 0;
-    let mut nextlen: ::core::ffi::c_int = (*tree.offset(0 as isize)).dl as ::core::ffi::c_int;
+    let mut nextlen: ::core::ffi::c_int = tree[0].dl as ::core::ffi::c_int;
     let mut count: ::core::ffi::c_int = 0 as ::core::ffi::c_int;
     let mut max_count: ::core::ffi::c_int = 7 as ::core::ffi::c_int;
     let mut min_count: ::core::ffi::c_int = 4 as ::core::ffi::c_int;
@@ -2950,7 +2950,7 @@ unsafe extern "C" fn send_tree(
     n = 0 as ::core::ffi::c_int;
     while n <= max_code {
         curlen = nextlen;
-        nextlen = (*tree.offset((n + 1 as ::core::ffi::c_int) as isize)).dl as ::core::ffi::c_int;
+        nextlen = tree[(n + 1 as ::core::ffi::c_int) as usize].dl as ::core::ffi::c_int;
         count += 1;
         if !(count < max_count && curlen == nextlen) {
             if count < min_count {
@@ -3293,19 +3293,9 @@ unsafe extern "C" fn send_all_trees(
             );
             rank += 1;
         }
+        send_tree(s, &state.dyn_ltree, lcodes - 1 as ::core::ffi::c_int);
+        send_tree(s, &state.dyn_dtree, dcodes - 1 as ::core::ffi::c_int);
     }
-    send_tree(
-        s,
-        &raw mut (*s).dyn_ltree as *mut crate::src::deflate::ct_data_s
-            as *mut crate::src::deflate::ct_data,
-        lcodes - 1 as ::core::ffi::c_int,
-    );
-    send_tree(
-        s,
-        &raw mut (*s).dyn_dtree as *mut crate::src::deflate::ct_data_s
-            as *mut crate::src::deflate::ct_data,
-        dcodes - 1 as ::core::ffi::c_int,
-    );
 }
 pub unsafe extern "C" fn _tr_stored_block(
     mut s: *mut crate::src::deflate::deflate_state,
