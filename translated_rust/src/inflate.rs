@@ -2973,6 +2973,10 @@ fn inflate_sync_point_value(
         as ::core::ffi::c_int
 }
 
+fn inflate_sync_point(state: &crate::src::inflate::inflate_state) -> ::core::ffi::c_int {
+    inflate_sync_point_value(state.mode as ::core::ffi::c_uint, state.bits)
+}
+
 #[export_name = "inflateSyncPoint"]
 pub unsafe extern "C" fn inflateSyncPoint_ffi(
     mut strm: crate::zlib_h::z_streamp,
@@ -2982,7 +2986,7 @@ pub unsafe extern "C" fn inflateSyncPoint_ffi(
     }
 
     let state = (*strm).state as *mut crate::src::inflate::inflate_state;
-    inflate_sync_point_value((*state).mode as ::core::ffi::c_uint, (*state).bits)
+    inflate_sync_point(&*state)
 }
 pub unsafe extern "C" fn inflateCopy(
     mut dest: crate::zlib_h::z_streamp,
@@ -3189,18 +3193,18 @@ mod tests {
         inflate_reset_keep_adler, inflate_should_update_window, inflate_state_check_impl,
         inflate_state_check_result, inflate_state_is_usable, inflate_state_metadata_is_valid,
         inflate_stream_buffers_are_valid, inflate_stream_has_allocator_callbacks,
-        inflate_sync_input_progress, inflate_sync_normalized_wrap, inflate_sync_point_value,
-        inflate_sync_remaining_input, inflate_sync_search_core, inflate_trailer_checksum_from_hold,
-        inflate_undermine_core, inflate_validate_core, inflate_validate_wrap,
-        inflate_zlib_header_error, inflate_zlib_header_transition, inflate_zlib_window_params,
-        initial_window_metadata, reset_window_history, stored_block_length, syncsearch_safe,
-        update_window_buffer_len, update_window_core, update_window_produced_len,
-        window_allocation_failed, window_allocation_plan, window_allocation_request,
-        window_allocation_request_for_plan, window_metadata_update_plan, window_needs_allocation,
-        window_update_plan, DynamicCodeLengthRepeat, InflateBlockKind, InflateCallProgress,
-        InflateCopyProgress, InflateGzipExtraProgress, InflateGzipFlags, InflateGzipFlagsError,
-        InflateMatchPlan, InflateMatchSource, InflateOutputChecksum, InflatePrimeUpdate,
-        InflateSyncSearch, InflateZlibHeaderError, InflateZlibHeaderTransition,
+        inflate_sync_input_progress, inflate_sync_normalized_wrap, inflate_sync_point,
+        inflate_sync_point_value, inflate_sync_remaining_input, inflate_sync_search_core,
+        inflate_trailer_checksum_from_hold, inflate_undermine_core, inflate_validate_core,
+        inflate_validate_wrap, inflate_zlib_header_error, inflate_zlib_header_transition,
+        inflate_zlib_window_params, initial_window_metadata, reset_window_history,
+        stored_block_length, syncsearch_safe, update_window_buffer_len, update_window_core,
+        update_window_produced_len, window_allocation_failed, window_allocation_plan,
+        window_allocation_request, window_allocation_request_for_plan, window_metadata_update_plan,
+        window_needs_allocation, window_update_plan, DynamicCodeLengthRepeat, InflateBlockKind,
+        InflateCallProgress, InflateCopyProgress, InflateGzipExtraProgress, InflateGzipFlags,
+        InflateGzipFlagsError, InflateMatchPlan, InflateMatchSource, InflateOutputChecksum,
+        InflatePrimeUpdate, InflateSyncSearch, InflateZlibHeaderError, InflateZlibHeaderTransition,
         InflateZlibWindowParams, WindowAllocationPlan, BAD, CHECK, CODE_LENGTH_ORDER, COPY_,
         COPY_1, DICT, DICTID, HEAD, LEN_, MATCH, STORED, SYNC, TYPE, TYPEDO,
     };
@@ -3860,6 +3864,52 @@ mod tests {
         assert_eq!(inflate_sync_point_value(STORED as u32, 1), 0);
         assert_eq!(inflate_sync_point_value(HEAD as u32, 0), 0);
         assert_eq!(inflate_sync_point_value(u32::MAX, 0), 0);
+    }
+
+    #[test]
+    fn inflate_sync_point_reads_the_state_mode_and_bit_count() {
+        let mut stream = crate::zlib_h::z_stream {
+            next_in: ::core::ptr::null_mut(),
+            avail_in: 0,
+            total_in: 0,
+            next_out: ::core::ptr::null_mut(),
+            avail_out: 0,
+            total_out: 0,
+            msg: ::core::ptr::null_mut(),
+            state: ::core::ptr::null_mut(),
+            zalloc: None,
+            zfree: None,
+            opaque: ::core::ptr::null_mut(),
+            data_type: 0,
+            adler: 0,
+            reserved: 0,
+        };
+
+        assert_eq!(
+            unsafe {
+                super::inflateInit2_(
+                    &mut stream,
+                    crate::zutil_h::DEF_WBITS,
+                    crate::zlib_h::ZLIB_VERSION.as_ptr(),
+                    ::core::mem::size_of::<crate::zlib_h::z_stream>() as ::core::ffi::c_int,
+                )
+            },
+            crate::zlib_h::Z_OK
+        );
+
+        let state = unsafe { &mut *(stream.state as *mut crate::src::inflate::inflate_state) };
+        assert_eq!(inflate_sync_point(state), 0);
+
+        state.mode = STORED;
+        assert_eq!(inflate_sync_point(state), 1);
+
+        state.bits = 1;
+        assert_eq!(inflate_sync_point(state), 0);
+
+        assert_eq!(
+            unsafe { super::inflateEnd(&mut stream) },
+            crate::zlib_h::Z_OK
+        );
     }
 
     #[test]
