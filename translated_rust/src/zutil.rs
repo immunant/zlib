@@ -16,17 +16,17 @@ static Z_ERRMSG_BUFFER: &[u8] = b"buffer error\0";
 static Z_ERRMSG_VERSION: &[u8] = b"incompatible version\0";
 #[no_mangle]
 
-pub static mut z_errmsg: [*mut ::core::ffi::c_char; 10] = [
-    Z_ERRMSG_NEED_DICT.as_ptr() as *const ::core::ffi::c_char as *mut ::core::ffi::c_char,
-    Z_ERRMSG_STREAM_END.as_ptr() as *const ::core::ffi::c_char as *mut ::core::ffi::c_char,
-    Z_ERRMSG_EMPTY.as_ptr() as *const ::core::ffi::c_char as *mut ::core::ffi::c_char,
-    Z_ERRMSG_FILE.as_ptr() as *const ::core::ffi::c_char as *mut ::core::ffi::c_char,
-    Z_ERRMSG_STREAM.as_ptr() as *const ::core::ffi::c_char as *mut ::core::ffi::c_char,
-    Z_ERRMSG_DATA.as_ptr() as *const ::core::ffi::c_char as *mut ::core::ffi::c_char,
-    Z_ERRMSG_MEMORY.as_ptr() as *const ::core::ffi::c_char as *mut ::core::ffi::c_char,
-    Z_ERRMSG_BUFFER.as_ptr() as *const ::core::ffi::c_char as *mut ::core::ffi::c_char,
-    Z_ERRMSG_VERSION.as_ptr() as *const ::core::ffi::c_char as *mut ::core::ffi::c_char,
-    Z_ERRMSG_EMPTY.as_ptr() as *const ::core::ffi::c_char as *mut ::core::ffi::c_char,
+pub static z_errmsg: [&'static u8; 10] = [
+    &Z_ERRMSG_NEED_DICT[0],
+    &Z_ERRMSG_STREAM_END[0],
+    &Z_ERRMSG_EMPTY[0],
+    &Z_ERRMSG_FILE[0],
+    &Z_ERRMSG_STREAM[0],
+    &Z_ERRMSG_DATA[0],
+    &Z_ERRMSG_MEMORY[0],
+    &Z_ERRMSG_BUFFER[0],
+    &Z_ERRMSG_VERSION[0],
+    &Z_ERRMSG_EMPTY[0],
 ];
 
 /// Return zlib's fixed diagnostic for an error code without reading the
