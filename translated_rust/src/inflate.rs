@@ -600,6 +600,23 @@ impl ::core::ops::DerefMut for InflateState<'_> {
     }
 }
 
+/// Returns the bytes most recently consumed from the input buffer.
+///
+/// `inflate()` keeps its C-compatible cursor as a raw pointer while decoding,
+/// but checksum updates only need the bounded portion that has already been
+/// consumed.  Keeping that range calculation slice-based avoids rebuilding a
+/// raw slice at each header field.
+fn inflate_consumed_input(
+    input: &[crate::stdlib::Bytef],
+    initial_avail: crate::stdlib::uInt,
+    remaining_avail: crate::stdlib::uInt,
+    count: crate::stdlib::uInt,
+) -> &[crate::stdlib::Bytef] {
+    let start = initial_avail.saturating_sub(remaining_avail) as usize;
+    let end = start.saturating_add(count as usize);
+    input.get(start..end).unwrap_or(&[])
+}
+
 pub unsafe fn inflate(
     strm: &mut crate::zlib_h::z_stream_s,
     mut flush: ::core::ffi::c_int,
@@ -655,6 +672,14 @@ pub unsafe fn inflate(
     {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
+    let input = if (*strm).avail_in == 0 {
+        &[]
+    } else {
+        ::core::slice::from_raw_parts(
+            (*strm).next_in as *const crate::stdlib::Bytef,
+            (*strm).avail_in as usize,
+        )
+    };
     let mut state = InflateState(&mut *((*strm).state as *mut crate::src::inflate::inflate_state));
     if (*state).mode as ::core::ffi::c_uint
         == crate::src::inflate::TYPE as ::core::ffi::c_int as ::core::ffi::c_uint
@@ -2020,9 +2045,7 @@ pub unsafe fn inflate(
                                 {
                                     (*state).check = crate::src::crc32::crc32(
                                         (*state).check as crate::stdlib::uLong,
-                                        unsafe {
-                                            ::core::slice::from_raw_parts(next, copy as usize)
-                                        },
+                                        inflate_consumed_input(input, in_0, have, copy),
                                     )
                                         as ::core::ffi::c_ulong;
                                 }
@@ -2142,7 +2165,7 @@ pub unsafe fn inflate(
                         {
                             (*state).check = crate::src::crc32::crc32(
                                 (*state).check as crate::stdlib::uLong,
-                                unsafe { ::core::slice::from_raw_parts(next, copy as usize) },
+                                inflate_consumed_input(input, in_0, have, copy),
                             ) as ::core::ffi::c_ulong;
                         }
                         have = have.wrapping_sub(copy);
