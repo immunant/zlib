@@ -106,12 +106,12 @@ pub fn uncompress2_z(
     return (
         if err == crate::zlib_h::Z_STREAM_END {
             crate::zlib_h::Z_OK
-    } else if err == crate::zlib_h::Z_NEED_DICT {
-        crate::zlib_h::Z_DATA_ERROR
-    } else if err == crate::zlib_h::Z_BUF_ERROR && len == 0 as crate::stdlib::z_size_t {
-        crate::zlib_h::Z_DATA_ERROR
-    } else {
-        err
+        } else if err == crate::zlib_h::Z_NEED_DICT {
+            crate::zlib_h::Z_DATA_ERROR
+        } else if err == crate::zlib_h::Z_BUF_ERROR && len == 0 as crate::stdlib::z_size_t {
+            crate::zlib_h::Z_DATA_ERROR
+        } else {
+            err
         },
         used,
         written,
@@ -149,7 +149,11 @@ pub fn uncompress2(
     crate::stdlib::uLongf,
 ) {
     let (ret, used, written) = uncompress2_z(dest, source);
-    (ret, used as crate::stdlib::uLong, written as crate::stdlib::uLong as crate::stdlib::uLongf)
+    (
+        ret,
+        used as crate::stdlib::uLong,
+        written as crate::stdlib::uLong as crate::stdlib::uLongf,
+    )
 }
 #[export_name = "uncompress2"]
 
@@ -167,12 +171,10 @@ pub unsafe extern "C" fn uncompress2_ffi(
     if dest_len != 0 && dest.is_null() || source_len != 0 && source.is_null() {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    let dest = (!dest.is_null()).then(|| {
-        ::core::slice::from_raw_parts_mut(dest, dest_len as crate::stdlib::z_size_t)
-    });
-    let source = (!source.is_null()).then(|| {
-        ::core::slice::from_raw_parts(source, source_len as crate::stdlib::z_size_t)
-    });
+    let dest = (!dest.is_null())
+        .then(|| ::core::slice::from_raw_parts_mut(dest, dest_len as crate::stdlib::z_size_t));
+    let source = (!source.is_null())
+        .then(|| ::core::slice::from_raw_parts(source, source_len as crate::stdlib::z_size_t));
     let (ret, used, written) = uncompress2(dest, source);
     *sourceLen = used;
     *destLen = written;
@@ -214,12 +216,10 @@ pub unsafe extern "C" fn uncompress_ffi(
     if dest_len != 0 && dest.is_null() || sourceLen != 0 && source.is_null() {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    let dest = (!dest.is_null()).then(|| {
-        ::core::slice::from_raw_parts_mut(dest, dest_len as crate::stdlib::z_size_t)
-    });
-    let source = (!source.is_null()).then(|| {
-        ::core::slice::from_raw_parts(source, sourceLen as crate::stdlib::z_size_t)
-    });
+    let dest = (!dest.is_null())
+        .then(|| ::core::slice::from_raw_parts_mut(dest, dest_len as crate::stdlib::z_size_t));
+    let source = (!source.is_null())
+        .then(|| ::core::slice::from_raw_parts(source, sourceLen as crate::stdlib::z_size_t));
     let (ret, _, written) = uncompress2(dest, source);
     *destLen = written;
     ret

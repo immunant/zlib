@@ -4340,10 +4340,8 @@ pub unsafe extern "C" fn _tr_stored_block_ffi(
     mut last: ::core::ffi::c_int,
 ) {
     let state = &mut *s;
-    let pending_buf = ::core::slice::from_raw_parts_mut(
-        state.pending_buf,
-        state.pending_buf_size as usize,
-    );
+    let pending_buf =
+        ::core::slice::from_raw_parts_mut(state.pending_buf, state.pending_buf_size as usize);
     let source = if stored_len == 0 {
         None
     } else {
@@ -4552,10 +4550,8 @@ pub unsafe extern "C" fn _tr_flush_block_ffi(
 ) {
     let strm = &mut *(*s).strm;
     let state = &mut *s;
-    let pending_buf = ::core::slice::from_raw_parts_mut(
-        state.pending_buf,
-        state.pending_buf_size as usize,
-    );
+    let pending_buf =
+        ::core::slice::from_raw_parts_mut(state.pending_buf, state.pending_buf_size as usize);
     let source = if buf.is_null() {
         None
     } else if stored_len == 0 {

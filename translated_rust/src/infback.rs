@@ -424,7 +424,9 @@ pub unsafe extern "C" fn inflateBack(
                         &mut (&mut (*state).work)[..19],
                     ) {
                         Ok(used) => {
-                            (*state).next = (&raw mut (*state).codes as *mut crate::src::inftrees::code).add(used);
+                            (*state).next = (&raw mut (*state).codes
+                                as *mut crate::src::inftrees::code)
+                                .add(used);
                             0
                         }
                         Err(error) => error,
@@ -653,7 +655,9 @@ pub unsafe extern "C" fn inflateBack(
                                 &mut (&mut (*state).work)[..(*state).nlen as usize],
                             ) {
                                 Ok(used) => {
-                                    (*state).next = (&raw mut (*state).codes as *mut crate::src::inftrees::code).add(used);
+                                    (*state).next = (&raw mut (*state).codes
+                                        as *mut crate::src::inftrees::code)
+                                        .add(used);
                                     0
                                 }
                                 Err(error) => error,
@@ -668,11 +672,13 @@ pub unsafe extern "C" fn inflateBack(
                                 (*state).distcode =
                                     (*state).next as *const crate::src::inftrees::code;
                                 (*state).distbits = 6 as ::core::ffi::c_uint;
-                                let table_start = &raw mut (*state).codes as *mut crate::src::inftrees::code;
+                                let table_start =
+                                    &raw mut (*state).codes as *mut crate::src::inftrees::code;
                                 let table_used = (*state).next.offset_from(table_start) as usize;
                                 ret = match crate::src::inftrees::inflate_table(
                                     crate::src::inftrees::DISTS,
-                                    &(&(*state).lens)[(*state).nlen as usize..((*state).nlen + (*state).ndist) as usize],
+                                    &(&(*state).lens)[(*state).nlen as usize
+                                        ..((*state).nlen + (*state).ndist) as usize],
                                     &mut (&mut (*state).codes)[table_used..],
                                     &mut (*state).distbits,
                                     &mut (&mut (*state).work)[..(*state).ndist as usize],
@@ -942,13 +948,13 @@ pub unsafe extern "C" fn inflateBack(
                         bits = bits.wrapping_sub((*state).extra);
                     }
                     if (*state).offset
-                        > (*state).wsize.wrapping_sub(
-                            if (*state).whave < (*state).wsize {
+                        > (*state)
+                            .wsize
+                            .wrapping_sub(if (*state).whave < (*state).wsize {
                                 left
                             } else {
                                 0 as ::core::ffi::c_uint
-                            } ,
-                        )
+                            })
                     {
                         (*strm).msg = b"invalid distance too far back\0".as_ptr()
                             as *const ::core::ffi::c_char

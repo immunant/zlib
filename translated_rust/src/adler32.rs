@@ -14,7 +14,10 @@ pub use crate::zlib_h::Z_NULL;
 pub const BASE: ::core::ffi::c_uint = 65521;
 pub const NMAX: ::core::ffi::c_int = 5552;
 
-pub fn adler32_z(mut adler: crate::stdlib::uLong, buf: Option<&[crate::stdlib::Bytef]>) -> crate::stdlib::uLong {
+pub fn adler32_z(
+    mut adler: crate::stdlib::uLong,
+    buf: Option<&[crate::stdlib::Bytef]>,
+) -> crate::stdlib::uLong {
     let Some(buf) = buf else {
         return 1;
     };
@@ -43,7 +46,10 @@ pub fn adler32_z(mut adler: crate::stdlib::uLong, buf: Option<&[crate::stdlib::B
     adler | sum2 << 16
 }
 
-pub fn adler32(adler: crate::stdlib::uLong, buf: Option<&[crate::stdlib::Bytef]>) -> crate::stdlib::uLong {
+pub fn adler32(
+    adler: crate::stdlib::uLong,
+    buf: Option<&[crate::stdlib::Bytef]>,
+) -> crate::stdlib::uLong {
     adler32_z(adler, buf)
 }
 
@@ -56,7 +62,10 @@ pub unsafe extern "C" fn adler32_z_ffi(
     if buf.is_null() {
         adler32_z(adler, None)
     } else {
-        adler32_z(adler, Some(unsafe { ::core::slice::from_raw_parts(buf, len) }))
+        adler32_z(
+            adler,
+            Some(unsafe { ::core::slice::from_raw_parts(buf, len) }),
+        )
     }
 }
 
@@ -69,7 +78,10 @@ pub unsafe extern "C" fn adler32_ffi(
     if buf.is_null() {
         adler32(adler, None)
     } else {
-        adler32(adler, Some(unsafe { ::core::slice::from_raw_parts(buf, len as crate::stdlib::z_size_t) }))
+        adler32(
+            adler,
+            Some(unsafe { ::core::slice::from_raw_parts(buf, len as crate::stdlib::z_size_t) }),
+        )
     }
 }
 

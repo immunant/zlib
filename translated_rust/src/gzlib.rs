@@ -425,6 +425,38 @@ pub fn gzrewind(
     gz_reset_state(state);
     return 0 as ::core::ffi::c_int;
 }
+
+fn gz_skip_output(state: &mut crate::gzguts_h::gz_state, count: ::core::ffi::c_uint) -> bool {
+    let Ok(have) = usize::try_from(state.x.have) else {
+        return false;
+    };
+    let Ok(count) = usize::try_from(count) else {
+        return false;
+    };
+    if count > have {
+        return false;
+    }
+    let Some(start) = state.x.next.addr().checked_sub(state.out.as_ptr().addr()) else {
+        return false;
+    };
+    let Some(end) = start.checked_add(have) else {
+        return false;
+    };
+    if end > state.out.len() {
+        return false;
+    }
+    let Some(next) = start.checked_add(count) else {
+        return false;
+    };
+    let Some(tail) = state.out.get_mut(next..) else {
+        return false;
+    };
+    state.x.have -= count as ::core::ffi::c_uint;
+    state.x.next = tail.as_mut_ptr();
+    state.x.pos += count as crate::stdlib::off64_t;
+    true
+}
+
 #[export_name = "gzrewind"]
 
 pub unsafe extern "C" fn gzrewind_ffi(mut file: crate::zlib_h::gzFile) -> ::core::ffi::c_int {
@@ -504,9 +536,9 @@ pub fn gzseek64(
         } else {
             state.x.have
         };
-        state.x.have = state.x.have.wrapping_sub(n);
-        state.x.next = state.x.next.wrapping_add(n as usize);
-        state.x.pos += n as crate::stdlib::off64_t;
+        if !gz_skip_output(state, n) {
+            return -1 as crate::stdlib::off64_t;
+        }
         offset -= n as crate::stdlib::off64_t;
     }
     state.skip = offset;

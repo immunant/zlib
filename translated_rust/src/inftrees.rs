@@ -2749,9 +2749,7 @@ pub mod inffixed_h {
             val: 0 as ::core::ffi::c_ushort,
         },
     ];
-    
 }
-
 
 pub use crate::src::deflate::internal_state;
 pub use crate::src::inflate::inflate_mode;
@@ -3116,8 +3114,7 @@ pub fn inflate_table(
     loop {
         here.bits = len.wrapping_sub(drop_0) as ::core::ffi::c_uchar;
         let symbol = work[sym as usize] as usize;
-        if (symbol as ::core::ffi::c_uint).wrapping_add(1) < match_0
-        {
+        if (symbol as ::core::ffi::c_uint).wrapping_add(1) < match_0 {
             here.op = 0 as ::core::ffi::c_int as ::core::ffi::c_uchar;
             here.val = symbol as ::core::ffi::c_ushort;
         } else if symbol as ::core::ffi::c_uint >= match_0 {
@@ -3226,10 +3223,7 @@ pub unsafe extern "C" fn inflate_table_ffi(
     let work = unsafe { ::core::slice::from_raw_parts_mut(work, codes as usize) };
     let table_start = unsafe { *table };
     let table_slice = unsafe {
-        ::core::slice::from_raw_parts_mut(
-            table_start,
-            crate::src::inftrees::ENOUGH as usize,
-        )
+        ::core::slice::from_raw_parts_mut(table_start, crate::src::inftrees::ENOUGH as usize)
     };
     let bits = unsafe { &mut *bits };
     match inflate_table(type_0, lens, table_slice, bits, work) {
