@@ -1533,6 +1533,10 @@ pub(crate) enum InflateStreamRequest<'request> {
     Decode(::core::ffi::c_int),
     Fast(::core::ffi::c_uint),
     Sync,
+    // Ending a normal stream uses the same opaque stream/state association as
+    // the other normal requests.  Keep the callback release at that boundary
+    // after the pointer-free history owner has consumed its window.
+    End,
     Reset(InflateResetKind),
     Scalar(InflateNormalScalarAction),
     Dictionary {
@@ -3290,6 +3294,7 @@ pub(crate) unsafe fn inflate_from_stream(
             InflateStreamRequest::Decode(_)
             | InflateStreamRequest::Fast(_)
             | InflateStreamRequest::Sync
+            | InflateStreamRequest::End
             | InflateStreamRequest::Reset(_)
             | InflateStreamRequest::Dictionary { .. }
             | InflateStreamRequest::SetDictionary(_)
@@ -3340,6 +3345,20 @@ pub(crate) unsafe fn inflate_from_stream(
             strm.msg = message.as_ptr().cast_mut().cast();
         }
         return InflateStreamResult::Status(result.status);
+    }
+    if let InflateStreamRequest::End = request {
+        // Snapshot the callback allocation handle before borrowing its typed
+        // contents.  The stream remains associated with that state until the
+        // matching zfree callback returns, exactly as it did at the dedicated
+        // end boundary.
+        let state_handle = strm
+            .state
+            .expect("inflate stream/state association preserved its handle");
+        InflateEndOwner::from_normal(&mut state.decoder.normal).release();
+        let zfree = strm.zfree.expect("non-null function pointer");
+        zfree(strm.opaque, state_handle.as_ptr().cast());
+        strm.state = None;
+        return InflateStreamResult::Status(crate::zlib_h::Z_OK);
     }
     if let InflateStreamRequest::Reset(kind) = request {
         // Reset shares this established stream/state projection with normal
@@ -3608,24 +3627,7 @@ impl<'state> InflateEndOwner<'state> {
 }
 
 pub unsafe fn inflateEnd(stream: &mut crate::zlib_h::z_stream_s) -> ::core::ffi::c_int {
-    // Snapshot the opaque allocation handle before borrowing its typed
-    // contents.  This preserves the callback's provenance without deriving
-    // a new raw address from the projected state reference.
-    let Some(state_handle) = stream.state else {
-        return crate::zlib_h::Z_STREAM_ERROR;
-    };
-    // Keep the ABI projections at the callback-release boundary.  The stream
-    // must continue to point at that state during `zfree`, matching C's
-    // observable release order.
-    let Some((stream, state)) = inflate_stream_and_state(stream) else {
-        return crate::zlib_h::Z_STREAM_ERROR;
-    };
-    InflateEndOwner::from_normal(&mut state.decoder.normal).release();
-    let zfree = stream.zfree.expect("non-null function pointer");
-    let opaque = stream.opaque;
-    zfree(opaque, state_handle.as_ptr().cast());
-    stream.state = None;
-    return crate::zlib_h::Z_OK;
+    inflate_from_stream(stream, InflateStreamRequest::End, None).status()
 }
 #[export_name = "inflateEnd"]
 
