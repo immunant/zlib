@@ -147,7 +147,7 @@ pub unsafe extern "C" fn inflateBackInit__ffi(
     };
     inflateBackInit_(strm, windowBits, window, version, stream_size)
 }
-pub unsafe fn inflateBack(
+pub fn inflateBack(
     strm: &mut crate::zlib_h::z_stream,
     state: &mut crate::src::inflate::inflate_state,
     mut in_0: crate::zlib_h::in_func,
@@ -155,6 +155,9 @@ pub unsafe fn inflateBack(
     mut out: crate::zlib_h::out_func,
     mut out_desc: *mut ::core::ffi::c_void,
 ) -> ::core::ffi::c_int {
+    // The callback ABI and caller-owned buffers remain one internal unsafe
+    // boundary. Keeping it here lets callers dispatch through a safe core.
+    unsafe {
     let mut next: *mut ::core::ffi::c_uchar = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
     let mut put: *mut ::core::ffi::c_uchar = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
     let mut have: ::core::ffi::c_uint = 0;
@@ -1038,6 +1041,7 @@ pub unsafe fn inflateBack(
     strm.next_in = next as *mut crate::stdlib::Bytef;
     strm.avail_in = have as crate::stdlib::uInt;
     return ret;
+    }
 }
 #[export_name = "inflateBack"]
 
@@ -1054,7 +1058,7 @@ pub unsafe extern "C" fn inflateBack_ffi(
     let Some(state) = (strm.state as *mut crate::src::inflate::inflate_state).as_mut() else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
-    unsafe { inflateBack(strm, state, in_0, in_desc, out, out_desc) }
+    inflateBack(strm, state, in_0, in_desc, out, out_desc)
 }
 fn inflate_back_end<F>(
     strm: &mut crate::zlib_h::z_stream,
