@@ -1314,7 +1314,7 @@ pub unsafe fn deflateInit2_(
                 2 as ::core::ffi::c_int - -4 as ::core::ffi::c_int
             }) as usize]
                 .load(::core::sync::atomic::Ordering::Relaxed);
-            deflateEnd(strm);
+            deflate_end_release(strm);
             return crate::zlib_h::Z_MEM_ERROR;
         }
         s.sym_buf = s.lit_bufsize as usize;
@@ -2644,11 +2644,11 @@ pub unsafe fn deflateEnd(strm: &mut crate::zlib_h::z_stream_s) -> ::core::ffi::c
     if strm.zalloc.is_none() || strm.zfree.is_none() {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    let (status, gzhead, head, prev, pending, allocations, state_allocation) = {
+    let (status, gzhead, head, prev, pending, allocations) = {
         // The state was installed by the initialization boundary and is only
         // retained while this stream owns it.  All later cleanup uses the
         // reference and the allocator that belong to this stream.
-        let Some(state) = (unsafe { strm.state.as_mut() }) else {
+        let Some(state) = strm.state.as_mut() else {
             return crate::zlib_h::Z_STREAM_ERROR;
         };
         if state.status != crate::src::deflate::INIT_STATE
@@ -2669,7 +2669,6 @@ pub unsafe fn deflateEnd(strm: &mut crate::zlib_h::z_stream_s) -> ::core::ffi::c
             state.prev.take(),
             state.pending_buf.take(),
             state.window.take(),
-            strm.state.cast::<::core::ffi::c_void>(),
         )
     };
     gzip_header_remove(gzhead);
@@ -2677,9 +2676,6 @@ pub unsafe fn deflateEnd(strm: &mut crate::zlib_h::z_stream_s) -> ::core::ffi::c
     drop(prev);
     drop(pending);
     drop(allocations);
-    let zfree = strm.zfree.expect("non-null function pointer");
-    unsafe { zfree(strm.opaque, state_allocation) };
-    strm.state = ::core::ptr::null_mut::<crate::src::deflate::internal_state>();
     return if status == crate::src::deflate::BUSY_STATE {
         crate::zlib_h::Z_DATA_ERROR
     } else {
@@ -2687,23 +2683,32 @@ pub unsafe fn deflateEnd(strm: &mut crate::zlib_h::z_stream_s) -> ::core::ffi::c
     };
 }
 
-/// Adapt legacy internal callers that still carry the ABI stream pointer.
-/// The exported boundary converts the pointer directly; this adapter keeps
-/// those callers from spreading another raw-to-reference conversion around
-/// their cleanup paths.
-unsafe fn deflateEnd_from_stream_pointer(strm: crate::zlib_h::z_streamp) -> ::core::ffi::c_int {
-    let Some(strm) = strm.as_mut() else {
+/// Release the ABI allocation around the safe state teardown.  The pointer
+/// was installed by the initializer using this stream's allocator, so this
+/// is the one boundary that may return it through that allocator.
+pub(crate) unsafe fn deflate_end_release(
+    strm: &mut crate::zlib_h::z_stream_s,
+) -> ::core::ffi::c_int {
+    if strm.zalloc.is_none() || strm.zfree.is_none() {
         return crate::zlib_h::Z_STREAM_ERROR;
-    };
-    deflateEnd(strm)
+    }
+    let state_allocation = strm.state.cast::<::core::ffi::c_void>();
+    let end = deflateEnd(strm);
+    if end != crate::zlib_h::Z_STREAM_ERROR {
+        let zfree = strm.zfree.expect("deflate_end_release validates zfree");
+        zfree(strm.opaque, state_allocation);
+        strm.state = ::core::ptr::null_mut::<crate::src::deflate::internal_state>();
+    }
+    end
 }
+
 #[export_name = "deflateEnd"]
 
 pub unsafe extern "C" fn deflateEnd_ffi(mut strm: crate::zlib_h::z_streamp) -> ::core::ffi::c_int {
     let Some(strm) = strm.as_mut() else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
-    deflateEnd(strm)
+    deflate_end_release(strm)
 }
 fn deflate_copy_state_is_valid(
     strm: &crate::zlib_h::z_stream_s,

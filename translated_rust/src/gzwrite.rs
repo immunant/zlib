@@ -796,7 +796,7 @@ pub unsafe fn gzclose_w(
         }
         if state.size != 0 {
             if state.direct == 0 {
-                crate::src::deflate::deflateEnd(&mut state.strm);
+                crate::src::deflate::deflate_end_release(&mut state.strm);
             }
             state.in_0.clear();
         }
