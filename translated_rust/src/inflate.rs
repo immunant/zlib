@@ -3959,7 +3959,7 @@ pub fn inflate(
                 state_ref.bits,
                 state_ref.last,
             );
-            let (window_error, produced): (bool, &[crate::stdlib::Bytef]) = 'window: {
+            let (window_error, window_exit_checksum): (bool, Option<::core::ffi::c_ulong>) = 'window: {
                 // Invoke a possible allocator callback before lending the caller's
                 // completed-output span. History retention, and any checksum
                 // not already computed from the invocation-local view, then
@@ -3975,18 +3975,18 @@ pub fn inflate(
                         state_ref.wsize,
                         exit.output_used,
                     ) else {
-                        break 'window (true, &[]);
+                        break 'window (true, None);
                     };
                     if plan.allocate {
                         let Ok(requested_wsize) = ::core::ffi::c_uint::try_from(plan.window_len)
                         else {
-                            break 'window (true, &[]);
+                            break 'window (true, None);
                         };
                         // `inflate()` normally reaches this boundary only after
                         // init has installed zalloc. Treat malformed callback
                         // state as allocation failure instead of panicking.
                         let Some(zalloc) = strm_ref.zalloc else {
-                            break 'window (true, &[]);
+                            break 'window (true, None);
                         };
                         state_ref.window = zalloc(
                             strm_ref.opaque,
@@ -3994,7 +3994,7 @@ pub fn inflate(
                             ::core::mem::size_of::<::core::ffi::c_uchar>() as crate::stdlib::uInt,
                         ) as *mut ::core::ffi::c_uchar;
                         if state_ref.window.is_null() {
-                            break 'window (true, &[]);
+                            break 'window (true, None);
                         }
                     }
                     Some(::core::slice::from_raw_parts_mut(
@@ -4005,7 +4005,7 @@ pub fn inflate(
                     None
                 };
                 if exit.update_window && window.is_none() {
-                    break 'window (true, &[]);
+                    break 'window (true, None);
                 }
                 let produced = if exit.update_window && exit.output_used != 0 {
                     ::core::slice::from_raw_parts(output_base, exit.output_used as usize)
@@ -4014,10 +4014,19 @@ pub fn inflate(
                 };
                 if let Some(window) = window {
                     if inflate_window_update_state(state_ref, window, produced).is_none() {
-                        break 'window (true, &[]);
+                        break 'window (true, None);
                     }
                 }
-                (false, produced)
+                // Keep the post-callback output view inside this history
+                // transition.  The final accounting commit needs only the
+                // scalar checksum, not another borrow of caller output.
+                let check = inflate_exit_checksum(
+                    state_ref.wrap,
+                    state_ref.check as crate::stdlib::uLong,
+                    state_ref.flags,
+                    produced,
+                );
+                (false, check)
             };
             if window_error {
                 state_ref.mode = crate::src::inflate::MEM;
@@ -4034,14 +4043,7 @@ pub fn inflate(
             state_ref.total = state_ref
                 .total
                 .wrapping_add(exit.output_used as ::core::ffi::c_ulong);
-            let check = deferred_exit_checksum.or_else(|| {
-                inflate_exit_checksum(
-                    state_ref.wrap,
-                    state_ref.check as crate::stdlib::uLong,
-                    state_ref.flags,
-                    produced,
-                )
-            });
+            let check = deferred_exit_checksum.or(window_exit_checksum);
             if let Some(check) = check {
                 state_ref.check = check;
                 strm_ref.adler = state_ref.check as crate::stdlib::uLong;
