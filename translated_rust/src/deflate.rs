@@ -2523,6 +2523,13 @@ fn reset_insert_hash(
     );
 }
 
+fn literal_byte(
+    window: &[crate::stdlib::Bytef],
+    strstart: crate::stdlib::uInt,
+) -> crate::zutil_h::uch {
+    window[strstart as usize] as crate::zutil_h::uch
+}
+
 pub const MAX_STORED: ::core::ffi::c_int = 65535 as ::core::ffi::c_int;
 
 fn stored_block_length_bytes(output: &mut [crate::stdlib::Bytef], len: ::core::ffi::c_uint) {
@@ -2805,10 +2812,10 @@ unsafe extern "C" fn deflate_fast(
                 break;
             }
         }
+        let window = ::core::slice::from_raw_parts((*s).window, (*s).window_size as usize);
         hash_head = NIL as crate::src::deflate::IPos;
         if (*s).lookahead >= crate::zutil_h::MIN_MATCH as crate::stdlib::uInt {
             let state = &mut *s;
-            let window = ::core::slice::from_raw_parts(state.window, state.window_size as usize);
             let head = ::core::slice::from_raw_parts_mut(state.head, state.hash_size as usize);
             let prev = ::core::slice::from_raw_parts_mut(state.prev, state.w_size as usize);
             hash_head = insert_hash_entry(state, window, head, prev);
@@ -2835,7 +2842,6 @@ unsafe extern "C" fn deflate_fast(
                 loop {
                     (*s).strstart = (*s).strstart.wrapping_add(1);
                     let state = &mut *s;
-                    let window = ::core::slice::from_raw_parts(state.window, state.window_size as usize);
                     let head = ::core::slice::from_raw_parts_mut(state.head, state.hash_size as usize);
                     let prev = ::core::slice::from_raw_parts_mut(state.prev, state.w_size as usize);
                     hash_head = insert_hash_entry(state, window, head, prev);
@@ -2849,12 +2855,10 @@ unsafe extern "C" fn deflate_fast(
                 (*s).strstart = (*s).strstart.wrapping_add((*s).match_length);
                 (*s).match_length = 0 as crate::stdlib::uInt;
                 let state = &mut *s;
-                let window = ::core::slice::from_raw_parts(state.window, state.window_size as usize);
                 reset_insert_hash(state, window);
             }
         } else {
-            let mut cc: crate::zutil_h::uch =
-                *(*s).window.offset((*s).strstart as isize) as crate::zutil_h::uch;
+            let cc = literal_byte(window, (*s).strstart);
             bflush = crate::src::trees::_tr_tally(s, 0, cc as ::core::ffi::c_uint);
             (*s).lookahead = (*s).lookahead.wrapping_sub(1);
             (*s).strstart = (*s).strstart.wrapping_add(1);
@@ -2958,10 +2962,10 @@ unsafe extern "C" fn deflate_slow(
                 break;
             }
         }
+        let window = ::core::slice::from_raw_parts((*s).window, (*s).window_size as usize);
         hash_head = NIL as crate::src::deflate::IPos;
         if (*s).lookahead >= crate::zutil_h::MIN_MATCH as crate::stdlib::uInt {
             let state = &mut *s;
-            let window = ::core::slice::from_raw_parts(state.window, state.window_size as usize);
             let head = ::core::slice::from_raw_parts_mut(state.head, state.hash_size as usize);
             let prev = ::core::slice::from_raw_parts_mut(state.prev, state.w_size as usize);
             hash_head = insert_hash_entry(state, window, head, prev);
@@ -3010,7 +3014,6 @@ unsafe extern "C" fn deflate_slow(
                 (*s).strstart = (*s).strstart.wrapping_add(1);
                 if (*s).strstart <= max_insert {
                     let state = &mut *s;
-                    let window = ::core::slice::from_raw_parts(state.window, state.window_size as usize);
                     let head = ::core::slice::from_raw_parts_mut(state.head, state.hash_size as usize);
                     let prev = ::core::slice::from_raw_parts_mut(state.prev, state.w_size as usize);
                     hash_head = insert_hash_entry(state, window, head, prev);
@@ -3049,10 +3052,7 @@ unsafe extern "C" fn deflate_slow(
                 }
             }
         } else if (*s).match_available != 0 {
-            let mut cc: crate::zutil_h::uch = *(*s)
-                .window
-                .offset((*s).strstart.wrapping_sub(1 as crate::stdlib::uInt) as isize)
-                as crate::zutil_h::uch;
+            let cc = literal_byte(window, (*s).strstart.wrapping_sub(1 as crate::stdlib::uInt));
             bflush = crate::src::trees::_tr_tally(s, 0, cc as ::core::ffi::c_uint);
             if bflush != 0 {
                 crate::src::trees::_tr_flush_block(
@@ -3205,7 +3205,7 @@ unsafe extern "C" fn deflate_rle(
             (*s).strstart = (*s).strstart.wrapping_add((*s).match_length);
             (*s).match_length = 0 as crate::stdlib::uInt;
         } else {
-            let mut cc: crate::zutil_h::uch = window[(*s).strstart as usize] as crate::zutil_h::uch;
+            let cc = literal_byte(window, (*s).strstart);
             bflush = crate::src::trees::_tr_tally(s, 0, cc as ::core::ffi::c_uint);
             (*s).lookahead = (*s).lookahead.wrapping_sub(1);
             (*s).strstart = (*s).strstart.wrapping_add(1);
