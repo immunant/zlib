@@ -610,29 +610,27 @@ pub unsafe extern "C" fn gzeof_ffi(mut file: crate::zlib_h::gzFile) -> ::core::f
     }
     gzeof(Some(&*(file as crate::gzguts_h::gz_statep)))
 }
-pub unsafe extern "C" fn gzerror(
-    mut file: crate::zlib_h::gzFile,
-    mut errnum: *mut ::core::ffi::c_int,
-) -> *const ::core::ffi::c_char {
-    let mut state: crate::gzguts_h::gz_statep =
-        ::core::ptr::null_mut::<crate::gzguts_h::gz_state>();
-    if file.is_null() {
-        return ::core::ptr::null::<::core::ffi::c_char>();
+pub enum GzErrorMessage {
+    OutOfMemory,
+    Empty,
+    StateMessage,
+}
+
+pub fn gzerror(
+    state: Option<&crate::gzguts_h::gz_state>,
+) -> Option<(::core::ffi::c_int, GzErrorMessage)> {
+    let state = state?;
+    if state.mode != crate::gzguts_h::GZ_READ && state.mode != crate::gzguts_h::GZ_WRITE {
+        return None;
     }
-    state = file as crate::gzguts_h::gz_statep;
-    if (*state).mode != crate::gzguts_h::GZ_READ && (*state).mode != crate::gzguts_h::GZ_WRITE {
-        return ::core::ptr::null::<::core::ffi::c_char>();
-    }
-    if !errnum.is_null() {
-        *errnum = (*state).err;
-    }
-    return if (*state).err == crate::zlib_h::Z_MEM_ERROR {
-        b"out of memory\0".as_ptr() as *const ::core::ffi::c_char
-    } else if (*state).msg.is_null() {
-        b"\0".as_ptr() as *const ::core::ffi::c_char
+    let message = if state.err == crate::zlib_h::Z_MEM_ERROR {
+        GzErrorMessage::OutOfMemory
+    } else if state.msg.is_null() {
+        GzErrorMessage::Empty
     } else {
-        (*state).msg as *const ::core::ffi::c_char
+        GzErrorMessage::StateMessage
     };
+    Some((state.err, message))
 }
 #[export_name = "gzerror"]
 
@@ -640,7 +638,22 @@ pub unsafe extern "C" fn gzerror_ffi(
     mut file: crate::zlib_h::gzFile,
     mut errnum: *mut ::core::ffi::c_int,
 ) -> *const ::core::ffi::c_char {
-    gzerror(file, errnum)
+    let Some(state) = (file as crate::gzguts_h::gz_statep).as_ref() else {
+        return ::core::ptr::null::<::core::ffi::c_char>();
+    };
+    let Some((err, message)) = gzerror(Some(state)) else {
+        return ::core::ptr::null::<::core::ffi::c_char>();
+    };
+    if !errnum.is_null() {
+        *errnum = err;
+    }
+    match message {
+        GzErrorMessage::OutOfMemory => {
+            b"out of memory\0".as_ptr() as *const ::core::ffi::c_char
+        }
+        GzErrorMessage::Empty => b"\0".as_ptr() as *const ::core::ffi::c_char,
+        GzErrorMessage::StateMessage => state.msg as *const ::core::ffi::c_char,
+    }
 }
 pub unsafe extern "C" fn gzclearerr(mut file: crate::zlib_h::gzFile) {
     let mut state: crate::gzguts_h::gz_statep =
