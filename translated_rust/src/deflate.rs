@@ -5343,61 +5343,83 @@ unsafe fn deflate_huff(
                 DeflateHuffRefillAction::Done => break,
             }
         }
-        (*s).match_length = 0 as crate::stdlib::uInt;
-        let mut cc: crate::zutil_h::uch =
-            *(*s).window.offset((*s).strstart as isize) as crate::zutil_h::uch;
-        crate::src::trees::_tr_tally_ffi(s, 0, cc as ::core::ffi::c_uint);
-        let (sym_next, lookahead, strstart, must_flush_block) = deflate_huff_literal_progress(
-            (*s).sym_next,
-            (*s).sym_end,
-            (*s).lookahead,
-            (*s).strstart,
+        let state = &mut *s;
+        state.match_length = 0 as crate::stdlib::uInt;
+        let literal: crate::zutil_h::uch =
+            *state.window.offset(state.strstart as isize) as crate::zutil_h::uch;
+        let layout =
+            pending_storage_layout_for_state(state).expect("validated pending storage layout");
+        let pending = &mut *core::ptr::slice_from_raw_parts_mut(
+            state
+                .pending_buf
+                .expect("validated pending storage")
+                .as_ptr(),
+            layout.total_len,
         );
-        (*s).sym_next = sym_next;
-        (*s).lookahead = lookahead;
-        (*s).strstart = strstart;
-        bflush = must_flush_block as ::core::ffi::c_int;
+        let mut storage = PendingStorageView::new(pending, layout)
+            .expect("pending storage layout matches its allocation");
+        let tally = deflate_literal_tally_plan(literal, state.sym_next);
+        state.sym_next = tally.next_sym;
+        assert!(storage.write_symbol_triplet(tally.cursors, tally.symbol_bytes));
+        state.dyn_ltree[tally.literal_tree_index].fc.value = state.dyn_ltree
+            [tally.literal_tree_index]
+            .fc
+            .value
+            .wrapping_add(1);
+        bflush = symbol_buffer_is_full(state.sym_next, state.sym_end) as ::core::ffi::c_int;
+        (state.lookahead, state.strstart) =
+            deflate_literal_state_after_emit(state.lookahead, state.strstart);
         if bflush != 0 {
-            crate::src::trees::_tr_flush_block(
-                s as *mut crate::src::deflate::internal_state,
-                if (*s).block_start >= 0 as ::core::ffi::c_long {
-                    (*s).window
-                        .offset((*s).block_start as ::core::ffi::c_uint as isize)
-                        as *mut crate::stdlib::Bytef
-                        as *mut crate::stdlib::charf
-                } else {
-                    ::core::ptr::null_mut::<crate::stdlib::charf>()
-                },
-                deflate_block_len((*s).strstart, (*s).block_start),
+            let stored_len = deflate_block_len(state.strstart, state.block_start);
+            let stored_data = if state.block_start >= 0 as ::core::ffi::c_long {
+                Some(core::slice::from_raw_parts(
+                    state
+                        .window
+                        .add(state.block_start as ::core::ffi::c_uint as usize),
+                    stored_len as usize,
+                ))
+            } else {
+                None
+            };
+            let stream = &mut *state.strm;
+            crate::src::trees::tr_flush_block_core(
+                &mut storage,
+                state,
+                Some(stream),
+                stored_data,
+                stored_len,
                 0 as ::core::ffi::c_int,
             );
-            (*s).block_start = (*s).strstart as ::core::ffi::c_long;
-            flush_pending((*s).strm);
-            if let Some(state) =
-                deflate_flush_block_state_after_output((*(*s).strm).avail_out, false)
+            drop(storage);
+            state.block_start = state.strstart as ::core::ffi::c_long;
+            flush_pending(state.strm);
+            if let Some(state) = deflate_flush_block_state_after_output((*stream).avail_out, false)
             {
                 return state;
             }
         }
     }
-    (*s).insert = 0 as crate::stdlib::uInt;
-    let final_flush_action = deflate_final_flush_action(flush, (*s).sym_next);
+    let state = &mut *s;
+    state.insert = 0 as crate::stdlib::uInt;
+    let final_flush_action = deflate_final_flush_action(flush, state.sym_next);
     if final_flush_action == DeflateFinalFlushAction::Finish {
         crate::src::trees::_tr_flush_block(
             s as *mut crate::src::deflate::internal_state,
-            if (*s).block_start >= 0 as ::core::ffi::c_long {
-                (*s).window
-                    .offset((*s).block_start as ::core::ffi::c_uint as isize)
+            if state.block_start >= 0 as ::core::ffi::c_long {
+                state
+                    .window
+                    .offset(state.block_start as ::core::ffi::c_uint as isize)
                     as *mut crate::stdlib::Bytef as *mut crate::stdlib::charf
             } else {
                 ::core::ptr::null_mut::<crate::stdlib::charf>()
             },
-            deflate_block_len((*s).strstart, (*s).block_start),
+            deflate_block_len(state.strstart, state.block_start),
             1 as ::core::ffi::c_int,
         );
-        (*s).block_start = (*s).strstart as ::core::ffi::c_long;
-        flush_pending((*s).strm);
-        if let Some(state) = deflate_flush_block_state_after_output((*(*s).strm).avail_out, true) {
+        state.block_start = state.strstart as ::core::ffi::c_long;
+        flush_pending(state.strm);
+        let stream = &mut *state.strm;
+        if let Some(state) = deflate_flush_block_state_after_output((*stream).avail_out, true) {
             return state;
         }
         return finish_done;
@@ -5405,19 +5427,21 @@ unsafe fn deflate_huff(
     if final_flush_action == DeflateFinalFlushAction::FlushPendingSymbols {
         crate::src::trees::_tr_flush_block(
             s as *mut crate::src::deflate::internal_state,
-            if (*s).block_start >= 0 as ::core::ffi::c_long {
-                (*s).window
-                    .offset((*s).block_start as ::core::ffi::c_uint as isize)
+            if state.block_start >= 0 as ::core::ffi::c_long {
+                state
+                    .window
+                    .offset(state.block_start as ::core::ffi::c_uint as isize)
                     as *mut crate::stdlib::Bytef as *mut crate::stdlib::charf
             } else {
                 ::core::ptr::null_mut::<crate::stdlib::charf>()
             },
-            deflate_block_len((*s).strstart, (*s).block_start),
+            deflate_block_len(state.strstart, state.block_start),
             0 as ::core::ffi::c_int,
         );
-        (*s).block_start = (*s).strstart as ::core::ffi::c_long;
-        flush_pending((*s).strm);
-        if (*(*s).strm).avail_out == 0 as crate::stdlib::uInt {
+        state.block_start = state.strstart as ::core::ffi::c_long;
+        flush_pending(state.strm);
+        let stream = &mut *state.strm;
+        if (*stream).avail_out == 0 as crate::stdlib::uInt {
             return (if false {
                 finish_started as ::core::ffi::c_int
             } else {
@@ -5780,6 +5804,21 @@ mod tests {
             wrapped.literal_tree_index,
             crate::zutil_h::uch::MAX as usize
         );
+    }
+
+    #[test]
+    fn huffman_literal_tally_uses_the_bounded_symbol_view() {
+        let layout = pending_storage_layout(4);
+        let mut bytes = [0xaa; 16];
+        let mut storage = PendingStorageView::new(&mut bytes, layout).unwrap();
+        let tally = deflate_literal_tally_plan(b'Q', 6);
+
+        assert!(storage.write_symbol_triplet(tally.cursors, tally.symbol_bytes));
+        assert_eq!(tally.next_sym, 9);
+        assert_eq!(&storage.symbol_bytes()[6..9], &[0, 0, b'Q']);
+        assert_eq!(storage.symbol_bytes()[5], 0xaa);
+        assert_eq!(storage.symbol_bytes()[9], 0xaa);
+        assert!(symbol_buffer_is_full(9, 9));
     }
 
     #[test]
