@@ -1727,10 +1727,49 @@ fn flush_pending_bytes(
     len as crate::stdlib::uInt
 }
 
-// `deflateCopy()` duplicates two logical regions of the pending allocation:
-// queued output and the deferred symbol buffer.  Allocation setup establishes
-// the extents before the implementation constructs these views; the copy
-// order here matches the two original memcpy operations.
+// The pending allocation has two logical regions: queued output and deferred
+// symbols.  Keep those ranges as ordinary Rust indices so the eventual owned
+// pending storage can use this same description without reconstructing raw
+// cursors.
+struct PendingRegions {
+    queued: ::core::ops::Range<usize>,
+    symbols: ::core::ops::Range<usize>,
+}
+
+impl PendingRegions {
+    fn new(
+        pending_out: usize,
+        pending_len: usize,
+        sym_buf_start: usize,
+        sym_next: usize,
+    ) -> Option<Self> {
+        Some(Self {
+            queued: pending_out..pending_out.checked_add(pending_len)?,
+            symbols: sym_buf_start..sym_buf_start.checked_add(sym_next)?,
+        })
+    }
+
+    fn copy_from(self, source: &[crate::stdlib::Bytef], destination: &mut [crate::stdlib::Bytef]) {
+        let Some(queued) = source.get(self.queued.clone()) else {
+            return;
+        };
+        let Some(symbols) = source.get(self.symbols.clone()) else {
+            return;
+        };
+        let Some(destination_queued) = destination.get_mut(self.queued) else {
+            return;
+        };
+        destination_queued.copy_from_slice(queued);
+        let Some(destination_symbols) = destination.get_mut(self.symbols) else {
+            return;
+        };
+        destination_symbols.copy_from_slice(symbols);
+    }
+}
+
+// `deflateCopy()` duplicates those two logical regions.  Allocation setup
+// establishes the extents before the implementation constructs these views;
+// the copy order matches the two original memcpy operations.
 fn copy_pending_regions(
     source: &[crate::stdlib::Bytef],
     destination: &mut [crate::stdlib::Bytef],
@@ -1739,10 +1778,11 @@ fn copy_pending_regions(
     sym_buf_start: usize,
     sym_next: usize,
 ) {
-    let pending_end = pending_out + pending_len;
-    destination[pending_out..pending_end].copy_from_slice(&source[pending_out..pending_end]);
-    let sym_end = sym_buf_start + sym_next;
-    destination[sym_buf_start..sym_end].copy_from_slice(&source[sym_buf_start..sym_end]);
+    let Some(regions) = PendingRegions::new(pending_out, pending_len, sym_buf_start, sym_next)
+    else {
+        return;
+    };
+    regions.copy_from(source, destination);
 }
 
 // `_tr_stored_block()` has already reserved these four bytes after winding up
