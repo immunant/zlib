@@ -3891,6 +3891,8 @@ struct DeflateFastState<'a> {
     match_length: crate::stdlib::uInt,
     match_start: crate::stdlib::uInt,
     prev_length: crate::stdlib::uInt,
+    prev_match: crate::src::deflate::IPos,
+    match_available: ::core::ffi::c_int,
     max_chain_length: crate::stdlib::uInt,
     max_lazy_match: crate::stdlib::uInt,
     good_match: crate::stdlib::uInt,
@@ -4402,6 +4404,8 @@ unsafe extern "C" fn deflate_fast(
         match_length: state.match_length,
         match_start: state.match_start,
         prev_length: state.prev_length,
+        prev_match: state.prev_match,
+        match_available: state.match_available,
         max_chain_length: state.max_chain_length,
         max_lazy_match: state.max_lazy_match,
         good_match: state.good_match,
@@ -4460,9 +4464,9 @@ unsafe extern "C" fn deflate_fast(
     result
 }
 
-unsafe extern "C" fn deflate_slow(
-    state: &mut crate::src::deflate::deflate_state,
-    stream: &mut crate::zlib_h::z_stream_s,
+fn deflate_slow_from_views(
+    state: &mut DeflateFastState<'_>,
+    stream: &mut DeflateFastStream<'_>,
     mut flush: ::core::ffi::c_int,
 ) -> block_state {
     let mut hash_head: crate::src::deflate::IPos = 0;
@@ -4472,16 +4476,9 @@ unsafe extern "C" fn deflate_slow(
     let sym_buf_start = state.sym_buf_start;
     // `pending_buf` is the full allocation; symbols occupy its suffix after
     // the literal area. Keeping one full-capacity view avoids a raw cursor.
-    let pending_buf = ::core::slice::from_raw_parts_mut(
-        state
-            .pending_buf
-            .expect("initialized pending buffer")
-            .as_ptr(),
-        state.pending_buf_size as usize,
-    );
     loop {
         if state.lookahead < crate::src::deflate::MIN_LOOKAHEAD as crate::stdlib::uInt {
-            fill_window(state as *mut crate::src::deflate::deflate_state);
+            fill_fast_window(state, stream);
             if state.lookahead < crate::src::deflate::MIN_LOOKAHEAD as crate::stdlib::uInt
                 && flush == crate::zlib_h::Z_NO_FLUSH
             {
@@ -4495,10 +4492,7 @@ unsafe extern "C" fn deflate_slow(
         // `fill_window()` above has established the initialized extent for
         // this iteration. Reuse one bounded read view for both hashing and a
         // possible delayed literal instead of rebuilding raw views for each.
-        let window = ::core::slice::from_raw_parts(
-            state.window.expect("initialized window").as_ptr(),
-            state.window_size as usize,
-        );
+        let window = &*state.window;
         // The insertion step does not inspect the previous match fields, so
         // establish the lazy-match candidate before borrowing `prev`. This
         // lets the safe matcher reuse that same bounded hash-table view.
@@ -4507,14 +4501,8 @@ unsafe extern "C" fn deflate_slow(
         state.match_length =
             (crate::zutil_h::MIN_MATCH - 1 as ::core::ffi::c_int) as crate::stdlib::uInt;
         if state.lookahead >= crate::zutil_h::MIN_MATCH as crate::stdlib::uInt {
-            let head = ::core::slice::from_raw_parts_mut(
-                state.head.expect("initialized head table").as_ptr(),
-                state.hash_size as usize,
-            );
-            let prev = ::core::slice::from_raw_parts_mut(
-                state.prev.expect("initialized prev table").as_ptr(),
-                state.w_size as usize,
-            );
+            let head = &mut *state.head;
+            let prev = &mut *state.prev;
             (state.ins_h, hash_head) = insert_hash(
                 window,
                 head,
@@ -4575,7 +4563,7 @@ unsafe extern "C" fn deflate_slow(
             lookahead: state.lookahead,
         };
         let action = {
-            let sym_buf = &mut pending_buf[sym_buf_start..];
+            let sym_buf = &mut state.pending_buf[sym_buf_start..];
             advance_slow_match(
                 &mut slow_state,
                 sym_buf,
@@ -4600,18 +4588,9 @@ unsafe extern "C" fn deflate_slow(
             } => {
                 bflush = next_bflush;
                 for offset in 0..insert_count {
-                    let window = ::core::slice::from_raw_parts(
-                        state.window.expect("initialized window").as_ptr(),
-                        state.window_size as usize,
-                    );
-                    let head = ::core::slice::from_raw_parts_mut(
-                        state.head.expect("initialized head table").as_ptr(),
-                        state.hash_size as usize,
-                    );
-                    let prev = ::core::slice::from_raw_parts_mut(
-                        state.prev.expect("initialized prev table").as_ptr(),
-                        state.w_size as usize,
-                    );
+                    let window = &*state.window;
+                    let head = &mut *state.head;
+                    let prev = &mut *state.prev;
                     (state.ins_h, hash_head) = insert_hash(
                         window,
                         head,
@@ -4641,7 +4620,7 @@ unsafe extern "C" fn deflate_slow(
                         crate::src::trees::BlockFlushState {
                             level: state.level,
                             strategy: state.strategy,
-                            pending_buf,
+                            pending_buf: state.pending_buf,
                             pending: &mut state.pending,
                             bi_buf: &mut state.bi_buf,
                             bi_valid: &mut state.bi_valid,
@@ -4668,7 +4647,7 @@ unsafe extern "C" fn deflate_slow(
                         0,
                     );
                     state.block_start = state.strstart as ::core::ffi::c_long;
-                    flush_pending(stream, state);
+                    flush_fast_pending(state, stream);
                     if stream.avail_out == 0 as crate::stdlib::uInt {
                         return need_more;
                     }
@@ -4694,7 +4673,7 @@ unsafe extern "C" fn deflate_slow(
                         crate::src::trees::BlockFlushState {
                             level: state.level,
                             strategy: state.strategy,
-                            pending_buf,
+                            pending_buf: state.pending_buf,
                             pending: &mut state.pending,
                             bi_buf: &mut state.bi_buf,
                             bi_valid: &mut state.bi_valid,
@@ -4721,7 +4700,7 @@ unsafe extern "C" fn deflate_slow(
                         0,
                     );
                     state.block_start = state.strstart as ::core::ffi::c_long;
-                    flush_pending(stream, state);
+                    flush_fast_pending(state, stream);
                 }
                 state.strstart = state.strstart.wrapping_add(1);
                 state.lookahead = state.lookahead.wrapping_sub(1);
@@ -4733,13 +4712,10 @@ unsafe extern "C" fn deflate_slow(
         }
     }
     if state.match_available != 0 {
-        let window = ::core::slice::from_raw_parts(
-            state.window.expect("initialized window").as_ptr(),
-            state.window_size as usize,
-        );
+        let window = &*state.window;
         let cc_0 = window[state.strstart.wrapping_sub(1) as usize] as crate::zutil_h::uch;
         bflush = {
-            let sym_buf = &mut pending_buf[sym_buf_start..];
+            let sym_buf = &mut state.pending_buf[sym_buf_start..];
             tally_slow_symbol(
                 sym_buf,
                 &mut state.sym_next,
@@ -4763,10 +4739,7 @@ unsafe extern "C" fn deflate_slow(
     if flush == crate::zlib_h::Z_FINISH {
         let stored_len =
             (state.strstart as ::core::ffi::c_long - state.block_start) as crate::zutil_h::ulg;
-        let window = ::core::slice::from_raw_parts(
-            state.window.expect("initialized window").as_ptr(),
-            state.window_size as usize,
-        );
+        let window = &*state.window;
         let input = if state.block_start >= 0 {
             let start = state.block_start as usize;
             Some(&window[start..start + stored_len as usize])
@@ -4782,7 +4755,7 @@ unsafe extern "C" fn deflate_slow(
             crate::src::trees::BlockFlushState {
                 level: state.level,
                 strategy: state.strategy,
-                pending_buf,
+                pending_buf: state.pending_buf,
                 pending: &mut state.pending,
                 bi_buf: &mut state.bi_buf,
                 bi_valid: &mut state.bi_valid,
@@ -4809,7 +4782,7 @@ unsafe extern "C" fn deflate_slow(
             1,
         );
         state.block_start = state.strstart as ::core::ffi::c_long;
-        flush_pending(stream, state);
+        flush_fast_pending(state, stream);
         if stream.avail_out == 0 as crate::stdlib::uInt {
             return (if true {
                 finish_started as ::core::ffi::c_int
@@ -4822,10 +4795,7 @@ unsafe extern "C" fn deflate_slow(
     if state.sym_next != 0 {
         let stored_len =
             (state.strstart as ::core::ffi::c_long - state.block_start) as crate::zutil_h::ulg;
-        let window = ::core::slice::from_raw_parts(
-            state.window.expect("initialized window").as_ptr(),
-            state.window_size as usize,
-        );
+        let window = &*state.window;
         let input = if state.block_start >= 0 {
             let start = state.block_start as usize;
             Some(&window[start..start + stored_len as usize])
@@ -4841,7 +4811,7 @@ unsafe extern "C" fn deflate_slow(
             crate::src::trees::BlockFlushState {
                 level: state.level,
                 strategy: state.strategy,
-                pending_buf,
+                pending_buf: state.pending_buf,
                 pending: &mut state.pending,
                 bi_buf: &mut state.bi_buf,
                 bi_valid: &mut state.bi_valid,
@@ -4868,7 +4838,7 @@ unsafe extern "C" fn deflate_slow(
             0,
         );
         state.block_start = state.strstart as ::core::ffi::c_long;
-        flush_pending(stream, state);
+        flush_fast_pending(state, stream);
         if stream.avail_out == 0 as crate::stdlib::uInt {
             return (if false {
                 finish_started as ::core::ffi::c_int
@@ -4878,6 +4848,17 @@ unsafe extern "C" fn deflate_slow(
         }
     }
     return block_done;
+}
+
+// The lazy parser has the same bounded-storage requirements as the RLE and
+// Huffman parsers.  Reuse their ABI adapter so the parsing loop above stays
+// entirely on slices and scalar cursors.
+unsafe extern "C" fn deflate_slow(
+    state: &mut crate::src::deflate::deflate_state,
+    stream: &mut crate::zlib_h::z_stream_s,
+    flush: ::core::ffi::c_int,
+) -> block_state {
+    deflate_match_from_abi(state, stream, flush, deflate_slow_from_views)
 }
 
 // Find a repeated-byte match using offsets into the fully allocated sliding
@@ -5121,6 +5102,7 @@ unsafe fn deflate_match_from_abi(
         lookahead: state.lookahead, strstart: state.strstart, block_start: state.block_start,
         insert: state.insert, ins_h: state.ins_h, match_length: state.match_length,
         match_start: state.match_start, prev_length: state.prev_length,
+        prev_match: state.prev_match, match_available: state.match_available,
         max_chain_length: state.max_chain_length, max_lazy_match: state.max_lazy_match,
         good_match: state.good_match, nice_match: state.nice_match, level: state.level,
         strategy: state.strategy, w_size: state.w_size, w_mask: state.w_mask,
@@ -5158,6 +5140,9 @@ unsafe fn deflate_match_from_abi(
     state.ins_h = matched.ins_h;
     state.match_length = matched.match_length;
     state.match_start = matched.match_start;
+    state.prev_length = matched.prev_length;
+    state.prev_match = matched.prev_match;
+    state.match_available = matched.match_available;
     state.slid = matched.slid;
     state.high_water = matched.high_water;
     result
