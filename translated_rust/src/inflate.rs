@@ -2673,63 +2673,116 @@ pub unsafe extern "C" fn inflateSyncPoint_ffi(
 ) -> ::core::ffi::c_int {
     inflateSyncPoint(strm)
 }
+
+// `inflateCopy()` must preserve the ABI-visible scalar state while giving the
+// normal history window an independent owner.  Keep the raw-pointer-bearing
+// state at this narrow unsafe boundary; the actual field copy uses ordinary
+// Rust values and never duplicates an owner by bit pattern.
+unsafe fn copy_inflate_state(
+    source: &inflate_state,
+    stream_identity: usize,
+) -> Option<inflate_state> {
+    let owned_window = match source.owned_window.as_deref() {
+        Some(source_window) => {
+            let mut window = allocate_inflate_window(source_window.len())?;
+            window[..source.whave as usize]
+                .copy_from_slice(&source_window[..source.whave as usize]);
+            Some(window)
+        }
+        None => None,
+    };
+    Some(inflate_state {
+        stream_identity,
+        mode: source.mode,
+        last: source.last,
+        wrap: source.wrap,
+        havedict: source.havedict,
+        flags: source.flags,
+        dmax: source.dmax,
+        check: source.check,
+        total: source.total,
+        head: source.head,
+        wbits: source.wbits,
+        wsize: source.wsize,
+        whave: source.whave,
+        wnext: source.wnext,
+        window: source.window,
+        owned_window,
+        hold: source.hold,
+        bits: source.bits,
+        length: source.length,
+        offset: source.offset,
+        extra: source.extra,
+        lencode: source.lencode,
+        distcode: source.distcode,
+        lenbits: source.lenbits,
+        distbits: source.distbits,
+        ncode: source.ncode,
+        nlen: source.nlen,
+        ndist: source.ndist,
+        have: source.have,
+        next: source.next,
+        lens: source.lens,
+        work: source.work,
+        codes: core::array::from_fn(|index| {
+            crate::src::inftrees::code::copied_from(&source.codes[index])
+        }),
+        sane: source.sane,
+        back: source.back,
+        was: source.was,
+    })
+}
+
 pub unsafe extern "C" fn inflateCopy(
     mut dest: crate::zlib_h::z_streamp,
     mut source: crate::zlib_h::z_streamp,
 ) -> ::core::ffi::c_int {
-    let mut state: *mut crate::src::inflate::inflate_state =
-        ::core::ptr::null_mut::<crate::src::inflate::inflate_state>();
-    let mut copy: *mut crate::src::inflate::inflate_state =
-        ::core::ptr::null_mut::<crate::src::inflate::inflate_state>();
-    let mut window: Option<Box<[u8]>> = None;
     if inflateStateCheck(source) != 0 || dest.is_null() {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    state = (*source).state as *mut crate::src::inflate::inflate_state;
-    copy = Some((*source).zalloc.expect("non-null function pointer"))
+    // `inflateStateCheck()` established the source state association.  C's
+    // API requires a distinct destination stream, so these scoped views do
+    // not alias.
+    let dest_identity = dest.addr();
+    let source = &*source;
+    let dest = &mut *dest;
+    let state = &*(source.state as *const crate::src::inflate::inflate_state);
+    let copy = Some(source.zalloc.expect("non-null function pointer"))
         .expect("non-null function pointer")(
-        (*source).opaque,
+        source.opaque,
         1 as crate::stdlib::uInt,
         ::core::mem::size_of::<crate::src::inflate::inflate_state>() as crate::stdlib::uInt,
     ) as *mut crate::src::inflate::inflate_state;
-    if copy.is_null() {
+    let Some(copy) = ::core::ptr::NonNull::new(copy) else {
         return crate::zlib_h::Z_MEM_ERROR;
-    }
-    // The allocation is not observed before the complete state copy below.
-    // Clearing it here would be dead work and only adds an unsafe foreign
-    // memory call; the copy establishes every state byte before use.
-    if let Some(source_window) = (*state).owned_window.as_deref() {
-        window = allocate_inflate_window(source_window.len());
-        if window.is_none() {
-            Some((*source).zfree.expect("non-null function pointer"))
-                .expect("non-null function pointer")(
-                (*source).opaque,
-                copy as crate::stdlib::voidpf,
-            );
-            return crate::zlib_h::Z_MEM_ERROR;
-        }
-    }
-    // `dest` and `source`, and their separately allocated states, are
-    // distinct by inflateCopy's existing C contract.
-    ::core::ptr::copy_nonoverlapping(source, dest, 1);
-    ::core::ptr::copy_nonoverlapping(state, copy, 1);
-    (*copy).stream_identity = dest.addr();
-    (*copy).lencode = (*state).lencode;
-    (*copy).distcode = (*state).distcode;
-    (*copy).next = (*state).next;
-    if let Some(window) = window.as_deref_mut() {
-        let source_window = (*state)
-            .owned_window
-            .as_deref()
-            .expect("normal inflate owns its history window");
-        window[..(*state).whave as usize]
-            .copy_from_slice(&source_window[..(*state).whave as usize]);
-    }
-    // `copy_nonoverlapping()` above duplicated the Box bits along with the
-    // scalar state. Replace that transient duplicate without dropping it;
-    // `window` is the independently owned history allocation for `copy`.
-    ::core::ptr::write(::core::ptr::addr_of_mut!((*copy).owned_window), window);
-    (*dest).state = copy as *mut crate::src::deflate::internal_state;
+    };
+    let Some(state_copy) = copy_inflate_state(state, dest_identity) else {
+        Some(source.zfree.expect("non-null function pointer")).expect("non-null function pointer")(
+            source.opaque,
+            copy.as_ptr().cast(),
+        );
+        return crate::zlib_h::Z_MEM_ERROR;
+    };
+    // zalloc() returns uninitialized storage.  Publish a fully initialized
+    // state in one write, then mirror the source stream exactly with only its
+    // opaque state handle changed.
+    copy.as_ptr().write(state_copy);
+    *dest = crate::zlib_h::z_stream_s {
+        next_in: source.next_in,
+        avail_in: source.avail_in,
+        total_in: source.total_in,
+        next_out: source.next_out,
+        avail_out: source.avail_out,
+        total_out: source.total_out,
+        msg: source.msg,
+        state: copy.as_ptr().cast(),
+        zalloc: source.zalloc,
+        zfree: source.zfree,
+        opaque: source.opaque,
+        data_type: source.data_type,
+        adler: source.adler,
+        reserved: source.reserved,
+    };
     return crate::zlib_h::Z_OK;
 }
 #[export_name = "inflateCopy"]
