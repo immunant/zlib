@@ -298,6 +298,10 @@ fn gzgets_request_has_capacity(len: ::core::ffi::c_int) -> bool {
     len >= 1
 }
 
+fn gzgets_remaining_capacity(len: ::core::ffi::c_int) -> ::core::ffi::c_uint {
+    (len as ::core::ffi::c_uint).wrapping_sub(1)
+}
+
 enum GzUngetcBufferState {
     Empty,
     Full,
@@ -784,19 +788,27 @@ fn gz_skip_core(
     skip: &mut crate::stdlib::off64_t,
     intmax: ::core::ffi::c_uint,
 ) -> ::core::ffi::c_uint {
-    let n = if ::core::mem::size_of::<::core::ffi::c_int>() as usize
-        == ::core::mem::size_of::<crate::stdlib::off64_t>() as usize
-        && *have > intmax
-        || *have as crate::stdlib::off64_t > *skip
-    {
-        *skip as ::core::ffi::c_uint
-    } else {
-        *have
-    };
+    let n = gz_skip_len(*have, *skip, intmax);
     *have = have.wrapping_sub(n);
     *pos += n as crate::stdlib::off64_t;
     *skip -= n as crate::stdlib::off64_t;
     n
+}
+
+fn gz_skip_len(
+    have: ::core::ffi::c_uint,
+    skip: crate::stdlib::off64_t,
+    intmax: ::core::ffi::c_uint,
+) -> ::core::ffi::c_uint {
+    if ::core::mem::size_of::<::core::ffi::c_int>() as usize
+        == ::core::mem::size_of::<crate::stdlib::off64_t>() as usize
+        && have > intmax
+        || have as crate::stdlib::off64_t > skip
+    {
+        skip as ::core::ffi::c_uint
+    } else {
+        have
+    }
 }
 
 enum GzSkipAction {
@@ -1489,6 +1501,13 @@ mod tests {
     }
 
     #[test]
+    fn gz_skip_len_limits_consumption_by_skip_and_buffered_input() {
+        assert_eq!(gz_skip_len(10, 3, 5), 3);
+        assert_eq!(gz_skip_len(10, 10, 5), 10);
+        assert_eq!(gz_skip_len(10, 15, 5), 10);
+    }
+
+    #[test]
     fn gz_skip_action_prioritizes_buffered_data_over_eof() {
         assert!(matches!(
             gz_skip_action(1, 1, 0),
@@ -1578,6 +1597,16 @@ mod tests {
         assert!(!gzgets_request_has_capacity(-1));
         assert!(!gzgets_request_has_capacity(0));
         assert!(gzgets_request_has_capacity(1));
+    }
+
+    #[test]
+    fn gzgets_remaining_capacity_reserves_the_terminator() {
+        assert_eq!(gzgets_remaining_capacity(1), 0);
+        assert_eq!(gzgets_remaining_capacity(2), 1);
+        assert_eq!(
+            gzgets_remaining_capacity(::core::ffi::c_int::MAX),
+            (::core::ffi::c_int::MAX as ::core::ffi::c_uint) - 1
+        );
     }
 
     #[test]
@@ -1930,7 +1959,7 @@ pub unsafe extern "C" fn gzgets(
         return ::core::ptr::null_mut::<::core::ffi::c_char>();
     }
     str = buf;
-    left = (len as ::core::ffi::c_uint).wrapping_sub(1 as ::core::ffi::c_uint);
+    left = gzgets_remaining_capacity(len);
     if left != 0 {
         while !((*state).x.have == 0 as ::core::ffi::c_uint
             && gz_fetch(state) == -1 as ::core::ffi::c_int)

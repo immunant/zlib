@@ -168,6 +168,14 @@ fn gz_zero_needs_pending_flush(avail_in: crate::stdlib::uInt) -> bool {
     avail_in != 0
 }
 
+fn gz_has_pending_skip(skip: crate::stdlib::off64_t) -> bool {
+    skip != 0
+}
+
+fn gz_buffer_is_initialized(size: ::core::ffi::c_uint) -> bool {
+    size != 0
+}
+
 fn gz_write_buffered_copy_len(
     size: ::core::ffi::c_uint,
     have: ::core::ffi::c_uint,
@@ -424,7 +432,7 @@ unsafe extern "C" fn gz_comp(
     let mut put: ::core::ffi::c_uint = 0;
     let mut max: ::core::ffi::c_uint = gz_comp_max_write_chunk();
     let mut strm: crate::zlib_h::z_streamp = &raw mut (*state).strm;
-    if (*state).size == 0 as ::core::ffi::c_uint && gz_init(state) == -1 as ::core::ffi::c_int {
+    if !gz_buffer_is_initialized((*state).size) && gz_init(state) == -1 as ::core::ffi::c_int {
         return -1 as ::core::ffi::c_int;
     }
     if (*state).direct != 0 {
@@ -573,10 +581,10 @@ unsafe extern "C" fn gz_write(
     if gz_write_is_empty(len) {
         return 0 as crate::stdlib::z_size_t;
     }
-    if (*state).size == 0 as ::core::ffi::c_uint && gz_init(state) == -1 as ::core::ffi::c_int {
+    if !gz_buffer_is_initialized((*state).size) && gz_init(state) == -1 as ::core::ffi::c_int {
         return 0 as crate::stdlib::z_size_t;
     }
-    if (*state).skip != 0 && gz_zero(state) == -1 as ::core::ffi::c_int {
+    if gz_has_pending_skip((*state).skip) && gz_zero(state) == -1 as ::core::ffi::c_int {
         return 0 as crate::stdlib::z_size_t;
     }
     if gz_write_uses_buffered_path(len, (*state).size) {
@@ -753,10 +761,10 @@ pub unsafe extern "C" fn gzputc(
         crate::zlib_h::Z_OK,
         ::core::ptr::null::<::core::ffi::c_char>(),
     );
-    if (*state).skip != 0 && gz_zero(state) == -1 as ::core::ffi::c_int {
+    if gz_has_pending_skip((*state).skip) && gz_zero(state) == -1 as ::core::ffi::c_int {
         return -1 as ::core::ffi::c_int;
     }
-    if (*state).size != 0 {
+    if gz_buffer_is_initialized((*state).size) {
         if (*strm).avail_in == 0 as crate::stdlib::uInt {
             (*strm).next_in = (*state).in_0 as *mut crate::stdlib::Bytef;
         }
@@ -852,7 +860,7 @@ pub unsafe extern "C" fn gzflush(
     if !gzflush_mode_is_valid(flush) {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    if (*state).skip != 0 && gz_zero(state) == -1 as ::core::ffi::c_int {
+    if gz_has_pending_skip((*state).skip) && gz_zero(state) == -1 as ::core::ffi::c_int {
         return (*state).err;
     }
     gz_comp(state, flush);
@@ -890,10 +898,10 @@ pub unsafe extern "C" fn gzsetparams(
     if gzsetparams_settings_match(level, (*state).level, strategy, (*state).strategy) {
         return crate::zlib_h::Z_OK;
     }
-    if (*state).skip != 0 && gz_zero(state) == -1 as ::core::ffi::c_int {
+    if gz_has_pending_skip((*state).skip) && gz_zero(state) == -1 as ::core::ffi::c_int {
         return (*state).err;
     }
-    if (*state).size != 0 {
+    if gz_buffer_is_initialized((*state).size) {
         if gz_write_needs_pending_flush((*strm).avail_in)
             && gz_comp(state, crate::zlib_h::Z_BLOCK) == -1 as ::core::ffi::c_int
         {
@@ -924,17 +932,18 @@ pub unsafe extern "C" fn gzclose_w(mut file: crate::zlib_h::gzFile) -> ::core::f
     if !gzclose_mode_is_writable((*state).mode) {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    let zero_error = if (*state).skip != 0 && gz_zero(state) == -1 as ::core::ffi::c_int {
-        Some((*state).err)
-    } else {
-        None
-    };
+    let zero_error =
+        if gz_has_pending_skip((*state).skip) && gz_zero(state) == -1 as ::core::ffi::c_int {
+            Some((*state).err)
+        } else {
+            None
+        };
     let finish_error = if gz_comp(state, crate::zlib_h::Z_FINISH) == -1 as ::core::ffi::c_int {
         Some((*state).err)
     } else {
         None
     };
-    if (*state).size != 0 {
+    if gz_buffer_is_initialized((*state).size) {
         if (*state).direct == 0 {
             crate::src::deflate::deflateEnd(
                 &raw mut (*state).strm as *mut _ as *mut crate::zlib_h::z_stream_s,
@@ -962,13 +971,13 @@ pub unsafe extern "C" fn gzclose_w_ffi(mut file: crate::zlib_h::gzFile) -> ::cor
 #[cfg(test)]
 mod tests {
     use super::{
-        gz_buffered_have, gz_comp_has_output, gz_comp_max_write_chunk,
+        gz_buffer_is_initialized, gz_buffered_have, gz_comp_has_output, gz_comp_max_write_chunk,
         gz_comp_needs_output_buffer_reset, gz_comp_needs_output_write, gz_comp_needs_reset,
         gz_comp_output_produced, gz_comp_remaining_direct_input, gz_comp_reset_action,
         gz_comp_reset_after_flush, gz_comp_skips_empty_flush, gz_comp_write_chunk_len,
-        gz_comp_write_failed, gz_write_apply_direct_progress, gz_write_buffered_copy_len,
-        gz_write_buffered_step, gz_write_chunk_consumed_len, gz_write_chunk_len,
-        gz_write_errno_is_retryable, gz_write_error_result, gz_write_is_empty,
+        gz_comp_write_failed, gz_has_pending_skip, gz_write_apply_direct_progress,
+        gz_write_buffered_copy_len, gz_write_buffered_step, gz_write_chunk_consumed_len,
+        gz_write_chunk_len, gz_write_errno_is_retryable, gz_write_error_result, gz_write_is_empty,
         gz_write_needs_pending_flush, gz_write_state_is_usable, gz_write_uses_buffered_path,
         gz_zero_apply_progress, gz_zero_chunk_len, gz_zero_needs_initialization,
         gz_zero_needs_pending_flush, gzclose_mode_is_writable, gzclose_w_result,
@@ -1044,6 +1053,20 @@ mod tests {
         assert!(!gz_zero_needs_pending_flush(0));
         assert!(gz_zero_needs_pending_flush(1));
         assert!(gz_zero_needs_pending_flush(crate::stdlib::uInt::MAX));
+    }
+
+    #[test]
+    fn gz_has_pending_skip_detects_nonzero_offsets() {
+        assert!(!gz_has_pending_skip(0));
+        assert!(gz_has_pending_skip(1));
+        assert!(gz_has_pending_skip(-1));
+    }
+
+    #[test]
+    fn gz_buffer_is_initialized_requires_nonzero_size() {
+        assert!(!gz_buffer_is_initialized(0));
+        assert!(gz_buffer_is_initialized(1));
+        assert!(gz_buffer_is_initialized(::core::ffi::c_uint::MAX));
     }
 
     #[test]
