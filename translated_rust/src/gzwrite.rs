@@ -141,6 +141,15 @@ fn gz_direct_write(
     Ok(written)
 }
 
+/// Return the unconsumed tail of gzip's state-owned direct-write buffer.
+///
+/// Keeping cursor advancement as a checked slice operation lets the caller
+/// expose the ABI pointer only after it has proved the cursor remains within
+/// that owned buffer.
+fn gz_input_tail(input: &mut [u8], cursor: usize, advanced: usize) -> Option<&mut [u8]> {
+    input.get_mut(cursor.checked_add(advanced)?..)
+}
+
 fn gz_comp(state: &mut crate::gzguts_h::gz_state, flush: ::core::ffi::c_int) -> ::core::ffi::c_int {
     let mut ret: ::core::ffi::c_int = 0;
     let mut writ: ::core::ffi::c_int = 0;
@@ -204,7 +213,15 @@ fn gz_comp(state: &mut crate::gzguts_h::gz_state, flush: ::core::ffi::c_int) -> 
                         .strm
                         .avail_in
                         .wrapping_sub(written as ::core::ffi::c_uint);
-                    state.strm.next_in = state.in_0.as_mut_ptr().wrapping_add(cursor + written);
+                    let Some(next_input) = gz_input_tail(&mut state.in_0, cursor, written) else {
+                        crate::src::gzlib::gz_static_error(
+                            state,
+                            crate::zlib_h::Z_STREAM_ERROR,
+                            b"internal write buffer corrupt\0",
+                        );
+                        return -1 as ::core::ffi::c_int;
+                    };
+                    state.strm.next_in = next_input.as_mut_ptr();
                     gz_write_error(state, error);
                     gz_set_errno(error);
                     return -1 as ::core::ffi::c_int;
@@ -214,7 +231,15 @@ fn gz_comp(state: &mut crate::gzguts_h::gz_state, flush: ::core::ffi::c_int) -> 
                 .strm
                 .avail_in
                 .wrapping_sub(writ as ::core::ffi::c_uint);
-            state.strm.next_in = state.in_0.as_mut_ptr().wrapping_add(cursor + writ as usize);
+            let Some(next_input) = gz_input_tail(&mut state.in_0, cursor, writ as usize) else {
+                crate::src::gzlib::gz_static_error(
+                    state,
+                    crate::zlib_h::Z_STREAM_ERROR,
+                    b"internal write buffer corrupt\0",
+                );
+                return -1 as ::core::ffi::c_int;
+            };
+            state.strm.next_in = next_input.as_mut_ptr();
         }
         return 0 as ::core::ffi::c_int;
     }
