@@ -762,23 +762,6 @@ unsafe extern "C" fn fill_window(mut s: *mut crate::src::deflate::deflate_state)
             initialize_window_high_water(window, state.high_water, state.strstart, state.lookahead);
     }
 }
-pub unsafe extern "C" fn deflateInit_(
-    mut strm: crate::zlib_h::z_streamp,
-    mut level: ::core::ffi::c_int,
-    mut version: *const ::core::ffi::c_char,
-    mut stream_size: ::core::ffi::c_int,
-) -> ::core::ffi::c_int {
-    return deflateInit2_(
-        strm,
-        level,
-        crate::zlib_h::Z_DEFLATED,
-        crate::stdlib::MAX_WBITS,
-        crate::zutil_h::DEF_MEM_LEVEL,
-        crate::zlib_h::Z_DEFAULT_STRATEGY,
-        version,
-        stream_size,
-    );
-}
 #[export_name = "deflateInit_"]
 
 pub unsafe extern "C" fn deflateInit__ffi(
@@ -787,7 +770,16 @@ pub unsafe extern "C" fn deflateInit__ffi(
     mut version: *const ::core::ffi::c_char,
     mut stream_size: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
-    deflateInit_(strm, level, version, stream_size)
+    deflateInit2_(
+        strm,
+        level,
+        crate::zlib_h::Z_DEFLATED,
+        crate::stdlib::MAX_WBITS,
+        crate::zutil_h::DEF_MEM_LEVEL,
+        crate::zlib_h::Z_DEFAULT_STRATEGY,
+        version,
+        stream_size,
+    )
 }
 pub unsafe extern "C" fn deflateInit2_(
     mut strm: crate::zlib_h::z_streamp,

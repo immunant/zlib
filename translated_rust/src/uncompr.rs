@@ -5,7 +5,7 @@ use crate::src::compress::OneShotCursor;
 pub use crate::src::deflate::internal_state;
 pub use crate::src::inflate::inflate;
 pub use crate::src::inflate::inflateEnd;
-pub use crate::src::inflate::inflateInit_;
+pub use crate::src::inflate::inflateInit2_;
 pub use crate::stdlib::uInt;
 pub use crate::stdlib::uLong;
 pub use crate::stdlib::uLongf;
@@ -66,8 +66,9 @@ fn uncompress2_z(
     // The stream is an ABI mirror used only while this slice-backed loop is
     // active.  Empty output still needs a non-null cursor for inflate's ABI.
     unsafe {
-        err = crate::src::inflate::inflateInit_(
+        err = crate::src::inflate::inflateInit2_(
             &raw mut stream as *mut _ as *mut crate::zlib_h::z_stream_s,
+            crate::zutil_h::DEF_WBITS,
             crate::zlib_h::ZLIB_VERSION.as_ptr(),
             ::core::mem::size_of::<crate::zlib_h::z_stream>() as ::core::ffi::c_int,
         );
