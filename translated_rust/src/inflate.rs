@@ -71,6 +71,42 @@ macro_rules! inflate_input_byte {
     };
 }
 
+macro_rules! inflate_lencode {
+    ($state:expr, $index:expr $(,)?) => {{
+        let state = &*$state;
+        let index = $index;
+        if ::core::ptr::eq(
+            state.lencode,
+            crate::src::inftrees::inffixed_h::lenfix.as_ptr(),
+        ) {
+            crate::src::inftrees::inffixed_h::lenfix[index]
+        } else {
+            state.codes[index]
+        }
+    }};
+}
+
+macro_rules! inflate_distcode {
+    ($state:expr, $index:expr $(,)?) => {{
+        let state = &*$state;
+        let index = $index;
+        if ::core::ptr::eq(
+            state.distcode,
+            crate::src::inftrees::inffixed_h::distfix.as_ptr(),
+        ) {
+            crate::src::inftrees::inffixed_h::distfix[index]
+        } else {
+            let base = state.codes.as_ptr().addr();
+            let start = state
+                .distcode
+                .addr()
+                .wrapping_sub(base)
+                .wrapping_div(::core::mem::size_of::<crate::src::inftrees::code>());
+            state.codes[start.wrapping_add(index)]
+        }
+    }};
+}
+
 #[derive(Copy, Clone)]
 #[repr(C)]
 
@@ -995,9 +1031,12 @@ pub unsafe extern "C" fn inflate(
                                                                                                     if left == 0 as ::core::ffi::c_uint {
                                                                                                         break '_inf_leave;
                                                                                                     }
-                                                                                                    let c2rust_fresh32 = put;
-                                                                                                    put = put.offset(1);
-                                                                                                    *c2rust_fresh32 = (*state).length as ::core::ffi::c_uchar;
+                                                                                                    let output = ::core::slice::from_raw_parts_mut(
+                                                                                                        put,
+                                                                                                        left as usize,
+                                                                                                    );
+                                                                                                    output[0] = (*state).length as ::core::ffi::c_uchar;
+                                                                                                    put = output[1..].as_mut_ptr();
                                                                                                     left = left.wrapping_sub(1);
                                                                                                     (*state).mode = crate::src::inflate::LEN;
                                                                                                     continue '_inf_leave;
@@ -1249,13 +1288,12 @@ pub unsafe extern "C" fn inflate(
                                                                                 )
                                                                         {
                                                                             loop {
-                                                                                here = *(*state)
-                                                                                    .lencode
-                                                                                    .offset(
-                                                                                        (hold as ::core::ffi::c_uint
-                                                                                            & ((1 as ::core::ffi::c_uint) << (*state).lenbits)
-                                                                                                .wrapping_sub(1 as ::core::ffi::c_uint)) as isize,
-                                                                                    );
+                                                                                here = inflate_lencode!(
+                                                                                    state,
+                                                                                    (hold as ::core::ffi::c_uint
+                                                                                        & ((1 as ::core::ffi::c_uint) << (*state).lenbits)
+                                                                                            .wrapping_sub(1 as ::core::ffi::c_uint)) as usize,
+                                                                                );
                                                                                 if here.bits as ::core::ffi::c_uint <= bits {
                                                                                     break;
                                                                                 }
@@ -1482,10 +1520,13 @@ pub unsafe extern "C" fn inflate(
                                                                         {
                                                                             break '_inf_leave;
                                                                         }
-                                                                        crate::stdlib::memcpy(
-                                                                            put as *mut ::core::ffi::c_void,
-                                                                            next as *const ::core::ffi::c_void,
-                                                                            copy as crate::__stddef_size_t_h::size_t,
+                                                                        let input_start = in_0.wrapping_sub(have) as usize;
+                                                                        let output = ::core::slice::from_raw_parts_mut(
+                                                                            put,
+                                                                            copy as usize,
+                                                                        );
+                                                                        output.copy_from_slice(
+                                                                            &input[input_start..input_start + copy as usize],
                                                                         );
                                                                         have =
                                                                             have.wrapping_sub(copy);
@@ -1493,8 +1534,7 @@ pub unsafe extern "C" fn inflate(
                                                                             .offset(copy as isize);
                                                                         left =
                                                                             left.wrapping_sub(copy);
-                                                                        put = put
-                                                                            .offset(copy as isize);
+                                                                        put = output[copy as usize..].as_mut_ptr();
                                                                         (*state).length = (*state)
                                                                             .length
                                                                             .wrapping_sub(copy);
@@ -1737,12 +1777,13 @@ pub unsafe extern "C" fn inflate(
                                         } else {
                                             (*state).back = 0 as ::core::ffi::c_int;
                                             loop {
-                                                here = *(*state).lencode.offset(
+                                                here = inflate_lencode!(
+                                                    state,
                                                     (hold as ::core::ffi::c_uint
                                                         & ((1 as ::core::ffi::c_uint)
                                                             << (*state).lenbits)
                                                             .wrapping_sub(1 as ::core::ffi::c_uint))
-                                                        as isize,
+                                                        as usize,
                                                 );
                                                 if here.bits as ::core::ffi::c_uint <= bits {
                                                     break;
@@ -1765,7 +1806,8 @@ pub unsafe extern "C" fn inflate(
                                             {
                                                 last = here;
                                                 loop {
-                                                    here = *(*state).lencode.offset(
+                                                    here = inflate_lencode!(
+                                                        state,
                                                         (last.val as ::core::ffi::c_uint)
                                                             .wrapping_add(
                                                             (hold as ::core::ffi::c_uint
@@ -1779,7 +1821,7 @@ pub unsafe extern "C" fn inflate(
                                                                     ))
                                                                 >> last.bits as ::core::ffi::c_int,
                                                         )
-                                                            as isize,
+                                                            as usize,
                                                     );
                                                     if (last.bits as ::core::ffi::c_int
                                                         + here.bits as ::core::ffi::c_int)
@@ -1969,11 +2011,12 @@ pub unsafe extern "C" fn inflate(
                             break 'c_2325;
                         }
                         loop {
-                            here = *(*state).distcode.offset(
+                            here = inflate_distcode!(
+                                state,
                                 (hold as ::core::ffi::c_uint
                                     & ((1 as ::core::ffi::c_uint) << (*state).distbits)
                                         .wrapping_sub(1 as ::core::ffi::c_uint))
-                                    as isize,
+                                    as usize,
                             );
                             if here.bits as ::core::ffi::c_uint <= bits {
                                 break;
@@ -1992,7 +2035,8 @@ pub unsafe extern "C" fn inflate(
                         {
                             last = here;
                             loop {
-                                here = *(*state).distcode.offset(
+                                here = inflate_distcode!(
+                                    state,
                                     (last.val as ::core::ffi::c_uint).wrapping_add(
                                         (hold as ::core::ffi::c_uint
                                             & ((1 as ::core::ffi::c_uint)
@@ -2000,7 +2044,7 @@ pub unsafe extern "C" fn inflate(
                                                     + last.op as ::core::ffi::c_int)
                                                 .wrapping_sub(1 as ::core::ffi::c_uint))
                                             >> last.bits as ::core::ffi::c_int,
-                                    ) as isize,
+                                    ) as usize,
                                 );
                                 if (last.bits as ::core::ffi::c_int
                                     + here.bits as ::core::ffi::c_int)
