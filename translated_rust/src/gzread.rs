@@ -912,10 +912,6 @@ fn gzgetc_impl(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
     }
 }
 
-pub unsafe fn gzgetc(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
-    gzgetc_impl(state)
-}
-
 #[export_name = "gzgetc"]
 
 pub unsafe extern "C" fn gzgetc_ffi(mut file: crate::zlib_h::gzFile) -> ::core::ffi::c_int {
