@@ -444,7 +444,7 @@ pub unsafe extern "C" fn inflateBack_ffi(
                     ret = {
                         let state = &mut *state;
                         state.next = 0;
-                        state.lencode = state.codes.as_ptr();
+                        state.lencode = crate::src::inflate::InflateCodeTable::Dynamic(0);
                         state.lenbits = 7 as ::core::ffi::c_uint;
                         match crate::src::inftrees::inflate_table_into(
                             crate::src::inftrees::CODES,
@@ -471,11 +471,20 @@ pub unsafe extern "C" fn inflateBack_ffi(
                         (*state).have = 0 as ::core::ffi::c_uint;
                         while (*state).have < (*state).nlen.wrapping_add((*state).ndist) {
                             loop {
-                                here = *(*state).lencode.wrapping_add(
+                                here = crate::src::inflate::inflate_table_entry(
+                                    &(*state).codes,
+                                    (*state).lencode,
                                     (hold as ::core::ffi::c_uint
                                         & ((1 as ::core::ffi::c_uint) << (*state).lenbits)
                                             .wrapping_sub(1 as ::core::ffi::c_uint))
                                         as usize,
+                                )
+                                .unwrap_or(
+                                    crate::src::inftrees::code {
+                                        op: 64,
+                                        bits: 0,
+                                        val: 0,
+                                    },
                                 );
                                 if here.bits as ::core::ffi::c_uint <= bits {
                                     break;
@@ -677,7 +686,7 @@ pub unsafe extern "C" fn inflateBack_ffi(
                                 let state = &mut *state;
                                 let nlen = state.nlen as usize;
                                 state.next = 0;
-                                state.lencode = state.codes.as_ptr();
+                                state.lencode = crate::src::inflate::InflateCodeTable::Dynamic(0);
                                 state.lenbits = 9 as ::core::ffi::c_uint;
                                 match state.lens.get(..nlen) {
                                     Some(lens) => match crate::src::inftrees::inflate_table_into(
@@ -710,10 +719,8 @@ pub unsafe extern "C" fn inflateBack_ffi(
                                     let state = &mut *state;
                                     let nlen = state.nlen as usize;
                                     let ndist = state.ndist as usize;
-                                    state.distcode = match state.codes.get(table_used..) {
-                                        Some(table) => table.as_ptr(),
-                                        None => ::core::ptr::null(),
-                                    };
+                                    state.distcode =
+                                        crate::src::inflate::InflateCodeTable::Dynamic(table_used);
                                     state.distbits = 6 as ::core::ffi::c_uint;
                                     let end = match table_used
                                         .checked_add(crate::src::inftrees::ENOUGH_DISTS as usize)
@@ -785,8 +792,8 @@ pub unsafe extern "C" fn inflateBack_ffi(
                         .filter(|offset| *offset <= wsize);
                     let tables = crate::src::inflate::inflate_fast_tables(
                         &state_ref.codes,
-                        state_ref.lencode as usize,
-                        state_ref.distcode as usize,
+                        state_ref.lencode,
+                        state_ref.distcode,
                     );
                     match (output_start, tables) {
                         (Some(output_start), Some((lcode, dcode)))
@@ -854,11 +861,18 @@ pub unsafe extern "C" fn inflateBack_ffi(
             }
         } else {
             loop {
-                here = *(*state).lencode.wrapping_add(
+                here = crate::src::inflate::inflate_table_entry(
+                    &(*state).codes,
+                    (*state).lencode,
                     (hold as ::core::ffi::c_uint
                         & ((1 as ::core::ffi::c_uint) << (*state).lenbits)
                             .wrapping_sub(1 as ::core::ffi::c_uint)) as usize,
-                );
+                )
+                .unwrap_or(crate::src::inftrees::code {
+                    op: 64,
+                    bits: 0,
+                    val: 0,
+                });
                 if here.bits as ::core::ffi::c_uint <= bits {
                     break;
                 }
@@ -882,7 +896,9 @@ pub unsafe extern "C" fn inflateBack_ffi(
             {
                 last = here;
                 loop {
-                    here = *(*state).lencode.wrapping_add(
+                    here = crate::src::inflate::inflate_table_entry(
+                        &(*state).codes,
+                        (*state).lencode,
                         (last.val as ::core::ffi::c_uint).wrapping_add(
                             (hold as ::core::ffi::c_uint
                                 & ((1 as ::core::ffi::c_uint)
@@ -891,7 +907,12 @@ pub unsafe extern "C" fn inflateBack_ffi(
                                     .wrapping_sub(1 as ::core::ffi::c_uint))
                                 >> last.bits as ::core::ffi::c_int,
                         ) as usize,
-                    );
+                    )
+                    .unwrap_or(crate::src::inftrees::code {
+                        op: 64,
+                        bits: 0,
+                        val: 0,
+                    });
                     if (last.bits as ::core::ffi::c_int + here.bits as ::core::ffi::c_int)
                         as ::core::ffi::c_uint
                         <= bits
@@ -967,12 +988,19 @@ pub unsafe extern "C" fn inflateBack_ffi(
                     bits = bits.wrapping_sub((*state).extra);
                 }
                 loop {
-                    here = *(*state).distcode.wrapping_add(
+                    here = crate::src::inflate::inflate_table_entry(
+                        &(*state).codes,
+                        (*state).distcode,
                         (hold as ::core::ffi::c_uint
                             & ((1 as ::core::ffi::c_uint) << (*state).distbits)
                                 .wrapping_sub(1 as ::core::ffi::c_uint))
                             as usize,
-                    );
+                    )
+                    .unwrap_or(crate::src::inftrees::code {
+                        op: 64,
+                        bits: 0,
+                        val: 0,
+                    });
                     if here.bits as ::core::ffi::c_uint <= bits {
                         break;
                     }
@@ -995,7 +1023,9 @@ pub unsafe extern "C" fn inflateBack_ffi(
                 {
                     last = here;
                     loop {
-                        here = *(*state).distcode.wrapping_add(
+                        here = crate::src::inflate::inflate_table_entry(
+                            &(*state).codes,
+                            (*state).distcode,
                             (last.val as ::core::ffi::c_uint).wrapping_add(
                                 (hold as ::core::ffi::c_uint
                                     & ((1 as ::core::ffi::c_uint)
@@ -1004,7 +1034,12 @@ pub unsafe extern "C" fn inflateBack_ffi(
                                         .wrapping_sub(1 as ::core::ffi::c_uint))
                                     >> last.bits as ::core::ffi::c_int,
                             ) as usize,
-                        );
+                        )
+                        .unwrap_or(crate::src::inftrees::code {
+                            op: 64,
+                            bits: 0,
+                            val: 0,
+                        });
                         if (last.bits as ::core::ffi::c_int + here.bits as ::core::ffi::c_int)
                             as ::core::ffi::c_uint
                             <= bits

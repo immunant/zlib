@@ -65,8 +65,14 @@ pub const MEM: crate::src::inflate::inflate_mode = 16210;
 
 pub const SYNC: crate::src::inflate::inflate_mode = 16211;
 #[derive(Copy, Clone)]
-#[repr(C)]
+pub enum InflateCodeTable {
+    Empty,
+    FixedLens,
+    FixedDists,
+    Dynamic(usize),
+}
 
+#[derive(Copy, Clone)]
 pub struct inflate_state {
     pub strm: crate::zlib_h::z_streamp,
     pub mode: crate::src::inflate::inflate_mode,
@@ -88,8 +94,8 @@ pub struct inflate_state {
     pub length: ::core::ffi::c_uint,
     pub offset: ::core::ffi::c_uint,
     pub extra: ::core::ffi::c_uint,
-    pub lencode: *const crate::src::inftrees::code,
-    pub distcode: *const crate::src::inftrees::code,
+    pub lencode: InflateCodeTable,
+    pub distcode: InflateCodeTable,
     pub lenbits: ::core::ffi::c_uint,
     pub distbits: ::core::ffi::c_uint,
     pub ncode: ::core::ffi::c_uint,
@@ -140,8 +146,8 @@ pub(crate) fn inflate_initial_state() -> inflate_state {
         length: 0,
         offset: 0,
         extra: 0,
-        lencode: ::core::ptr::null(),
-        distcode: ::core::ptr::null(),
+        lencode: InflateCodeTable::Empty,
+        distcode: InflateCodeTable::Empty,
         lenbits: 0,
         distbits: 0,
         ncode: 0,
@@ -643,8 +649,8 @@ macro_rules! inflate_reset_keep_at_boundary {
             state_ref.hold = 0 as ::core::ffi::c_ulong;
             state_ref.bits = 0 as ::core::ffi::c_uint;
             state_ref.next = 0;
-            state_ref.distcode = state_ref.codes.as_ptr();
-            state_ref.lencode = state_ref.distcode;
+            state_ref.distcode = crate::src::inflate::InflateCodeTable::Dynamic(0);
+            state_ref.lencode = crate::src::inflate::InflateCodeTable::Dynamic(0);
             state_ref.sane = 1 as ::core::ffi::c_int;
             state_ref.back = -1 as ::core::ffi::c_int;
             crate::zlib_h::Z_OK
@@ -1077,111 +1083,41 @@ fn inflate_window_update(
     })
 }
 
-/// Resolve a dynamic decode-table cursor to a bounded tail of `codes`.
-/// `cursor` is only an address token here; no implementation dereferences it.
-pub(crate) fn inflate_fast_dynamic_table(
+/// Resolve a table source to a bounded view. Dynamic tables live in `codes`;
+/// fixed tables are immutable static data.
+pub(crate) fn inflate_table_view(
     codes: &[crate::src::inftrees::code],
-    cursor: usize,
+    table: InflateCodeTable,
 ) -> Option<&[crate::src::inftrees::code]> {
-    let code_size = ::core::mem::size_of::<crate::src::inftrees::code>();
-    let code_start = codes.as_ptr() as usize;
-    let code_end = code_start.checked_add(::core::mem::size_of_val(codes))?;
-    cursor
-        .checked_sub(code_start)
-        .filter(|offset| code_size != 0 && *offset % code_size == 0 && cursor <= code_end)
-        .and_then(|offset| codes.get(offset / code_size..))
-}
-
-/// Turn a compatibility table cursor into an index without relying on raw
-/// same-allocation pointer-distance operations.  Callers keep the raw cursor
-/// validation at their ABI boundary and pass only address tokens here.
-fn inflate_code_index(code_start: usize, code_len: usize, cursor: usize) -> Option<usize> {
-    let code_size = ::core::mem::size_of::<crate::src::inftrees::code>();
-    let byte_len = code_len.checked_mul(code_size)?;
-    let code_end = code_start.checked_add(byte_len)?;
-    let offset = cursor.checked_sub(code_start)?;
-    if cursor > code_end || code_size == 0 || offset % code_size != 0 {
-        return None;
-    }
-    let index = offset / code_size;
-    (index <= code_len).then_some(index)
-}
-
-/// Describe how an `inflateCopy()` boundary must rebase its decode-table
-/// cursors after copying the owning state record.  The compatibility fields
-/// remain address tokens at the ABI boundary; this plan performs their range
-/// validation and index calculation without relational raw-pointer
-/// comparisons or raw-pointer arithmetic.
-#[derive(Copy, Clone)]
-struct InflateCopyCodeCursors {
-    lencode: Option<usize>,
-    distcode: Option<usize>,
-    next: usize,
-}
-
-fn inflate_copy_code_cursors(
-    source_code_start: usize,
-    code_len: usize,
-    lencode: usize,
-    distcode: usize,
-    next: usize,
-) -> InflateCopyCodeCursors {
-    // The original cursor-range test accepted only an actual table element
-    // for `lencode`, not the one-past-end sentinel.  Preserve that detail
-    // before attempting to rebase the paired distance-table cursor.
-    let lencode =
-        inflate_code_index(source_code_start, code_len, lencode).filter(|index| *index < code_len);
-    let distcode = lencode.and_then(|_| inflate_code_index(source_code_start, code_len, distcode));
-    InflateCopyCodeCursors {
-        // zlib's copied state retains its original table tokens when the
-        // paired cursor is malformed.  Only publish rebased table cursors
-        // when both indices passed the existing boundary validation.
-        lencode: distcode.and(lencode),
-        distcode,
-        // `next` is an owned table index.  Retain the translated
-        // implementation's invalid-cursor fallback to the start of `codes`.
-        next: (next <= code_len).then_some(next).unwrap_or(0),
+    match table {
+        InflateCodeTable::Empty => None,
+        InflateCodeTable::FixedLens => Some(&crate::src::inftrees::inffixed_h::lenfix),
+        InflateCodeTable::FixedDists => Some(&crate::src::inftrees::inffixed_h::distfix),
+        InflateCodeTable::Dynamic(index) => codes.get(index..),
     }
 }
 
-/// Resolve the two active decode-table cursors to their bounded table tails.
-/// Fixed tables have stable static storage; dynamic tables live in `codes`.
-/// The codec boundary uses this only to lend the safe fast decoder its table
-/// views, never to dereference either raw compatibility cursor directly.
+/// Read one active decode-table entry without reconstructing an interior
+/// pointer into the state-owned dynamic table.
+pub(crate) fn inflate_table_entry(
+    codes: &[crate::src::inftrees::code],
+    table: InflateCodeTable,
+    index: usize,
+) -> Option<crate::src::inftrees::code> {
+    inflate_table_view(codes, table)?.get(index).copied()
+}
+
+/// Resolve the two active decode-table sources to their bounded table tails.
+/// The codec boundary uses this only to lend the safe fast decoder table views.
 pub(crate) fn inflate_fast_tables(
     codes: &[crate::src::inftrees::code],
-    lencode: usize,
-    distcode: usize,
+    lencode: InflateCodeTable,
+    distcode: InflateCodeTable,
 ) -> Option<(&[crate::src::inftrees::code], &[crate::src::inftrees::code])> {
-    let lcode = inflate_fast_table(
-        codes,
-        lencode,
-        crate::src::inftrees::inffixed_h::lenfix.as_ptr() as usize,
-        &crate::src::inftrees::inffixed_h::lenfix,
-    );
-    let dcode = inflate_fast_table(
-        codes,
-        distcode,
-        crate::src::inftrees::inffixed_h::distfix.as_ptr() as usize,
-        &crate::src::inftrees::inffixed_h::distfix,
-    );
-    Some((lcode?, dcode?))
-}
-
-/// Resolve one compatibility table cursor to a bounded table view.  The
-/// cursor remains an address token: all table access after this point is by
-/// checked slice indexing.
-fn inflate_fast_table<'a>(
-    codes: &'a [crate::src::inftrees::code],
-    cursor: usize,
-    fixed_cursor: usize,
-    fixed: &'a [crate::src::inftrees::code],
-) -> Option<&'a [crate::src::inftrees::code]> {
-    if cursor == fixed_cursor {
-        Some(fixed)
-    } else {
-        inflate_fast_dynamic_table(codes, cursor)
-    }
+    Some((
+        inflate_table_view(codes, lencode)?,
+        inflate_table_view(codes, distcode)?,
+    ))
 }
 
 /// Run normal inflate's bounded fast decoder after its ABI boundary has
@@ -2009,8 +1945,8 @@ pub fn inflate(
                                                                                         }
                                                                                             ret = {
                                                                                                 state_ref.next = 0;
-                                                                                                state_ref.distcode = state_ref.codes.as_ptr();
-                                                                                                state_ref.lencode = state_ref.distcode;
+                                                                                                state_ref.distcode = InflateCodeTable::Dynamic(0);
+                                                                                                state_ref.lencode = InflateCodeTable::Dynamic(0);
                                                                                                 state_ref.lenbits = 7 as ::core::ffi::c_uint;
                                                                                                 match crate::src::inftrees::inflate_table_into(
                                                                                                 crate::src::inftrees::CODES,
@@ -2123,13 +2059,14 @@ pub fn inflate(
                                                                             // view, so every subsequent table read is checked
                                                                             // slice access rather than raw interior-pointer
                                                                             // arithmetic.
-                                                                            let Some(lcode) = inflate_fast_table(
-                                                                                &state_ref.codes,
-                                                                                state_ref.lencode as usize,
-                                                                                crate::src::inftrees::inffixed_h::lenfix.as_ptr()
-                                                                                    as usize,
-                                                                                &crate::src::inftrees::inffixed_h::lenfix,
-                                                                            ) else {
+                                                                            let Some(lcode) =
+                                                                                inflate_table_view(
+                                                                                    &state_ref
+                                                                                        .codes,
+                                                                                    state_ref
+                                                                                        .lencode,
+                                                                                )
+                                                                            else {
                                                                                 strm_ref.msg = INFLATE_ERROR_MESSAGES[8].as_ptr()
                                                                                     as *const ::core::ffi::c_char
                                                                                     as *mut ::core::ffi::c_char;
@@ -2344,7 +2281,7 @@ pub fn inflate(
                                                                             ret = {
                                                                                 let nlen = state_ref.nlen as usize;
                                                                                 state_ref.next = 0;
-                                                                                state_ref.lencode = state_ref.codes.as_ptr();
+                                                                                state_ref.lencode = InflateCodeTable::Dynamic(0);
                                                                                 state_ref.lenbits = 9 as ::core::ffi::c_uint;
                                                                                 match state_ref.lens.get(..nlen) {
                                                                                     Some(lens) => match crate::src::inftrees::inflate_table_into(
@@ -2374,10 +2311,7 @@ pub fn inflate(
                                                                                 ret = {
                                                                                     let nlen = state_ref.nlen as usize;
                                                                                     let ndist = state_ref.ndist as usize;
-                                                                                    state_ref.distcode = match state_ref.codes.get(table_used..) {
-                                                                                        Some(table) => table.as_ptr(),
-                                                                                        None => ::core::ptr::null(),
-                                                                                    };
+                                                                                    state_ref.distcode = InflateCodeTable::Dynamic(table_used);
                                                                                     state_ref.distbits = 6 as ::core::ffi::c_uint;
                                                                                     let end = match table_used.checked_add(
                                                                                         crate::src::inftrees::ENOUGH_DISTS as usize,
@@ -2725,12 +2659,9 @@ pub fn inflate(
                                             }
                                             let strm_ref = &mut *strm;
                                             let state_ref = &mut *state;
-                                            let lcode = inflate_fast_table(
+                                            let lcode = inflate_table_view(
                                                 &state_ref.codes,
-                                                state_ref.lencode as usize,
-                                                crate::src::inftrees::inffixed_h::lenfix.as_ptr()
-                                                    as usize,
-                                                &crate::src::inftrees::inffixed_h::lenfix,
+                                                state_ref.lencode,
                                             );
                                             let fast = if let Some(span) = inflate_fast_span(
                                                 have,
@@ -2766,8 +2697,8 @@ pub fn inflate(
                                                     );
                                                     inflate_fast_tables(
                                                         &state_ref.codes,
-                                                        state_ref.lencode as usize,
-                                                        state_ref.distcode as usize,
+                                                        state_ref.lencode,
+                                                        state_ref.distcode,
                                                     )
                                                     .map(|(lcode, dcode)| {
                                                         inflate_fast_normal(
@@ -3143,12 +3074,9 @@ pub fn inflate(
                             // subtable reads stay checked slice accesses.
                             let strm_ref = &mut *strm;
                             let state_ref = &mut *state;
-                            let Some(dcode) = inflate_fast_table(
-                                &state_ref.codes,
-                                state_ref.distcode as usize,
-                                crate::src::inftrees::inffixed_h::distfix.as_ptr() as usize,
-                                &crate::src::inftrees::inffixed_h::distfix,
-                            ) else {
+                            let Some(dcode) =
+                                inflate_table_view(&state_ref.codes, state_ref.distcode)
+                            else {
                                 strm_ref.msg = INFLATE_ERROR_MESSAGES[15].as_ptr()
                                     as *const ::core::ffi::c_char
                                     as *mut ::core::ffi::c_char;
@@ -4119,20 +4047,10 @@ pub unsafe extern "C" fn inflateCopy_ffi(
     *dest_ref = *source_ref;
     *copy_ref = *state_ref;
     copy_ref.strm = dest;
-    let source_codes = state_ref.codes.as_ptr();
-    let copy_codes = copy_ref.codes.as_mut_ptr();
-    let cursors = inflate_copy_code_cursors(
-        source_codes as usize,
-        crate::src::inftrees::ENOUGH as usize,
-        state_ref.lencode as usize,
-        state_ref.distcode as usize,
-        state_ref.next,
-    );
-    if let (Some(lencode), Some(distcode)) = (cursors.lencode, cursors.distcode) {
-        copy_ref.lencode = copy_codes.wrapping_add(lencode);
-        copy_ref.distcode = copy_codes.wrapping_add(distcode);
-    }
-    copy_ref.next = cursors.next;
+    // Decode tables are now described by fixed-table selectors or indices
+    // into the owned `codes` array, so the ordinary record copy above keeps
+    // both table sources valid without address rebasing.
+    copy_ref.next = copy_ref.next.min(crate::src::inftrees::ENOUGH as usize);
     if !window.is_null() {
         let length = state_ref.whave as usize;
         let source_window = ::core::slice::from_raw_parts(state_ref.window, length);

@@ -3364,9 +3364,9 @@ pub unsafe extern "C" fn inflate_table_ffi(
     0
 }
 pub(crate) fn inflate_fixed_state(state: &mut crate::src::inflate::inflate_state) {
-    state.lencode = &raw const lenfix as *const crate::src::inftrees::code;
+    state.lencode = crate::src::inflate::InflateCodeTable::FixedLens;
     state.lenbits = 9 as ::core::ffi::c_uint;
-    state.distcode = &raw const distfix as *const crate::src::inftrees::code;
+    state.distcode = crate::src::inflate::InflateCodeTable::FixedDists;
     state.distbits = 5 as ::core::ffi::c_uint;
 }
 
