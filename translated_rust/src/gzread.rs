@@ -455,6 +455,18 @@ fn gzgets_buffer_copy_commit_state(
     Some(left.wrapping_sub(copied))
 }
 
+/// Commit consumption of one buffered byte after the boundary has read it and
+/// advanced the raw cursor.  This keeps `gzgetc`'s visible prefix accounting
+/// checked and independent of the raw output pointer.
+fn gzgetc_buffer_commit_state(state: &mut crate::gzguts_h::gz_state) -> bool {
+    if state.x.have == 0 {
+        return false;
+    }
+    state.x.have = state.x.have.wrapping_sub(1);
+    state.x.pos = state.x.pos.wrapping_add(1);
+    true
+}
+
 unsafe extern "C" fn gz_skip(mut state: crate::gzguts_h::gz_statep) -> ::core::ffi::c_int {
     let mut n: ::core::ffi::c_uint = 0;
     loop {
@@ -689,10 +701,11 @@ pub unsafe extern "C" fn gzgetc(mut file: crate::zlib_h::gzFile) -> ::core::ffi:
         ::core::ptr::null::<::core::ffi::c_char>(),
     );
     if (*state).x.have != 0 {
-        (*state).x.have = (*state).x.have.wrapping_sub(1);
-        (*state).x.pos += 1;
         let c2rust_fresh2 = (*state).x.next;
         (*state).x.next = (*state).x.next.offset(1);
+        if !gzgetc_buffer_commit_state(&mut *state) {
+            return -1 as ::core::ffi::c_int;
+        }
         return *c2rust_fresh2 as ::core::ffi::c_int;
     }
     return if gz_read(
