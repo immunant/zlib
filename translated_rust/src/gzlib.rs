@@ -763,6 +763,14 @@ pub unsafe extern "C" fn gzseek64_ffi(
 ) -> crate::stdlib::off64_t {
     gzseek64(file, offset, whence)
 }
+fn gz_legacy_offset_result(ret: crate::stdlib::off64_t) -> crate::stdlib::off_t {
+    if ret == ret {
+        ret
+    } else {
+        -1 as ::core::ffi::c_int as crate::stdlib::off_t
+    }
+}
+
 pub unsafe extern "C" fn gzseek(
     mut file: crate::zlib_h::gzFile,
     mut offset: crate::stdlib::off_t,
@@ -770,11 +778,7 @@ pub unsafe extern "C" fn gzseek(
 ) -> crate::stdlib::off_t {
     let mut ret: crate::stdlib::off64_t = 0;
     ret = gzseek64(file, offset, whence);
-    return if ret == ret {
-        ret
-    } else {
-        -1 as ::core::ffi::c_int as crate::stdlib::off_t
-    };
+    return gz_legacy_offset_result(ret);
 }
 #[export_name = "gzseek"]
 
@@ -814,11 +818,7 @@ pub unsafe extern "C" fn gztell64_ffi(mut file: crate::zlib_h::gzFile) -> crate:
 pub unsafe extern "C" fn gztell(mut file: crate::zlib_h::gzFile) -> crate::stdlib::off_t {
     let mut ret: crate::stdlib::off64_t = 0;
     ret = gztell64(file);
-    return if ret == ret {
-        ret
-    } else {
-        -1 as ::core::ffi::c_int as crate::stdlib::off_t
-    };
+    return gz_legacy_offset_result(ret);
 }
 #[export_name = "gztell"]
 
@@ -866,11 +866,7 @@ pub unsafe extern "C" fn gzoffset64_ffi(mut file: crate::zlib_h::gzFile) -> crat
 pub unsafe extern "C" fn gzoffset(mut file: crate::zlib_h::gzFile) -> crate::stdlib::off_t {
     let mut ret: crate::stdlib::off64_t = 0;
     ret = gzoffset64(file);
-    return if ret == ret {
-        ret
-    } else {
-        -1 as ::core::ffi::c_int as crate::stdlib::off_t
-    };
+    return gz_legacy_offset_result(ret);
 }
 #[export_name = "gzoffset"]
 
@@ -1033,6 +1029,7 @@ mod tests {
         gz_clear_read_flags, gz_is_read_or_write_mode, gz_open_offset_plan, gz_parse_open_mode,
         gz_post_open_metadata, gz_prepare_open, gz_reset_core, gzbuffer_normalized_want,
         gzclearerr_core, gzerror_core, gzoffset64_adjust_for_buffered_read,
+        gz_legacy_offset_result,
         gzrewind_request_is_valid, gzseek_adjust_offset, gzseek_can_fast_forward,
         gzseek_error_allows_positioning, gzseek_fast_forward_lseek_offset,
         gzseek_fast_forward_reset, gzseek_plan_read_buffer_consumption,
@@ -1242,6 +1239,18 @@ mod tests {
     #[test]
     fn gztell64_core_ignores_skip_after_eof() {
         assert_eq!(gztell64_core(42, 1, 7), 42);
+    }
+
+    #[test]
+    fn legacy_offset_result_preserves_signed_offsets() {
+        assert_eq!(
+            gz_legacy_offset_result(27),
+            27 as crate::stdlib::off_t
+        );
+        assert_eq!(
+            gz_legacy_offset_result(-1),
+            -1 as crate::stdlib::off_t
+        );
     }
 
     #[test]

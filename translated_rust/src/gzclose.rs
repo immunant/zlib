@@ -33,8 +33,12 @@ enum GzCloseAction {
     Close(GzCloseMode),
 }
 
+fn gz_close_uses_read_close(mode: ::core::ffi::c_int) -> bool {
+    mode == crate::gzguts_h::GZ_READ
+}
+
 fn gz_close_mode(mode: ::core::ffi::c_int) -> GzCloseMode {
-    if mode == crate::gzguts_h::GZ_READ {
+    if gz_close_uses_read_close(mode) {
         GzCloseMode::Read
     } else {
         GzCloseMode::Write
@@ -71,7 +75,16 @@ pub unsafe extern "C" fn gzclose_ffi(file: crate::zlib_h::gzFile) -> ::core::ffi
 
 #[cfg(test)]
 mod tests {
-    use super::{gz_close_action, gz_close_mode, GzCloseAction, GzCloseMode};
+    use super::{
+        gz_close_action, gz_close_mode, gz_close_uses_read_close, GzCloseAction, GzCloseMode,
+    };
+
+    #[test]
+    fn read_close_is_used_only_for_read_mode() {
+        assert!(gz_close_uses_read_close(crate::gzguts_h::GZ_READ));
+        assert!(!gz_close_uses_read_close(crate::gzguts_h::GZ_WRITE));
+        assert!(!gz_close_uses_read_close(crate::gzguts_h::GZ_NONE));
+    }
 
     #[test]
     fn selects_read_close_for_read_mode() {

@@ -209,6 +209,14 @@ fn gz_read_should_continue(len: crate::stdlib::z_size_t, err: ::core::ffi::c_int
     len != 0 && err == 0
 }
 
+fn gz_direct_needs_look(
+    mode: ::core::ffi::c_int,
+    how: ::core::ffi::c_int,
+    have: ::core::ffi::c_uint,
+) -> bool {
+    mode == crate::gzguts_h::GZ_READ && how == crate::gzguts_h::LOOK && have == 0
+}
+
 enum GzUngetcBufferState {
     Empty,
     Full,
@@ -1237,6 +1245,30 @@ mod tests {
     }
 
     #[test]
+    fn gz_direct_needs_look_only_for_empty_read_look_state() {
+        assert!(gz_direct_needs_look(
+            crate::gzguts_h::GZ_READ,
+            crate::gzguts_h::LOOK,
+            0
+        ));
+        assert!(!gz_direct_needs_look(
+            crate::gzguts_h::GZ_READ,
+            crate::gzguts_h::COPY,
+            0
+        ));
+        assert!(!gz_direct_needs_look(
+            crate::gzguts_h::GZ_READ,
+            crate::gzguts_h::LOOK,
+            1
+        ));
+        assert!(!gz_direct_needs_look(
+            crate::gzguts_h::GZ_WRITE,
+            crate::gzguts_h::LOOK,
+            0
+        ));
+    }
+
+    #[test]
     fn gzclose_r_result_preserves_buffer_error_on_clean_close() {
         assert_eq!(
             gzclose_r_result(crate::zlib_h::Z_BUF_ERROR, 0),
@@ -1653,10 +1685,7 @@ pub unsafe extern "C" fn gzdirect(mut file: crate::zlib_h::gzFile) -> ::core::ff
         return 0 as ::core::ffi::c_int;
     }
     state = file as crate::gzguts_h::gz_statep;
-    if (*state).mode == crate::gzguts_h::GZ_READ
-        && (*state).how == crate::gzguts_h::LOOK
-        && (*state).x.have == 0 as ::core::ffi::c_uint
-    {
+    if gz_direct_needs_look((*state).mode, (*state).how, (*state).x.have) {
         gz_look(state);
     }
     return ((*state).direct == 1 as ::core::ffi::c_int) as ::core::ffi::c_int;
