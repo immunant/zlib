@@ -364,23 +364,56 @@ unsafe extern "C" fn gz_fetch(mut state: crate::gzguts_h::gz_statep) -> ::core::
     return 0 as ::core::ffi::c_int;
 }
 
+/// Decide how much already-buffered gzip output a pending forward seek can
+/// consume.  Cursor reconstruction remains at the raw boundary, but this
+/// keeps the size conversion and scalar arithmetic out of that adapter.
+fn gz_skip_buffer_plan(
+    have: crate::stdlib::uInt,
+    skip: crate::stdlib::off64_t,
+) -> Option<::core::ffi::c_uint> {
+    if skip < 0 {
+        return None;
+    }
+    Some(
+        if (::core::mem::size_of::<::core::ffi::c_int>()
+            == ::core::mem::size_of::<crate::stdlib::off64_t>()
+            && have > crate::src::gzlib::gz_intmax())
+            || have as crate::stdlib::off64_t > skip
+        {
+            skip as ::core::ffi::c_uint
+        } else {
+            have
+        },
+    )
+}
+
+/// Commit a preflighted buffered-seek consumption after the boundary has
+/// advanced the raw output cursor.
+fn gz_skip_buffer_commit_state(
+    state: &mut crate::gzguts_h::gz_state,
+    consume: ::core::ffi::c_uint,
+) -> bool {
+    if consume > state.x.have || state.skip < consume as crate::stdlib::off64_t {
+        return false;
+    }
+    state.x.have = state.x.have.wrapping_sub(consume);
+    state.x.pos = state.x.pos.wrapping_add(consume as crate::stdlib::off64_t);
+    state.skip = state.skip.wrapping_sub(consume as crate::stdlib::off64_t);
+    true
+}
+
 unsafe extern "C" fn gz_skip(mut state: crate::gzguts_h::gz_statep) -> ::core::ffi::c_int {
     let mut n: ::core::ffi::c_uint = 0;
     loop {
         if (*state).x.have != 0 {
-            n = if ::core::mem::size_of::<::core::ffi::c_int>()
-                == ::core::mem::size_of::<crate::stdlib::off64_t>()
-                && (*state).x.have > crate::src::gzlib::gz_intmax()
-                || (*state).x.have as crate::stdlib::off64_t > (*state).skip
-            {
-                (*state).skip as ::core::ffi::c_uint
-            } else {
-                (*state).x.have
+            let Some(consume) = gz_skip_buffer_plan((*state).x.have, (*state).skip) else {
+                return -1 as ::core::ffi::c_int;
             };
-            (*state).x.have = (*state).x.have.wrapping_sub(n);
+            n = consume;
             (*state).x.next = (*state).x.next.offset(n as isize);
-            (*state).x.pos += n as crate::stdlib::off64_t;
-            (*state).skip -= n as crate::stdlib::off64_t;
+            if !gz_skip_buffer_commit_state(&mut *state, n) {
+                return -1 as ::core::ffi::c_int;
+            }
         } else {
             if (*state).eof != 0 && (*state).strm.avail_in == 0 as crate::stdlib::uInt {
                 break;
