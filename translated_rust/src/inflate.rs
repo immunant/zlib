@@ -594,6 +594,26 @@ pub(crate) fn inflate_reset_state(
     inflateReset(strm, state)
 }
 
+/// Run one synchronous operation on the opaque inflate state owned by a
+/// stream.  The state allocation is distinct from the caller-owned stream,
+/// so this keeps the one typed conversion at a narrow boundary without
+/// returning a borrow that could alias a simultaneous stream borrow.
+fn with_inflate_stream_state<R>(
+    stream: &mut crate::zlib_h::z_stream,
+    action: impl FnOnce(
+        &mut crate::zlib_h::z_stream,
+        &mut crate::src::inflate::inflate_state,
+    ) -> R,
+) -> Option<R> {
+    let state = stream.state as *mut crate::src::inflate::inflate_state;
+    if state.is_null() {
+        return None;
+    }
+    // The opaque state allocation is separate from the caller-owned stream.
+    // Expose it only for this synchronous typed operation.
+    unsafe { Some(action(stream, &mut *state)) }
+}
+
 /// Reset a stream whose opaque state is still represented by the ABI handle.
 ///
 /// This is the sole internal bridge for users that own a validated stream but
@@ -605,12 +625,10 @@ pub(crate) fn inflate_reset_stream(
     if !inflate_stream_has_allocators(strm) {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    let Some(state) =
-        (unsafe { (strm.state as *mut crate::src::inflate::inflate_state).as_mut() })
-    else {
-        return crate::zlib_h::Z_STREAM_ERROR;
-    };
-    inflate_reset_state(strm, Some(state))
+    with_inflate_stream_state(strm, |strm, state| {
+        inflate_reset_state(strm, Some(state))
+    })
+    .unwrap_or(crate::zlib_h::Z_STREAM_ERROR)
 }
 
 #[export_name = "inflateReset"]
@@ -3137,13 +3155,7 @@ pub fn inflateEnd(strm: &mut crate::zlib_h::z_stream_s) -> ::core::ffi::c_int {
     if !inflate_stream_has_allocators(strm) {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    // The state handle is an ABI field.  Keep its one conversion at the
-    // teardown boundary after validating the allocator pair above.
-    let Some(state) = (unsafe { (strm.state as *mut crate::src::inflate::inflate_state).as_mut() })
-    else {
-        return crate::zlib_h::Z_STREAM_ERROR;
-    };
-    inflate_end(strm, state)
+    with_inflate_stream_state(strm, inflate_end).unwrap_or(crate::zlib_h::Z_STREAM_ERROR)
 }
 #[export_name = "inflateEnd"]
 
