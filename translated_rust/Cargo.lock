@@ -62,5 +62,6 @@ dependencies = [
 name = "zlib"
 version = "0.0.0"
 dependencies = [
+ "errno",
  "rustix",
 ]

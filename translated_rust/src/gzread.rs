@@ -78,7 +78,7 @@ unsafe fn gz_load(
     let mut have = 0usize;
     let max = ((-1 as ::core::ffi::c_int as ::core::ffi::c_uint >> 2) + 1) as usize;
     state.again = 0 as ::core::ffi::c_int;
-    *crate::stdlib::__errno_location() = 0 as ::core::ffi::c_int;
+    errno::set_errno(errno::Errno(0));
     loop {
         let get = (buf.len() - have).min(max);
         let Some(fd) = state.fd.as_ref() else {
@@ -103,11 +103,14 @@ unsafe fn gz_load(
                         return Ok(have);
                     }
                 }
-                let message = crate::stdlib::strerror(errno);
+                // `Errno` obtains the platform's strerror text through its
+                // safe API, so the gzip implementation neither calls libc
+                // directly nor borrows a C string with an unbounded lifetime.
+                let message = std::ffi::CString::new(errno::Errno(errno).to_string()).ok();
                 crate::src::gzlib::gz_error_state(
                     state,
                     crate::zlib_h::Z_ERRNO,
-                    (!message.is_null()).then(|| ::core::ffi::CStr::from_ptr(message)),
+                    message.as_deref(),
                 );
                 return Err(());
             }
