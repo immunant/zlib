@@ -644,6 +644,32 @@ fn initialize_inflate_state_base(
     state.mode = crate::src::inflate::HEAD;
 }
 
+/// Initialize a state value in already-reserved storage.
+///
+/// The allocator boundary supplies the slot, but all Rust-value initialization
+/// and reset policy stays in this safe helper.  This deliberately accepts a
+/// `MaybeUninit` slot rather than a raw allocation so a later boundary adapter
+/// can allocate the slot directly without reintroducing initialization through
+/// a reference to uninitialized state.
+fn initialize_inflate_state_slot(
+    strm: &mut crate::zlib_h::z_stream,
+    state_slot: &mut ::core::mem::MaybeUninit<crate::src::inflate::inflate_state>,
+    window_bits: ::core::ffi::c_int,
+    allocator_provenance: crate::src::zutil::AllocatorProvenance,
+) -> ::core::ffi::c_int {
+    let state = state_slot.write(empty_inflate_state());
+    strm.state = (state as *mut crate::src::inflate::inflate_state)
+        .cast::<crate::src::deflate::internal_state>();
+    initialize_inflate_state_base(state, strm, allocator_provenance);
+    match prepare_inflate_reset2(strm, state, window_bits) {
+        Ok(plan) => {
+            debug_assert!(!plan.release_window);
+            apply_inflate_reset2(strm, state, plan)
+        }
+        Err(error) => error,
+    }
+}
+
 /// Allocate, initialize, and install the opaque state through one named
 /// implementation boundary.  The stream takes ownership only after its ABI
 /// state field has been installed.
@@ -663,17 +689,13 @@ fn initialize_allocated_inflate_state(
     if state.is_null() {
         return crate::zlib_h::Z_MEM_ERROR;
     }
-    strm.state = state.cast::<crate::src::deflate::internal_state>();
-    let state_ref = unsafe { &mut *state };
-    *state_ref = empty_inflate_state();
-    initialize_inflate_state_base(state_ref, strm, allocator_provenance);
-    let ret = match prepare_inflate_reset2(strm, state_ref, window_bits) {
-        Ok(plan) => {
-            debug_assert!(!plan.release_window);
-            apply_inflate_reset2(strm, state_ref, plan)
-        }
-        Err(error) => error,
+    // The callback returns uninitialized storage.  Convert it once to the
+    // slot type expected by the safe initializer; no initialized reference is
+    // formed until `MaybeUninit::write` above has stored the first Rust value.
+    let state_slot = unsafe {
+        &mut *state.cast::<::core::mem::MaybeUninit<crate::src::inflate::inflate_state>>()
     };
+    let ret = initialize_inflate_state_slot(strm, state_slot, window_bits, allocator_provenance);
     if ret != crate::zlib_h::Z_OK {
         unsafe {
             Some(strm.zfree.expect("non-null function pointer"))
