@@ -1742,18 +1742,14 @@ fn deflate_used_impl(state: &crate::src::deflate::deflate_state) -> ::core::ffi:
     state.bi_used
 }
 
-/// Read the bit count after validating the ABI stream and its installed
-/// deflate state.  The state link is still an ABI raw pointer, so keep the
-/// one link crossing here rather than in the exported output wrapper.
-unsafe fn deflateUsed(
-    strm: &crate::zlib_h::z_stream_s,
+/// Read the bit count from a previously validated deflate state.
+///
+/// ABI stream validation and conversion of its raw state link belong to the
+/// exported wrapper.  The implementation only receives the typed state it
+/// needs to inspect.
+fn deflateUsed(
+    state: &crate::src::deflate::deflate_state,
 ) -> Result<::core::ffi::c_int, ::core::ffi::c_int> {
-    if !deflate_params_stream_is_valid(strm) {
-        return Err(crate::zlib_h::Z_STREAM_ERROR);
-    }
-    let Some(state) = strm.state.as_ref() else {
-        return Err(crate::zlib_h::Z_STREAM_ERROR);
-    };
     if !deflate_params_state_is_valid(state) {
         return Err(crate::zlib_h::Z_STREAM_ERROR);
     }
@@ -1769,7 +1765,14 @@ pub unsafe extern "C" fn deflateUsed_ffi(
         let Some(strm) = strm.as_ref() else {
             return crate::zlib_h::Z_STREAM_ERROR;
         };
-        match deflateUsed(strm) {
+        // Validate the ABI stream before following its raw state link.
+        if !deflate_params_stream_is_valid(strm) {
+            return crate::zlib_h::Z_STREAM_ERROR;
+        }
+        let Some(state) = strm.state.as_ref() else {
+            return crate::zlib_h::Z_STREAM_ERROR;
+        };
+        match deflateUsed(state) {
             Ok(used) => used,
             Err(error) => return error,
         }
