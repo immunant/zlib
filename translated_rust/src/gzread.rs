@@ -9,6 +9,7 @@ pub use crate::gzguts_h::LOOK;
 pub use crate::src::gzlib::gz_consume_buffered_read_cursor;
 pub use crate::src::gzlib::gz_errno_is_retryable;
 pub use crate::src::gzlib::gz_error;
+pub(crate) use crate::src::gzlib::gz_file_completed_items;
 pub(crate) use crate::src::gzlib::gz_file_request_len;
 pub use crate::src::gzlib::gz_io_chunk_len;
 pub use crate::src::gzlib::gz_uInt_fits_int;
@@ -786,11 +787,12 @@ pub unsafe extern "C" fn gzfread_ffi(
         );
         return 0 as crate::stdlib::z_size_t;
     };
-    return if len != 0 {
-        gz_read(&mut *state, buf, len).wrapping_div(size)
+    let completed = if len != 0 {
+        gz_read(&mut *state, buf, len)
     } else {
         0 as crate::stdlib::z_size_t
     };
+    return gz_file_completed_items(len, size, completed);
 }
 #[export_name = "gzgetc"]
 pub unsafe extern "C" fn gzgetc_ffi(mut file: crate::zlib_h::gzFile) -> ::core::ffi::c_int {

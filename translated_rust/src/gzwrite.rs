@@ -6,6 +6,7 @@ pub use crate::gzguts_h::GZ_WRITE;
 pub use crate::src::gzlib::gz_clamped_uint;
 pub use crate::src::gzlib::gz_errno_is_retryable;
 pub use crate::src::gzlib::gz_error;
+pub(crate) use crate::src::gzlib::gz_file_completed_items;
 pub(crate) use crate::src::gzlib::gz_file_request_len;
 pub use crate::src::gzlib::gz_io_chunk_len;
 pub use crate::src::gzlib::gz_io_chunk_limit;
@@ -581,11 +582,12 @@ pub unsafe extern "C" fn gzfwrite_ffi(
         );
         return 0 as crate::stdlib::z_size_t;
     };
-    return if len != 0 {
-        gz_write(&mut *state, buf, len).wrapping_div(size)
+    let completed = if len != 0 {
+        gz_write(&mut *state, buf, len)
     } else {
         0 as crate::stdlib::z_size_t
     };
+    return gz_file_completed_items(len, size, completed);
 }
 #[export_name = "gzputc"]
 

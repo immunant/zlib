@@ -468,6 +468,18 @@ pub(crate) fn gz_file_request_len(
     size.checked_mul(nitems)
 }
 
+pub(crate) fn gz_file_completed_items(
+    request_len: crate::stdlib::z_size_t,
+    item_size: crate::stdlib::z_size_t,
+    completed_bytes: crate::stdlib::z_size_t,
+) -> crate::stdlib::z_size_t {
+    if request_len != 0 {
+        completed_bytes.wrapping_div(item_size)
+    } else {
+        0 as crate::stdlib::z_size_t
+    }
+}
+
 pub fn gz_errno_is_retryable(errno: ::core::ffi::c_int) -> bool {
     errno == crate::stdlib::EAGAIN || errno == crate::stdlib::EWOULDBLOCK
 }
@@ -808,7 +820,7 @@ fn gz_error_message_capacity(
         .wrapping_add(3 as crate::__stddef_size_t_h::size_t)
 }
 
-pub unsafe extern "C" fn gz_error(
+pub unsafe fn gz_error(
     mut state: crate::gzguts_h::gz_statep,
     mut err: ::core::ffi::c_int,
     mut msg: *const ::core::ffi::c_char,
