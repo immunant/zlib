@@ -156,31 +156,6 @@ impl<'input, 'output, 'state> InflateFastRequest<'input, 'output, 'state> {
     }
 }
 
-// This facade owns one complete fast-stream invocation without retaining an
-// ABI stream, cursor, or opaque state handle.  The projection adapter builds
-// it from its short-lived bounded views, then receives only this pointer-free
-// update back for ABI cursor and scalar publication.
-pub(crate) struct InflateFastStreamFacade<'input, 'output, 'state> {
-    request: InflateFastRequest<'input, 'output, 'state>,
-}
-
-impl<'input, 'output, 'state> InflateFastStreamFacade<'input, 'output, 'state> {
-    pub(crate) fn from_views(
-        input: &'input [u8],
-        output: &'output mut [u8],
-        output_pos: usize,
-        state: InflateFastState<'state>,
-    ) -> Option<Self> {
-        Some(Self {
-            request: InflateFastRequest::new(input, output, output_pos, state)?,
-        })
-    }
-
-    pub(crate) fn decode(self) -> InflateFastStreamUpdate {
-        inflate_fast_from_stream(self)
-    }
-}
-
 #[inline]
 fn table_entry(table: CodeTableRef, codes: &[code], index: usize) -> code {
     code::copied_from(table.get(codes, index as isize))
@@ -447,11 +422,15 @@ pub(crate) unsafe fn inflate_fast_from_abi_stream(
         codes: &state.codes,
         sane: state.sane != 0,
     };
-    let facade = InflateFastStreamFacade::from_views(input, output, written, fast_state);
-    let Some(facade) = facade else {
+    // Use the same pointer-free transaction as normal inflate.  This keeps
+    // the raw ABI cursor projection here while ensuring both fast callers
+    // consume and account for an identical bounded request.
+    let owner =
+        crate::src::inflate::InflateNormalStreamOwner::new(input, output, written, fast_state);
+    let Some(owner) = owner else {
         return;
     };
-    let update = inflate_fast_from_stream(facade);
+    let update = owner.run_fast();
     strm.next_in = strm.next_in.wrapping_add(update.input_used);
     strm.avail_in = update.input_remaining as crate::stdlib::uInt;
     strm.next_out = output_start.wrapping_add(update.output_used);
@@ -476,15 +455,6 @@ pub(crate) unsafe fn inflate_fast_from_abi_stream(
             state.mode = BAD;
         }
     }
-}
-
-// This consumes the whole bounded stream request before its completion is
-// published by the ABI adapter.  Its signature intentionally contains no ABI
-// stream or raw cursor, making it the one reusable fast decoder seam.
-pub(crate) fn inflate_fast_from_stream(
-    facade: InflateFastStreamFacade<'_, '_, '_>,
-) -> InflateFastStreamUpdate {
-    InflateFastStreamUpdate::from_completion(facade.request.run())
 }
 
 // The normal inflate owner also dispatches directly through the same

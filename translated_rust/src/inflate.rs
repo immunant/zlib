@@ -807,6 +807,7 @@ pub(crate) struct InflateNormalStreamOwner<'input, 'output> {
     input: &'input [u8],
     output: &'output mut [u8],
     output_pos: usize,
+    state: crate::src::inffast::InflateFastState<'input>,
 }
 
 impl<'input, 'output> InflateNormalStreamOwner<'input, 'output> {
@@ -814,24 +815,23 @@ impl<'input, 'output> InflateNormalStreamOwner<'input, 'output> {
         input: &'input [u8],
         output: &'output mut [u8],
         output_pos: usize,
+        state: crate::src::inffast::InflateFastState<'input>,
     ) -> Option<Self> {
         output.get(output_pos..)?;
         Some(Self {
             input,
             output,
             output_pos,
+            state,
         })
     }
 
-    pub(crate) fn run_fast(
-        self,
-        state: crate::src::inffast::InflateFastState<'_>,
-    ) -> crate::src::inffast::InflateFastStreamUpdate {
+    pub(crate) fn run_fast(self) -> crate::src::inffast::InflateFastStreamUpdate {
         let request = crate::src::inffast::InflateFastRequest::new(
             self.input,
             self.output,
             self.output_pos,
-            state,
+            self.state,
         )
         .expect("normal inflate checked its fast output cursor");
         crate::src::inffast::inflate_fast(request).into_stream_update()
@@ -2213,20 +2213,22 @@ pub unsafe extern "C" fn inflate(
                                                     sane: state.sane != 0,
                                                 };
                                                 let owner = InflateNormalStreamOwner::new(
-                                                    input,
-                                                    output,
-                                                    written,
+                                                    input, output, written, fast_state,
                                                 )
-                                                .expect("normal inflate checked its fast output cursor");
-                                                let result = owner.run_fast(fast_state);
+                                                .expect(
+                                                    "normal inflate checked its fast output cursor",
+                                                );
+                                                let result = owner.run_fast();
                                                 next =
                                                     input.as_ptr().wrapping_add(result.input_used)
                                                         as *mut ::core::ffi::c_uchar;
-                                                have = result.input_remaining as ::core::ffi::c_uint;
+                                                have =
+                                                    result.input_remaining as ::core::ffi::c_uint;
                                                 put = output
                                                     .as_mut_ptr()
                                                     .wrapping_add(result.output_used);
-                                                left = result.output_remaining as ::core::ffi::c_uint;
+                                                left =
+                                                    result.output_remaining as ::core::ffi::c_uint;
                                                 hold = result.hold;
                                                 bits = result.bits;
                                                 match result.exit {
