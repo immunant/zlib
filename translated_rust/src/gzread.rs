@@ -933,6 +933,50 @@ fn gzgets_has_valid_inputs(
     file_present && buffer_present && gzgets_request_has_capacity(len)
 }
 
+fn gz_byte_range_end(start: usize, len: usize) -> Option<usize> {
+    start.checked_add(len)
+}
+
+// The exported read APIs must not borrow a caller buffer that aliases either
+// allocation owned by the gzip handle.  Besides making memcpy invalid, such
+// an overlap would prevent the next step of the read refactor from forming
+// independent Rust views of caller and handle storage.  Address arithmetic is
+// deliberately checked and malformed handle storage fails closed.
+fn gz_byte_ranges_overlap(
+    first_start: usize,
+    first_len: usize,
+    second_start: usize,
+    second_len: usize,
+) -> bool {
+    if first_len == 0 || second_len == 0 {
+        return false;
+    }
+    let (Some(first_end), Some(second_end)) = (
+        gz_byte_range_end(first_start, first_len),
+        gz_byte_range_end(second_start, second_len),
+    ) else {
+        return true;
+    };
+    first_start < second_end && second_start < first_end
+}
+
+fn gz_read_buffer_aliases_storage(
+    caller_start: usize,
+    caller_len: usize,
+    state: &crate::gzguts_h::gz_state,
+) -> bool {
+    if caller_len == 0 || state.size == 0 {
+        return false;
+    }
+    if state.in_0.is_null() || state.out.is_null() {
+        return true;
+    }
+    let output_len = gz_output_buffer_len(state.size) as usize;
+    output_len == 0
+        || gz_byte_ranges_overlap(caller_start, caller_len, state.in_0 as usize, state.size as usize)
+        || gz_byte_ranges_overlap(caller_start, caller_len, state.out as usize, output_len)
+}
+
 fn gzgets_remaining_capacity(len: ::core::ffi::c_int) -> ::core::ffi::c_uint {
     (len as ::core::ffi::c_uint).wrapping_sub(1)
 }
@@ -4407,6 +4451,47 @@ mod tests {
     }
 
     #[test]
+    fn gz_byte_ranges_overlap_detects_overlap_adjacency_and_overflow() {
+        assert!(gz_byte_ranges_overlap(10, 4, 12, 4));
+        assert!(!gz_byte_ranges_overlap(10, 4, 14, 4));
+        assert!(!gz_byte_ranges_overlap(10, 0, 10, 4));
+        assert!(gz_byte_ranges_overlap(usize::MAX - 1, 4, 0, 1));
+    }
+
+    #[test]
+    fn gz_read_buffer_aliases_storage_rejects_internal_and_malformed_ranges() {
+        let mut input = [0_u8; 4];
+        let mut output = [0_u8; 8];
+        let mut caller = [0_u8; 4];
+        let mut state: crate::gzguts_h::gz_state = unsafe { core::mem::zeroed() };
+        state.size = 4;
+        state.in_0 = input.as_mut_ptr();
+        state.out = output.as_mut_ptr();
+
+        assert!(gz_read_buffer_aliases_storage(
+            input.as_mut_ptr() as usize,
+            input.len(),
+            &state,
+        ));
+        assert!(gz_read_buffer_aliases_storage(
+            output.as_mut_ptr().wrapping_add(2) as usize,
+            1,
+            &state,
+        ));
+        assert!(!gz_read_buffer_aliases_storage(
+            caller.as_mut_ptr() as usize,
+            caller.len(),
+            &state,
+        ));
+        state.out = ::core::ptr::null_mut();
+        assert!(gz_read_buffer_aliases_storage(
+            caller.as_mut_ptr() as usize,
+            caller.len(),
+            &state,
+        ));
+    }
+
+    #[test]
     fn gzgets_remaining_capacity_reserves_the_terminator() {
         assert_eq!(gzgets_remaining_capacity(1), 0);
         assert_eq!(gzgets_remaining_capacity(2), 1);
@@ -4694,6 +4779,16 @@ pub unsafe extern "C" fn gzread_ffi(
         );
         return -1 as ::core::ffi::c_int;
     };
+    if request_len != 0
+        && (buf.is_null() || gz_read_buffer_aliases_storage(buf as usize, request_len, &*state))
+    {
+        crate::src::gzlib::gz_error(
+            state,
+            crate::zlib_h::Z_STREAM_ERROR,
+            b"read buffer aliases gzip state\0".as_ptr().cast(),
+        );
+        return -1 as ::core::ffi::c_int;
+    }
     len = gz_read(&mut *state, buf, request_len) as ::core::ffi::c_uint;
     if let Some((error, errno)) = gz_take_deferred_read_error(&mut *state) {
         let (code, message) = (
@@ -4752,6 +4847,16 @@ pub unsafe extern "C" fn gzfread_ffi(
         );
         return 0 as crate::stdlib::z_size_t;
     };
+    if request_len != 0
+        && (buf.is_null() || gz_read_buffer_aliases_storage(buf as usize, request_len, &*state))
+    {
+        crate::src::gzlib::gz_error(
+            state,
+            crate::zlib_h::Z_STREAM_ERROR,
+            b"read buffer aliases gzip state\0".as_ptr().cast(),
+        );
+        return 0 as crate::stdlib::z_size_t;
+    }
     len = request_len;
     let read = match gz_fread_action(len) {
         GzFreadAction::ReturnZero => 0 as crate::stdlib::z_size_t,
@@ -4952,6 +5057,14 @@ pub unsafe extern "C" fn gzgets_ffi(
         ::core::ptr::null::<::core::ffi::c_char>(),
     );
     let state_ref = &mut *state;
+    if gz_read_buffer_aliases_storage(buf as usize, len as usize, state_ref) {
+        crate::src::gzlib::gz_error(
+            state,
+            crate::zlib_h::Z_STREAM_ERROR,
+            b"read buffer aliases gzip state\0".as_ptr().cast(),
+        );
+        return ::core::ptr::null_mut::<::core::ffi::c_char>();
+    }
     if gz_read_has_pending_skip(state_ref.skip) && gz_skip!(state_ref) {
         if let Some((error, errno)) = gz_take_deferred_read_error(&mut *state) {
             let (code, message) = (
