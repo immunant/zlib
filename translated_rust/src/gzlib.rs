@@ -745,14 +745,15 @@ fn gzbuffer_normalized_want(size: ::core::ffi::c_uint) -> Option<::core::ffi::c_
     Some(size.max(8 as ::core::ffi::c_uint))
 }
 
+fn gzbuffer_can_set_want(mode: ::core::ffi::c_int, allocated_size: ::core::ffi::c_uint) -> bool {
+    gz_is_read_or_write_mode(mode) && allocated_size == 0 as ::core::ffi::c_uint
+}
+
 fn gzbuffer_core(
     state: &mut crate::gzguts_h::gz_state,
     size: ::core::ffi::c_uint,
 ) -> ::core::ffi::c_int {
-    if !gz_is_read_or_write_mode(state.mode) {
-        return -1 as ::core::ffi::c_int;
-    }
-    if state.size != 0 as ::core::ffi::c_uint {
+    if !gzbuffer_can_set_want(state.mode, state.size) {
         return -1 as ::core::ffi::c_int;
     }
     let Some(size) = gzbuffer_normalized_want(size) else {
@@ -1152,11 +1153,11 @@ mod tests {
         gz_open_path_buffer_len, gz_open_recorded_offset, gz_open_should_set_close_on_exec,
         gz_open_should_set_nonblocking, gz_parse_open_mode, gz_position_after_skip,
         gz_post_open_metadata, gz_prepare_open, gz_request_len, gz_reset_core,
-        gzbuffer_normalized_want, gzclearerr_core, gzdopen_has_valid_descriptor,
-        gzdopen_path_buffer_len, gzeof_result, gzerror_core, gzoffset64_adjust_for_buffered_read,
-        gzoffset64_result, gzrewind_request_is_valid, gzseek_adjust_offset,
-        gzseek_can_fast_forward, gzseek_clears_pending_skip, gzseek_effective_skip,
-        gzseek_error_allows_positioning, gzseek_fast_forward_lseek_offset,
+        gzbuffer_can_set_want, gzbuffer_normalized_want, gzclearerr_core,
+        gzdopen_has_valid_descriptor, gzdopen_path_buffer_len, gzeof_result, gzerror_core,
+        gzoffset64_adjust_for_buffered_read, gzoffset64_result, gzrewind_request_is_valid,
+        gzseek_adjust_offset, gzseek_can_fast_forward, gzseek_clears_pending_skip,
+        gzseek_effective_skip, gzseek_error_allows_positioning, gzseek_fast_forward_lseek_offset,
         gzseek_fast_forward_reset, gzseek_plan_read_buffer_consumption,
         gzseek_plan_remaining_offset, gzseek_read_buffer_consumed,
         gzseek_read_buffer_plan_for_mode, gzseek_read_buffer_uses_requested_offset,
@@ -1350,6 +1351,19 @@ mod tests {
     fn gzbuffer_preserves_valid_requested_sizes() {
         assert_eq!(gzbuffer_normalized_want(8), Some(8));
         assert_eq!(gzbuffer_normalized_want(9), Some(9));
+    }
+
+    #[test]
+    fn gzbuffer_admission_requires_active_unallocated_state() {
+        assert!(gzbuffer_can_set_want(crate::gzguts_h::GZ_READ, 0));
+        assert!(gzbuffer_can_set_want(crate::gzguts_h::GZ_WRITE, 0));
+        assert!(!gzbuffer_can_set_want(crate::gzguts_h::GZ_NONE, 0));
+        assert!(!gzbuffer_can_set_want(123, 0));
+        assert!(!gzbuffer_can_set_want(crate::gzguts_h::GZ_READ, 1));
+        assert!(!gzbuffer_can_set_want(
+            crate::gzguts_h::GZ_WRITE,
+            ::core::ffi::c_uint::MAX
+        ));
     }
 
     #[test]

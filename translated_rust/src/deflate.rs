@@ -1693,6 +1693,19 @@ fn zlib_header(
     )
 }
 
+fn gzip_default_xfl(
+    level: ::core::ffi::c_int,
+    strategy: ::core::ffi::c_int,
+) -> crate::stdlib::Bytef {
+    if level == 9 as ::core::ffi::c_int {
+        2 as crate::stdlib::Bytef
+    } else if strategy >= 2 as ::core::ffi::c_int || level < 2 as ::core::ffi::c_int {
+        4 as crate::stdlib::Bytef
+    } else {
+        0 as crate::stdlib::Bytef
+    }
+}
+
 fn deflate_should_return_buf_error(
     avail_in: crate::stdlib::uInt,
     flush: ::core::ffi::c_int,
@@ -1857,15 +1870,7 @@ pub unsafe extern "C" fn deflate(
             let c2rust_fresh8 = (*s).pending;
             (*s).pending = (*s).pending.wrapping_add(1);
             *(*s).pending_buf.offset(c2rust_fresh8 as isize) =
-                (if (*s).level == 9 as ::core::ffi::c_int {
-                    2 as ::core::ffi::c_int
-                } else if (*s).strategy >= 2 as ::core::ffi::c_int
-                    || (*s).level < 2 as ::core::ffi::c_int
-                {
-                    4 as ::core::ffi::c_int
-                } else {
-                    0 as ::core::ffi::c_int
-                }) as crate::stdlib::Bytef;
+                gzip_default_xfl((*s).level, (*s).strategy);
             let c2rust_fresh9 = (*s).pending;
             (*s).pending = (*s).pending.wrapping_add(1);
             *(*s).pending_buf.offset(c2rust_fresh9 as isize) =
@@ -3725,10 +3730,10 @@ mod tests {
         deflate_pending_value, deflate_prime_bits_valid, deflate_request_is_invalid,
         deflate_should_return_buf_error, deflate_state_status_valid, deflate_version_matches,
         fill_window_available_space, fill_window_cursor, fill_window_insert_after_slide,
-        fill_window_zero_range, flush_pending_accounting, gzip_header_crc, gzip_header_crc_pending,
-        gzip_header_crc_pending_range, normalize_deflate_params, pending_output_len,
-        pending_short_cursors, read_buf_len, read_buf_total_in_after_copy, short_msb_bytes,
-        slide_hash_entry, stored_block_available_output, stored_block_min_size,
+        fill_window_zero_range, flush_pending_accounting, gzip_default_xfl, gzip_header_crc,
+        gzip_header_crc_pending, gzip_header_crc_pending_range, normalize_deflate_params,
+        pending_output_len, pending_short_cursors, read_buf_len, read_buf_total_in_after_copy,
+        short_msb_bytes, slide_hash_entry, stored_block_available_output, stored_block_min_size,
         stored_block_should_wait, stored_insert_after_input, symbol_triplet_cursors, zlib_header,
     };
 
@@ -3873,6 +3878,17 @@ mod tests {
             zlib_header(w_bits, crate::zlib_h::Z_HUFFMAN_ONLY, 9, false),
             0x7801
         );
+    }
+
+    #[test]
+    fn gzip_default_xfl_prioritizes_level_then_strategy_and_speed() {
+        assert_eq!(gzip_default_xfl(9, crate::zlib_h::Z_DEFAULT_STRATEGY), 2);
+        assert_eq!(gzip_default_xfl(9, 2), 2);
+        assert_eq!(gzip_default_xfl(0, crate::zlib_h::Z_DEFAULT_STRATEGY), 4);
+        assert_eq!(gzip_default_xfl(1, crate::zlib_h::Z_DEFAULT_STRATEGY), 4);
+        assert_eq!(gzip_default_xfl(2, crate::zlib_h::Z_DEFAULT_STRATEGY), 0);
+        assert_eq!(gzip_default_xfl(8, crate::zlib_h::Z_DEFAULT_STRATEGY), 0);
+        assert_eq!(gzip_default_xfl(6, 2), 4);
     }
 
     #[test]

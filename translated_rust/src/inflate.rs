@@ -778,6 +778,13 @@ fn inflate_can_use_fast_path(
     available_input >= 6 && available_output >= 258
 }
 
+fn inflate_dictionary_id_from_hold(hold: crate::stdlib::uLong) -> crate::stdlib::uLong {
+    (hold >> 24 as ::core::ffi::c_int & 0xff as ::core::ffi::c_ulong)
+        .wrapping_add(hold >> 8 as ::core::ffi::c_int & 0xff00 as ::core::ffi::c_ulong)
+        .wrapping_add((hold & 0xff00 as ::core::ffi::c_ulong) << 8 as ::core::ffi::c_int)
+        .wrapping_add((hold & 0xff as ::core::ffi::c_ulong) << 24 as ::core::ffi::c_int)
+}
+
 fn initialize_window_metadata(state: &mut crate::src::inflate::inflate_state) {
     if state.wsize == 0 {
         let metadata = initial_window_metadata(state.wbits);
@@ -1048,14 +1055,7 @@ pub unsafe extern "C" fn inflate(
                     hold = hold.wrapping_add((*c2rust_fresh10 as ::core::ffi::c_ulong) << bits);
                     bits = bits.wrapping_add(8 as ::core::ffi::c_uint);
                 }
-                (*state).check = (hold >> 24 as ::core::ffi::c_int & 0xff as ::core::ffi::c_ulong)
-                    .wrapping_add(hold >> 8 as ::core::ffi::c_int & 0xff00 as ::core::ffi::c_ulong)
-                    .wrapping_add(
-                        (hold & 0xff00 as ::core::ffi::c_ulong) << 8 as ::core::ffi::c_int,
-                    )
-                    .wrapping_add(
-                        (hold & 0xff as ::core::ffi::c_ulong) << 24 as ::core::ffi::c_int,
-                    );
+                (*state).check = inflate_dictionary_id_from_hold(hold);
                 (*strm).adler = (*state).check as crate::stdlib::uLong;
                 hold = 0 as ::core::ffi::c_ulong;
                 bits = 0 as ::core::ffi::c_uint;
@@ -2856,11 +2856,12 @@ mod tests {
         apply_window_update, copy_dictionary_from_window, dynamic_code_length_repeat_fits,
         dynamic_header_counts, gzip_extra_copy_bounds, inflateSyncPoint_ffi, inflate_block_header,
         inflate_can_use_fast_path, inflate_codes_used_offset_value, inflate_copy_progress,
-        inflate_data_type_value, inflate_dictionary_is_allowed, inflate_get_dictionary_result,
-        inflate_header_crc_enabled, inflate_header_wrap_allows_capture, inflate_mark_progress,
-        inflate_mark_value, inflate_match_copy_plan, inflate_mode_data_type_flags,
-        inflate_mode_is_valid, inflate_needs_buffer_error, inflate_prime_update,
-        inflate_reset2_params, inflate_should_update_window, inflate_state_metadata_is_valid,
+        inflate_data_type_value, inflate_dictionary_id_from_hold, inflate_dictionary_is_allowed,
+        inflate_get_dictionary_result, inflate_header_crc_enabled,
+        inflate_header_wrap_allows_capture, inflate_mark_progress, inflate_mark_value,
+        inflate_match_copy_plan, inflate_mode_data_type_flags, inflate_mode_is_valid,
+        inflate_needs_buffer_error, inflate_prime_update, inflate_reset2_params,
+        inflate_should_update_window, inflate_state_metadata_is_valid,
         inflate_stream_has_allocator_callbacks, inflate_sync_input_progress,
         inflate_sync_normalized_wrap, inflate_sync_point_value, inflate_sync_remaining_input,
         inflate_sync_search_core, inflate_undermine_core, inflate_validate_core,
@@ -2890,6 +2891,13 @@ mod tests {
             ::core::ffi::c_uint::MAX,
             ::core::ffi::c_uint::MAX
         ));
+    }
+
+    #[test]
+    fn inflate_dictionary_id_reverses_the_four_dictid_bytes() {
+        assert_eq!(inflate_dictionary_id_from_hold(0x7856_3412), 0x1234_5678);
+        assert_eq!(inflate_dictionary_id_from_hold(0x0102_0408), 0x0804_0201);
+        assert_eq!(inflate_dictionary_id_from_hold(0xffff_ffff), 0xffff_ffff);
     }
 
     #[test]
