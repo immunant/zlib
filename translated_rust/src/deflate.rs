@@ -2883,126 +2883,137 @@ pub unsafe extern "C" fn deflateCopy(
     mut dest: crate::zlib_h::z_streamp,
     mut source: crate::zlib_h::z_streamp,
 ) -> ::core::ffi::c_int {
-    let mut ds: *mut crate::src::deflate::deflate_state =
-        ::core::ptr::null_mut::<crate::src::deflate::deflate_state>();
-    let mut ss: *mut crate::src::deflate::deflate_state =
-        ::core::ptr::null_mut::<crate::src::deflate::deflate_state>();
     if deflateStateCheck(source) != 0 || dest.is_null() {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    ss = (*source).state as *mut crate::src::deflate::deflate_state;
-    // zlib's `deflateCopy()` requires distinct source and destination stream
-    // objects.  Preserve the translated byte-for-byte copy, but do not route
-    // it through the C `memcpy` import.
-    ::core::ptr::copy_nonoverlapping(
-        source.cast::<u8>(),
-        dest.cast::<u8>(),
-        ::core::mem::size_of::<crate::zlib_h::z_stream>(),
-    );
-    ds = Some((*dest).zalloc.expect("non-null function pointer"))
+    let source = &*source;
+    let dest = &mut *dest;
+    let ss = &*(source.state as *const crate::src::deflate::deflate_state);
+
+    // Do not byte-copy the ABI stream: that made this boundary depend on the
+    // layout of a caller-visible owner and obscured which fields are retained
+    // by the copied stream.  The explicit snapshot preserves all ABI fields
+    // (including callbacks and caller cursors), while the state allocation
+    // below replaces its temporary source-state pointer before return.
+    *dest = crate::zlib_h::z_stream_s {
+        next_in: source.next_in,
+        avail_in: source.avail_in,
+        total_in: source.total_in,
+        next_out: source.next_out,
+        avail_out: source.avail_out,
+        total_out: source.total_out,
+        msg: source.msg,
+        state: source.state,
+        zalloc: source.zalloc,
+        zfree: source.zfree,
+        opaque: source.opaque,
+        data_type: source.data_type,
+        adler: source.adler,
+        reserved: source.reserved,
+    };
+    let ds = Some(dest.zalloc.expect("non-null function pointer"))
         .expect("non-null function pointer")(
-        (*dest).opaque,
+        dest.opaque,
         1 as crate::stdlib::uInt,
         ::core::mem::size_of::<crate::src::deflate::deflate_state>() as crate::stdlib::uInt,
     ) as *mut crate::src::deflate::deflate_state;
     if ds.is_null() {
         return crate::zlib_h::Z_MEM_ERROR;
     }
-    (*dest).state = ds as *mut crate::src::deflate::internal_state;
+    dest.state = ds as *mut crate::src::deflate::internal_state;
     // The allocation is immediately overwritten with the source state before
     // any field is observed.  Do not clear it first: that C-style write is
     // dead and the copied state supplies every byte.
     ::core::ptr::copy_nonoverlapping(
-        ss.cast::<u8>(),
-        ds.cast::<u8>(),
-        ::core::mem::size_of::<crate::src::deflate::deflate_state>(),
+        ss,
+        ds,
+        1,
     );
     // The bytewise state copy above is needed for the C allocator-backed
     // storage.  Replace the copied owner before it can be observed or
     // released, making the header registration an independent deep copy.
-    ::core::ptr::addr_of_mut!((*ds).gzhead).write((*ss).gzhead.as_ref().map(copy_gzip_header));
-    (*ds).strm = ::core::ptr::NonNull::new(dest).expect("validated destination stream");
-    let storage = DeflateStorageLayout::new((*ds).w_size, (*ds).hash_size, (*ds).lit_bufsize);
-    (*ds).window =
-        ::core::ptr::NonNull::new(Some((*dest).zalloc.expect("non-null function pointer"))
+    let ds = &mut *ds;
+    ::core::ptr::addr_of_mut!(ds.gzhead).write(ss.gzhead.as_ref().map(copy_gzip_header));
+    ds.strm = ::core::ptr::NonNull::from(&mut *dest);
+    let storage = DeflateStorageLayout::new(ds.w_size, ds.hash_size, ds.lit_bufsize);
+    ds.window =
+        ::core::ptr::NonNull::new(Some(dest.zalloc.expect("non-null function pointer"))
             .expect("non-null function pointer")(
-            (*dest).opaque,
+            dest.opaque,
             storage.window.items,
             storage.window.size,
         ) as *mut crate::stdlib::Bytef);
-    (*ds).prev =
-        ::core::ptr::NonNull::new(Some((*dest).zalloc.expect("non-null function pointer"))
+    ds.prev =
+        ::core::ptr::NonNull::new(Some(dest.zalloc.expect("non-null function pointer"))
             .expect("non-null function pointer")(
-            (*dest).opaque,
+            dest.opaque,
             storage.prev.items,
             storage.prev.size,
         ) as *mut crate::src::deflate::Posf);
-    (*ds).head =
-        ::core::ptr::NonNull::new(Some((*dest).zalloc.expect("non-null function pointer"))
+    ds.head =
+        ::core::ptr::NonNull::new(Some(dest.zalloc.expect("non-null function pointer"))
             .expect("non-null function pointer")(
-            (*dest).opaque,
+            dest.opaque,
             storage.head.items,
             storage.head.size,
         ) as *mut crate::src::deflate::Posf);
-    (*ds).pending_buf =
-        ::core::ptr::NonNull::new(Some((*dest).zalloc.expect("non-null function pointer"))
+    ds.pending_buf =
+        ::core::ptr::NonNull::new(Some(dest.zalloc.expect("non-null function pointer"))
             .expect("non-null function pointer")(
-            (*dest).opaque,
+            dest.opaque,
             storage.pending.items,
             storage.pending.size,
         ) as *mut crate::zutil_h::uchf
             as *mut crate::stdlib::Bytef);
-    if (*ds).window.is_none()
-        || (*ds).prev.is_none()
-        || (*ds).head.is_none()
-        || (*ds).pending_buf.is_none()
+    if ds.window.is_none()
+        || ds.prev.is_none()
+        || ds.head.is_none()
+        || ds.pending_buf.is_none()
     {
-        deflateEnd(dest);
+        deflateEnd(dest as *mut crate::zlib_h::z_stream_s);
         return crate::zlib_h::Z_MEM_ERROR;
     }
     let copy_layout = deflate_copy_layout(
-        (*ss).high_water,
-        (*ss).slid,
-        (*ss).strstart,
-        (*ss).insert,
+        ss.high_water,
+        ss.slid,
+        ss.strstart,
+        ss.insert,
         &storage,
-        (*ss).pending_out,
-        (*ss).pending as usize,
-        (*ss).sym_buf_start,
-        (*ss).sym_next as usize,
+        ss.pending_out,
+        ss.pending as usize,
+        ss.sym_buf_start,
+        ss.sym_next as usize,
     );
     ::core::ptr::copy_nonoverlapping(
-        (*ss).window.expect("initialized window").as_ptr(),
-        (*ds).window.expect("initialized window").as_ptr(),
+        ss.window.expect("initialized window").as_ptr(),
+        ds.window.expect("initialized window").as_ptr(),
         copy_layout.window_bytes,
     );
     ::core::ptr::copy_nonoverlapping(
-        (*ss).prev.expect("initialized prev table").as_ptr(),
-        (*ds).prev.expect("initialized prev table").as_ptr(),
+        ss.prev.expect("initialized prev table").as_ptr(),
+        ds.prev.expect("initialized prev table").as_ptr(),
         copy_layout.prev_entries,
     );
     ::core::ptr::copy_nonoverlapping(
-        (*ss).head.expect("initialized head table").as_ptr(),
-        (*ds).head.expect("initialized head table").as_ptr(),
+        ss.head.expect("initialized head table").as_ptr(),
+        ds.head.expect("initialized head table").as_ptr(),
         copy_layout.head_entries,
     );
-    (*ds).pending_out = (*ss).pending_out;
+    ds.pending_out = ss.pending_out;
     // Both allocations have the copied `pending_buf_size` capacity.  Form
     // each bounded view once and keep the two logical-region copies in the
     // pointer-free kernel.
     let source_pending = ::core::slice::from_raw_parts(
-        (*ss)
-            .pending_buf
+        ss.pending_buf
             .expect("initialized pending buffer")
             .as_ptr(),
-        (*ss).pending_buf_size as usize,
+        ss.pending_buf_size as usize,
     );
     let destination_pending = ::core::slice::from_raw_parts_mut(
-        (*ds)
-            .pending_buf
+        ds.pending_buf
             .expect("initialized pending buffer")
             .as_ptr(),
-        (*ds).pending_buf_size as usize,
+        ds.pending_buf_size as usize,
     );
     copy_pending_regions(source_pending, destination_pending, copy_layout.pending);
     return crate::zlib_h::Z_OK;
