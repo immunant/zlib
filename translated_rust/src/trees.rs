@@ -3707,15 +3707,12 @@ fn bi_windup_state(
     state.bi_valid = 0 as ::core::ffi::c_int;
 }
 
-// This is a private raw-state helper called only by translated Rust code.
-// Keep the C ABI at the exported wrappers, rather than propagating it through
-// the tree-building implementation.
-unsafe fn bi_windup(mut s: *mut crate::src::deflate::deflate_state) {
-    let state = &mut *s;
-    let pending = ::core::slice::from_raw_parts_mut(
-        state.pending_buf,
-        state.pending_buf_size as usize,
-    );
+// The final bit-buffer write is ordinary state and slice work once the caller
+// has bound the deflater's pending allocation.
+fn bi_windup(
+    state: &mut crate::src::deflate::deflate_state,
+    pending: &mut [crate::zutil_h::uch],
+) {
     bi_windup_state(state, pending);
 }
 
@@ -4589,35 +4586,40 @@ pub unsafe extern "C" fn _tr_stored_block(
                 << (*s).bi_valid) as crate::zutil_h::ush;
         (*s).bi_valid += len;
     }
-    bi_windup(s);
-    let c2rust_fresh51 = (*s).pending;
-    (*s).pending = (*s).pending.wrapping_add(1);
-    *(*s).pending_buf.offset(c2rust_fresh51 as isize) =
+    let state = &mut *s;
+    let pending = ::core::slice::from_raw_parts_mut(
+        state.pending_buf,
+        state.pending_buf_size as usize,
+    );
+    bi_windup(state, pending);
+    let c2rust_fresh51 = state.pending;
+    state.pending = state.pending.wrapping_add(1);
+    *state.pending_buf.offset(c2rust_fresh51 as isize) =
         (stored_len as crate::zutil_h::ush as ::core::ffi::c_int & 0xff as ::core::ffi::c_int)
             as crate::zutil_h::uch;
-    let c2rust_fresh52 = (*s).pending;
-    (*s).pending = (*s).pending.wrapping_add(1);
-    *(*s).pending_buf.offset(c2rust_fresh52 as isize) =
+    let c2rust_fresh52 = state.pending;
+    state.pending = state.pending.wrapping_add(1);
+    *state.pending_buf.offset(c2rust_fresh52 as isize) =
         (stored_len as crate::zutil_h::ush as ::core::ffi::c_int >> 8 as ::core::ffi::c_int)
             as crate::zutil_h::uch;
-    let c2rust_fresh53 = (*s).pending;
-    (*s).pending = (*s).pending.wrapping_add(1);
-    *(*s).pending_buf.offset(c2rust_fresh53 as isize) =
+    let c2rust_fresh53 = state.pending;
+    state.pending = state.pending.wrapping_add(1);
+    *state.pending_buf.offset(c2rust_fresh53 as isize) =
         (!stored_len as crate::zutil_h::ush as ::core::ffi::c_int & 0xff as ::core::ffi::c_int)
             as crate::zutil_h::uch;
-    let c2rust_fresh54 = (*s).pending;
-    (*s).pending = (*s).pending.wrapping_add(1);
-    *(*s).pending_buf.offset(c2rust_fresh54 as isize) =
+    let c2rust_fresh54 = state.pending;
+    state.pending = state.pending.wrapping_add(1);
+    *state.pending_buf.offset(c2rust_fresh54 as isize) =
         (!stored_len as crate::zutil_h::ush as ::core::ffi::c_int >> 8 as ::core::ffi::c_int)
             as crate::zutil_h::uch;
     if stored_len != 0 {
         crate::stdlib::memcpy(
-            (*s).pending_buf.offset((*s).pending as isize) as *mut ::core::ffi::c_void,
+            state.pending_buf.offset(state.pending as isize) as *mut ::core::ffi::c_void,
             buf as *mut crate::stdlib::Bytef as *const ::core::ffi::c_void,
             stored_len as crate::__stddef_size_t_h::size_t,
         );
     }
-    (*s).pending = (*s).pending.wrapping_add(stored_len);
+    state.pending = state.pending.wrapping_add(stored_len);
 }
 #[export_name = "_tr_stored_block"]
 
@@ -5058,9 +5060,14 @@ pub unsafe extern "C" fn _tr_flush_block(
                 as *const crate::src::deflate::ct_data,
         );
     }
-    init_block(&mut *s);
+    let state = &mut *s;
+    init_block(state);
     if last != 0 {
-        bi_windup(s);
+        let pending = ::core::slice::from_raw_parts_mut(
+            state.pending_buf,
+            state.pending_buf_size as usize,
+        );
+        bi_windup(state, pending);
     }
 }
 #[export_name = "_tr_flush_block"]
