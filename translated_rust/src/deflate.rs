@@ -2878,133 +2878,64 @@ pub unsafe extern "C" fn deflateCopy_ffi(
 ) -> ::core::ffi::c_int {
     deflateCopy(dest, source)
 }
-unsafe extern "C" fn longest_match(
-    mut s: *mut crate::src::deflate::deflate_state,
+unsafe fn longest_match(
+    s: &mut crate::src::deflate::deflate_state,
     mut cur_match: crate::src::deflate::IPos,
 ) -> crate::stdlib::uInt {
-    let mut chain_length: ::core::ffi::c_uint = (*s).max_chain_length as ::core::ffi::c_uint;
-    let lookahead = (*s).lookahead;
-    let Some(window) = (*s).window.as_deref() else {
+    let mut chain_length = s.max_chain_length as ::core::ffi::c_uint;
+    let lookahead = s.lookahead;
+    let Some(window) = s.window.as_deref() else {
         return lookahead;
     };
-    let Ok(scan_start) = usize::try_from((*s).strstart) else {
+    let Ok(scan_start) = usize::try_from(s.strstart) else {
         return lookahead;
     };
     let Some(scan) = window.get(scan_start..) else {
         return lookahead;
     };
-    let mut scan: *mut crate::stdlib::Bytef = scan.as_ptr().cast_mut();
-    let mut match_0: *mut crate::stdlib::Bytef = ::core::ptr::null_mut::<crate::stdlib::Bytef>();
-    let mut len: ::core::ffi::c_int = 0;
-    let mut best_len: ::core::ffi::c_int = (*s).prev_length as ::core::ffi::c_int;
-    let mut nice_match: ::core::ffi::c_int = (*s).nice_match;
-    let mut limit: crate::src::deflate::IPos = if (*s).strstart
-        > (*s)
-            .w_size
+    let mut best_len = s.prev_length as ::core::ffi::c_int;
+    let mut nice_match = s.nice_match;
+    let limit = if s.strstart
+        > s.w_size
             .wrapping_sub(crate::src::deflate::MIN_LOOKAHEAD as crate::stdlib::uInt)
     {
-        ((*s).strstart as crate::src::deflate::IPos).wrapping_sub(
-            (*s).w_size
+        (s.strstart as crate::src::deflate::IPos).wrapping_sub(
+            s.w_size
                 .wrapping_sub(crate::src::deflate::MIN_LOOKAHEAD as crate::stdlib::uInt),
         )
     } else {
         NIL as crate::src::deflate::IPos
     };
-    let Some(prev) = (*s).prev.as_deref() else {
+    let Some(prev) = s.prev.as_deref() else {
         return lookahead;
     };
-    let mut wmask: crate::stdlib::uInt = (*s).w_mask;
-    let Some(strend_start) = scan_start.checked_add(crate::zutil_h::MAX_MATCH as usize) else {
-        return lookahead;
-    };
-    let Some(strend) = window.get(strend_start..) else {
-        return lookahead;
-    };
-    let mut strend: *mut crate::stdlib::Bytef = strend.as_ptr().cast_mut();
-    let mut scan_end1: crate::stdlib::Byte =
-        *scan.offset((best_len - 1 as ::core::ffi::c_int) as isize) as crate::stdlib::Byte;
-    let mut scan_end: crate::stdlib::Byte = *scan.offset(best_len as isize) as crate::stdlib::Byte;
-    if (*s).prev_length >= (*s).good_match {
+    let wmask = s.w_mask;
+    if s.prev_length >= s.good_match {
         chain_length >>= 2 as ::core::ffi::c_int;
     }
-    if nice_match as crate::stdlib::uInt > (*s).lookahead {
-        nice_match = (*s).lookahead as ::core::ffi::c_int;
+    if nice_match as crate::stdlib::uInt > s.lookahead {
+        nice_match = s.lookahead as ::core::ffi::c_int;
     }
+    let mut best_match = None;
     loop {
         let Ok(match_start) = usize::try_from(cur_match) else {
             break;
         };
-        let Some(match_bytes) = window.get(match_start..) else {
+        let Some(candidate) = window.get(match_start..) else {
             break;
         };
-        match_0 = match_bytes.as_ptr().cast_mut();
-        if !(*match_0.offset(best_len as isize) as ::core::ffi::c_int
-            != scan_end as ::core::ffi::c_int
-            || *match_0.offset((best_len - 1 as ::core::ffi::c_int) as isize) as ::core::ffi::c_int
-                != scan_end1 as ::core::ffi::c_int
-            || *match_0 as ::core::ffi::c_int != *scan as ::core::ffi::c_int
-            || {
-                match_0 = match_0.offset(1);
-                *match_0 as ::core::ffi::c_int != *scan.offset(1 as isize) as ::core::ffi::c_int
-            })
-        {
-            scan = scan.offset(2 as ::core::ffi::c_int as isize);
-            match_0 = match_0.offset(1);
-            loop {
-                scan = scan.offset(1);
-                match_0 = match_0.offset(1);
-                if !(*scan as ::core::ffi::c_int == *match_0 as ::core::ffi::c_int
-                    && {
-                        scan = scan.offset(1);
-                        match_0 = match_0.offset(1);
-                        *scan as ::core::ffi::c_int == *match_0 as ::core::ffi::c_int
-                    }
-                    && {
-                        scan = scan.offset(1);
-                        match_0 = match_0.offset(1);
-                        *scan as ::core::ffi::c_int == *match_0 as ::core::ffi::c_int
-                    }
-                    && {
-                        scan = scan.offset(1);
-                        match_0 = match_0.offset(1);
-                        *scan as ::core::ffi::c_int == *match_0 as ::core::ffi::c_int
-                    }
-                    && {
-                        scan = scan.offset(1);
-                        match_0 = match_0.offset(1);
-                        *scan as ::core::ffi::c_int == *match_0 as ::core::ffi::c_int
-                    }
-                    && {
-                        scan = scan.offset(1);
-                        match_0 = match_0.offset(1);
-                        *scan as ::core::ffi::c_int == *match_0 as ::core::ffi::c_int
-                    }
-                    && {
-                        scan = scan.offset(1);
-                        match_0 = match_0.offset(1);
-                        *scan as ::core::ffi::c_int == *match_0 as ::core::ffi::c_int
-                    }
-                    && {
-                        scan = scan.offset(1);
-                        match_0 = match_0.offset(1);
-                        *scan as ::core::ffi::c_int == *match_0 as ::core::ffi::c_int
-                    }
-                    && scan < strend)
-                {
-                    break;
-                }
-            }
-            len = crate::zutil_h::MAX_MATCH - strend.offset_from(scan) as ::core::ffi::c_int;
-            scan = strend.offset(-(crate::zutil_h::MAX_MATCH as isize));
-            if len > best_len {
-                (*s).match_start = cur_match as crate::stdlib::uInt;
-                best_len = len;
-                if len >= nice_match {
-                    break;
-                }
-                scan_end1 = *scan.offset((best_len - 1 as ::core::ffi::c_int) as isize)
-                    as crate::stdlib::Byte;
-                scan_end = *scan.offset(best_len as isize) as crate::stdlib::Byte;
+        let len = scan
+            .iter()
+            .zip(candidate)
+            .take(crate::zutil_h::MAX_MATCH as usize)
+            .take(lookahead as usize)
+            .take_while(|(scan_byte, match_byte)| scan_byte == match_byte)
+            .count() as ::core::ffi::c_int;
+        if len > best_len {
+            best_match = Some(cur_match as crate::stdlib::uInt);
+            best_len = len;
+            if len >= nice_match {
+                break;
             }
         }
         let Some(&previous) = prev.get((cur_match as crate::stdlib::uInt & wmask) as usize)
@@ -3019,7 +2950,10 @@ unsafe extern "C" fn longest_match(
             break;
         }
     }
-    if best_len as crate::stdlib::uInt <= (*s).lookahead {
+    if let Some(best_match) = best_match {
+        s.match_start = best_match;
+    }
+    if best_len as crate::stdlib::uInt <= lookahead {
         return best_len as crate::stdlib::uInt;
     }
     return lookahead;
@@ -3269,7 +3203,7 @@ unsafe fn deflate_fast(
                 <= s.w_size
                     .wrapping_sub(crate::src::deflate::MIN_LOOKAHEAD as crate::stdlib::uInt)
         {
-            s.match_length = longest_match(core::ptr::from_mut(s), hash_head);
+            s.match_length = longest_match(s, hash_head);
         }
         if s.match_length >= crate::zutil_h::MIN_MATCH as crate::stdlib::uInt {
             let mut len: crate::zutil_h::uch =
@@ -3416,8 +3350,7 @@ unsafe fn deflate_slow(
                     .w_size
                     .wrapping_sub(crate::src::deflate::MIN_LOOKAHEAD as crate::stdlib::uInt)
         {
-            (*s).match_length =
-                longest_match(s as *mut crate::src::deflate::deflate_state, hash_head);
+            (*s).match_length = longest_match(s, hash_head);
             if (*s).match_length <= 5 as crate::stdlib::uInt
                 && ((*s).strategy == crate::zlib_h::Z_FILTERED
                     || (*s).match_length == crate::zutil_h::MIN_MATCH as crate::stdlib::uInt
