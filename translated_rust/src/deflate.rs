@@ -950,6 +950,7 @@ pub unsafe extern "C" fn deflateGetDictionary_ffi(
 }
 pub unsafe extern "C" fn deflateResetKeep(
     mut strm: crate::zlib_h::z_streamp,
+    reset_match_finder: bool,
 ) -> ::core::ffi::c_int {
     let mut s: *mut crate::src::deflate::deflate_state =
         ::core::ptr::null_mut::<crate::src::deflate::deflate_state>();
@@ -983,6 +984,9 @@ pub unsafe extern "C" fn deflateResetKeep(
     };
     s.last_flush = -2 as ::core::ffi::c_int;
     crate::src::trees::_tr_init(s);
+    if reset_match_finder {
+        lm_init(s);
+    }
     return crate::zlib_h::Z_OK;
 }
 #[export_name = "deflateResetKeep"]
@@ -990,10 +994,9 @@ pub unsafe extern "C" fn deflateResetKeep(
 pub unsafe extern "C" fn deflateResetKeep_ffi(
     mut strm: crate::zlib_h::z_streamp,
 ) -> ::core::ffi::c_int {
-    deflateResetKeep(strm)
+    deflateResetKeep(strm, false)
 }
-unsafe extern "C" fn lm_init(mut s: *mut crate::src::deflate::deflate_state) {
-    let s = &mut *s;
+fn lm_init(s: &mut crate::src::deflate::deflate_state) {
     let (pending_buf, window, pending_len) = {
         let buffers = s.buffers.as_mut().expect("deflate buffers initialized");
         (
@@ -1029,12 +1032,7 @@ unsafe extern "C" fn lm_init(mut s: *mut crate::src::deflate::deflate_state) {
 }
 pub fn deflateReset(strm: &mut crate::zlib_h::z_stream) -> ::core::ffi::c_int {
     unsafe {
-    let mut ret: ::core::ffi::c_int = 0;
-    ret = deflateResetKeep(std::ptr::from_mut(strm));
-    if ret == crate::zlib_h::Z_OK {
-        lm_init(strm.state as *mut crate::src::deflate::deflate_state);
-    }
-    return ret;
+    return deflateResetKeep(std::ptr::from_mut(strm), true);
     }
 }
 #[export_name = "deflateReset"]
