@@ -3192,9 +3192,7 @@ fn inflate_sync_point(
 // entered.  Keeping the projection here makes the implementation's borrow
 // explicitly live for the full state access without retaining a raw stream
 // cursor in the core API.
-pub unsafe fn inflateSyncPoint(
-    strm: &mut crate::zlib_h::z_stream_s,
-) -> ::core::ffi::c_int {
+pub unsafe fn inflateSyncPoint(strm: &mut crate::zlib_h::z_stream_s) -> ::core::ffi::c_int {
     let Some((_strm, state)) = inflate_stream_and_state(strm) else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };

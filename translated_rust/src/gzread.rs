@@ -364,6 +364,20 @@ enum GzSkipStep {
     Done,
 }
 
+// `gzgets()` owns every read-side field it needs between fetches.  The ABI
+// cursor is rebuilt only while the adapter dispatches `gz_fetch()` and after
+// this facade has finished, so text reads themselves work entirely with
+// checked indices and owned buffers.
+struct GzGetsState {
+    buffers: crate::gzguts_h::GzBuffers,
+    have: crate::stdlib::uInt,
+    pos: crate::stdlib::off64_t,
+    skip: crate::stdlib::off64_t,
+    eof: ::core::ffi::c_int,
+    past: ::core::ffi::c_int,
+    avail_in: crate::stdlib::uInt,
+}
+
 fn gz_skip_step(state: &mut GzSkipState<'_>) -> Result<GzSkipStep, ()> {
     if state.have == 0 {
         return Ok(if state.eof != 0 && state.avail_in == 0 {
@@ -1461,53 +1475,38 @@ pub unsafe extern "C" fn gzungetc_ffi(
     };
     gzungetc(c, state)
 }
-unsafe fn gzgets(
-    state: &mut crate::gzguts_h::gz_state,
+fn gzgets(
+    state: &mut GzGetsState,
     output: &mut [u8],
-) -> *mut ::core::ffi::c_char {
+    mut fetch: impl FnMut(&mut GzGetsState) -> Result<(), ()>,
+) -> bool {
     if output.is_empty() {
-        return ::core::ptr::null_mut::<::core::ffi::c_char>();
+        return false;
     }
-    let policy = GzReadPolicy {
-        mode: state.mode,
-        err: state.err,
-        again: state.again,
-    };
-    if !policy.accepts_read() {
-        return ::core::ptr::null_mut::<::core::ffi::c_char>();
-    }
-    crate::src::gzlib::GzErrorState {
-        message: &mut state.msg,
-        error: &mut state.err,
-        buffered: &mut state.x.have,
-        again: state.again,
-        path: state.path.as_deref(),
-    }
-    .clear();
     if state.skip != 0 {
         loop {
-            let cursor = if state.x.have == 0 {
+            let cursor = if state.have == 0 {
                 0
             } else {
                 let Some(cursor) = state.buffers.output_cursor().map(|cursor| cursor.start())
                 else {
-                    return ::core::ptr::null_mut();
+                    return false;
                 };
                 cursor
             };
             let mut skip = GzSkipState {
                 buffer: state.buffers.output.as_deref(),
                 cursor,
-                have: state.x.have,
-                pos: state.x.pos,
+                have: state.have,
+                pos: state.pos,
                 skip: state.skip,
                 eof: state.eof,
-                avail_in: state.strm.avail_in,
+                avail_in: state.avail_in,
             };
             match gz_skip_step(&mut skip) {
                 Ok(GzSkipStep::Fetch) => {
-                    if gz_fetch(state) == -1 as ::core::ffi::c_int {
-                        return ::core::ptr::null_mut();
+                    if fetch(state).is_err() {
+                        return false;
                     }
                 }
                 Ok(step @ (GzSkipStep::Advanced | GzSkipStep::Done)) => {
@@ -1518,7 +1517,7 @@ unsafe fn gzgets(
                     drop(skip);
                     if have != 0 {
                         let Some(buffer) = state.buffers.output.as_deref() else {
-                            return ::core::ptr::null_mut();
+                            return false;
                         };
                         let Some(cursor) =
                             crate::src::gzlib::GzCodecOutputCursor::from_owned_buffer(
@@ -1527,39 +1526,38 @@ unsafe fn gzgets(
                                 have,
                             )
                         else {
-                            return ::core::ptr::null_mut();
+                            return false;
                         };
-                        state.x.next = buffer.as_ptr().wrapping_add(cursor_index).cast_mut();
                         state.buffers.set_output_cursor(cursor);
                     } else {
                         state.buffers.clear_output_cursor();
                     }
-                    state.x.have = have;
-                    state.x.pos = pos;
+                    state.have = have;
+                    state.pos = pos;
                     state.skip = skip_remaining;
                     if matches!(step, GzSkipStep::Done) {
                         break;
                     }
                 }
-                Err(()) => return ::core::ptr::null_mut(),
+                Err(()) => return false,
             }
         }
     }
-    let str = output.as_mut_ptr().cast::<::core::ffi::c_char>();
     let mut left = output.len() - 1;
     let mut written = 0;
     if left != 0 {
-        while !(state.x.have == 0 as ::core::ffi::c_uint
-            && gz_fetch(state) == -1 as ::core::ffi::c_int)
-        {
-            if state.x.have == 0 as ::core::ffi::c_uint {
+        loop {
+            if state.have == 0 && fetch(state).is_err() {
+                break;
+            }
+            if state.have == 0 {
                 state.past = 1 as ::core::ffi::c_int;
                 break;
             } else {
-                let mut n = if state.x.have as usize > left {
+                let mut n = if state.have as usize > left {
                     left
                 } else {
-                    state.x.have as usize
+                    state.have as usize
                 };
                 let Some((copied, found_newline, next_cursor)) = (|| {
                     let buffer = state.buffers.output.as_deref()?;
@@ -1569,16 +1567,12 @@ unsafe fn gzgets(
                         copy_through_newline(input, &mut output[written..written + n]);
                     Some((copied, found_newline, cursor.advance(copied)?))
                 })() else {
-                    return ::core::ptr::null_mut::<::core::ffi::c_char>();
+                    return false;
                 };
                 n = copied;
-                let Some(buffer) = state.buffers.output.as_deref() else {
-                    return ::core::ptr::null_mut::<::core::ffi::c_char>();
-                };
-                state.x.have = next_cursor.have();
-                state.x.next = buffer.as_ptr().wrapping_add(next_cursor.start()).cast_mut();
+                state.have = next_cursor.have();
                 state.buffers.set_output_cursor(next_cursor);
-                state.x.pos += n as crate::stdlib::off64_t;
+                state.pos += n as crate::stdlib::off64_t;
                 left -= n;
                 written += n;
                 if !(left != 0 && !found_newline) {
@@ -1588,10 +1582,126 @@ unsafe fn gzgets(
         }
     }
     if written == 0 {
-        return ::core::ptr::null_mut::<::core::ffi::c_char>();
+        return false;
     }
     output[written] = 0;
-    return str;
+    true
+}
+
+// This is the only bridge between the pointer-free `gzgets` facade and the
+// existing embedded-codec state.  It transfers the owned buffer transaction
+// to the ABI state for one fetch, then snapshots the scalar result back into
+// the facade before the core resumes.
+unsafe fn gzgets_from_state(
+    state: &mut crate::gzguts_h::gz_state,
+    output: &mut [u8],
+) -> *mut ::core::ffi::c_char {
+    if output.is_empty() {
+        return ::core::ptr::null_mut();
+    }
+    let request = GzReadRequest::new(state.mode, state.err, state.again);
+    let mut error = crate::src::gzlib::GzErrorState {
+        message: &mut state.msg,
+        error: &mut state.err,
+        buffered: &mut state.x.have,
+        again: state.again,
+        path: state.path.as_deref(),
+    };
+    if !request.begin(&mut error) {
+        return ::core::ptr::null_mut();
+    }
+    drop(error);
+    let mut read = GzGetsState {
+        buffers: ::core::mem::replace(&mut state.buffers, crate::gzguts_h::GzBuffers::empty()),
+        have: state.x.have,
+        pos: state.x.pos,
+        skip: state.skip,
+        eof: state.eof,
+        past: state.past,
+        avail_in: state.strm.avail_in,
+    };
+    let result = gzgets(&mut read, output, |read| {
+        state.buffers =
+            ::core::mem::replace(&mut read.buffers, crate::gzguts_h::GzBuffers::empty());
+        state.x.have = read.have;
+        state.x.pos = read.pos;
+        state.skip = read.skip;
+        state.eof = read.eof;
+        state.past = read.past;
+        state.strm.avail_in = read.avail_in;
+        let cursor = state
+            .buffers
+            .output_cursor()
+            .map(|cursor| (cursor.start(), cursor.have()));
+        match cursor {
+            Some((start, have)) if have == state.x.have => {
+                let Some(output) = state.buffers.output.as_deref_mut() else {
+                    read.buffers = ::core::mem::replace(
+                        &mut state.buffers,
+                        crate::gzguts_h::GzBuffers::empty(),
+                    );
+                    return Err(());
+                };
+                let Some(output) = output.get_mut(start..) else {
+                    read.buffers = ::core::mem::replace(
+                        &mut state.buffers,
+                        crate::gzguts_h::GzBuffers::empty(),
+                    );
+                    return Err(());
+                };
+                state.x.next = output.as_mut_ptr();
+            }
+            None if state.x.have == 0 => state.x.next = ::core::ptr::null_mut(),
+            _ => {
+                read.buffers =
+                    ::core::mem::replace(&mut state.buffers, crate::gzguts_h::GzBuffers::empty());
+                return Err(());
+            }
+        }
+        let fetched = gz_fetch(state);
+        read.buffers =
+            ::core::mem::replace(&mut state.buffers, crate::gzguts_h::GzBuffers::empty());
+        read.have = state.x.have;
+        read.pos = state.x.pos;
+        read.skip = state.skip;
+        read.eof = state.eof;
+        read.past = state.past;
+        read.avail_in = state.strm.avail_in;
+        if fetched == -1 {
+            Err(())
+        } else {
+            Ok(())
+        }
+    });
+    state.buffers = ::core::mem::replace(&mut read.buffers, crate::gzguts_h::GzBuffers::empty());
+    state.x.have = read.have;
+    state.x.pos = read.pos;
+    state.skip = read.skip;
+    state.eof = read.eof;
+    state.past = read.past;
+    state.strm.avail_in = read.avail_in;
+    let cursor = state
+        .buffers
+        .output_cursor()
+        .map(|cursor| (cursor.start(), cursor.have()));
+    match cursor {
+        Some((start, have)) if have == state.x.have => {
+            let Some(output) = state.buffers.output.as_deref_mut() else {
+                return ::core::ptr::null_mut();
+            };
+            let Some(output) = output.get_mut(start..) else {
+                return ::core::ptr::null_mut();
+            };
+            state.x.next = output.as_mut_ptr();
+        }
+        None if state.x.have == 0 => state.x.next = ::core::ptr::null_mut(),
+        _ => return ::core::ptr::null_mut(),
+    }
+    if result {
+        output.as_mut_ptr().cast()
+    } else {
+        ::core::ptr::null_mut()
+    }
 }
 #[export_name = "gzgets"]
 
@@ -1610,7 +1720,7 @@ pub unsafe extern "C" fn gzgets_ffi(
         return ::core::ptr::null_mut::<::core::ffi::c_char>();
     };
     let output = ::core::slice::from_raw_parts_mut(buf.cast::<u8>(), len as usize);
-    gzgets(state, output)
+    gzgets_from_state(state, output)
 }
 unsafe fn gzdirect(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
     if matches!(

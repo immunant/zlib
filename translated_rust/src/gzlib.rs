@@ -94,6 +94,20 @@ impl<'a> GzWriteOutputView<'a> {
 }
 
 impl crate::gzguts_h::GzBuffers {
+    // A read facade temporarily owns this transaction while it runs a
+    // pointer-free buffered operation.  Leave an empty transaction at the
+    // ABI boundary until the facade needs to dispatch the embedded codec.
+    pub(crate) fn empty() -> Self {
+        Self {
+            size: 0,
+            input: None,
+            output: None,
+            input_cursor: None,
+            deflate_state: None,
+            output_cursor: None,
+        }
+    }
+
     // Allocate gzip write storage as the same single owner transaction used
     // by the read side.  Direct writes intentionally retain only the doubled
     // input buffer; compressed writes add the output buffer before publishing
