@@ -2959,7 +2959,7 @@ unsafe fn send_all_trees(
     let dtree = s.dyn_dtree;
     send_tree(s, &dtree, dcodes - 1);
 }
-unsafe fn tr_stored_block(
+pub(crate) unsafe fn tr_stored_block(
     s: &mut crate::src::deflate::deflate_state,
     buf: &[u8],
     stored_len: crate::zutil_h::ulg,
