@@ -3314,18 +3314,14 @@ pub(crate) fn inflate_table_into(
     Ok((build.entries.len(), build.root))
 }
 
-/// Legacy raw cursor adapter. All table construction occurs in
-/// `inflate_table_build`; this layer only copies bounded C arrays in and
-/// commits the resulting entries and cursors back out.
-pub unsafe extern "C" fn inflate_table(
+#[export_name = "inflate_table"]
+pub unsafe extern "C" fn inflate_table_ffi(
     type_0: crate::src::inftrees::codetype,
     lens: *mut ::core::ffi::c_ushort,
     codes: ::core::ffi::c_uint,
     table: *mut *mut crate::src::inftrees::code,
     bits: *mut ::core::ffi::c_uint,
     work: *mut ::core::ffi::c_ushort,
-    table_capacity: usize,
-    work_capacity: usize,
 ) -> ::core::ffi::c_int {
     if lens.is_null()
         || table.is_null()
@@ -3350,10 +3346,7 @@ pub unsafe extern "C" fn inflate_table(
         Err(status) => return status,
     };
     let table_start = *table;
-    if table_start.is_null()
-        || build.entries.len() > table_capacity
-        || build.work.len() > work_capacity
-    {
+    if table_start.is_null() {
         return 1;
     }
     for (index, symbol) in build.work.iter().enumerate() {
@@ -3365,30 +3358,6 @@ pub unsafe extern "C" fn inflate_table(
     *table = table_start.wrapping_add(build.entries.len());
     *bits = build.root;
     0
-}
-#[export_name = "inflate_table"]
-
-pub unsafe extern "C" fn inflate_table_ffi(
-    mut type_0: crate::src::inftrees::codetype,
-    mut lens: *mut ::core::ffi::c_ushort,
-    mut codes: ::core::ffi::c_uint,
-    mut table: *mut *mut crate::src::inftrees::code,
-    mut bits: *mut ::core::ffi::c_uint,
-    mut work: *mut ::core::ffi::c_ushort,
-) -> ::core::ffi::c_int {
-    // The C ABI does not carry output capacities.  Internal callers use the
-    // capacity-aware adapter above; retain this legacy entry point's contract
-    // for external callers that provide the documented ENOUGH-sized storage.
-    inflate_table(
-        type_0,
-        lens,
-        codes,
-        table,
-        bits,
-        work,
-        usize::MAX,
-        usize::MAX,
-    )
 }
 pub(crate) fn inflate_fixed_state(state: &mut crate::src::inflate::inflate_state) {
     state.lencode = &raw const lenfix as *const crate::src::inftrees::code;

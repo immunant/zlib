@@ -36,7 +36,6 @@ pub use crate::src::inflate::TYPE;
 pub use crate::src::inflate::TYPEDO;
 pub use crate::src::inftrees::code;
 pub use crate::src::inftrees::codetype;
-pub use crate::src::inftrees::inflate_table;
 pub use crate::src::inftrees::CODES;
 pub use crate::src::inftrees::DISTS;
 pub use crate::src::inftrees::LENS;
