@@ -1143,6 +1143,10 @@ fn append_deflate_pending_bytes(
     *pending = pending.wrapping_add(bytes.len() as crate::zutil_h::ulg);
 }
 
+fn copy_deflate_bytes(dst: &mut [crate::stdlib::Bytef], src: &[crate::stdlib::Bytef]) {
+    dst.copy_from_slice(src);
+}
+
 #[export_name = "deflatePrime"]
 
 pub unsafe extern "C" fn deflatePrime_ffi(
@@ -2384,18 +2388,32 @@ pub unsafe extern "C" fn deflateCopy_ffi(
     );
     (*ds).pending_out_offset = (*ss).pending_out_offset;
     (*ds).pending_out = (*ds).pending_buf.offset((*ds).pending_out_offset as isize);
-    crate::stdlib::memcpy(
-        (*ds).pending_out as *mut ::core::ffi::c_void,
-        (*ss).pending_out as *const ::core::ffi::c_void,
-        (*ss).pending as crate::__stddef_size_t_h::size_t,
-    );
+    {
+        let pending_start = (*ss).pending_out_offset as usize;
+        let pending_end = pending_start + (*ss).pending as usize;
+        let source_pending =
+            ::core::slice::from_raw_parts((*ss).pending_buf, (*ss).pending_buf_size as usize);
+        let dest_pending =
+            ::core::slice::from_raw_parts_mut((*ds).pending_buf, (*ds).pending_buf_size as usize);
+        copy_deflate_bytes(
+            &mut dest_pending[pending_start..pending_end],
+            &source_pending[pending_start..pending_end],
+        );
+    }
     (*ds).sym_buf =
         (*ds).pending_buf.offset((*ds).lit_bufsize as isize) as *mut crate::zutil_h::uchf;
-    crate::stdlib::memcpy(
-        (*ds).sym_buf as *mut ::core::ffi::c_void,
-        (*ss).sym_buf as *const ::core::ffi::c_void,
-        (*ss).sym_next as crate::__stddef_size_t_h::size_t,
-    );
+    {
+        let sym_start = (*ss).lit_bufsize as usize;
+        let sym_end = sym_start + (*ss).sym_next as usize;
+        let source_pending =
+            ::core::slice::from_raw_parts((*ss).pending_buf, (*ss).pending_buf_size as usize);
+        let dest_pending =
+            ::core::slice::from_raw_parts_mut((*ds).pending_buf, (*ds).pending_buf_size as usize);
+        copy_deflate_bytes(
+            &mut dest_pending[sym_start..sym_end],
+            &source_pending[sym_start..sym_end],
+        );
+    }
     return crate::zlib_h::Z_OK;
 }
 unsafe fn longest_match(
