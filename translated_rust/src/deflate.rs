@@ -230,7 +230,6 @@ pub use crate::__stddef_size_t_h::size_t;
 pub use crate::src::trees::_dist_code;
 pub use crate::src::trees::_length_code;
 pub use crate::src::trees::_tr_flush_block;
-pub use crate::src::trees::_tr_stored_block;
 pub use crate::src::zutil::z_errmsg;
 pub use crate::stdlib::charf;
 
@@ -3648,6 +3647,20 @@ fn record_stored_input_state(
     }
 }
 
+/// Select the bytes for a stored block from the owned deflate window.  The
+/// caller lends that callback-allocated window at its existing transitional
+/// boundary; range arithmetic itself stays ordinary slice logic.
+fn stored_block_window_slice(
+    window: &[crate::stdlib::Byte],
+    block_start: ::core::ffi::c_long,
+    stored_len: crate::stdlib::uInt,
+) -> Option<&[crate::stdlib::Byte]> {
+    let start = usize::try_from(block_start).ok()?;
+    let len = usize::try_from(stored_len).ok()?;
+    let end = start.checked_add(len)?;
+    window.get(start..end)
+}
+
 unsafe fn deflate_stored(
     mut s: *mut crate::src::deflate::deflate_state,
     mut flush: ::core::ffi::c_int,
@@ -3828,11 +3841,7 @@ unsafe fn deflate_stored(
             read_buf(stream, output, have, state.wrap);
             record_stored_input_state(state, have);
         }
-    }
-    let tail_plan = {
-        let state = &mut *s;
-        let strm = &mut *state.strm;
-        stored_tail_block_plan(
+        let tail_plan = stored_tail_block_plan(
             state.pending_buf_size,
             state.bi_valid,
             state.w_size,
@@ -3840,31 +3849,44 @@ unsafe fn deflate_stored(
             state.block_start,
             strm.avail_in,
             flush,
-        )
-    };
-    if let Some(plan) = tail_plan {
-        len = plan.len;
-        last = plan.last;
-        let state = &mut *s;
-        // Match the legacy `c_long` -> pointer-offset narrowing before
-        // splitting the signed cursor into an unsigned direction.
-        let block_start = state.block_start as isize;
-        let stored = if block_start >= 0 {
-            (state.window as *mut crate::stdlib::charf).wrapping_add(block_start as usize)
-        } else {
-            (state.window as *mut crate::stdlib::charf).wrapping_sub(block_start.unsigned_abs())
-        };
-        crate::src::trees::_tr_stored_block(
-            state as *mut crate::src::deflate::internal_state,
-            stored,
-            len as crate::zutil_h::ulg,
-            last,
         );
-        state.block_start += len as ::core::ffi::c_long;
-        if last != 0 {
-            state.bi_used = 8 as ::core::ffi::c_int;
+        if let Some(plan) = tail_plan {
+            len = plan.len;
+            last = plan.last;
+            let Ok(pending_len) = usize::try_from(state.pending_buf_size) else {
+                return need_more;
+            };
+            if pending_len != 0 && state.pending_buf.is_null() {
+                return need_more;
+            }
+            let pending_buf = if pending_len == 0 {
+                &mut []
+            } else {
+                ::core::slice::from_raw_parts_mut(state.pending_buf, pending_len)
+            };
+            let stored = if len == 0 {
+                &[]
+            } else {
+                let Some(stored) = stored_block_window_slice(window, state.block_start, len) else {
+                    return need_more;
+                };
+                stored
+            };
+            let _ = crate::src::trees::tr_stored_block_state(
+                pending_buf,
+                &mut state.pending,
+                &mut state.bi_buf,
+                &mut state.bi_valid,
+                &mut state.bi_used,
+                stored,
+                last,
+            );
+            state.block_start += len as ::core::ffi::c_long;
+            if last != 0 {
+                state.bi_used = 8 as ::core::ffi::c_int;
+            }
+            flush_pending(state.strm);
         }
-        flush_pending(state.strm);
     }
     return (if last != 0 {
         finish_started as ::core::ffi::c_int

@@ -5177,7 +5177,8 @@ fn send_all_trees_header_state(
     true
 }
 
-pub unsafe extern "C" fn _tr_stored_block(
+#[export_name = "_tr_stored_block"]
+pub unsafe extern "C" fn _tr_stored_block_ffi(
     mut s: *mut crate::src::deflate::deflate_state,
     mut buf: *mut crate::stdlib::charf,
     mut stored_len: crate::zutil_h::ulg,
@@ -5215,16 +5216,6 @@ pub unsafe extern "C" fn _tr_stored_block(
         stored,
         last,
     );
-}
-
-#[export_name = "_tr_stored_block"]
-pub unsafe extern "C" fn _tr_stored_block_ffi(
-    mut s: *mut crate::src::deflate::deflate_state,
-    mut buf: *mut crate::stdlib::charf,
-    mut stored_len: crate::zutil_h::ulg,
-    mut last: ::core::ffi::c_int,
-) {
-    _tr_stored_block(s, buf, stored_len, last)
 }
 #[export_name = "_tr_flush_bits"]
 
