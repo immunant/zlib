@@ -44,6 +44,14 @@ pub use crate::zlib_h::Z_OK;
 pub use crate::zlib_h::Z_STREAM_END;
 pub use crate::zlib_h::Z_STREAM_ERROR;
 
+fn write_buffered_byte(buffer: &mut [u8], index: usize, byte: u8) -> bool {
+    let Some(slot) = buffer.get_mut(index) else {
+        return false;
+    };
+    *slot = byte;
+    true
+}
+
 unsafe extern "C" fn gz_init(mut state: crate::gzguts_h::gz_statep) -> ::core::ffi::c_int {
     let mut ret: ::core::ffi::c_int = 0;
     let mut strm: crate::zlib_h::z_streamp = &raw mut (*state).strm;
@@ -474,7 +482,10 @@ pub unsafe extern "C" fn gzputc(
             .offset((*strm).avail_in as isize)
             .offset_from((*state).in_0) as ::core::ffi::c_uint;
         if have < (*state).size {
-            *(*state).in_0.offset(have as isize) = c as ::core::ffi::c_uchar;
+            let buffer = ::core::slice::from_raw_parts_mut((*state).in_0, (*state).size as usize);
+            if !write_buffered_byte(buffer, have as usize, c as ::core::ffi::c_uchar) {
+                return -1 as ::core::ffi::c_int;
+            }
             (*strm).avail_in = (*strm).avail_in.wrapping_add(1);
             (*state).x.pos += 1;
             return c & 0xff as ::core::ffi::c_int;
