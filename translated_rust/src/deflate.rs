@@ -1037,11 +1037,15 @@ fn initialize_allocated_deflate_state(
         return crate::zlib_h::Z_MEM_ERROR;
     }
     unsafe {
-        strm.state = state as *mut crate::src::deflate::internal_state;
-        let state = &mut *state;
-        // Callback allocation returns uninitialized storage.  Write the
-        // first Rust value into it without attempting to drop that storage.
-        ::core::ptr::write(state, empty_deflate_state());
+        // Callback allocation returns uninitialized storage.  Convert it to
+        // a `MaybeUninit` slot first, then install the first Rust value with
+        // its safe initialization API instead of writing through an assumed
+        // initialized reference.
+        let state_slot =
+            &mut *state.cast::<::core::mem::MaybeUninit<crate::src::deflate::deflate_state>>();
+        let state = state_slot.write(empty_deflate_state());
+        strm.state = (state as *mut crate::src::deflate::deflate_state)
+            .cast::<crate::src::deflate::internal_state>();
         initialize_deflate_state_base(
             state,
             strm,
