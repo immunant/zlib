@@ -1205,11 +1205,7 @@ unsafe extern "C" fn gz_open(
         }
     }
     gz_reset(state_ref);
-    gz_error(
-        state,
-        crate::zlib_h::Z_OK,
-        ::core::ptr::null::<::core::ffi::c_char>(),
-    );
+    gz_error(state_ref, crate::zlib_h::Z_OK, None);
     return state as crate::zlib_h::gzFile;
 }
 pub unsafe extern "C" fn gzopen(
@@ -1638,15 +1634,7 @@ pub(crate) fn gzclearerr(state: &mut crate::gzguts_h::gz_state) {
     if !gz_clear_error_state(state) {
         return;
     }
-    // SAFETY: the bound state owns this error record; the null message does
-    // not dereference caller memory.
-    unsafe {
-        gz_error(
-            state,
-            crate::zlib_h::Z_OK,
-            ::core::ptr::null::<::core::ffi::c_char>(),
-        );
-    }
+    gz_error(state, crate::zlib_h::Z_OK, None);
 }
 
 // Ordinary read operations clear the owned error record, but unlike the
@@ -1728,45 +1716,58 @@ pub(crate) fn gz_error_allocation_failed(state: &mut crate::gzguts_h::gz_state) 
 }
 
 pub(crate) fn gz_error_needs_message_allocation(
-    msg_is_null: bool,
+    has_message: bool,
     err: ::core::ffi::c_int,
 ) -> bool {
-    !msg_is_null && err != crate::zlib_h::Z_MEM_ERROR
+    has_message && err != crate::zlib_h::Z_MEM_ERROR
 }
 
-pub unsafe extern "C" fn gz_error(
-    mut state: crate::gzguts_h::gz_statep,
-    mut err: ::core::ffi::c_int,
-    mut msg: *const ::core::ffi::c_char,
+// This coordinator receives an already-bound state and either no message or
+// a nul-terminated byte slice.  It owns the C allocation boundary internally,
+// letting ordinary gzip state transitions report fixed messages without raw
+// pointers or unsafe calls at each site.
+pub fn gz_error(
+    state: &mut crate::gzguts_h::gz_state,
+    err: ::core::ffi::c_int,
+    msg: Option<&[u8]>,
 ) {
-    let state_ref = &mut *state;
-    let plan = gz_error_plan(state_ref.err, !state_ref.msg.is_null(), state_ref.again, err);
+    let plan = gz_error_plan(state.err, !state.msg.is_null(), state.again, err);
     if plan.release_message {
-        crate::stdlib::free(state_ref.msg as *mut ::core::ffi::c_void);
+        // SAFETY: the state owns its previous non-MEM_ERROR message.
+        unsafe { crate::stdlib::free(state.msg as *mut ::core::ffi::c_void) };
     }
-    gz_error_apply(state_ref, err, &plan);
-    if !gz_error_needs_message_allocation(msg.is_null(), err) {
+    gz_error_apply(state, err, &plan);
+    let Some(msg) = msg else {
+        return;
+    };
+    if !gz_error_needs_message_allocation(true, err) {
         return;
     }
-    state_ref.msg = crate::stdlib::malloc(
-        crate::stdlib::strlen(state_ref.path)
-            .wrapping_add(crate::stdlib::strlen(msg))
-            .wrapping_add(3 as crate::__stddef_size_t_h::size_t),
-    ) as *mut ::core::ffi::c_char;
-    if state_ref.msg.is_null() {
-        gz_error_allocation_failed(state_ref);
+    // SAFETY: `path` is owned by this initialized gzip state and `msg` is a
+    // nul-terminated slice supplied by either a fixed zlib message or a
+    // checked C string at an FFI boundary. This is the sole allocation and
+    // formatting boundary for the owned error record.
+    unsafe {
+        state.msg = crate::stdlib::malloc(
+            crate::stdlib::strlen(state.path)
+                .wrapping_add(msg.len().wrapping_add(2)),
+        ) as *mut ::core::ffi::c_char;
+    }
+    if state.msg.is_null() {
+        gz_error_allocation_failed(state);
         return;
     }
-    crate::stdlib::snprintf(
-        state_ref.msg,
-        crate::stdlib::strlen(state_ref.path)
-            .wrapping_add(crate::stdlib::strlen(msg))
-            .wrapping_add(3 as crate::__stddef_size_t_h::size_t),
-        b"%s%s%s\0".as_ptr() as *const ::core::ffi::c_char,
-        state_ref.path,
-        b": \0".as_ptr() as *const ::core::ffi::c_char,
-        msg,
-    );
+    unsafe {
+        crate::stdlib::snprintf(
+            state.msg,
+            crate::stdlib::strlen(state.path)
+                .wrapping_add(msg.len().wrapping_add(2)),
+            b"%s%s%s\0".as_ptr() as *const ::core::ffi::c_char,
+            state.path,
+            b": \0".as_ptr() as *const ::core::ffi::c_char,
+            msg.as_ptr() as *const ::core::ffi::c_char,
+        );
+    }
 }
 #[export_name = "gz_error"]
 
@@ -1775,7 +1776,16 @@ pub unsafe extern "C" fn gz_error_ffi(
     mut err: ::core::ffi::c_int,
     mut msg: *const ::core::ffi::c_char,
 ) {
-    gz_error(state, err, msg)
+    let msg = if msg.is_null() {
+        None
+    } else {
+        // SAFETY: this ABI entry retains the original C contract that `msg`
+        // points to a nul-terminated string for the duration of the call.
+        Some(unsafe { ::core::ffi::CStr::from_ptr(msg).to_bytes_with_nul() })
+    };
+    // SAFETY: this ABI entry retains the original C contract that `state`
+    // points to a live gzip state.
+    gz_error(unsafe { &mut *state }, err, msg)
 }
 
 pub fn gz_skip_chunk(

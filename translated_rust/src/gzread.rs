@@ -96,7 +96,7 @@ fn gz_load(
             crate::src::gzlib::gz_error(
                 state,
                 crate::zlib_h::Z_ERRNO,
-                crate::stdlib::strerror(errno),
+                Some(::core::ffi::CStr::from_ptr(crate::stdlib::strerror(errno)).to_bytes_with_nul()),
             );
             return GzLoadResult {
                 received: loaded,
@@ -170,7 +170,7 @@ fn gz_look(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
                 crate::src::gzlib::gz_error(
                     state,
                     crate::zlib_h::Z_MEM_ERROR,
-                    b"out of memory\0".as_ptr() as *const ::core::ffi::c_char,
+                    Some(b"out of memory\0"),
                 );
                 return -1 as ::core::ffi::c_int;
             }
@@ -193,7 +193,7 @@ fn gz_look(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
                 crate::src::gzlib::gz_error(
                     state,
                     crate::zlib_h::Z_MEM_ERROR,
-                    b"out of memory\0".as_ptr() as *const ::core::ffi::c_char,
+                    Some(b"out of memory\0"),
                 );
                 return -1 as ::core::ffi::c_int;
             }
@@ -266,15 +266,11 @@ fn gz_decomp(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
             break;
         } else if state.strm.avail_in == 0 as crate::stdlib::uInt {
             if state.again == 0 {
-                // SAFETY: `state` is the validated gzip state whose message
-                // ownership this error helper updates.
-                unsafe {
-                    crate::src::gzlib::gz_error(
-                        state,
-                        crate::zlib_h::Z_BUF_ERROR,
-                        b"unexpected end of file\0".as_ptr() as *const ::core::ffi::c_char,
-                    );
-                }
+                crate::src::gzlib::gz_error(
+                    state,
+                    crate::zlib_h::Z_BUF_ERROR,
+                    Some(b"unexpected end of file\0"),
+                );
             }
             break;
         } else {
@@ -290,43 +286,30 @@ fn gz_decomp(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
                     break;
                 }
                 crate::src::gzlib::GzDecompStep::StreamError => {
-                    // SAFETY: `state` is the validated gzip state whose
-                    // message ownership this error helper updates.
-                    unsafe {
-                        crate::src::gzlib::gz_error(
-                            state,
-                            crate::zlib_h::Z_STREAM_ERROR,
-                            b"internal error: inflate stream corrupt\0".as_ptr()
-                                as *const ::core::ffi::c_char,
-                        );
-                    }
+                    crate::src::gzlib::gz_error(
+                        state,
+                        crate::zlib_h::Z_STREAM_ERROR,
+                        Some(b"internal error: inflate stream corrupt\0"),
+                    );
                     break;
                 }
                 crate::src::gzlib::GzDecompStep::MemError => {
-                    // SAFETY: `state` is the validated gzip state whose
-                    // message ownership this error helper updates.
-                    unsafe {
-                        crate::src::gzlib::gz_error(
-                            state,
-                            crate::zlib_h::Z_MEM_ERROR,
-                            b"out of memory\0".as_ptr() as *const ::core::ffi::c_char,
-                        );
-                    }
+                    crate::src::gzlib::gz_error(
+                        state,
+                        crate::zlib_h::Z_MEM_ERROR,
+                        Some(b"out of memory\0"),
+                    );
                     break;
                 }
                 crate::src::gzlib::GzDecompStep::DataError => {
-                    // SAFETY: `state` is the validated gzip state; its
-                    // inflater either supplies a live message or the static
-                    // fallback is used for the duration of `gz_error`.
                     unsafe {
                         crate::src::gzlib::gz_error(
                             state,
                             crate::zlib_h::Z_DATA_ERROR,
                             if state.strm.msg.is_null() {
-                                b"compressed data error\0".as_ptr()
-                                    as *const ::core::ffi::c_char
+                                Some(b"compressed data error\0" as &[u8])
                             } else {
-                                state.strm.msg as *const ::core::ffi::c_char
+                                Some(::core::ffi::CStr::from_ptr(state.strm.msg).to_bytes_with_nul())
                             },
                         );
                     }
@@ -375,15 +358,11 @@ fn gz_fetch(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
                 }
             }
             crate::src::gzlib::GzFetchPlan::Corrupt => {
-                // SAFETY: the validated state reference is also the state
-                // whose error ownership `gz_error` updates.
-                unsafe {
-                    crate::src::gzlib::gz_error(
-                        state,
-                        crate::zlib_h::Z_STREAM_ERROR,
-                        b"state corrupt\0".as_ptr() as *const ::core::ffi::c_char,
-                    );
-                }
+                crate::src::gzlib::gz_error(
+                    state,
+                    crate::zlib_h::Z_STREAM_ERROR,
+                    Some(b"state corrupt\0"),
+                );
                 return -1 as ::core::ffi::c_int;
             }
         }
@@ -548,7 +527,7 @@ pub unsafe extern "C" fn gzread(
         crate::src::gzlib::gz_error(
             state,
             crate::zlib_h::Z_STREAM_ERROR,
-            b"request does not fit in an int\0".as_ptr() as *const ::core::ffi::c_char,
+            Some(b"request does not fit in an int\0"),
         );
         return -1 as ::core::ffi::c_int;
     }
@@ -561,7 +540,7 @@ pub unsafe extern "C" fn gzread(
             crate::src::gzlib::gz_error(
                 state,
                 crate::zlib_h::Z_ERRNO,
-                crate::stdlib::strerror(*crate::stdlib::__errno_location()),
+                Some(::core::ffi::CStr::from_ptr(crate::stdlib::strerror(*crate::stdlib::__errno_location())).to_bytes_with_nul()),
             );
             return -1 as ::core::ffi::c_int;
         }
@@ -595,7 +574,7 @@ pub unsafe extern "C" fn gzfread(
             crate::src::gzlib::gz_error(
                 state,
                 crate::zlib_h::Z_STREAM_ERROR,
-                b"request does not fit in a size_t\0".as_ptr() as *const ::core::ffi::c_char,
+                Some(b"request does not fit in a size_t\0"),
             );
             0 as crate::stdlib::z_size_t
         }
@@ -685,16 +664,11 @@ pub fn gzungetc(
             crate::src::gzlib::gz_ungetc_progress(state, true);
         }
         crate::src::gzlib::GzUngetcPlan::Full => {
-            // SAFETY: this updates the bound gzip state's owned error record
-            // with a static message.
-            unsafe {
-                crate::src::gzlib::gz_error(
-                    state,
-                    crate::zlib_h::Z_DATA_ERROR,
-                    b"out of room to push characters\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                );
-            }
+            crate::src::gzlib::gz_error(
+                state,
+                crate::zlib_h::Z_DATA_ERROR,
+                Some(b"out of room to push characters\0"),
+            );
             return -1 as ::core::ffi::c_int;
         }
         crate::src::gzlib::GzUngetcPlan::Prepend { move_to_end } => {

@@ -61,7 +61,7 @@ fn gz_init(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
             crate::src::gzlib::gz_error(
                 state,
                 crate::zlib_h::Z_MEM_ERROR,
-                b"out of memory\0".as_ptr() as *const ::core::ffi::c_char,
+                Some(b"out of memory\0"),
             );
             return -1 as ::core::ffi::c_int;
         }
@@ -73,7 +73,7 @@ fn gz_init(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
                 crate::src::gzlib::gz_error(
                     state,
                     crate::zlib_h::Z_MEM_ERROR,
-                    b"out of memory\0".as_ptr() as *const ::core::ffi::c_char,
+                    Some(b"out of memory\0"),
                 );
                 return -1 as ::core::ffi::c_int;
             }
@@ -96,7 +96,7 @@ fn gz_init(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
                 crate::src::gzlib::gz_error(
                     state,
                     crate::zlib_h::Z_MEM_ERROR,
-                    b"out of memory\0".as_ptr() as *const ::core::ffi::c_char,
+                    Some(b"out of memory\0"),
                 );
                 return -1 as ::core::ffi::c_int;
             }
@@ -145,13 +145,11 @@ fn gz_comp(
                     (written, *crate::stdlib::__errno_location())
                 };
                 if let Err(errno) = crate::src::gzlib::gz_io_result(state, written, errno) {
-                    // SAFETY: `state` is the validated gzip state and the
-                    // errno string is owned by the C runtime for this call.
                     unsafe {
                         crate::src::gzlib::gz_error(
                             state,
                             crate::zlib_h::Z_ERRNO,
-                            crate::stdlib::strerror(errno),
+                            Some(::core::ffi::CStr::from_ptr(crate::stdlib::strerror(errno)).to_bytes_with_nul()),
                         );
                     }
                     return -1 as ::core::ffi::c_int;
@@ -194,13 +192,11 @@ fn gz_comp(
                     (written, *crate::stdlib::__errno_location())
                 };
                 if let Err(errno) = crate::src::gzlib::gz_io_result(state, written, errno) {
-                    // SAFETY: `state` is valid and this reports the string
-                    // returned by the C runtime for the failed write.
                     unsafe {
                         crate::src::gzlib::gz_error(
                             state,
                             crate::zlib_h::Z_ERRNO,
-                            crate::stdlib::strerror(errno),
+                            Some(::core::ffi::CStr::from_ptr(crate::stdlib::strerror(errno)).to_bytes_with_nul()),
                         );
                     }
                     return -1 as ::core::ffi::c_int;
@@ -219,16 +215,11 @@ fn gz_comp(
         // fields are maintained by this validated write-state machine.
         ret = unsafe { crate::src::deflate::deflate(&mut state.strm, flush) };
         if ret == crate::zlib_h::Z_STREAM_ERROR {
-            // SAFETY: this updates only the validated gzip state's error
-            // record with a static message.
-            unsafe {
-                crate::src::gzlib::gz_error(
-                    state,
-                    crate::zlib_h::Z_STREAM_ERROR,
-                    b"internal error: deflate stream corrupt\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                );
-            }
+            crate::src::gzlib::gz_error(
+                state,
+                crate::zlib_h::Z_STREAM_ERROR,
+                Some(b"internal error: deflate stream corrupt\0"),
+            );
             return -1 as ::core::ffi::c_int;
         }
         have = crate::src::gzlib::gz_produced(have, state.strm.avail_out);
@@ -373,16 +364,11 @@ pub fn gzwrite(
         return 0 as ::core::ffi::c_int;
     }
     if !crate::src::gzlib::gz_uint_request_fits_int(len) {
-        // SAFETY: this only updates the bound gzip state's owned error
-        // record with a static message.
-        unsafe {
-            crate::src::gzlib::gz_error(
-                state,
-                crate::zlib_h::Z_DATA_ERROR,
-                b"requested length does not fit in int\0".as_ptr()
-                    as *const ::core::ffi::c_char,
-            );
-        }
+        crate::src::gzlib::gz_error(
+            state,
+            crate::zlib_h::Z_DATA_ERROR,
+            Some(b"requested length does not fit in int\0"),
+        );
         return 0 as ::core::ffi::c_int;
     }
     return gz_write(state, buf, len as crate::stdlib::z_size_t) as ::core::ffi::c_int;
@@ -411,16 +397,11 @@ pub fn gzfwrite(
     match crate::src::gzlib::gz_item_request(size, nitems) {
         crate::src::gzlib::GzItemRequest::Empty => 0 as crate::stdlib::z_size_t,
         crate::src::gzlib::GzItemRequest::TooLarge => {
-            // SAFETY: this only updates the bound gzip state's owned error
-            // record with a static message.
-            unsafe {
-                crate::src::gzlib::gz_error(
-                    state,
-                    crate::zlib_h::Z_STREAM_ERROR,
-                    b"request does not fit in a size_t\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                );
-            }
+            crate::src::gzlib::gz_error(
+                state,
+                crate::zlib_h::Z_STREAM_ERROR,
+                Some(b"request does not fit in a size_t\0"),
+            );
             0 as crate::stdlib::z_size_t
         }
         crate::src::gzlib::GzItemRequest::Bytes(len) => {
@@ -490,7 +471,7 @@ pub unsafe extern "C" fn gzputs(
         crate::src::gzlib::gz_error(
             state,
             crate::zlib_h::Z_STREAM_ERROR,
-            b"string length does not fit in int\0".as_ptr() as *const ::core::ffi::c_char,
+            Some(b"string length does not fit in int\0"),
         );
         return -1 as ::core::ffi::c_int;
     }
