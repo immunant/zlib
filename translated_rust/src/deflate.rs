@@ -147,7 +147,6 @@ pub use crate::src::crc32::crc32_z;
 pub use crate::src::trees::_dist_code;
 pub use crate::src::trees::_length_code;
 pub use crate::src::trees::_tr_align;
-pub use crate::src::trees::_tr_flush_bits;
 pub use crate::src::trees::_tr_flush_block;
 pub use crate::src::trees::_tr_init;
 pub use crate::src::trees::_tr_stored_block;
@@ -1107,7 +1106,7 @@ pub unsafe extern "C" fn deflatePrime(
                 << (*s).bi_valid) as crate::zutil_h::ush as ::core::ffi::c_int)
             as crate::zutil_h::ush;
         (*s).bi_valid += put;
-        crate::src::trees::_tr_flush_bits(s as *mut crate::src::deflate::internal_state);
+        crate::src::trees::bi_flush(s as *mut crate::src::deflate::internal_state);
         value >>= put;
         bits -= put;
         if bits == 0 {
@@ -1502,7 +1501,7 @@ unsafe extern "C" fn flush_pending(mut strm: crate::zlib_h::z_streamp) {
     let mut len: ::core::ffi::c_uint = 0;
     let mut s: *mut crate::src::deflate::deflate_state =
         (*strm).state as *mut crate::src::deflate::deflate_state;
-    crate::src::trees::_tr_flush_bits(s as *mut crate::src::deflate::internal_state);
+    crate::src::trees::bi_flush(s as *mut crate::src::deflate::internal_state);
     len = if (*s).pending > (*strm).avail_out as crate::zutil_h::ulg {
         (*strm).avail_out as ::core::ffi::c_uint
     } else {
