@@ -248,17 +248,15 @@ pub unsafe extern "C" fn inflateReset_ffi(
     };
     inflateReset(strm, state)
 }
-pub unsafe extern "C" fn inflateReset2(
-    mut strm: crate::zlib_h::z_streamp,
+pub unsafe fn inflateReset2(
+    strm: &mut crate::zlib_h::z_stream,
+    state: &mut crate::src::inflate::inflate_state,
     mut windowBits: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
     let mut wrap: ::core::ffi::c_int = 0;
-    let mut state: *mut crate::src::inflate::inflate_state =
-        ::core::ptr::null_mut::<crate::src::inflate::inflate_state>();
-    if inflateStateCheck(strm) != 0 {
+    if !inflate_state_valid(strm, state) {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    state = (*strm).state as *mut crate::src::inflate::inflate_state;
     if windowBits < 0 as ::core::ffi::c_int {
         if windowBits < -15 as ::core::ffi::c_int {
             return crate::zlib_h::Z_STREAM_ERROR;
@@ -276,16 +274,16 @@ pub unsafe extern "C" fn inflateReset2(
     {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    if !(*state).window.is_null() && (*state).wbits != windowBits as ::core::ffi::c_uint {
-        Some((*strm).zfree.expect("non-null function pointer")).expect("non-null function pointer")(
-            (*strm).opaque,
-            (*state).window as crate::stdlib::voidpf,
+    if !state.window.is_null() && state.wbits != windowBits as ::core::ffi::c_uint {
+        Some(strm.zfree.expect("non-null function pointer")).expect("non-null function pointer")(
+            strm.opaque,
+            state.window as crate::stdlib::voidpf,
         );
-        (*state).window = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
+        state.window = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
     }
-    (*state).wrap = wrap;
-    (*state).wbits = windowBits as ::core::ffi::c_uint;
-    return inflateReset(&mut *strm, &mut *state);
+    state.wrap = wrap;
+    state.wbits = windowBits as ::core::ffi::c_uint;
+    inflateReset(strm, state)
 }
 #[export_name = "inflateReset2"]
 
@@ -293,7 +291,13 @@ pub unsafe extern "C" fn inflateReset2_ffi(
     mut strm: crate::zlib_h::z_streamp,
     mut windowBits: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
-    inflateReset2(strm, windowBits)
+    let Some(strm) = strm.as_mut() else {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    };
+    let Some(state) = (strm.state as *mut crate::src::inflate::inflate_state).as_mut() else {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    };
+    inflateReset2(strm, state, windowBits)
 }
 pub unsafe extern "C" fn inflateInit2_(
     mut strm: crate::zlib_h::z_streamp,
@@ -350,7 +354,7 @@ pub unsafe extern "C" fn inflateInit2_(
     (*state).strm = strm;
     (*state).window = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
     (*state).mode = crate::src::inflate::HEAD;
-    ret = inflateReset2(strm, windowBits);
+    ret = inflateReset2(&mut *strm, &mut *state, windowBits);
     if ret != crate::zlib_h::Z_OK {
         Some((*strm).zfree.expect("non-null function pointer")).expect("non-null function pointer")(
             (*strm).opaque,
