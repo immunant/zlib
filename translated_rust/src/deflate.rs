@@ -51,7 +51,6 @@ pub type tree_desc = crate::src::deflate::tree_desc_s;
 #[repr(C)]
 
 pub struct tree_desc_s {
-    pub dyn_tree: *mut crate::src::deflate::ct_data,
     pub max_code: ::core::ffi::c_int,
     pub stat_desc_kind: ::core::ffi::c_int,
 }
@@ -708,7 +707,13 @@ pub unsafe extern "C" fn deflateInit2__ffi(
     (*s).level = config.level;
     (*s).strategy = config.strategy;
     (*s).method = config.method as crate::stdlib::Byte;
-    return deflateReset_ffi(strm);
+    let state = &mut *s;
+    deflate_reset_keep_state(&mut *strm, state);
+    let head_ptr = state.head;
+    let hash_size = state.hash_size as usize;
+    let head = ::core::slice::from_raw_parts_mut(head_ptr, hash_size);
+    lm_init(state, head);
+    return crate::zlib_h::Z_OK;
 }
 fn deflate_status_is_valid(status: ::core::ffi::c_int) -> bool {
     status == crate::src::deflate::INIT_STATE
@@ -1368,6 +1373,23 @@ fn deflate_bound_cstring_len(value: &::core::ffi::CStr) -> crate::stdlib::z_size
     value.to_bytes_with_nul().len() as crate::stdlib::z_size_t
 }
 
+#[derive(Copy, Clone)]
+struct DeflateBoundState {
+    wrap: ::core::ffi::c_int,
+    strstart: crate::stdlib::uInt,
+    w_bits: crate::stdlib::uInt,
+    hash_bits: crate::stdlib::uInt,
+    level: ::core::ffi::c_int,
+}
+
+#[derive(Copy, Clone)]
+struct DeflateBoundGzipHeader {
+    extra_len: Option<crate::stdlib::uInt>,
+    name_len: crate::stdlib::z_size_t,
+    comment_len: crate::stdlib::z_size_t,
+    has_hcrc: bool,
+}
+
 fn deflate_bound_gzip_header_len(
     extra_len: Option<crate::stdlib::uInt>,
     name_len: crate::stdlib::z_size_t,
@@ -1386,6 +1408,76 @@ fn deflate_bound_gzip_header_len(
         wraplen = wraplen.wrapping_add(2 as crate::stdlib::z_size_t);
     }
     wraplen
+}
+
+fn deflate_bound_wrap_len(
+    state: DeflateBoundState,
+    gzip_header: Option<DeflateBoundGzipHeader>,
+) -> crate::stdlib::z_size_t {
+    match if state.wrap < 0 as ::core::ffi::c_int {
+        -state.wrap
+    } else {
+        state.wrap
+    } {
+        0 => 0 as crate::stdlib::z_size_t,
+        1 => {
+            (6 as ::core::ffi::c_int
+                + (if state.strstart != 0 {
+                    4 as ::core::ffi::c_int
+                } else {
+                    0 as ::core::ffi::c_int
+                })) as crate::stdlib::z_size_t
+        }
+        2 => {
+            if let Some(header) = gzip_header {
+                deflate_bound_gzip_header_len(
+                    header.extra_len,
+                    header.name_len,
+                    header.comment_len,
+                    header.has_hcrc,
+                )
+            } else {
+                18 as crate::stdlib::z_size_t
+            }
+        }
+        _ => 18 as crate::stdlib::z_size_t,
+    }
+}
+
+fn deflate_bound_uses_gzip_header(wrap: ::core::ffi::c_int) -> bool {
+    let normalized_wrap = if wrap < 0 as ::core::ffi::c_int {
+        -wrap
+    } else {
+        wrap
+    };
+    normalized_wrap == 2 as ::core::ffi::c_int
+}
+
+fn deflate_bound_z_impl(
+    source_len: crate::stdlib::z_size_t,
+    state: Option<DeflateBoundState>,
+    gzip_header: Option<DeflateBoundGzipHeader>,
+) -> crate::stdlib::z_size_t {
+    let fixed_len = deflate_bound_fixed_len(source_len);
+    let store_len = deflate_bound_store_len(source_len);
+    let Some(state) = state else {
+        let bound = if fixed_len > store_len {
+            fixed_len
+        } else {
+            store_len
+        };
+        return deflate_bound_add(bound, 18 as crate::stdlib::z_size_t);
+    };
+    let wrap_len = deflate_bound_wrap_len(state, gzip_header);
+    deflate_bound_for_state(
+        source_len,
+        fixed_len,
+        store_len,
+        wrap_len,
+        state.w_bits,
+        state.hash_bits,
+        state.level,
+    )
 }
 
 fn deflate_zlib_header(
@@ -1499,76 +1591,46 @@ pub unsafe extern "C" fn deflateBound_z_ffi(
     mut strm: crate::zlib_h::z_streamp,
     mut sourceLen: crate::stdlib::z_size_t,
 ) -> crate::stdlib::z_size_t {
-    let mut s: *mut crate::src::deflate::deflate_state =
-        ::core::ptr::null_mut::<crate::src::deflate::deflate_state>();
-    let mut fixedlen: crate::stdlib::z_size_t = deflate_bound_fixed_len(sourceLen);
-    let mut storelen: crate::stdlib::z_size_t = deflate_bound_store_len(sourceLen);
-    let mut wraplen: crate::stdlib::z_size_t = 0;
-    let mut bound: crate::stdlib::z_size_t = 0;
     if deflate_state_check_raw!(strm) != 0 {
-        bound = if fixedlen > storelen {
-            fixedlen
+        return deflate_bound_z_impl(sourceLen, None, None);
+    }
+    let s = &*((*strm).state as *mut crate::src::deflate::deflate_state);
+    let state = DeflateBoundState {
+        wrap: s.wrap,
+        strstart: s.strstart,
+        w_bits: s.w_bits,
+        hash_bits: s.hash_bits,
+        level: s.level,
+    };
+    let gzip_header = if deflate_bound_uses_gzip_header(state.wrap) && !s.gzhead.is_null() {
+        let head = &*s.gzhead;
+        let extra_len = if head.extra.is_null() {
+            None
         } else {
-            storelen
+            Some(head.extra_len)
         };
-        return deflate_bound_add(bound, 18 as crate::stdlib::z_size_t);
-    }
-    s = (*strm).state as *mut crate::src::deflate::deflate_state;
-    match if (*s).wrap < 0 as ::core::ffi::c_int {
-        -(*s).wrap
+        let name_len = if head.name.is_null() {
+            0 as crate::stdlib::z_size_t
+        } else {
+            let name = ::core::ffi::CStr::from_ptr(head.name as *const ::core::ffi::c_char);
+            deflate_bound_cstring_len(name)
+        };
+        let comment_len = if head.comment.is_null() {
+            0 as crate::stdlib::z_size_t
+        } else {
+            let comment = ::core::ffi::CStr::from_ptr(head.comment as *const ::core::ffi::c_char);
+            deflate_bound_cstring_len(comment)
+        };
+        Some(DeflateBoundGzipHeader {
+            extra_len,
+            name_len,
+            comment_len,
+            has_hcrc: head.hcrc != 0,
+        })
     } else {
-        (*s).wrap
-    } {
-        0 => {
-            wraplen = 0 as crate::stdlib::z_size_t;
-        }
-        1 => {
-            wraplen = (6 as ::core::ffi::c_int
-                + (if (*s).strstart != 0 {
-                    4 as ::core::ffi::c_int
-                } else {
-                    0 as ::core::ffi::c_int
-                })) as crate::stdlib::z_size_t;
-        }
-        2 => {
-            wraplen = 18 as crate::stdlib::z_size_t;
-            if !(*s).gzhead.is_null() {
-                let head = &*(*s).gzhead;
-                let extra_len = if head.extra.is_null() {
-                    None
-                } else {
-                    Some(head.extra_len)
-                };
-                let name_len = if head.name.is_null() {
-                    0 as crate::stdlib::z_size_t
-                } else {
-                    let name = ::core::ffi::CStr::from_ptr(head.name as *const ::core::ffi::c_char);
-                    deflate_bound_cstring_len(name)
-                };
-                let comment_len = if head.comment.is_null() {
-                    0 as crate::stdlib::z_size_t
-                } else {
-                    let comment =
-                        ::core::ffi::CStr::from_ptr(head.comment as *const ::core::ffi::c_char);
-                    deflate_bound_cstring_len(comment)
-                };
-                wraplen =
-                    deflate_bound_gzip_header_len(extra_len, name_len, comment_len, head.hcrc != 0);
-            }
-        }
-        _ => {
-            wraplen = 18 as crate::stdlib::z_size_t;
-        }
-    }
-    return deflate_bound_for_state(
-        sourceLen,
-        fixedlen,
-        storelen,
-        wraplen,
-        (*s).w_bits,
-        (*s).hash_bits,
-        (*s).level,
-    );
+        None
+    };
+    return deflate_bound_z_impl(sourceLen, Some(state), gzip_header);
 }
 #[export_name = "deflateBound"]
 
@@ -1576,8 +1638,52 @@ pub unsafe extern "C" fn deflateBound_ffi(
     mut strm: crate::zlib_h::z_streamp,
     mut sourceLen: crate::stdlib::uLong,
 ) -> crate::stdlib::uLong {
-    let mut bound: crate::stdlib::z_size_t =
-        deflateBound_z_ffi(strm, sourceLen as crate::stdlib::z_size_t);
+    let mut bound: crate::stdlib::z_size_t = if deflate_state_check_raw!(strm) != 0 {
+        deflate_bound_z_impl(sourceLen as crate::stdlib::z_size_t, None, None)
+    } else {
+        let s = &*((*strm).state as *mut crate::src::deflate::deflate_state);
+        let state = DeflateBoundState {
+            wrap: s.wrap,
+            strstart: s.strstart,
+            w_bits: s.w_bits,
+            hash_bits: s.hash_bits,
+            level: s.level,
+        };
+        let gzip_header = if deflate_bound_uses_gzip_header(state.wrap) && !s.gzhead.is_null() {
+            let head = &*s.gzhead;
+            let extra_len = if head.extra.is_null() {
+                None
+            } else {
+                Some(head.extra_len)
+            };
+            let name_len = if head.name.is_null() {
+                0 as crate::stdlib::z_size_t
+            } else {
+                let name = ::core::ffi::CStr::from_ptr(head.name as *const ::core::ffi::c_char);
+                deflate_bound_cstring_len(name)
+            };
+            let comment_len = if head.comment.is_null() {
+                0 as crate::stdlib::z_size_t
+            } else {
+                let comment =
+                    ::core::ffi::CStr::from_ptr(head.comment as *const ::core::ffi::c_char);
+                deflate_bound_cstring_len(comment)
+            };
+            Some(DeflateBoundGzipHeader {
+                extra_len,
+                name_len,
+                comment_len,
+                has_hcrc: head.hcrc != 0,
+            })
+        } else {
+            None
+        };
+        deflate_bound_z_impl(
+            sourceLen as crate::stdlib::z_size_t,
+            Some(state),
+            gzip_header,
+        )
+    };
     return if bound != bound {
         -1 as ::core::ffi::c_int as crate::stdlib::uLong
     } else {
@@ -2274,12 +2380,6 @@ pub unsafe extern "C" fn deflateCopy_ffi(
         (*ss).sym_buf as *const ::core::ffi::c_void,
         (*ss).sym_next as crate::__stddef_size_t_h::size_t,
     );
-    (*ds).l_desc.dyn_tree = &raw mut (*ds).dyn_ltree as *mut crate::src::deflate::ct_data_s
-        as *mut crate::src::deflate::ct_data;
-    (*ds).d_desc.dyn_tree = &raw mut (*ds).dyn_dtree as *mut crate::src::deflate::ct_data_s
-        as *mut crate::src::deflate::ct_data;
-    (*ds).bl_desc.dyn_tree = &raw mut (*ds).bl_tree as *mut crate::src::deflate::ct_data_s
-        as *mut crate::src::deflate::ct_data;
     return crate::zlib_h::Z_OK;
 }
 unsafe fn longest_match(

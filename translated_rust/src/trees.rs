@@ -2650,14 +2650,8 @@ fn init_block(s: &mut crate::src::deflate::deflate_state) {
     s.sym_next = s.matches;
 }
 pub(crate) fn tr_init(state: &mut crate::src::deflate::deflate_state) {
-    state.l_desc.dyn_tree = &raw mut state.dyn_ltree as *mut crate::src::deflate::ct_data_s
-        as *mut crate::src::deflate::ct_data;
     state.l_desc.stat_desc_kind = STATIC_L_DESC_KIND;
-    state.d_desc.dyn_tree = &raw mut state.dyn_dtree as *mut crate::src::deflate::ct_data_s
-        as *mut crate::src::deflate::ct_data;
     state.d_desc.stat_desc_kind = STATIC_D_DESC_KIND;
-    state.bl_desc.dyn_tree = &raw mut state.bl_tree as *mut crate::src::deflate::ct_data_s
-        as *mut crate::src::deflate::ct_data;
     state.bl_desc.stat_desc_kind = STATIC_BL_DESC_KIND;
     state.bi_buf = 0 as crate::zutil_h::ush;
     state.bi_valid = 0 as ::core::ffi::c_int;

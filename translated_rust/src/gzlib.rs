@@ -513,6 +513,17 @@ fn gz_seek64_finish_copy_seek(
     state.x.pos
 }
 
+fn gz_seek64_finish_deferred_skip(
+    state: &mut crate::gzguts_h::gz_state,
+    offset: &mut crate::stdlib::off64_t,
+) -> crate::stdlib::off64_t {
+    if state.mode == crate::gzguts_h::GZ_READ {
+        gz_consume_buffered_read_cursor(state, offset);
+    }
+    state.skip = *offset;
+    state.x.pos + *offset
+}
+
 #[export_name = "gzrewind"]
 
 pub unsafe extern "C" fn gzrewind_ffi(mut file: crate::zlib_h::gzFile) -> ::core::ffi::c_int {
@@ -616,12 +627,7 @@ pub unsafe extern "C" fn gzseek64_ffi(
         );
         gz_reset_after_error(state_ref);
     }
-    let state_ref = &mut *(file as crate::gzguts_h::gz_statep);
-    if state_ref.mode == crate::gzguts_h::GZ_READ {
-        gz_consume_buffered_read_cursor(state_ref, &mut offset);
-    }
-    state_ref.skip = offset;
-    return state_ref.x.pos + offset;
+    return gz_seek64_finish_deferred_skip(state_ref, &mut offset);
 }
 #[export_name = "gzseek"]
 
@@ -701,12 +707,7 @@ pub unsafe extern "C" fn gzseek_ffi(
         );
         gz_reset_after_error(state_ref);
     }
-    let state_ref = &mut *(file as crate::gzguts_h::gz_statep);
-    if state_ref.mode == crate::gzguts_h::GZ_READ {
-        gz_consume_buffered_read_cursor(state_ref, &mut offset);
-    }
-    state_ref.skip = offset;
-    ret = state_ref.x.pos + offset;
+    ret = gz_seek64_finish_deferred_skip(state_ref, &mut offset);
     return if ret == ret {
         ret
     } else {
