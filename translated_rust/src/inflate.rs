@@ -882,10 +882,13 @@ fn registered_inflate_header(
 }
 
 fn remove_inflate_header(state: &crate::src::inflate::inflate_state) {
+    remove_inflate_header_address(inflate_state_address(state));
+}
+
+fn remove_inflate_header_address(state_address: usize) {
     let mut registrations = inflate_header_registrations()
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
-    let state_address = inflate_state_address(state);
     if let Some(index) = registrations
         .iter()
         .position(|registration| registration.state_address == state_address)
@@ -2744,6 +2747,8 @@ pub unsafe extern "C" fn inflate_ffi(
 pub struct InflateEndState<'a> {
     mode: crate::src::inflate::inflate_mode,
     window: &'a mut Option<Vec<crate::stdlib::Bytef>>,
+    header_registered: &'a mut bool,
+    state_address: usize,
 }
 
 pub fn inflateEnd(mut state: InflateEndState<'_>) -> ::core::ffi::c_int {
@@ -2751,6 +2756,10 @@ pub fn inflateEnd(mut state: InflateEndState<'_>) -> ::core::ffi::c_int {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
     *state.window = None;
+    if *state.header_registered {
+        remove_inflate_header_address(state.state_address);
+        *state.header_registered = false;
+    }
     crate::zlib_h::Z_OK
 }
 
@@ -2783,16 +2792,15 @@ unsafe fn inflate_end_boundary(
     else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
+    let state_address = inflate_state_address(inflate_state);
     let state = InflateEndState {
         mode: inflate_state.mode,
         window: &mut inflate_state.window,
+        header_registered: &mut inflate_state.head,
+        state_address,
     };
     let end = inflate_end_impl(state, strm.zalloc.is_some() && zfree.is_some());
     if end != crate::zlib_h::Z_STREAM_ERROR {
-        if inflate_state.head {
-            remove_inflate_header(inflate_state);
-            inflate_state.head = false;
-        }
         zfree.expect("inflate_end_impl validates zfree")(opaque, state_allocation);
         clear_inflate_state(strm);
     }
