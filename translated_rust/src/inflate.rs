@@ -2358,16 +2358,18 @@ pub unsafe extern "C" fn inflateEnd(mut strm: crate::zlib_h::z_streamp) -> ::cor
     let Some((strm, state)) = inflateStateCheck(strm) else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
-    if !state.window.is_null() {
-        Some(strm.zfree.expect("non-null function pointer")).expect("non-null function pointer")(
-            strm.opaque,
-            state.window as crate::stdlib::voidpf,
-        );
-    }
-    Some(strm.zfree.expect("non-null function pointer")).expect("non-null function pointer")(
+    // Snapshot the release plan before invoking a user-supplied deallocator,
+    // since it is allowed to invalidate allocations reachable from the stream.
+    let (zfree, opaque, window, state_ptr) = (
+        strm.zfree.expect("non-null function pointer"),
         strm.opaque,
-        strm.state as crate::stdlib::voidpf,
+        state.window,
+        strm.state,
     );
+    if !window.is_null() {
+        Some(zfree).expect("non-null function pointer")(opaque, window as crate::stdlib::voidpf);
+    }
+    Some(zfree).expect("non-null function pointer")(opaque, state_ptr as crate::stdlib::voidpf);
     clear_inflate_state(strm);
     crate::zlib_h::Z_OK
 }
