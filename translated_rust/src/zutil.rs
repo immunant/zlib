@@ -116,19 +116,27 @@ pub extern "C" fn zError(mut err: ::core::ffi::c_int) -> *const ::core::ffi::c_c
 pub unsafe extern "C" fn zError_ffi(mut err: ::core::ffi::c_int) -> *const ::core::ffi::c_char {
     zError(err)
 }
-pub unsafe extern "C" fn zcalloc(
+// `opaque` is deliberately ignored and every `uInt` size is valid for the
+// allocator, so Rust callers need no safety precondition to select zlib's
+// default allocation callback. The exported ABI wrapper below remains unsafe
+// for C callers.
+pub extern "C" fn zcalloc(
     _opaque: crate::stdlib::voidpf,
     mut items: ::core::ffi::c_uint,
     mut size: ::core::ffi::c_uint,
 ) -> crate::stdlib::voidpf {
-    return if ::core::mem::size_of::<crate::stdlib::uInt>() > 2 as usize {
-        crate::stdlib::malloc(items.wrapping_mul(size) as crate::__stddef_size_t_h::size_t)
-    } else {
-        crate::stdlib::calloc(
-            items as crate::__stddef_size_t_h::size_t,
-            size as crate::__stddef_size_t_h::size_t,
-        )
-    };
+    // SAFETY: `malloc` and `calloc` accept all size values; their result is
+    // returned untouched for the caller to handle according to the zlib ABI.
+    unsafe {
+        return if ::core::mem::size_of::<crate::stdlib::uInt>() > 2 as usize {
+            crate::stdlib::malloc(items.wrapping_mul(size) as crate::__stddef_size_t_h::size_t)
+        } else {
+            crate::stdlib::calloc(
+                items as crate::__stddef_size_t_h::size_t,
+                size as crate::__stddef_size_t_h::size_t,
+            )
+        };
+    }
 }
 #[export_name = "zcalloc"]
 
