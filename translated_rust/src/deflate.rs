@@ -2376,38 +2376,58 @@ fn pending_output_len(
 }
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
+struct PendingDrainState {
+    pending: crate::zutil_h::ulg,
+    pending_out_offset: usize,
+}
+
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
 struct FlushPendingResult {
     copied: ::core::ffi::c_uint,
-    remaining: crate::zutil_h::ulg,
+    next: PendingDrainState,
     avail_out: crate::stdlib::uInt,
     total_out: crate::stdlib::uLong,
     reset_pending_out: bool,
 }
 
 fn flush_pending_core(
-    pending: crate::zutil_h::ulg,
+    drain: PendingDrainState,
     avail_out: crate::stdlib::uInt,
     total_out: crate::stdlib::uLong,
 ) -> Option<FlushPendingResult> {
-    let copied = pending_output_len(pending, avail_out);
+    let copied = pending_output_len(drain.pending, avail_out);
     if copied == 0 {
         return None;
     }
-    let remaining = pending.wrapping_sub(copied as crate::zutil_h::ulg);
+    let remaining = drain.pending.wrapping_sub(copied as crate::zutil_h::ulg);
+    let reset_pending_out = remaining == 0;
     Some(FlushPendingResult {
         copied,
-        remaining,
+        next: PendingDrainState {
+            pending: remaining,
+            pending_out_offset: if reset_pending_out {
+                0
+            } else {
+                drain.pending_out_offset.wrapping_add(copied as usize)
+            },
+        },
         avail_out: avail_out.wrapping_sub(copied),
         total_out: total_out.wrapping_add(copied as crate::stdlib::uLong),
-        reset_pending_out: remaining == 0,
+        reset_pending_out,
     })
 }
 
 unsafe fn flush_pending(mut strm: crate::zlib_h::z_streamp) {
     let state = &mut *((*strm).state as *mut crate::src::deflate::deflate_state);
     crate::src::trees::_tr_flush_bits_ffi(state as *mut crate::src::deflate::internal_state);
-    let Some(result) = flush_pending_core(state.pending, (*strm).avail_out, (*strm).total_out)
-    else {
+    let Some(result) = flush_pending_core(
+        PendingDrainState {
+            pending: state.pending,
+            pending_out_offset: state.pending_out_offset,
+        },
+        (*strm).avail_out,
+        (*strm).total_out,
+    ) else {
         return;
     };
     crate::stdlib::memcpy(
@@ -2417,15 +2437,12 @@ unsafe fn flush_pending(mut strm: crate::zlib_h::z_streamp) {
     );
     (*strm).next_out = (*strm).next_out.wrapping_add(result.copied as usize);
     state.pending_out = state.pending_out.wrapping_add(result.copied as usize);
-    state.pending_out_offset = state
-        .pending_out_offset
-        .wrapping_add(result.copied as usize);
     (*strm).total_out = result.total_out;
     (*strm).avail_out = result.avail_out;
-    state.pending = result.remaining;
+    state.pending = result.next.pending;
+    state.pending_out_offset = result.next.pending_out_offset;
     if result.reset_pending_out {
         state.pending_out = state.pending_buf;
-        state.pending_out_offset = 0;
     }
 }
 
@@ -4640,7 +4657,7 @@ mod tests {
         stored_insert_after_input, symbol_buffer_is_full, symbol_triplet_cursors, zlib_header,
         DeflateFastMatchProgress, DeflateFinalFlushAction, DeflateMatchRefillAction,
         DeflatePreflight, DeflateRleRefillAction, DeflateRleTallyPlan, FlushPendingResult,
-        PendingStorageView, ReadBufChecksum, ReadBufResult,
+        PendingDrainState, PendingStorageView, ReadBufChecksum, ReadBufResult,
     };
 
     #[test]
@@ -5555,10 +5572,20 @@ mod tests {
     #[test]
     fn flush_pending_core_copies_partial_pending_output() {
         assert_eq!(
-            flush_pending_core(5, 3, 12),
+            flush_pending_core(
+                PendingDrainState {
+                    pending: 5,
+                    pending_out_offset: 7,
+                },
+                3,
+                12,
+            ),
             Some(FlushPendingResult {
                 copied: 3,
-                remaining: 2,
+                next: PendingDrainState {
+                    pending: 2,
+                    pending_out_offset: 10,
+                },
                 avail_out: 0,
                 total_out: 15,
                 reset_pending_out: false,
@@ -5569,10 +5596,20 @@ mod tests {
     #[test]
     fn flush_pending_core_copies_exact_pending_output() {
         assert_eq!(
-            flush_pending_core(3, 8, crate::stdlib::uLong::MAX),
+            flush_pending_core(
+                PendingDrainState {
+                    pending: 3,
+                    pending_out_offset: 7,
+                },
+                8,
+                crate::stdlib::uLong::MAX,
+            ),
             Some(FlushPendingResult {
                 copied: 3,
-                remaining: 0,
+                next: PendingDrainState {
+                    pending: 0,
+                    pending_out_offset: 0,
+                },
                 avail_out: 5,
                 total_out: 2,
                 reset_pending_out: true,
@@ -5582,7 +5619,17 @@ mod tests {
 
     #[test]
     fn flush_pending_core_is_a_zero_pending_no_op() {
-        assert_eq!(flush_pending_core(0, 3, 12), None);
+        assert_eq!(
+            flush_pending_core(
+                PendingDrainState {
+                    pending: 0,
+                    pending_out_offset: 7,
+                },
+                3,
+                12,
+            ),
+            None
+        );
     }
 
     #[test]
