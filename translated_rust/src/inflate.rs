@@ -330,74 +330,80 @@ pub unsafe extern "C" fn inflateReset2_ffi(
     };
     inflateReset2(strm, state, windowBits)
 }
+
+fn initialize_inflate_state_base(
+    state: &mut crate::src::inflate::inflate_state,
+    strm: &mut crate::zlib_h::z_stream,
+) {
+    state.strm = ::core::ptr::from_mut(strm);
+    state.window = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
+    state.mode = crate::src::inflate::HEAD;
+}
+
 pub fn inflateInit2_(
     strm: &mut crate::zlib_h::z_stream,
     mut windowBits: ::core::ffi::c_int,
     version: &::core::ffi::c_char,
     mut stream_size: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
-    // This legacy allocator/state bridge is the sole raw portion of the
-    // initializer. Callers use the safe named initializer below.
-    unsafe {
-        let mut ret: ::core::ffi::c_int = 0;
-        let mut state: *mut crate::src::inflate::inflate_state =
-            ::core::ptr::null_mut::<crate::src::inflate::inflate_state>();
-        if *version as ::core::ffi::c_int
-            != crate::zlib_h::ZLIB_VERSION[0 as ::core::ffi::c_int as usize]
-                as ::core::ffi::c_int
-            || stream_size
-                != ::core::mem::size_of::<crate::zlib_h::z_stream>() as ::core::ffi::c_int
-        {
-            return crate::zlib_h::Z_VERSION_ERROR;
-        }
-        strm.msg = ::core::ptr::null_mut::<::core::ffi::c_char>();
-        if strm.zalloc.is_none() {
-            strm.zalloc = Some(
-                crate::src::zutil::zcalloc
-                    as unsafe extern "C" fn(
-                        crate::stdlib::voidpf,
-                        ::core::ffi::c_uint,
-                        ::core::ffi::c_uint,
-                    ) -> crate::stdlib::voidpf,
-            ) as crate::zlib_h::alloc_func;
-            strm.opaque = ::core::ptr::null_mut::<::core::ffi::c_void>();
-        }
-        if strm.zfree.is_none() {
-            strm.zfree = Some(
-                crate::src::zutil::zcfree
-                    as unsafe extern "C" fn(crate::stdlib::voidpf, crate::stdlib::voidpf) -> (),
-            ) as crate::zlib_h::free_func;
-        }
-        state = Some(strm.zalloc.expect("non-null function pointer"))
+    if *version as ::core::ffi::c_int
+        != crate::zlib_h::ZLIB_VERSION[0 as ::core::ffi::c_int as usize]
+            as ::core::ffi::c_int
+        || stream_size != ::core::mem::size_of::<crate::zlib_h::z_stream>() as ::core::ffi::c_int
+    {
+        return crate::zlib_h::Z_VERSION_ERROR;
+    }
+    strm.msg = ::core::ptr::null_mut::<::core::ffi::c_char>();
+    if strm.zalloc.is_none() {
+        strm.zalloc = Some(
+            crate::src::zutil::zcalloc
+                as unsafe extern "C" fn(
+                    crate::stdlib::voidpf,
+                    ::core::ffi::c_uint,
+                    ::core::ffi::c_uint,
+                ) -> crate::stdlib::voidpf,
+        ) as crate::zlib_h::alloc_func;
+        strm.opaque = ::core::ptr::null_mut::<::core::ffi::c_void>();
+    }
+    if strm.zfree.is_none() {
+        strm.zfree = Some(
+            crate::src::zutil::zcfree
+                as unsafe extern "C" fn(crate::stdlib::voidpf, crate::stdlib::voidpf) -> (),
+        ) as crate::zlib_h::free_func;
+    }
+    // Custom allocation and the resulting raw state handle remain confined
+    // to this legacy bridge. The initialized state is otherwise configured
+    // through safe references below.
+    let state = unsafe {
+        Some(strm.zalloc.expect("non-null function pointer"))
             .expect("non-null function pointer")(
             strm.opaque,
             1 as crate::stdlib::uInt,
             ::core::mem::size_of::<crate::src::inflate::inflate_state>() as crate::stdlib::uInt,
-        ) as *mut crate::src::inflate::inflate_state;
-        if state.is_null() {
-            return crate::zlib_h::Z_MEM_ERROR;
-        }
+        ) as *mut crate::src::inflate::inflate_state
+    };
+    if state.is_null() {
+        return crate::zlib_h::Z_MEM_ERROR;
+    }
+    unsafe {
         crate::stdlib::memset(
             state as *mut ::core::ffi::c_void,
             0 as ::core::ffi::c_int,
             ::core::mem::size_of::<crate::src::inflate::inflate_state>(),
         );
-        strm.state = state as *mut crate::src::deflate::internal_state;
-        let state_ref = &mut *state;
-        state_ref.strm = ::core::ptr::from_mut(strm);
-        state_ref.window = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
-        state_ref.mode = crate::src::inflate::HEAD;
-        ret = inflateReset2(strm, state_ref, windowBits);
-        if ret != crate::zlib_h::Z_OK {
-            Some(strm.zfree.expect("non-null function pointer"))
-                .expect("non-null function pointer")(
-                strm.opaque,
-                state as crate::stdlib::voidpf,
-            );
-            strm.state = ::core::ptr::null_mut::<crate::src::deflate::internal_state>();
-        }
-        ret
     }
+    strm.state = state as *mut crate::src::deflate::internal_state;
+    let state_ref = unsafe { &mut *state };
+    initialize_inflate_state_base(state_ref, strm);
+    let ret = inflateReset2(strm, state_ref, windowBits);
+    if ret != crate::zlib_h::Z_OK {
+        unsafe {
+            Some(strm.zfree.expect("non-null function pointer"))
+                .expect("non-null function pointer")(strm.opaque, state as crate::stdlib::voidpf);
+        }
+        strm.state = ::core::ptr::null_mut::<crate::src::deflate::internal_state>();
+    }
+    ret
 }
 #[export_name = "inflateInit2_"]
 
