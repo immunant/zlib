@@ -316,20 +316,37 @@ fn finish_inflate_fast(
     publish_inflate_fast_result(strm, input, output, result);
 }
 
+// `inflate_fast()` is normally entered only from an inflater that has at
+// least the fast loop's six input bytes and 258 output bytes available. Keep
+// that internal contract explicit before the raw cursor adapter constructs
+// its views. In addition to documenting the loop's indexing assumptions,
+// this prevents a direct ABI call with incomplete cursors from doing cursor
+// arithmetic at all.
+fn inflate_fast_cursor_lengths(
+    strm: &crate::zlib_h::z_stream,
+    start: ::core::ffi::c_uint,
+) -> Option<(usize, usize)> {
+    if strm.avail_in < 6 || strm.avail_out < 258 {
+        return None;
+    }
+    let used = start.checked_sub(strm.avail_out)? as usize;
+    let output_len = used.checked_add(strm.avail_out as usize)?;
+    Some((used, output_len))
+}
+
 // Once its caller has bound the stream cursors, the fast decoder is entirely
 // reference- and slice-based. Keeping the cursor binding in the adapter
 // below removes raw pointer work from this core implementation.
 fn inflate_fast_slices(
     strm: &mut crate::zlib_h::z_stream,
     state: &mut crate::src::inflate::inflate_state,
-    mut start: ::core::ffi::c_uint,
+    used: usize,
     input: &[crate::stdlib::Bytef],
     output: &mut [crate::stdlib::Bytef],
 ) {
     // The cursor adapter already validated the stream/state pair. Snapshot
     // the scalar fast-loop state before its bounded decode pass.
     let mut fast_state = InflateFastState::from(&*state);
-    let used = start.wrapping_sub(strm.avail_out) as usize;
     let result = crate::src::inflate::updatewindow(
         strm,
         state,
@@ -374,7 +391,12 @@ pub fn inflate_fast(
     let Some((strm, state)) = crate::src::inflate::inflateStateCheck(strm) else {
         return;
     };
-    let used = start.wrapping_sub(strm.avail_out) as usize;
+    let Some((used, output_len)) = inflate_fast_cursor_lengths(strm, start) else {
+        return;
+    };
+    if strm.next_in.is_null() || strm.next_out.is_null() {
+        return;
+    }
     let input = if strm.avail_in == 0 {
         &[]
     } else {
@@ -382,7 +404,6 @@ pub fn inflate_fast(
         // bytes at this cursor.
         unsafe { ::core::slice::from_raw_parts(strm.next_in, strm.avail_in as usize) }
     };
-    let output_len = used + strm.avail_out as usize;
     let output = if output_len == 0 {
         &mut []
     } else {
@@ -390,7 +411,7 @@ pub fn inflate_fast(
         // plus `avail_out` remaining bytes, one writable output range.
         unsafe { ::core::slice::from_raw_parts_mut(strm.next_out.wrapping_sub(used), output_len) }
     };
-    inflate_fast_slices(strm, state, start, input, output)
+    inflate_fast_slices(strm, state, used, input, output)
 }
 
 #[export_name = "inflate_fast"]
