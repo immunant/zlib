@@ -597,6 +597,96 @@ fn gz_reset(state: &mut crate::gzguts_h::gz_state) {
     state.strm.avail_in = 0 as crate::stdlib::uInt;
 }
 
+struct GzOpenMode {
+    oflag: ::core::ffi::c_int,
+    exclusive: ::core::ffi::c_int,
+}
+
+// Keep the constructor's state-only setup separate from allocation and C
+// string traversal in gz_open().
+fn gz_open_init(state: &mut crate::gzguts_h::gz_state) {
+    state.size = 0;
+    state.want = crate::gzguts_h::GZBUFSIZE as ::core::ffi::c_uint;
+    state.err = crate::zlib_h::Z_OK;
+    state.msg = ::core::ptr::null_mut::<::core::ffi::c_char>();
+    state.mode = crate::gzguts_h::GZ_NONE;
+    state.level = crate::zlib_h::Z_DEFAULT_COMPRESSION;
+    state.strategy = crate::zlib_h::Z_DEFAULT_STRATEGY;
+    state.direct = 0;
+}
+
+// Apply one mode character without coupling interpretation to the raw mode
+// string cursor used by the public FFI constructor.
+fn gz_open_mode_byte(
+    state: &mut crate::gzguts_h::gz_state,
+    options: &mut GzOpenMode,
+    mode: ::core::ffi::c_uchar,
+) -> bool {
+    if mode >= b'0' && mode <= b'9' {
+        state.level = (mode - b'0') as ::core::ffi::c_int;
+        return true;
+    }
+    match mode {
+        b'r' => state.mode = crate::gzguts_h::GZ_READ,
+        b'w' => state.mode = crate::gzguts_h::GZ_WRITE,
+        b'a' => state.mode = crate::gzguts_h::GZ_APPEND,
+        b'+' => return false,
+        b'e' => options.oflag |= crate::stdlib::O_CLOEXEC,
+        b'x' => options.exclusive = 1,
+        b'f' => state.strategy = crate::zlib_h::Z_FILTERED,
+        b'h' => state.strategy = crate::zlib_h::Z_HUFFMAN_ONLY,
+        b'R' => state.strategy = crate::zlib_h::Z_RLE,
+        b'F' => state.strategy = crate::zlib_h::Z_FIXED,
+        b'G' => state.direct = -1,
+        b'N' => options.oflag |= crate::stdlib::O_NONBLOCK,
+        b'T' => state.direct = 1,
+        _ => {}
+    }
+    true
+}
+
+// Validate the parsed mode and apply the read-mode transparent default.
+fn gz_open_finish_mode(state: &mut crate::gzguts_h::gz_state) -> bool {
+    if state.mode == crate::gzguts_h::GZ_NONE {
+        return false;
+    }
+    if state.mode == crate::gzguts_h::GZ_READ {
+        if state.direct == 1 {
+            return false;
+        }
+        if state.direct == 0 {
+            state.direct = 1;
+        }
+    } else if state.direct == -1 {
+        return false;
+    }
+    true
+}
+
+fn gz_open_flags(
+    state: &crate::gzguts_h::gz_state,
+    options: &GzOpenMode,
+) -> ::core::ffi::c_int {
+    options.oflag
+        | crate::stdlib::O_LARGEFILE
+        | if state.mode == crate::gzguts_h::GZ_READ {
+            crate::stdlib::O_RDONLY
+        } else {
+            crate::stdlib::O_WRONLY
+                | crate::stdlib::O_CREAT
+                | if options.exclusive != 0 {
+                    crate::stdlib::O_EXCL
+                } else {
+                    0
+                }
+                | if state.mode == crate::gzguts_h::GZ_WRITE {
+                    crate::stdlib::O_TRUNC
+                } else {
+                    crate::stdlib::O_APPEND
+                }
+        }
+}
+
 unsafe extern "C" fn gz_open(
     mut path: *const ::core::ffi::c_void,
     mut fd: ::core::ffi::c_int,
@@ -605,8 +695,10 @@ unsafe extern "C" fn gz_open(
     let mut state: crate::gzguts_h::gz_statep =
         ::core::ptr::null_mut::<crate::gzguts_h::gz_state>();
     let mut len: crate::stdlib::z_size_t = 0;
-    let mut oflag: ::core::ffi::c_int = 0 as ::core::ffi::c_int;
-    let mut exclusive: ::core::ffi::c_int = 0 as ::core::ffi::c_int;
+    let mut options = GzOpenMode {
+        oflag: 0,
+        exclusive: 0,
+    };
     if path.is_null() || mode.is_null() {
         return ::core::ptr::null_mut::<crate::zlib_h::gzFile_s>();
     }
@@ -616,79 +708,15 @@ unsafe extern "C" fn gz_open(
         return ::core::ptr::null_mut::<crate::zlib_h::gzFile_s>();
     }
     let state_ref = &mut *state;
-    state_ref.size = 0 as ::core::ffi::c_uint;
-    state_ref.want = crate::gzguts_h::GZBUFSIZE as ::core::ffi::c_uint;
-    state_ref.err = crate::zlib_h::Z_OK;
-    state_ref.msg = ::core::ptr::null_mut::<::core::ffi::c_char>();
-    state_ref.mode = crate::gzguts_h::GZ_NONE;
-    state_ref.level = crate::zlib_h::Z_DEFAULT_COMPRESSION;
-    state_ref.strategy = crate::zlib_h::Z_DEFAULT_STRATEGY;
-    state_ref.direct = 0 as ::core::ffi::c_int;
+    gz_open_init(state_ref);
     while *mode != 0 {
-        if *mode as ::core::ffi::c_int >= '0' as ::core::ffi::c_int
-            && *mode as ::core::ffi::c_int <= '9' as ::core::ffi::c_int
-        {
-            state_ref.level = *mode as ::core::ffi::c_int - '0' as ::core::ffi::c_int;
-        } else {
-            match *mode as ::core::ffi::c_int {
-                114 => {
-                    state_ref.mode = crate::gzguts_h::GZ_READ;
-                }
-                119 => {
-                    state_ref.mode = crate::gzguts_h::GZ_WRITE;
-                }
-                97 => {
-                    state_ref.mode = crate::gzguts_h::GZ_APPEND;
-                }
-                43 => {
-                    crate::stdlib::free(state as *mut ::core::ffi::c_void);
-                    return ::core::ptr::null_mut::<crate::zlib_h::gzFile_s>();
-                }
-                101 => {
-                    oflag |= crate::stdlib::O_CLOEXEC;
-                }
-                120 => {
-                    exclusive = 1 as ::core::ffi::c_int;
-                }
-                102 => {
-                    state_ref.strategy = crate::zlib_h::Z_FILTERED;
-                }
-                104 => {
-                    state_ref.strategy = crate::zlib_h::Z_HUFFMAN_ONLY;
-                }
-                82 => {
-                    state_ref.strategy = crate::zlib_h::Z_RLE;
-                }
-                70 => {
-                    state_ref.strategy = crate::zlib_h::Z_FIXED;
-                }
-                71 => {
-                    state_ref.direct = -1 as ::core::ffi::c_int;
-                }
-                78 => {
-                    oflag |= crate::stdlib::O_NONBLOCK;
-                }
-                84 => {
-                    state_ref.direct = 1 as ::core::ffi::c_int;
-                }
-                98 | _ => {}
-            }
-        }
-        mode = mode.offset(1);
-    }
-    if state_ref.mode == crate::gzguts_h::GZ_NONE {
-        crate::stdlib::free(state as *mut ::core::ffi::c_void);
-        return ::core::ptr::null_mut::<crate::zlib_h::gzFile_s>();
-    }
-    if state_ref.mode == crate::gzguts_h::GZ_READ {
-        if state_ref.direct == 1 as ::core::ffi::c_int {
+        if !gz_open_mode_byte(state_ref, &mut options, *mode as ::core::ffi::c_uchar) {
             crate::stdlib::free(state as *mut ::core::ffi::c_void);
             return ::core::ptr::null_mut::<crate::zlib_h::gzFile_s>();
         }
-        if state_ref.direct == 0 as ::core::ffi::c_int {
-            state_ref.direct = 1 as ::core::ffi::c_int;
-        }
-    } else if state_ref.direct == -1 as ::core::ffi::c_int {
+        mode = mode.offset(1);
+    }
+    if !gz_open_finish_mode(state_ref) {
         crate::stdlib::free(state as *mut ::core::ffi::c_void);
         return ::core::ptr::null_mut::<crate::zlib_h::gzFile_s>();
     }
@@ -708,23 +736,7 @@ unsafe extern "C" fn gz_open(
         b"%s\0".as_ptr() as *const ::core::ffi::c_char,
         path as *const ::core::ffi::c_char,
     );
-    oflag |= crate::stdlib::O_LARGEFILE
-        | (if state_ref.mode == crate::gzguts_h::GZ_READ {
-            crate::stdlib::O_RDONLY
-        } else {
-            crate::stdlib::O_WRONLY
-                | crate::stdlib::O_CREAT
-                | (if exclusive != 0 {
-                    crate::stdlib::O_EXCL
-                } else {
-                    0 as ::core::ffi::c_int
-                })
-                | (if state_ref.mode == crate::gzguts_h::GZ_WRITE {
-                    crate::stdlib::O_TRUNC
-                } else {
-                    crate::stdlib::O_APPEND
-                })
-        });
+    let oflag = gz_open_flags(state_ref, &options);
     if fd == -1 as ::core::ffi::c_int {
         state_ref.fd = crate::stdlib::open(
             path as *const ::core::ffi::c_char,
