@@ -638,12 +638,162 @@ impl DeflateCallbackStorageOwner {
     }
 }
 
-// The legacy tree bit exports hold only an opaque deflate-state handle.  Keep
+// The opaque legacy tree adapter lends this pointer-free view to the tree
+// action core.  In particular, it deliberately contains neither a callback
+// allocation handle nor an ABI-shaped deflate state, so bit output cannot
+// reconstruct callback storage after the adapter's bounded projection.
+pub(crate) struct DeflateTreeState<'state> {
+    data_type: &'state mut ::core::ffi::c_int,
+    level: ::core::ffi::c_int,
+    strategy: ::core::ffi::c_int,
+    pending: &'state mut crate::zutil_h::ulg,
+    bi_buf: &'state mut crate::zutil_h::ush,
+    bi_valid: &'state mut ::core::ffi::c_int,
+    bi_used: &'state mut ::core::ffi::c_int,
+    dyn_ltree: &'state mut [crate::src::deflate::ct_data_s; 573],
+    dyn_dtree: &'state mut [crate::src::deflate::ct_data_s; 61],
+    bl_tree: &'state mut [crate::src::deflate::ct_data_s; 39],
+    l_desc: &'state mut crate::src::deflate::tree_desc_s,
+    d_desc: &'state mut crate::src::deflate::tree_desc_s,
+    bl_desc: &'state mut crate::src::deflate::tree_desc_s,
+    heap: &'state mut [::core::ffi::c_int; 573],
+    heap_len: &'state mut ::core::ffi::c_int,
+    heap_max: &'state mut ::core::ffi::c_int,
+    depth: &'state mut [crate::zutil_h::uch; 573],
+    bl_count: &'state mut [crate::zutil_h::ush; 16],
+    opt_len: &'state mut crate::zutil_h::ulg,
+    static_len: &'state mut crate::zutil_h::ulg,
+    matches: &'state mut crate::stdlib::uInt,
+    sym_buf_start: usize,
+    sym_next: &'state mut crate::stdlib::uInt,
+    sym_end: crate::stdlib::uInt,
+}
+
+// Tree bit output is a bounded byte/tree operation once its caller has
+// projected the callback-owned pending allocation and scalar tree state.
+pub(crate) fn deflate_tree_bit_output(
+    state: DeflateTreeState<'_>,
+    pending_buf: &mut [crate::stdlib::Bytef],
+    action: crate::src::trees::BitOutputAction<'_>,
+) -> ::core::ffi::c_int {
+    let DeflateTreeState {
+        data_type,
+        level,
+        strategy,
+        pending,
+        bi_buf,
+        bi_valid,
+        bi_used,
+        dyn_ltree,
+        dyn_dtree,
+        bl_tree,
+        l_desc,
+        d_desc,
+        bl_desc,
+        heap,
+        heap_len,
+        heap_max,
+        depth,
+        bl_count,
+        opt_len,
+        static_len,
+        matches,
+        sym_buf_start,
+        sym_next,
+        sym_end,
+    } = state;
+    match action {
+        action @ (crate::src::trees::BitOutputAction::Flush
+        | crate::src::trees::BitOutputAction::Windup
+        | crate::src::trees::BitOutputAction::Align) => {
+            crate::src::trees::bi_flush_or_windup(
+                crate::src::trees::BitOutputState {
+                    pending_buf,
+                    pending,
+                    bi_buf,
+                    bi_valid,
+                    bi_used,
+                },
+                action,
+            );
+            0
+        }
+        crate::src::trees::BitOutputAction::Stored {
+            input,
+            stored_len,
+            last,
+        } => {
+            crate::src::trees::stored_block_bytes(
+                pending_buf,
+                pending,
+                bi_buf,
+                bi_valid,
+                bi_used,
+                input,
+                stored_len,
+                last,
+            );
+            0
+        }
+        crate::src::trees::BitOutputAction::Block {
+            input,
+            stored_len,
+            last,
+        } => {
+            let data_type = (level > 0).then_some(data_type);
+            crate::src::trees::flush_block_from_views(
+                data_type,
+                crate::src::trees::BlockFlushState {
+                    level,
+                    strategy,
+                    pending_buf,
+                    pending,
+                    bi_buf,
+                    bi_valid,
+                    bi_used,
+                    dyn_ltree,
+                    dyn_dtree,
+                    bl_tree,
+                    l_desc,
+                    d_desc,
+                    bl_desc,
+                    heap,
+                    heap_len,
+                    heap_max,
+                    depth,
+                    bl_count,
+                    opt_len,
+                    static_len,
+                    matches,
+                    sym_buf_start,
+                    sym_next,
+                },
+                input,
+                stored_len,
+                last,
+            );
+            0
+        }
+        crate::src::trees::BitOutputAction::Tally { dist, lc } => crate::src::trees::_tr_tally(
+            crate::src::trees::TallyState {
+                sym_buf: &mut pending_buf[sym_buf_start..],
+                sym_next,
+                sym_end,
+                dyn_ltree,
+                dyn_dtree,
+                matches,
+            },
+            dist,
+            lc,
+        ),
+    }
+}
+
+// The legacy tree bit exports hold only an opaque deflate-state handle. Keep
 // their one callback-backed pending-buffer projection beside the callback
-// lifecycle owner, then hand the tree code the same bounded pointer-free view
-// used by the stream adapter.  Tree code must not reconstruct this view from
-// callback storage itself.
-pub(crate) unsafe fn deflate_tree_bit_output(
+// lifecycle owner, then lend the tree core the bounded pointer-free view.
+// Tree code must not reconstruct this view from callback storage itself.
+pub(crate) unsafe fn deflate_tree_bit_output_from_state(
     state: &mut crate::src::deflate::deflate_state,
     action: crate::src::trees::BitOutputAction<'_>,
 ) -> ::core::ffi::c_int {
@@ -662,98 +812,36 @@ pub(crate) unsafe fn deflate_tree_bit_output(
         .pending_storage(Some(pending))
         .expect("initialized pending storage projection")
         .pending_buf;
-    match action {
-        action @ (crate::src::trees::BitOutputAction::Flush
-        | crate::src::trees::BitOutputAction::Windup
-        | crate::src::trees::BitOutputAction::Align) => {
-            crate::src::trees::bi_flush_or_windup(
-                crate::src::trees::BitOutputState {
-                    pending_buf,
-                    pending: &mut state.pending,
-                    bi_buf: &mut state.bi_buf,
-                    bi_valid: &mut state.bi_valid,
-                    bi_used: &mut state.bi_used,
-                },
-                action,
-            );
-            0
-        }
-        crate::src::trees::BitOutputAction::Stored {
-            input,
-            stored_len,
-            last,
-        } => {
-            crate::src::trees::stored_block_bytes(
-                pending_buf,
-                &mut state.pending,
-                &mut state.bi_buf,
-                &mut state.bi_valid,
-                &mut state.bi_used,
-                input,
-                stored_len,
-                last,
-            );
-            0
-        }
-        crate::src::trees::BitOutputAction::Block {
-            input,
-            stored_len,
-            last,
-        } => {
-            let data_type = if state.level > 0 {
-                Some(&mut state.data_type)
-            } else {
-                None
-            };
-            crate::src::trees::flush_block_from_views(
-                data_type,
-                crate::src::trees::BlockFlushState {
-                    level: state.level,
-                    strategy: state.strategy,
-                    pending_buf,
-                    pending: &mut state.pending,
-                    bi_buf: &mut state.bi_buf,
-                    bi_valid: &mut state.bi_valid,
-                    bi_used: &mut state.bi_used,
-                    dyn_ltree: &mut state.dyn_ltree,
-                    dyn_dtree: &mut state.dyn_dtree,
-                    bl_tree: &mut state.bl_tree,
-                    l_desc: &mut state.l_desc,
-                    d_desc: &mut state.d_desc,
-                    bl_desc: &mut state.bl_desc,
-                    heap: &mut state.heap,
-                    heap_len: &mut state.heap_len,
-                    heap_max: &mut state.heap_max,
-                    depth: &mut state.depth,
-                    bl_count: &mut state.bl_count,
-                    opt_len: &mut state.opt_len,
-                    static_len: &mut state.static_len,
-                    matches: &mut state.matches,
-                    sym_buf_start: state.sym_buf_start,
-                    sym_next: &mut state.sym_next,
-                },
-                input,
-                stored_len,
-                last,
-            );
-            0
-        }
-        crate::src::trees::BitOutputAction::Tally { dist, lc } => {
-            let sym_buf_start = state.sym_buf_start;
-            crate::src::trees::_tr_tally(
-                crate::src::trees::TallyState {
-                    sym_buf: &mut pending_buf[sym_buf_start..],
-                    sym_next: &mut state.sym_next,
-                    sym_end: state.sym_end,
-                    dyn_ltree: &mut state.dyn_ltree,
-                    dyn_dtree: &mut state.dyn_dtree,
-                    matches: &mut state.matches,
-                },
-                dist,
-                lc,
-            )
-        }
-    }
+    deflate_tree_bit_output(
+        DeflateTreeState {
+            data_type: &mut state.data_type,
+            level: state.level,
+            strategy: state.strategy,
+            pending: &mut state.pending,
+            bi_buf: &mut state.bi_buf,
+            bi_valid: &mut state.bi_valid,
+            bi_used: &mut state.bi_used,
+            dyn_ltree: &mut state.dyn_ltree,
+            dyn_dtree: &mut state.dyn_dtree,
+            bl_tree: &mut state.bl_tree,
+            l_desc: &mut state.l_desc,
+            d_desc: &mut state.d_desc,
+            bl_desc: &mut state.bl_desc,
+            heap: &mut state.heap,
+            heap_len: &mut state.heap_len,
+            heap_max: &mut state.heap_max,
+            depth: &mut state.depth,
+            bl_count: &mut state.bl_count,
+            opt_len: &mut state.opt_len,
+            static_len: &mut state.static_len,
+            matches: &mut state.matches,
+            sym_buf_start: state.sym_buf_start,
+            sym_next: &mut state.sym_next,
+            sym_end: state.sym_end,
+        },
+        pending_buf,
+        action,
+    )
 }
 
 // This complete decision is pointer-free. The one callback boundary pairs

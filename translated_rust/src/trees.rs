@@ -3256,7 +3256,7 @@ pub unsafe extern "C" fn _tr_stored_block_ffi(
     } else {
         ::core::slice::from_raw_parts(buf as *const crate::stdlib::Bytef, stored_len as usize)
     };
-    crate::src::deflate::deflate_tree_bit_output(
+    crate::src::deflate::deflate_tree_bit_output_from_state(
         state,
         BitOutputAction::Stored {
             input,
@@ -3271,7 +3271,7 @@ pub unsafe extern "C" fn _tr_flush_bits_ffi(mut s: *mut crate::src::deflate::def
     let Some(state) = s.as_mut() else {
         return;
     };
-    crate::src::deflate::deflate_tree_bit_output(state, BitOutputAction::Flush);
+    crate::src::deflate::deflate_tree_bit_output_from_state(state, BitOutputAction::Flush);
 }
 #[export_name = "_tr_align"]
 
@@ -3279,7 +3279,7 @@ pub unsafe extern "C" fn _tr_align_ffi(mut s: *mut crate::src::deflate::deflate_
     let Some(state) = s.as_mut() else {
         return;
     };
-    crate::src::deflate::deflate_tree_bit_output(state, BitOutputAction::Align);
+    crate::src::deflate::deflate_tree_bit_output_from_state(state, BitOutputAction::Align);
 }
 fn compress_block(
     pending_buf: &mut [crate::stdlib::Bytef],
@@ -3712,7 +3712,7 @@ pub unsafe extern "C" fn _tr_flush_block(
             stored_len as usize,
         ))
     };
-    crate::src::deflate::deflate_tree_bit_output(
+    crate::src::deflate::deflate_tree_bit_output_from_state(
         state,
         BitOutputAction::Block {
             input,
@@ -3812,5 +3812,8 @@ pub unsafe extern "C" fn _tr_tally_ffi(
     let Some(state) = s.as_mut() else {
         return 0;
     };
-    crate::src::deflate::deflate_tree_bit_output(state, BitOutputAction::Tally { dist, lc })
+    crate::src::deflate::deflate_tree_bit_output_from_state(
+        state,
+        BitOutputAction::Tally { dist, lc },
+    )
 }
