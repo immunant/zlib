@@ -955,6 +955,68 @@ fn deflate_literal_tally_plan(
     }
 }
 
+/// Record one match in the bounded symbol view and update its dynamic-tree
+/// frequencies.  The caller owns the short-lived callback-storage view; this
+/// core never derives an interior symbol pointer from the deflate state.
+fn deflate_tally_match(
+    storage: &mut PendingStorageView<'_>,
+    state: &mut crate::src::deflate::deflate_state,
+    match_length: crate::stdlib::uInt,
+    strstart: crate::stdlib::uInt,
+    match_start: crate::stdlib::uInt,
+) -> bool {
+    let (length, distance) = deflate_fast_match_codes(match_length, strstart, match_start);
+    let distance_minus_one = distance.wrapping_sub(1);
+    let length_tree_index = deflate_length_tree_index(length);
+    let distance_tree_index = deflate_distance_tree_code(distance_minus_one) as usize;
+    let (cursors, next_sym) = symbol_triplet_cursors(state.sym_next);
+    let symbol_bytes = [
+        distance as crate::zutil_h::uchf,
+        (distance as ::core::ffi::c_int >> 8) as crate::zutil_h::uchf,
+        length as crate::zutil_h::uchf,
+    ];
+
+    // Validate every destination before changing either the symbol stream or
+    // a frequency.  A malformed bounded view is therefore rejected without
+    // leaving a half-recorded tally behind.
+    if state.dyn_ltree.get(length_tree_index).is_none()
+        || state.dyn_dtree.get(distance_tree_index).is_none()
+        || !storage.write_symbol_triplet(cursors, symbol_bytes)
+    {
+        return false;
+    }
+
+    state.sym_next = next_sym;
+    state.dyn_ltree[length_tree_index].fc.value =
+        state.dyn_ltree[length_tree_index].fc.value.wrapping_add(1);
+    state.dyn_dtree[distance_tree_index].fc.value = state.dyn_dtree[distance_tree_index]
+        .fc
+        .value
+        .wrapping_add(1);
+    true
+}
+
+/// Record one literal in the bounded symbol view and update its frequency.
+fn deflate_tally_literal(
+    storage: &mut PendingStorageView<'_>,
+    state: &mut crate::src::deflate::deflate_state,
+    literal: crate::zutil_h::uch,
+) -> bool {
+    let tally = deflate_literal_tally_plan(literal, state.sym_next);
+    if state.dyn_ltree.get(tally.literal_tree_index).is_none()
+        || !storage.write_symbol_triplet(tally.cursors, tally.symbol_bytes)
+    {
+        return false;
+    }
+
+    state.sym_next = tally.next_sym;
+    state.dyn_ltree[tally.literal_tree_index].fc.value = state.dyn_ltree[tally.literal_tree_index]
+        .fc
+        .value
+        .wrapping_add(1);
+    true
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum DeflateRleRefillAction {
     Continue,
@@ -4810,11 +4872,6 @@ unsafe extern "C" fn deflate_fast(
 ) -> block_state {
     let mut hash_head: crate::src::deflate::IPos = 0;
     let mut bflush: ::core::ffi::c_int = 0;
-    let symbol_base = (*s)
-        .pending_buf
-        .expect("validated pending storage")
-        .as_ptr()
-        .wrapping_add((*s).sym_buf_offset);
     loop {
         if (*s).lookahead < crate::src::deflate::MIN_LOOKAHEAD as crate::stdlib::uInt {
             fill_window(s);
@@ -4841,27 +4898,28 @@ unsafe extern "C" fn deflate_fast(
             (*s).match_length = longest_match(s, hash_head);
         }
         if (*s).match_length >= crate::zutil_h::MIN_MATCH as crate::stdlib::uInt {
-            let (len, mut dist) =
-                deflate_fast_match_codes((*s).match_length, (*s).strstart, (*s).match_start);
-            let c2rust_fresh47 = (*s).sym_next;
-            (*s).sym_next = (*s).sym_next.wrapping_add(1);
-            *symbol_base.wrapping_add(c2rust_fresh47 as usize) =
-                dist as crate::zutil_h::uch as crate::zutil_h::uchf;
-            let c2rust_fresh48 = (*s).sym_next;
-            (*s).sym_next = (*s).sym_next.wrapping_add(1);
-            *symbol_base.wrapping_add(c2rust_fresh48 as usize) =
-                (dist as ::core::ffi::c_int >> 8 as ::core::ffi::c_int) as crate::zutil_h::uch
-                    as crate::zutil_h::uchf;
-            let c2rust_fresh49 = (*s).sym_next;
-            (*s).sym_next = (*s).sym_next.wrapping_add(1);
-            *symbol_base.wrapping_add(c2rust_fresh49 as usize) = len as crate::zutil_h::uchf;
-            dist = dist.wrapping_sub(1);
-            let length_tree_index = deflate_length_tree_index(len);
-            (*s).dyn_ltree[length_tree_index].fc.value =
-                (*s).dyn_ltree[length_tree_index].fc.value.wrapping_add(1);
-            let distance_code = deflate_distance_tree_code(dist) as usize;
-            (*s).dyn_dtree[distance_code].fc.value =
-                (*s).dyn_dtree[distance_code].fc.value.wrapping_add(1);
+            let state = &mut *s;
+            let layout =
+                pending_storage_layout_for_state(state).expect("validated pending storage layout");
+            let pending = &mut *core::ptr::slice_from_raw_parts_mut(
+                state
+                    .pending_buf
+                    .expect("validated pending storage")
+                    .as_ptr(),
+                layout.total_len,
+            );
+            let mut storage = PendingStorageView::new(pending, layout)
+                .expect("pending storage layout matches its allocation");
+            if !deflate_tally_match(
+                &mut storage,
+                state,
+                state.match_length,
+                state.strstart,
+                state.match_start,
+            ) {
+                return need_more;
+            }
+            drop(storage);
             bflush = symbol_buffer_is_full((*s).sym_next, (*s).sym_end) as ::core::ffi::c_int;
             let progress = deflate_fast_match_progress(
                 (*s).match_length,
@@ -4906,13 +4964,22 @@ unsafe extern "C" fn deflate_fast(
         } else {
             let mut cc: crate::zutil_h::uch =
                 *(*s).window.offset((*s).strstart as isize) as crate::zutil_h::uch;
-            let (cursors, next) = symbol_triplet_cursors((*s).sym_next);
-            (*s).sym_next = next;
-            *symbol_base.wrapping_add(cursors[0] as usize) = 0 as crate::zutil_h::uchf;
-            *symbol_base.wrapping_add(cursors[1] as usize) = 0 as crate::zutil_h::uchf;
-            *symbol_base.wrapping_add(cursors[2] as usize) = cc as crate::zutil_h::uchf;
-            (*s).dyn_ltree[cc as usize].fc.value =
-                (*s).dyn_ltree[cc as usize].fc.value.wrapping_add(1);
+            let state = &mut *s;
+            let layout =
+                pending_storage_layout_for_state(state).expect("validated pending storage layout");
+            let pending = &mut *core::ptr::slice_from_raw_parts_mut(
+                state
+                    .pending_buf
+                    .expect("validated pending storage")
+                    .as_ptr(),
+                layout.total_len,
+            );
+            let mut storage = PendingStorageView::new(pending, layout)
+                .expect("pending storage layout matches its allocation");
+            if !deflate_tally_literal(&mut storage, state, cc) {
+                return need_more;
+            }
+            drop(storage);
             bflush = symbol_buffer_is_full((*s).sym_next, (*s).sym_end) as ::core::ffi::c_int;
             ((*s).lookahead, (*s).strstart) =
                 deflate_literal_state_after_emit((*s).lookahead, (*s).strstart);
@@ -5021,11 +5088,6 @@ unsafe extern "C" fn deflate_slow(
 ) -> block_state {
     let mut hash_head: crate::src::deflate::IPos = 0;
     let mut bflush: ::core::ffi::c_int = 0;
-    let symbol_base = (*s)
-        .pending_buf
-        .expect("validated pending storage")
-        .as_ptr()
-        .wrapping_add((*s).sym_buf_offset);
     loop {
         if (*s).lookahead < crate::src::deflate::MIN_LOOKAHEAD as crate::stdlib::uInt {
             fill_window(s);
@@ -5073,31 +5135,28 @@ unsafe extern "C" fn deflate_slow(
         if deflate_slow_should_emit_previous_match((*s).prev_length, (*s).match_length) {
             let mut max_insert: crate::stdlib::uInt =
                 deflate_slow_max_insert((*s).strstart, (*s).lookahead);
-            let mut len: crate::zutil_h::uch =
-                (*s).prev_length.wrapping_sub(3 as crate::stdlib::uInt) as crate::zutil_h::uch;
-            let mut dist: crate::zutil_h::ush = ((*s).strstart as crate::src::deflate::IPos)
-                .wrapping_sub(1 as crate::src::deflate::IPos)
-                .wrapping_sub((*s).prev_match)
-                as crate::zutil_h::ush;
-            let c2rust_fresh36 = (*s).sym_next;
-            (*s).sym_next = (*s).sym_next.wrapping_add(1);
-            *symbol_base.wrapping_add(c2rust_fresh36 as usize) =
-                dist as crate::zutil_h::uch as crate::zutil_h::uchf;
-            let c2rust_fresh37 = (*s).sym_next;
-            (*s).sym_next = (*s).sym_next.wrapping_add(1);
-            *symbol_base.wrapping_add(c2rust_fresh37 as usize) =
-                (dist as ::core::ffi::c_int >> 8 as ::core::ffi::c_int) as crate::zutil_h::uch
-                    as crate::zutil_h::uchf;
-            let c2rust_fresh38 = (*s).sym_next;
-            (*s).sym_next = (*s).sym_next.wrapping_add(1);
-            *symbol_base.wrapping_add(c2rust_fresh38 as usize) = len as crate::zutil_h::uchf;
-            dist = dist.wrapping_sub(1);
-            let length_tree_index = deflate_length_tree_index(len);
-            (*s).dyn_ltree[length_tree_index].fc.value =
-                (*s).dyn_ltree[length_tree_index].fc.value.wrapping_add(1);
-            let distance_code = deflate_distance_tree_code(dist) as usize;
-            (*s).dyn_dtree[distance_code].fc.value =
-                (*s).dyn_dtree[distance_code].fc.value.wrapping_add(1);
+            let state = &mut *s;
+            let layout =
+                pending_storage_layout_for_state(state).expect("validated pending storage layout");
+            let pending = &mut *core::ptr::slice_from_raw_parts_mut(
+                state
+                    .pending_buf
+                    .expect("validated pending storage")
+                    .as_ptr(),
+                layout.total_len,
+            );
+            let mut storage = PendingStorageView::new(pending, layout)
+                .expect("pending storage layout matches its allocation");
+            if !deflate_tally_match(
+                &mut storage,
+                state,
+                state.prev_length,
+                state.strstart.wrapping_sub(1),
+                state.prev_match as crate::stdlib::uInt,
+            ) {
+                return need_more;
+            }
+            drop(storage);
             bflush = symbol_buffer_is_full((*s).sym_next, (*s).sym_end) as ::core::ffi::c_int;
             (*s).lookahead = (*s)
                 .lookahead
@@ -5157,16 +5216,22 @@ unsafe extern "C" fn deflate_slow(
                 .window
                 .offset((*s).strstart.wrapping_sub(1 as crate::stdlib::uInt) as isize)
                 as crate::zutil_h::uch;
-            let tally = deflate_literal_tally_plan(cc, (*s).sym_next);
-            (*s).sym_next = tally.next_sym;
-            *symbol_base.wrapping_add(tally.cursors[0] as usize) = tally.symbol_bytes[0];
-            *symbol_base.wrapping_add(tally.cursors[1] as usize) = tally.symbol_bytes[1];
-            *symbol_base.wrapping_add(tally.cursors[2] as usize) = tally.symbol_bytes[2];
-            (*s).dyn_ltree[tally.literal_tree_index].fc.value = (*s).dyn_ltree
-                [tally.literal_tree_index]
-                .fc
-                .value
-                .wrapping_add(1);
+            let state = &mut *s;
+            let layout =
+                pending_storage_layout_for_state(state).expect("validated pending storage layout");
+            let pending = &mut *core::ptr::slice_from_raw_parts_mut(
+                state
+                    .pending_buf
+                    .expect("validated pending storage")
+                    .as_ptr(),
+                layout.total_len,
+            );
+            let mut storage = PendingStorageView::new(pending, layout)
+                .expect("pending storage layout matches its allocation");
+            if !deflate_tally_literal(&mut storage, state, cc) {
+                return need_more;
+            }
+            drop(storage);
             bflush = symbol_buffer_is_full((*s).sym_next, (*s).sym_end) as ::core::ffi::c_int;
             if bflush != 0 {
                 crate::src::trees::_tr_flush_block(
@@ -5201,16 +5266,22 @@ unsafe extern "C" fn deflate_slow(
             .window
             .offset((*s).strstart.wrapping_sub(1 as crate::stdlib::uInt) as isize)
             as crate::zutil_h::uch;
-        let tally = deflate_literal_tally_plan(cc_0, (*s).sym_next);
-        (*s).sym_next = tally.next_sym;
-        *symbol_base.wrapping_add(tally.cursors[0] as usize) = tally.symbol_bytes[0];
-        *symbol_base.wrapping_add(tally.cursors[1] as usize) = tally.symbol_bytes[1];
-        *symbol_base.wrapping_add(tally.cursors[2] as usize) = tally.symbol_bytes[2];
-        (*s).dyn_ltree[tally.literal_tree_index].fc.value = (*s).dyn_ltree
-            [tally.literal_tree_index]
-            .fc
-            .value
-            .wrapping_add(1);
+        let state = &mut *s;
+        let layout =
+            pending_storage_layout_for_state(state).expect("validated pending storage layout");
+        let pending = &mut *core::ptr::slice_from_raw_parts_mut(
+            state
+                .pending_buf
+                .expect("validated pending storage")
+                .as_ptr(),
+            layout.total_len,
+        );
+        let mut storage = PendingStorageView::new(pending, layout)
+            .expect("pending storage layout matches its allocation");
+        if !deflate_tally_literal(&mut storage, state, cc_0) {
+            return need_more;
+        }
+        drop(storage);
         bflush = symbol_buffer_is_full((*s).sym_next, (*s).sym_end) as ::core::ffi::c_int;
         (*s).match_available = 0 as ::core::ffi::c_int;
     }
@@ -5566,7 +5637,8 @@ mod tests {
         deflate_rle_next_scan_indices, deflate_rle_refill_action, deflate_rle_scan_indices,
         deflate_rle_scan_match, deflate_rle_tally_plan, deflate_set_dictionary_allowed,
         deflate_should_return_buf_error, deflate_slow_can_search_match, deflate_state_is_usable,
-        deflate_state_status_valid, deflate_version_matches, dictionary_tail_offset, drain_pending,
+        deflate_state_status_valid, deflate_tally_literal, deflate_tally_match,
+        deflate_version_matches, dictionary_tail_offset, drain_pending,
         fill_window_available_space, fill_window_cursor, fill_window_has_insertable_match,
         fill_window_hash_update, fill_window_high_water_after_zero, fill_window_insert_after_slide,
         fill_window_lookahead_after_read, fill_window_reinsert, fill_window_should_refill,
@@ -5916,6 +5988,36 @@ mod tests {
         assert_eq!(storage.symbol_bytes()[5], 0xaa);
         assert_eq!(storage.symbol_bytes()[9], 0xaa);
         assert!(symbol_buffer_is_full(9, 9));
+    }
+
+    #[test]
+    fn shared_tally_cores_update_symbols_and_frequencies_atomically() {
+        let layout = pending_storage_layout(4);
+        let mut bytes = [0xaa; 16];
+        let mut storage = PendingStorageView::new(&mut bytes, layout).unwrap();
+        let mut state = super::internal_state::newly_allocated();
+
+        assert!(deflate_tally_match(&mut storage, &mut state, 6, 10, 7));
+        assert_eq!(state.sym_next, 3);
+        assert_eq!(&storage.symbol_bytes()[..3], &[3, 0, 3]);
+        assert_eq!(state.dyn_ltree[deflate_length_tree_index(3)].fc.value, 1);
+        assert_eq!(state.dyn_dtree[2].fc.value, 1);
+
+        assert!(deflate_tally_literal(&mut storage, &mut state, b'Q'));
+        assert_eq!(state.sym_next, 6);
+        assert_eq!(&storage.symbol_bytes()[3..6], &[0, 0, b'Q']);
+        assert_eq!(state.dyn_ltree[b'Q' as usize].fc.value, 1);
+
+        let before = storage.symbol_bytes().to_vec();
+        let before_literal_frequency = state.dyn_ltree[b'R' as usize].fc.value;
+        state.sym_next = 11;
+        assert!(!deflate_tally_literal(&mut storage, &mut state, b'R'));
+        assert_eq!(storage.symbol_bytes(), before.as_slice());
+        assert_eq!(state.sym_next, 11);
+        assert_eq!(
+            state.dyn_ltree[b'R' as usize].fc.value,
+            before_literal_frequency
+        );
     }
 
     #[test]
