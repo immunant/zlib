@@ -119,13 +119,6 @@ fn gz_load_impl(
     Ok(have)
 }
 
-unsafe fn gz_load(
-    state: &mut crate::gzguts_h::gz_state,
-    buffer: GzLoadBuffer<'_>,
-) -> Result<usize, ()> {
-    gz_load_impl(state, buffer)
-}
-
 fn gz_avail_impl(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
     if state.err != crate::zlib_h::Z_OK && state.err != crate::zlib_h::Z_BUF_ERROR {
         return -1 as ::core::ffi::c_int;
