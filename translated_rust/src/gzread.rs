@@ -367,13 +367,11 @@ fn gz_decomp(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
                     ret = crate::zlib_h::Z_OK;
                     break;
                 } else {
-                    let message = if state.strm.msg.is_null() {
-                        ::std::ffi::CStr::from_bytes_with_nul(b"compressed data error\0").ok()
-                    } else {
-                        // `inflate` supplies an error string that remains valid until its
-                        // next stream operation.
-                        Some(unsafe { ::std::ffi::CStr::from_ptr(state.strm.msg) })
-                    };
+                    let message = crate::src::inflate::inflate_error_message(&state.strm)
+                        .or_else(|| {
+                            ::std::ffi::CStr::from_bytes_with_nul(b"compressed data error\0")
+                                .ok()
+                        });
                     crate::src::gzlib::gz_error_state(
                         state,
                         crate::zlib_h::Z_DATA_ERROR,
