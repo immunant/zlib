@@ -217,7 +217,7 @@ fn zcfree_is_external(address: usize) -> bool {
 }
 
 pub unsafe extern "C" fn zcfree(_opaque: crate::stdlib::voidpf, ptr: crate::stdlib::voidpf) {
-    if !ptr.is_null() && zcfree_is_external(ptr as usize) {
+    if !ptr.is_null() && zcfree_is_external(ptr.addr()) {
         // Preserve zcfree's public free-compatible behavior for allocations
         // supplied by an external caller rather than this default broker.
         crate::stdlib::free(ptr);
