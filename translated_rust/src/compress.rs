@@ -23,7 +23,7 @@ pub use crate::zlib_h::Z_NO_FLUSH;
 pub use crate::zlib_h::Z_OK;
 pub use crate::zlib_h::Z_STREAM_END;
 pub use crate::zlib_h::Z_STREAM_ERROR;
-pub unsafe fn compress2_z(
+pub fn compress2_z(
     dest: Option<&mut [crate::stdlib::Bytef]>,
     source: Option<&[crate::stdlib::Bytef]>,
     mut level: ::core::ffi::c_int,
@@ -85,14 +85,18 @@ pub unsafe fn compress2_z(
             source_len = source_len.wrapping_sub(stream.avail_in as crate::stdlib::z_size_t);
         }
         let avail_out = stream.avail_out;
-        err = crate::src::deflate::deflate(
-            &raw mut stream as *mut _ as *mut crate::zlib_h::z_stream_s,
-            if source_len != 0 {
-                crate::zlib_h::Z_NO_FLUSH
-            } else {
-                crate::zlib_h::Z_FINISH
-            },
-        );
+        // `stream` is initialized above and its input/output cursors are
+        // derived only from the borrowed slices retained for this call.
+        err = unsafe {
+            crate::src::deflate::deflate(
+                &raw mut stream as *mut _ as *mut crate::zlib_h::z_stream_s,
+                if source_len != 0 {
+                    crate::zlib_h::Z_NO_FLUSH
+                } else {
+                    crate::zlib_h::Z_FINISH
+                },
+            )
+        };
         written = written.wrapping_add(
             avail_out.wrapping_sub(stream.avail_out) as crate::stdlib::z_size_t,
         );
@@ -100,7 +104,13 @@ pub unsafe fn compress2_z(
             break;
         }
     }
-    crate::src::deflate::deflateEnd(&raw mut stream as *mut _ as *mut crate::zlib_h::z_stream_s);
+    // The stream is initialized successfully before the loop, so it has the
+    // lifecycle required by the translated cleanup routine.
+    unsafe {
+        crate::src::deflate::deflateEnd(
+            &raw mut stream as *mut _ as *mut crate::zlib_h::z_stream_s,
+        );
+    }
     return (
         if err == crate::zlib_h::Z_STREAM_END {
             crate::zlib_h::Z_OK

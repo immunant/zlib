@@ -584,7 +584,7 @@ unsafe extern "C" fn fill_window(mut s: *mut crate::src::deflate::deflate_state)
         }
     }
 }
-pub unsafe fn deflateInit_(
+pub fn deflateInit_(
     strm: Option<&mut crate::zlib_h::z_stream>,
     mut level: ::core::ffi::c_int,
     version: Option<&::core::ffi::c_char>,
@@ -601,16 +601,20 @@ pub unsafe fn deflateInit_(
     let Some(strm) = strm else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
-    return deflateInit2_(
-        strm,
-        level,
-        crate::zlib_h::Z_DEFLATED,
-        crate::stdlib::MAX_WBITS,
-        crate::zutil_h::DEF_MEM_LEVEL,
-        crate::zlib_h::Z_DEFAULT_STRATEGY,
-        ::core::ptr::from_ref(version),
-        stream_size,
-    );
+    // The safe inputs above establish the version and stream invariants that
+    // the translated initializer still expects as raw arguments.
+    unsafe {
+        deflateInit2_(
+            strm,
+            level,
+            crate::zlib_h::Z_DEFLATED,
+            crate::stdlib::MAX_WBITS,
+            crate::zutil_h::DEF_MEM_LEVEL,
+            crate::zlib_h::Z_DEFAULT_STRATEGY,
+            ::core::ptr::from_ref(version),
+            stream_size,
+        )
+    }
 }
 #[export_name = "deflateInit_"]
 
