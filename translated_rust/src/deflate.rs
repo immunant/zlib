@@ -2447,21 +2447,32 @@ pub unsafe fn deflate(
     mut flush: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
     let mut old_flush: ::core::ffi::c_int = 0;
-    let mut s: *mut crate::src::deflate::deflate_state =
-        ::core::ptr::null_mut::<crate::src::deflate::deflate_state>();
-    if deflateStateCheck(strm) != 0
-        || flush > crate::zlib_h::Z_BLOCK
-        || flush < 0 as ::core::ffi::c_int
-    {
+    if flush > crate::zlib_h::Z_BLOCK || flush < 0 as ::core::ffi::c_int || strm.is_null() {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    s = (*strm).state as *mut crate::src::deflate::deflate_state;
-    let invalid_stream_or_state = {
-        let strm_ref = &*strm;
-        let state = &*s;
-        strm_ref.next_out.is_null()
-            || strm_ref.avail_in != 0 as crate::stdlib::uInt && strm_ref.next_in.is_null()
-            || state.status == crate::src::deflate::FINISH_STATE && flush != crate::zlib_h::Z_FINISH
+    // This transitional dispatcher still uses raw cursors in its legacy
+    // compression loop.  Validate and adopt the stream/state once at entry
+    // rather than routing through the private raw state-check adapter.
+    let (s, invalid_stream_or_state) = {
+        let stream = &mut *strm;
+        let state_ptr = stream.state as *mut crate::src::deflate::deflate_state;
+        if state_ptr.is_null() {
+            return crate::zlib_h::Z_STREAM_ERROR;
+        }
+        let state = &mut *state_ptr;
+        if !deflate_state_values_are_valid(
+            stream.zalloc.is_some(),
+            stream.zfree.is_some(),
+            state.strm == strm,
+            state.status,
+        ) {
+            return crate::zlib_h::Z_STREAM_ERROR;
+        }
+        let invalid = stream.next_out.is_null()
+            || stream.avail_in != 0 as crate::stdlib::uInt && stream.next_in.is_null()
+            || state.status == crate::src::deflate::FINISH_STATE
+                && flush != crate::zlib_h::Z_FINISH;
+        (state_ptr, invalid)
     };
     if invalid_stream_or_state {
         (*strm).msg =
