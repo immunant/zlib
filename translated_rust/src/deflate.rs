@@ -3287,13 +3287,9 @@ pub unsafe extern "C" fn deflateCopy(
     if ds.is_null() {
         return crate::zlib_h::Z_MEM_ERROR;
     }
-    crate::stdlib::memset(
-        ds as *mut ::core::ffi::c_void,
-        0 as ::core::ffi::c_int,
-        ::core::mem::size_of::<crate::src::deflate::deflate_state>()
-            as crate::__stddef_size_t_h::size_t,
-    );
     (*dest).state = ds as *mut crate::src::deflate::internal_state;
+    // The source state is copied over the complete callback allocation before
+    // any field is observed.  Clearing it first is therefore redundant.
     crate::stdlib::memcpy(
         ds as *mut ::core::ffi::c_void,
         ss as *const ::core::ffi::c_void,
