@@ -1237,41 +1237,7 @@ pub unsafe fn deflateInit2_(
         strm.msg = crate::src::zutil::z_errmsg[6].load(::core::sync::atomic::Ordering::Relaxed);
         return crate::zlib_h::Z_MEM_ERROR;
     };
-    if strm.zalloc.is_none() && strm.zfree.is_none() {
-        let mut state = Box::new(state);
-        strm.state = core::ptr::from_mut(state.as_mut());
-        let result = deflate_reset_state(strm, state.as_mut());
-        if result == crate::zlib_h::Z_OK && retain_default_deflate_state(state) {
-            return result;
-        }
-        strm.state = core::ptr::null_mut();
-        return if result == crate::zlib_h::Z_OK {
-            crate::zlib_h::Z_MEM_ERROR
-        } else {
-            result
-        };
-    }
-    let (Some(zalloc), Some(_)) = (strm.zalloc, strm.zfree) else {
-        return crate::zlib_h::Z_STREAM_ERROR;
-    };
-    let state_allocation = unsafe {
-        zalloc(
-            strm.opaque,
-            1,
-            ::core::mem::size_of::<crate::src::deflate::deflate_state>() as crate::stdlib::uInt,
-        )
-        .cast::<crate::src::deflate::deflate_state>()
-    };
-    if state_allocation.is_null() {
-        return crate::zlib_h::Z_MEM_ERROR;
-    }
-    let state = unsafe {
-        (&mut *state_allocation
-            .cast::<::core::mem::MaybeUninit<crate::src::deflate::deflate_state>>())
-            .write(state)
-    };
-    strm.state = state;
-    deflate_reset_state(strm, state)
+    unsafe { deflate_install_state(strm, DeflateStateInstallation::Initialize(state)) }
 }
 
 /// Construct a fully owned deflate state before it is installed in the ABI
@@ -3449,14 +3415,6 @@ fn deflate_copy_state_is_valid(
         })
 }
 
-/// Safe input prepared at the FFI boundary after its stream and state links
-/// have been converted to Rust references. The state owner has no raw fields,
-/// and allocator validation remains in `deflateCopy`.
-struct DeflateCopySource<'a> {
-    state: &'a crate::src::deflate::deflate_state,
-    allocators_present: bool,
-}
-
 fn deflate_copy_state(
     source: &crate::src::deflate::deflate_state,
     head: Vec<crate::src::deflate::Posf>,
@@ -3580,35 +3538,60 @@ fn deflate_copy_impl(
     Ok(copied_state)
 }
 
-/// Validate and clone a prepared source stream without touching the
-/// destination. This is deliberately separate from the allocation handoff so
-/// all copy rules are testable without raw pointers or callbacks.
-fn deflateCopy(
-    source: DeflateCopySource<'_>,
-) -> Result<crate::src::deflate::deflate_state, ::core::ffi::c_int> {
-    if !deflate_copy_state_is_valid(source.allocators_present, source.state) {
-        return Err(crate::zlib_h::Z_STREAM_ERROR);
-    }
-    deflate_copy_impl(source.state)
+/// Select the fully owned state to install.  Copying deliberately completes
+/// before the allocator callback, so allocation failure cannot leave a
+/// partially initialized destination allocation behind.
+enum DeflateStateInstallation<'a> {
+    Initialize(crate::src::deflate::deflate_state),
+    Copy {
+        source: &'a crate::zlib_h::z_stream_s,
+        state: &'a crate::src::deflate::deflate_state,
+        allocators_present: bool,
+    },
 }
 
-/// Validate, clone, and install a copied deflater while keeping the ABI
-/// allocator paired with the source stream. The Rust-owned clone happens
-/// before callback allocation, so there is no post-allocation cleanup path.
-unsafe fn deflate_copy_install(
+/// Install a prepared deflater in either default Rust storage or storage
+/// supplied by the stream's ABI allocator.  This is the only deflate path
+/// that calls an allocator callback or turns its untyped result into a state.
+unsafe fn deflate_install_state(
     dest: &mut crate::zlib_h::z_stream_s,
-    source: &crate::zlib_h::z_stream_s,
-    copy_source: DeflateCopySource<'_>,
+    installation: DeflateStateInstallation<'_>,
 ) -> ::core::ffi::c_int {
-    let copied_state = match deflateCopy(copy_source) {
-        Ok(snapshot) => snapshot,
-        Err(error) => return error,
+    let (source, mut copied_state) = match installation {
+        DeflateStateInstallation::Initialize(state) => (None, state),
+        DeflateStateInstallation::Copy {
+            source,
+            state,
+            allocators_present,
+        } => {
+            if !deflate_copy_state_is_valid(allocators_present, state) {
+                return crate::zlib_h::Z_STREAM_ERROR;
+            }
+            let copied_state = match deflate_copy_impl(state) {
+                Ok(snapshot) => snapshot,
+                Err(error) => return error,
+            };
+            (Some(source), copied_state)
+        }
     };
-    *dest = *source;
+
+    if let Some(source) = source {
+        *dest = *source;
+    }
+    if source.is_none() {
+        let reset = deflate_reset_state(dest, &mut copied_state);
+        if reset != crate::zlib_h::Z_OK {
+            dest.state = core::ptr::null_mut();
+            return reset;
+        }
+    }
     if dest.zalloc.is_none() && dest.zfree.is_none() {
         let state = Box::new(copied_state);
         let state_memory = core::ptr::from_ref(state.as_ref());
         if !retain_default_deflate_state(state) {
+            if source.is_none() {
+                dest.state = core::ptr::null_mut();
+            }
             return crate::zlib_h::Z_MEM_ERROR;
         }
         dest.state = state_memory.cast_mut();
@@ -3646,11 +3629,16 @@ pub unsafe extern "C" fn deflateCopy_ffi(
     let Some(source_state) = source.state.as_ref() else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
-    let copy_source = DeflateCopySource {
-        state: source_state,
-        allocators_present: deflate_stream_has_state_allocation(source),
-    };
-    deflate_copy_install(dest, source, copy_source)
+    unsafe {
+        deflate_install_state(
+            dest,
+            DeflateStateInstallation::Copy {
+                source,
+                state: source_state,
+                allocators_present: deflate_stream_has_state_allocation(source),
+            },
+        )
+    }
 }
 fn longest_match(
     s: &mut crate::src::deflate::deflate_state,
