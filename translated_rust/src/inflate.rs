@@ -1898,11 +1898,7 @@ pub unsafe extern "C" fn inflate_ffi(
                             (*state).mode = crate::src::inflate::STORED;
                         }
                         1 => {
-                            let fixed = crate::src::inftrees::inflate_fixed_tables();
-                            (*state).lencode = fixed.lencode.as_ptr();
-                            (*state).lenbits = fixed.lenbits;
-                            (*state).distcode = fixed.distcode.as_ptr();
-                            (*state).distbits = fixed.distbits;
+                            crate::src::inftrees::inflate_fixed_state(&mut *state);
                             (*state).mode = crate::src::inflate::LEN_;
                             if flush == crate::zlib_h::Z_TREES {
                                 break;
