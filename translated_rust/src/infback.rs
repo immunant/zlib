@@ -1027,21 +1027,32 @@ pub unsafe extern "C" fn inflateBack_ffi(
 ) -> ::core::ffi::c_int {
     inflateBack(strm, in_0, in_desc, out, out_desc)
 }
-pub unsafe extern "C" fn inflateBackEnd(mut strm: crate::zlib_h::z_streamp) -> ::core::ffi::c_int {
-    if strm.is_null() || (*strm).state.is_null() || (*strm).zfree.is_none() {
+// The FFI wrapper has already established that `strm` is a valid mutable
+// stream. Keep the teardown state transition in a reference-based helper;
+// only the configured C deallocator remains an unsafe boundary here.
+pub fn inflateBackEnd(strm: &mut crate::zlib_h::z_stream) -> ::core::ffi::c_int {
+    if strm.state.is_null() || strm.zfree.is_none() {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    Some((*strm).zfree.expect("non-null function pointer")).expect("non-null function pointer")(
-        (*strm).opaque,
-        (*strm).state as crate::stdlib::voidpf,
-    );
-    (*strm).state = ::core::ptr::null_mut::<crate::src::deflate::internal_state>();
-    return crate::zlib_h::Z_OK;
+    // SAFETY: `inflateBackInit_` obtained `state` from this stream's `zalloc`,
+    // and this validated callback is the matching deallocator configured on
+    // the same stream. This is the final use of that allocation.
+    unsafe {
+        Some(strm.zfree.expect("non-null function pointer")).expect("non-null function pointer")(
+            strm.opaque,
+            strm.state as crate::stdlib::voidpf,
+        );
+    }
+    strm.state = ::core::ptr::null_mut::<crate::src::deflate::internal_state>();
+    crate::zlib_h::Z_OK
 }
 #[export_name = "inflateBackEnd"]
 
 pub unsafe extern "C" fn inflateBackEnd_ffi(
     mut strm: crate::zlib_h::z_streamp,
 ) -> ::core::ffi::c_int {
-    inflateBackEnd(strm)
+    if strm.is_null() {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    }
+    inflateBackEnd(&mut *strm)
 }
