@@ -807,7 +807,7 @@ impl<'a> WindowStorage<'a> {
         next: ::core::ffi::c_uint,
         have: ::core::ffi::c_uint,
     ) -> Option<Self> {
-        let size = ::core::ffi::c_uint::try_from(bytes.len()).ok()?;
+        let size = window_size_from_len(bytes.len())?;
         Some(Self {
             history: WindowHistory::new(size, next, have)?,
             bytes,
@@ -1020,7 +1020,7 @@ fn apply_window_update(
     whave: ::core::ffi::c_uint,
     produced: &[crate::stdlib::Bytef],
 ) -> Option<WindowUpdate> {
-    let mut history = WindowHistory::new(window.len() as ::core::ffi::c_uint, wnext, whave)?;
+    let mut history = WindowHistory::new(window_size_from_len(window.len())?, wnext, whave)?;
     history.apply(window, produced)
 }
 
@@ -1468,6 +1468,12 @@ fn update_window_core(
 
 fn update_window_buffer_len(wsize: ::core::ffi::c_uint) -> usize {
     wsize as usize
+}
+
+/// Convert a safe window length to the C-width history size without
+/// truncating a host-sized slice on 64-bit targets.
+fn window_size_from_len(window_len: usize) -> Option<::core::ffi::c_uint> {
+    ::core::ffi::c_uint::try_from(window_len).ok()
 }
 
 /// Convert a safe produced slice length to the C-width count consumed by the
@@ -5455,6 +5461,21 @@ mod tests {
         #[cfg(target_pointer_width = "64")]
         assert_eq!(
             super::window_update_copy_len(::core::ffi::c_uint::MAX as usize + 1),
+            None
+        );
+    }
+
+    #[test]
+    fn window_size_rejects_lengths_outside_c_width() {
+        assert_eq!(super::window_size_from_len(0), Some(0));
+        assert_eq!(
+            super::window_size_from_len(::core::ffi::c_uint::MAX as usize),
+            Some(::core::ffi::c_uint::MAX)
+        );
+
+        #[cfg(target_pointer_width = "64")]
+        assert_eq!(
+            super::window_size_from_len(::core::ffi::c_uint::MAX as usize + 1),
             None
         );
     }

@@ -1503,7 +1503,7 @@ macro_rules! gz_write_at_ffi_boundary {
                         break;
                     }
                     if let Some(result) = gz_write_buffered_comp_result(
-                        gz_comp(state, crate::zlib_h::Z_NO_FLUSH),
+                        unsafe { gz_comp(state, crate::zlib_h::Z_NO_FLUSH) },
                         state.again,
                         put,
                         len,
@@ -1513,7 +1513,7 @@ macro_rules! gz_write_at_ffi_boundary {
                 }
             } else {
                 if gz_has_pending_input(state.strm.avail_in)
-                    && gz_write_comp_failed(gz_comp(state, crate::zlib_h::Z_NO_FLUSH))
+                    && gz_write_comp_failed(unsafe { gz_comp(state, crate::zlib_h::Z_NO_FLUSH) })
                 {
                     break 'write 0 as crate::stdlib::z_size_t;
                 }
@@ -1521,7 +1521,7 @@ macro_rules! gz_write_at_ffi_boundary {
                 loop {
                     let n = gz_write_chunk_len(len);
                     state.strm.avail_in = n as crate::stdlib::uInt;
-                    let ret = gz_comp(state, crate::zlib_h::Z_NO_FLUSH);
+                    let ret = unsafe { gz_comp(state, crate::zlib_h::Z_NO_FLUSH) };
                     match gz_write_apply_direct_progress(
                         &mut state.x.pos,
                         &mut len,
@@ -1662,7 +1662,7 @@ macro_rules! gz_zero_at_ffi_boundary {
         if matches!(
             zero.initial_action(state.strm.avail_in),
             GzZeroInitialAction::FlushPending
-        ) && gz_comp(state, crate::zlib_h::Z_NO_FLUSH) == -1 as ::core::ffi::c_int
+        ) && unsafe { gz_comp(state, crate::zlib_h::Z_NO_FLUSH) } == -1 as ::core::ffi::c_int
         {
             -1 as ::core::ffi::c_int
         } else {
@@ -1670,7 +1670,7 @@ macro_rules! gz_zero_at_ffi_boundary {
                 let chunk = zero.prepare_chunk(&mut input);
                 state.strm.avail_in = chunk.len;
                 state.strm.next_in = state.in_0;
-                let ret = gz_comp(state, crate::zlib_h::Z_NO_FLUSH);
+                let ret = unsafe { gz_comp(state, crate::zlib_h::Z_NO_FLUSH) };
                 let action = zero.apply_compression(chunk.len, state.strm.avail_in, ret);
                 state.x.pos = zero.pos;
                 state.skip = zero.skip;
@@ -1873,7 +1873,7 @@ pub unsafe extern "C" fn gzflush_ffi(
     if matches!(gzflush_action(zero_result), GzFlushAction::ReturnStateError) {
         return (*state).err;
     }
-    gz_comp(state, flush);
+    unsafe { gz_comp(state, flush) };
     return (*state).err;
 }
 #[export_name = "gzsetparams"]
@@ -1916,7 +1916,7 @@ pub unsafe extern "C" fn gzsetparams_ffi(
         return state.err;
     }
     if matches!(action, GzSetParamsAction::FlushThenDeflate)
-        && gz_comp(state, crate::zlib_h::Z_BLOCK) == -1 as ::core::ffi::c_int
+        && unsafe { gz_comp(state, crate::zlib_h::Z_BLOCK) } == -1 as ::core::ffi::c_int
     {
         return state.err;
     }
@@ -1949,7 +1949,7 @@ pub unsafe extern "C" fn gzclose_w_ffi(mut file: crate::zlib_h::gzFile) -> ::cor
     } else {
         None
     };
-    let result = gz_comp(state, crate::zlib_h::Z_FINISH);
+    let result = unsafe { gz_comp(state, crate::zlib_h::Z_FINISH) };
     let finish_error = gzclose_operation_error(result, (*state).err);
     match gzclose_buffer_action((*state).size, (*state).direct) {
         GzCloseBufferAction::Keep => {}
