@@ -628,7 +628,8 @@ impl GzDecompLoopState<'_> {
 fn gz_decomp_loop(
     mut decomp: crate::src::gzlib::GzDecompState,
     state: &mut GzDecompLoopState<'_>,
-    mut inflate: impl FnMut(GzEmbeddedInflateCall<'_>) -> Option<GzCodecResult>,
+    output: &mut [u8],
+    mut inflate: impl FnMut(GzEmbeddedInflateCall<'_, '_>) -> Option<GzCodecResult>,
 ) -> crate::src::gzlib::GzDecompFinish {
     let mut result = crate::zlib_h::Z_OK;
     loop {
@@ -642,11 +643,11 @@ fn gz_decomp_loop(
             }
             break;
         }
-        let Some(call) = state
-            .input
-            .as_deref()
-            .and_then(|input| decomp.embedded_inflate_call(input).and_then(&mut inflate))
-        else {
+        let Some(call) = state.input.as_deref().and_then(|input| {
+            decomp
+                .embedded_inflate_call(input, &mut *output)
+                .and_then(&mut inflate)
+        }) else {
             result = -1;
             break;
         };
@@ -811,12 +812,11 @@ unsafe fn gz_look(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
 
 unsafe fn gz_decomp(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
     let output_len = (state.buffers.size << 1 as ::core::ffi::c_int) as usize;
-    // Publish the ABI codec cursor only after a pointer-free view proves that
-    // its complete advertised output range lies in the owned gzip buffer.
-    let Some(next_out) = state.buffers.output.as_deref_mut().and_then(|buffer| {
-        crate::src::gzlib::GzCodecOutputView::prefix(buffer, output_len)
-            .map(|mut output| output.bytes_mut().as_mut_ptr())
-    }) else {
+    // The loop receives the owned output allocation itself.  Each embedded
+    // request narrows it to the checked prefix available to this inflate
+    // pass, so this boundary no longer publishes an output cursor before a
+    // request exists.
+    let Some(output) = state.buffers.output.as_deref_mut() else {
         return -1 as ::core::ffi::c_int;
     };
     let Some(input) = state.buffers.input_cursor.as_ref() else {
@@ -837,8 +837,6 @@ unsafe fn gz_decomp(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int
     ) else {
         return -1 as ::core::ffi::c_int;
     };
-    state.strm.avail_out = decomp.output_available();
-    state.strm.next_out = next_out;
     let finish = {
         // The stream itself is embedded in the state we already exclusively
         // own. Its cursor projection and the unsafe codec call stay in this
@@ -855,7 +853,7 @@ unsafe fn gz_decomp(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int
             buffered: &mut state.x.have,
             path: state.path.as_deref(),
         };
-        gz_decomp_loop(decomp, &mut loop_state, |call| {
+        gz_decomp_loop(decomp, &mut loop_state, output, |mut call| {
             // The ABI stream projection consumes only this bounded codec
             // request.  Cursor accounting remains with `call`, so a future
             // owned embedded codec can replace this projection without
@@ -863,6 +861,7 @@ unsafe fn gz_decomp(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int
             strm.next_in = call.input().as_ptr().cast_mut();
             strm.avail_in = call.input_available();
             strm.avail_out = call.output_available();
+            strm.next_out = call.output_mut().as_mut_ptr();
             let result = crate::src::inflate::inflate(
                 strm as *mut crate::zlib_h::z_stream_s,
                 crate::zlib_h::Z_NO_FLUSH,

@@ -182,10 +182,10 @@ pub struct GzCodecInput {
 // so a future embedded-codec owner can consume the request and return a
 // `GzCodecResult` without borrowing an ABI `z_stream` or a separate gzip
 // state-machine request object.
-pub(crate) struct GzEmbeddedInflateCall<'a> {
-    input: &'a [u8],
+pub(crate) struct GzEmbeddedInflateCall<'input, 'output> {
+    input: &'input [u8],
     input_cursor: GzCodecInput,
-    output_available: crate::stdlib::uInt,
+    output: GzCodecOutputView<'output>,
 }
 
 pub(crate) struct GzCodecOutputView<'a> {
@@ -447,8 +447,8 @@ impl GzCodecInput {
     }
 }
 
-impl<'a> GzEmbeddedInflateCall<'a> {
-    pub(crate) fn input(&self) -> &'a [u8] {
+impl<'input, 'output> GzEmbeddedInflateCall<'input, 'output> {
+    pub(crate) fn input(&self) -> &'input [u8] {
         self.input
     }
 
@@ -457,7 +457,14 @@ impl<'a> GzEmbeddedInflateCall<'a> {
     }
 
     pub(crate) fn output_available(&self) -> crate::stdlib::uInt {
-        self.output_available
+        self.output.bytes.len() as crate::stdlib::uInt
+    }
+
+    // The request owns the bounded writable output view for this codec pass.
+    // The ABI projection may turn it into a cursor for `inflate()`, but no
+    // gzip state-machine code has to construct that cursor from a capacity.
+    pub(crate) fn output_mut(&mut self) -> &mut [u8] {
+        self.output.bytes_mut()
     }
 
     // Consume the bounded request when publishing the scalar codec result.
@@ -1054,17 +1061,19 @@ impl GzDecompState {
     // Build the complete pointer-free input/output view for one codec pass.
     // The slice bounds validate the stored cursor before any ABI stream
     // cursor is published by the caller.
-    pub(crate) fn embedded_inflate_call<'a>(
+    pub(crate) fn embedded_inflate_call<'input, 'output>(
         &self,
-        input: &'a [u8],
-    ) -> Option<GzEmbeddedInflateCall<'a>> {
+        input: &'input [u8],
+        output: &'output mut [u8],
+    ) -> Option<GzEmbeddedInflateCall<'input, 'output>> {
+        let output = GzCodecOutputView::prefix(output, self.output_available() as usize)?;
         Some(GzEmbeddedInflateCall {
             input: self.input.bytes(input)?,
             input_cursor: GzCodecInput {
                 cursor: self.input.cursor,
                 available: self.input.available,
             },
-            output_available: self.output_available(),
+            output,
         })
     }
 
