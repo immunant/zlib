@@ -68,7 +68,8 @@ pub use crate::zlib_h::Z_OK;
 pub use crate::zlib_h::Z_STREAM_END;
 pub use crate::zlib_h::Z_STREAM_ERROR;
 pub use crate::zlib_h::Z_VERSION_ERROR;
-pub unsafe extern "C" fn inflateBackInit_(
+#[export_name = "inflateBackInit_"]
+pub unsafe extern "C" fn inflateBackInit__ffi(
     mut strm: crate::zlib_h::z_streamp,
     mut windowBits: ::core::ffi::c_int,
     mut window: *mut ::core::ffi::c_uchar,
@@ -128,18 +129,8 @@ pub unsafe extern "C" fn inflateBackInit_(
     (*state).sane = 1 as ::core::ffi::c_int;
     return crate::zlib_h::Z_OK;
 }
-#[export_name = "inflateBackInit_"]
-
-pub unsafe extern "C" fn inflateBackInit__ffi(
-    mut strm: crate::zlib_h::z_streamp,
-    mut windowBits: ::core::ffi::c_int,
-    mut window: *mut ::core::ffi::c_uchar,
-    mut version: *const ::core::ffi::c_char,
-    mut stream_size: ::core::ffi::c_int,
-) -> ::core::ffi::c_int {
-    inflateBackInit_(strm, windowBits, window, version, stream_size)
-}
-pub unsafe extern "C" fn inflateBack(
+#[export_name = "inflateBack"]
+pub unsafe extern "C" fn inflateBack_ffi(
     mut strm: crate::zlib_h::z_streamp,
     mut in_0: crate::zlib_h::in_func,
     mut in_desc: *mut ::core::ffi::c_void,
@@ -1002,18 +993,10 @@ pub unsafe extern "C" fn inflateBack(
     (*strm).avail_in = have as crate::stdlib::uInt;
     return ret;
 }
-#[export_name = "inflateBack"]
-
-pub unsafe extern "C" fn inflateBack_ffi(
+#[export_name = "inflateBackEnd"]
+pub unsafe extern "C" fn inflateBackEnd_ffi(
     mut strm: crate::zlib_h::z_streamp,
-    mut in_0: crate::zlib_h::in_func,
-    mut in_desc: *mut ::core::ffi::c_void,
-    mut out: crate::zlib_h::out_func,
-    mut out_desc: *mut ::core::ffi::c_void,
 ) -> ::core::ffi::c_int {
-    inflateBack(strm, in_0, in_desc, out, out_desc)
-}
-pub unsafe extern "C" fn inflateBackEnd(mut strm: crate::zlib_h::z_streamp) -> ::core::ffi::c_int {
     if strm.is_null() || (*strm).state.is_null() || (*strm).zfree.is_none() {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
@@ -1023,11 +1006,4 @@ pub unsafe extern "C" fn inflateBackEnd(mut strm: crate::zlib_h::z_streamp) -> :
     );
     (*strm).state = ::core::ptr::null_mut::<crate::src::deflate::internal_state>();
     return crate::zlib_h::Z_OK;
-}
-#[export_name = "inflateBackEnd"]
-
-pub unsafe extern "C" fn inflateBackEnd_ffi(
-    mut strm: crate::zlib_h::z_streamp,
-) -> ::core::ffi::c_int {
-    inflateBackEnd(strm)
 }
