@@ -2356,45 +2356,93 @@ fn bi_reverse(mut code: ::core::ffi::c_uint, mut len: ::core::ffi::c_int) -> ::c
     return res >> 1 as ::core::ffi::c_int;
 }
 
-unsafe extern "C" fn bi_flush(mut s: *mut crate::src::deflate::deflate_state) {
-    if (*s).bi_valid == 16 as ::core::ffi::c_int {
-        let c2rust_fresh59 = (*s).pending;
-        (*s).pending = (*s).pending.wrapping_add(1);
-        *(*s).pending_buf.offset(c2rust_fresh59 as isize) =
-            ((*s).bi_buf as ::core::ffi::c_int & 0xff as ::core::ffi::c_int) as crate::zutil_h::uch;
-        let c2rust_fresh60 = (*s).pending;
-        (*s).pending = (*s).pending.wrapping_add(1);
-        *(*s).pending_buf.offset(c2rust_fresh60 as isize) =
-            ((*s).bi_buf as ::core::ffi::c_int >> 8 as ::core::ffi::c_int) as crate::zutil_h::uch;
-        (*s).bi_buf = 0 as crate::zutil_h::ush;
-        (*s).bi_valid = 0 as ::core::ffi::c_int;
-    } else if (*s).bi_valid >= 8 as ::core::ffi::c_int {
-        let c2rust_fresh61 = (*s).pending;
-        (*s).pending = (*s).pending.wrapping_add(1);
-        *(*s).pending_buf.offset(c2rust_fresh61 as isize) = (*s).bi_buf as crate::stdlib::Byte;
-        (*s).bi_buf =
-            ((*s).bi_buf as ::core::ffi::c_int >> 8 as ::core::ffi::c_int) as crate::zutil_h::ush;
-        (*s).bi_valid -= 8 as ::core::ffi::c_int;
+struct BiFlushResult {
+    bytes: [crate::stdlib::Byte; 2],
+    len: usize,
+    bi_buf: crate::zutil_h::ush,
+    bi_valid: ::core::ffi::c_int,
+}
+
+fn bi_flush_state(
+    bi_buf: crate::zutil_h::ush,
+    bi_valid: ::core::ffi::c_int,
+) -> BiFlushResult {
+    if bi_valid == 16 as ::core::ffi::c_int {
+        BiFlushResult {
+            bytes: [
+                (bi_buf as ::core::ffi::c_int & 0xff as ::core::ffi::c_int)
+                    as crate::stdlib::Byte,
+                (bi_buf as ::core::ffi::c_int >> 8 as ::core::ffi::c_int) as crate::stdlib::Byte,
+            ],
+            len: 2,
+            bi_buf: 0 as crate::zutil_h::ush,
+            bi_valid: 0 as ::core::ffi::c_int,
+        }
+    } else if bi_valid >= 8 as ::core::ffi::c_int {
+        BiFlushResult {
+            bytes: [bi_buf as crate::stdlib::Byte, 0],
+            len: 1,
+            bi_buf: (bi_buf as ::core::ffi::c_int >> 8 as ::core::ffi::c_int)
+                as crate::zutil_h::ush,
+            bi_valid: bi_valid - 8 as ::core::ffi::c_int,
+        }
+    } else {
+        BiFlushResult {
+            bytes: [0, 0],
+            len: 0,
+            bi_buf,
+            bi_valid,
+        }
     }
 }
 
-unsafe extern "C" fn bi_windup(mut s: *mut crate::src::deflate::deflate_state) {
-    if (*s).bi_valid > 8 as ::core::ffi::c_int {
-        let c2rust_fresh7 = (*s).pending;
-        (*s).pending = (*s).pending.wrapping_add(1);
-        *(*s).pending_buf.offset(c2rust_fresh7 as isize) =
-            ((*s).bi_buf as ::core::ffi::c_int & 0xff as ::core::ffi::c_int) as crate::zutil_h::uch;
-        let c2rust_fresh8 = (*s).pending;
-        (*s).pending = (*s).pending.wrapping_add(1);
-        *(*s).pending_buf.offset(c2rust_fresh8 as isize) =
-            ((*s).bi_buf as ::core::ffi::c_int >> 8 as ::core::ffi::c_int) as crate::zutil_h::uch;
-    } else if (*s).bi_valid > 0 as ::core::ffi::c_int {
-        let c2rust_fresh9 = (*s).pending;
-        (*s).pending = (*s).pending.wrapping_add(1);
-        *(*s).pending_buf.offset(c2rust_fresh9 as isize) = (*s).bi_buf as crate::stdlib::Byte;
+struct BiWindupResult {
+    bytes: [crate::stdlib::Byte; 2],
+    len: usize,
+    bi_used: ::core::ffi::c_int,
+}
+
+fn bi_windup_state(
+    bi_buf: crate::zutil_h::ush,
+    bi_valid: ::core::ffi::c_int,
+) -> BiWindupResult {
+    let len = if bi_valid > 8 as ::core::ffi::c_int {
+        2
+    } else if bi_valid > 0 as ::core::ffi::c_int {
+        1
+    } else {
+        0
+    };
+    BiWindupResult {
+        bytes: [
+            (bi_buf as ::core::ffi::c_int & 0xff as ::core::ffi::c_int) as crate::stdlib::Byte,
+            (bi_buf as ::core::ffi::c_int >> 8 as ::core::ffi::c_int) as crate::stdlib::Byte,
+        ],
+        len,
+        bi_used: (bi_valid - 1 as ::core::ffi::c_int & 7 as ::core::ffi::c_int)
+            + 1 as ::core::ffi::c_int,
     }
-    (*s).bi_used = ((*s).bi_valid - 1 as ::core::ffi::c_int & 7 as ::core::ffi::c_int)
-        + 1 as ::core::ffi::c_int;
+}
+
+unsafe extern "C" fn bi_flush(mut s: *mut crate::src::deflate::deflate_state) {
+    let result = bi_flush_state((*s).bi_buf, (*s).bi_valid);
+    for byte in result.bytes[..result.len].iter().copied() {
+        let pending = (*s).pending;
+        (*s).pending = (*s).pending.wrapping_add(1);
+        *(*s).pending_buf.offset(pending as isize) = byte;
+    }
+    (*s).bi_buf = result.bi_buf;
+    (*s).bi_valid = result.bi_valid;
+}
+
+unsafe extern "C" fn bi_windup(mut s: *mut crate::src::deflate::deflate_state) {
+    let result = bi_windup_state((*s).bi_buf, (*s).bi_valid);
+    for byte in result.bytes[..result.len].iter().copied() {
+        let pending = (*s).pending;
+        (*s).pending = (*s).pending.wrapping_add(1);
+        *(*s).pending_buf.offset(pending as isize) = byte;
+    }
+    (*s).bi_used = result.bi_used;
     (*s).bi_buf = 0 as crate::zutil_h::ush;
     (*s).bi_valid = 0 as ::core::ffi::c_int;
 }
