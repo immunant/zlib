@@ -4497,7 +4497,7 @@ fn deflate_fast(
             // Both parser transitions need the same callback-owned window
             // and pending allocation. Lend each once per no-refill
             // transition; only the match path additionally needs hash views.
-            let state = &mut *s;
+            let state: &mut crate::src::deflate::deflate_state = s;
             let has_min_match =
                 state.lookahead >= crate::zutil_h::MIN_MATCH as crate::stdlib::uInt;
             let (Ok(window_len), Ok(pending_len)) = (
@@ -4692,7 +4692,7 @@ fn deflate_fast(
         // tree work while those lends are live, then release them before
         // `flush_pending()` reaches the ABI-owned output cursor.
         let tail_last = {
-            let state = &mut *s;
+            let state: &mut crate::src::deflate::deflate_state = s;
             state.insert = if state.strstart
                 < (crate::zutil_h::MIN_MATCH - 1 as ::core::ffi::c_int) as crate::stdlib::uInt
             {
@@ -4737,7 +4737,7 @@ fn deflate_fast(
         };
         if let Some(last) = tail_last {
             let avail_out = {
-                let state = &mut *s;
+                let state: &mut crate::src::deflate::deflate_state = s;
                 state.block_start = state.strstart as ::core::ffi::c_long;
                 let strm = state.strm;
                 flush_pending(strm)
