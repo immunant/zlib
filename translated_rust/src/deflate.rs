@@ -1853,6 +1853,48 @@ pub(crate) fn deflate_params_plan(
     })
 }
 
+/// Apply the already-admitted parameter change using only owned state and
+/// checked hash-table views.  The ABI boundary decides whether those views are
+/// needed and lends them before calling this core, so no cursor or allocation
+/// pointer survives the optional block flush.
+pub(crate) fn deflate_params_commit_state(
+    state: &mut crate::src::deflate::deflate_state,
+    plan: DeflateParamsPlan,
+    head: &mut [crate::src::deflate::Posf],
+    prev: &mut [crate::src::deflate::Posf],
+) -> bool {
+    if state.level != plan.level {
+        if state.level == 0 && state.matches != 0 {
+            let Ok(head_len) = usize::try_from(state.hash_size) else {
+                return false;
+            };
+            if head_len > head.len() {
+                return false;
+            }
+            if state.matches == 1 {
+                let Ok(prev_len) = usize::try_from(state.w_size) else {
+                    return false;
+                };
+                if prev_len > prev.len() {
+                    return false;
+                }
+                slide_hash_state(&mut head[..head_len], &mut prev[..prev_len], state.w_size);
+                state.slid = 1;
+            } else {
+                clear_hash_state(&mut head[..head_len], &mut state.slid);
+            }
+            state.matches = 0;
+        }
+        state.level = plan.level;
+        state.max_lazy_match = plan.config.max_lazy as crate::stdlib::uInt;
+        state.good_match = plan.config.good_length as crate::stdlib::uInt;
+        state.nice_match = plan.config.nice_length as ::core::ffi::c_int;
+        state.max_chain_length = plan.config.max_chain as crate::stdlib::uInt;
+    }
+    state.strategy = plan.strategy;
+    true
+}
+
 // This still drives the legacy raw deflate state, so it is deliberately an
 // export-boundary macro.  `deflateParams` has no Rust implementation callers:
 // the gzip setter expands it directly at its own ABI boundary.
@@ -1896,62 +1938,50 @@ macro_rules! deflate_params_at_boundary {
                 }
             }
             // No callback-capable work remains after the optional block
-            // flush above, so commit this whole configuration transition
-            // through one boundary-owned state borrow.  In particular, keep
-            // the hash-buffer lends and strategy update together instead of
-            // re-adopting the raw state for the final field write.
+            // flush above. Lend just the hash buffers this transition needs;
+            // the checked core commits every scalar field only after it has
+            // accepted the complete hash update.
             let state = &mut *s;
-            if state.level != plan.level {
-                if state.level == 0 as ::core::ffi::c_int
-                    && state.matches != 0 as crate::stdlib::uInt
+            let needs_hash_update = state.level != plan.level
+                && state.level == 0
+                && state.matches != 0;
+            let (head, prev) = if needs_hash_update {
+                let Ok(head_len) = usize::try_from(state.hash_size) else {
+                    break 'deflate_params_result crate::zlib_h::Z_STREAM_ERROR;
+                };
+                let prev_len = if state.matches == 1 {
+                    let Ok(prev_len) = usize::try_from(state.w_size) else {
+                        break 'deflate_params_result crate::zlib_h::Z_STREAM_ERROR;
+                    };
+                    prev_len
+                } else {
+                    0
+                };
+                if (head_len != 0 && state.head.is_null())
+                    || (prev_len != 0 && state.prev.is_null())
                 {
-                    if state.matches == 1 as crate::stdlib::uInt {
-                        let Ok(head_len) = usize::try_from(state.hash_size) else {
-                                break 'deflate_params_result crate::zlib_h::Z_STREAM_ERROR;
-                            };
-                        let Ok(prev_len) = usize::try_from(state.w_size) else {
-                                break 'deflate_params_result crate::zlib_h::Z_STREAM_ERROR;
-                            };
-                        if (head_len != 0 && state.head.is_null())
-                            || (prev_len != 0 && state.prev.is_null())
-                        {
-                            break 'deflate_params_result crate::zlib_h::Z_STREAM_ERROR;
-                        }
-                        let head = if head_len == 0 {
-                            &mut []
-                        } else {
-                            ::core::slice::from_raw_parts_mut(state.head, head_len)
-                        };
-                        let prev = if prev_len == 0 {
-                            &mut []
-                        } else {
-                            ::core::slice::from_raw_parts_mut(state.prev, prev_len)
-                        };
-                        crate::src::deflate::slide_hash_state(head, prev, state.w_size);
-                        state.slid = 1;
-                    } else {
-                        let Ok(head_len) = usize::try_from(state.hash_size) else {
-                                break 'deflate_params_result crate::zlib_h::Z_STREAM_ERROR;
-                            };
-                        if head_len != 0 && state.head.is_null() {
-                            break 'deflate_params_result crate::zlib_h::Z_STREAM_ERROR;
-                        }
-                        let head = if head_len == 0 {
-                            &mut []
-                        } else {
-                            ::core::slice::from_raw_parts_mut(state.head, head_len)
-                        };
-                        crate::src::deflate::clear_hash_state(head, &mut state.slid);
-                    }
-                    state.matches = 0 as crate::stdlib::uInt;
+                    break 'deflate_params_result crate::zlib_h::Z_STREAM_ERROR;
                 }
-                state.level = plan.level;
-                state.max_lazy_match = plan.config.max_lazy as crate::stdlib::uInt;
-                state.good_match = plan.config.good_length as crate::stdlib::uInt;
-                state.nice_match = plan.config.nice_length as ::core::ffi::c_int;
-                state.max_chain_length = plan.config.max_chain as crate::stdlib::uInt;
+                let head = if head_len == 0 {
+                    &mut []
+                } else {
+                    ::core::slice::from_raw_parts_mut(state.head, head_len)
+                };
+                let prev = if prev_len == 0 {
+                    &mut []
+                } else {
+                    ::core::slice::from_raw_parts_mut(state.prev, prev_len)
+                };
+                (head, prev)
+            } else {
+                (
+                    &mut [] as &mut [crate::src::deflate::Posf],
+                    &mut [] as &mut [crate::src::deflate::Posf],
+                )
+            };
+            if !crate::src::deflate::deflate_params_commit_state(state, plan, head, prev) {
+                break 'deflate_params_result crate::zlib_h::Z_STREAM_ERROR;
             }
-            state.strategy = plan.strategy;
             crate::zlib_h::Z_OK
         }
     }};
