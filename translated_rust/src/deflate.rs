@@ -1769,27 +1769,30 @@ pub unsafe extern "C" fn deflate(
     }
     if (*s).status == crate::src::deflate::EXTRA_STATE {
         if !(*(*s).gzhead).extra.is_null() {
-            let mut beg: crate::zutil_h::ulg = (*s).pending;
+            let gzhead = &*(*s).gzhead;
+            let hcrc = gzhead.hcrc != 0;
             let mut left: crate::zutil_h::ulg =
-                (((*(*s).gzhead).extra_len & 0xffff as crate::stdlib::uInt) as crate::zutil_h::ulg)
+                ((gzhead.extra_len & 0xffff as crate::stdlib::uInt) as crate::zutil_h::ulg)
                     .wrapping_sub((*s).gzindex);
             while (*s).pending.wrapping_add(left) > (*s).pending_buf_size {
                 let mut copy: crate::zutil_h::ulg =
                     (*s).pending_buf_size.wrapping_sub((*s).pending);
-                crate::stdlib::memcpy(
-                    (*s).pending_buf.offset((*s).pending as isize) as *mut ::core::ffi::c_void,
-                    (*(*s).gzhead).extra.offset((*s).gzindex as isize)
-                        as *const ::core::ffi::c_void,
-                    copy as crate::__stddef_size_t_h::size_t,
+                // The source view is limited to the still-unemitted bytes,
+                // not the whole foreign header allocation.  The destination
+                // allocation has exactly `pending_buf_size` bytes.
+                let extra = ::core::slice::from_raw_parts(
+                    gzhead.extra.add((*s).gzindex as usize),
+                    left as usize,
                 );
-                (*s).pending = (*s).pending_buf_size;
-                if (*(*s).gzhead).hcrc != 0 && (*s).pending > beg {
+                let pending_buf = ::core::slice::from_raw_parts_mut(
+                    (*s).pending_buf,
+                    (*s).pending_buf_size as usize,
+                );
+                append_pending_bytes(pending_buf, &mut (*s).pending, &extra[..copy as usize]);
+                if hcrc {
                     (*strm).adler = crate::src::crc32::crc32_z(
                         (*strm).adler,
-                        Some(::core::slice::from_raw_parts(
-                            (*s).pending_buf.offset(beg as isize),
-                            ((*s).pending as usize).wrapping_sub(beg as usize),
-                        )),
+                        Some(&extra[..copy as usize]),
                     );
                 }
                 (*s).gzindex = (*s).gzindex.wrapping_add(copy);
@@ -1798,23 +1801,21 @@ pub unsafe extern "C" fn deflate(
                     (*s).last_flush = -1 as ::core::ffi::c_int;
                     return crate::zlib_h::Z_OK;
                 }
-                beg = 0 as crate::zutil_h::ulg;
                 left = left.wrapping_sub(copy);
             }
-            crate::stdlib::memcpy(
-                (*s).pending_buf.offset((*s).pending as isize) as *mut ::core::ffi::c_void,
-                (*(*s).gzhead).extra.offset((*s).gzindex as isize) as *const ::core::ffi::c_void,
-                left as crate::__stddef_size_t_h::size_t,
-            );
-            (*s).pending = (*s).pending.wrapping_add(left);
-            if (*(*s).gzhead).hcrc != 0 && (*s).pending > beg {
-                (*strm).adler = crate::src::crc32::crc32_z(
-                    (*strm).adler,
-                    Some(::core::slice::from_raw_parts(
-                        (*s).pending_buf.offset(beg as isize),
-                        ((*s).pending as usize).wrapping_sub(beg as usize),
-                    )),
+            if left != 0 {
+                let extra = ::core::slice::from_raw_parts(
+                    gzhead.extra.add((*s).gzindex as usize),
+                    left as usize,
                 );
+                let pending_buf = ::core::slice::from_raw_parts_mut(
+                    (*s).pending_buf,
+                    (*s).pending_buf_size as usize,
+                );
+                append_pending_bytes(pending_buf, &mut (*s).pending, extra);
+                if hcrc {
+                    (*strm).adler = crate::src::crc32::crc32_z((*strm).adler, Some(extra));
+                }
             }
             (*s).gzindex = 0 as crate::zutil_h::ulg;
         }
