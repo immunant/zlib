@@ -1042,16 +1042,22 @@ fn gz_skip_consume_progress(
     )
 }
 
+fn gz_skip_is_limited_by_remaining(
+    have: ::core::ffi::c_uint,
+    skip: crate::stdlib::off64_t,
+    intmax: ::core::ffi::c_uint,
+) -> bool {
+    let same_width = ::core::mem::size_of::<::core::ffi::c_int>()
+        == ::core::mem::size_of::<crate::stdlib::off64_t>();
+    (same_width && have > intmax) || have as crate::stdlib::off64_t > skip
+}
+
 fn gz_skip_len(
     have: ::core::ffi::c_uint,
     skip: crate::stdlib::off64_t,
     intmax: ::core::ffi::c_uint,
 ) -> ::core::ffi::c_uint {
-    if ::core::mem::size_of::<::core::ffi::c_int>() as usize
-        == ::core::mem::size_of::<crate::stdlib::off64_t>() as usize
-        && have > intmax
-        || have as crate::stdlib::off64_t > skip
-    {
+    if gz_skip_is_limited_by_remaining(have, skip, intmax) {
         skip as ::core::ffi::c_uint
     } else {
         have
@@ -1972,6 +1978,37 @@ mod tests {
         assert_eq!(gz_skip_len(10, 3, 5), 3);
         assert_eq!(gz_skip_len(10, 10, 5), 10);
         assert_eq!(gz_skip_len(10, 15, 5), 10);
+    }
+
+    #[test]
+    fn gz_skip_is_limited_by_remaining_clamps_and_preserves_equality() {
+        assert!(gz_skip_is_limited_by_remaining(
+            10,
+            3,
+            ::core::ffi::c_uint::MAX
+        ));
+        assert!(!gz_skip_is_limited_by_remaining(
+            10,
+            10,
+            ::core::ffi::c_uint::MAX
+        ));
+    }
+
+    #[test]
+    fn gz_skip_is_limited_by_remaining_checks_architecture_intmax_boundary() {
+        let intmax = crate::src::gzlib::gz_intmax();
+        let same_width = ::core::mem::size_of::<::core::ffi::c_int>()
+            == ::core::mem::size_of::<crate::stdlib::off64_t>();
+
+        assert!(!gz_skip_is_limited_by_remaining(
+            intmax,
+            crate::stdlib::off64_t::MAX,
+            intmax
+        ));
+        assert_eq!(
+            gz_skip_is_limited_by_remaining(intmax + 1, crate::stdlib::off64_t::MAX, intmax),
+            same_width
+        );
     }
 
     #[test]

@@ -173,6 +173,26 @@ enum InflateZlibHeaderError {
     UnknownCompressionMethod,
 }
 
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+enum InflateOutputChecksum {
+    Adler32,
+    Crc32,
+}
+
+fn inflate_output_checksum(
+    wrap: ::core::ffi::c_int,
+    flags: ::core::ffi::c_int,
+    output_len: ::core::ffi::c_uint,
+) -> Option<InflateOutputChecksum> {
+    if wrap & 4 == 0 || output_len == 0 {
+        None
+    } else if flags != 0 {
+        Some(InflateOutputChecksum::Crc32)
+    } else {
+        Some(InflateOutputChecksum::Adler32)
+    }
+}
+
 fn inflate_zlib_header_error(
     wrap: ::core::ffi::c_int,
     hold: crate::stdlib::uLong,
@@ -2238,19 +2258,18 @@ pub unsafe extern "C" fn inflate(
     (*strm).total_in = (*strm).total_in.wrapping_add(in_0 as crate::stdlib::uLong);
     (*strm).total_out = (*strm).total_out.wrapping_add(out as crate::stdlib::uLong);
     (*state).total = (*state).total.wrapping_add(out as ::core::ffi::c_ulong);
-    if (*state).wrap & 4 as ::core::ffi::c_int != 0 && out != 0 {
-        (*state).check = (if (*state).flags != 0 {
-            crate::src::crc32::crc32_ffi(
+    if let Some(checksum) = inflate_output_checksum((*state).wrap, (*state).flags, out) {
+        (*state).check = (match checksum {
+            InflateOutputChecksum::Crc32 => crate::src::crc32::crc32_ffi(
                 (*state).check as crate::stdlib::uLong,
                 checksum_start,
                 out as crate::stdlib::uInt,
-            )
-        } else {
-            crate::src::adler32::adler32_ffi(
+            ),
+            InflateOutputChecksum::Adler32 => crate::src::adler32::adler32_ffi(
                 (*state).check as crate::stdlib::uLong,
                 checksum_start,
                 out as crate::stdlib::uInt,
-            )
+            ),
         }) as ::core::ffi::c_ulong;
         (*strm).adler = (*state).check as crate::stdlib::uLong;
     }
@@ -2876,17 +2895,17 @@ mod tests {
         inflate_get_dictionary_result, inflate_header_crc_enabled,
         inflate_header_wrap_allows_capture, inflate_mark_progress, inflate_mark_value,
         inflate_match_copy_plan, inflate_mode_data_type_flags, inflate_mode_is_valid,
-        inflate_needs_buffer_error, inflate_prime_update, inflate_reset2_params,
-        inflate_should_update_window, inflate_state_metadata_is_valid,
+        inflate_needs_buffer_error, inflate_output_checksum, inflate_prime_update,
+        inflate_reset2_params, inflate_should_update_window, inflate_state_metadata_is_valid,
         inflate_stream_has_allocator_callbacks, inflate_sync_input_progress,
         inflate_sync_normalized_wrap, inflate_sync_point_value, inflate_sync_remaining_input,
         inflate_sync_search_core, inflate_undermine_core, inflate_validate_core,
         inflate_validate_wrap, inflate_zlib_header_error, inflate_zlib_window_params,
         initial_window_metadata, reset_window_history, stored_block_length, syncsearch_safe,
         window_needs_allocation, window_update_plan, InflateBlockKind, InflateCopyProgress,
-        InflateMatchPlan, InflateMatchSource, InflatePrimeUpdate, InflateSyncSearch,
-        InflateZlibHeaderError, InflateZlibWindowParams, BAD, CHECK, CODE_LENGTH_ORDER, COPY_,
-        COPY_1, DICT, DICTID, HEAD, LEN_, MATCH, STORED, SYNC, TYPE,
+        InflateMatchPlan, InflateMatchSource, InflateOutputChecksum, InflatePrimeUpdate,
+        InflateSyncSearch, InflateZlibHeaderError, InflateZlibWindowParams, BAD, CHECK,
+        CODE_LENGTH_ORDER, COPY_, COPY_1, DICT, DICTID, HEAD, LEN_, MATCH, STORED, SYNC, TYPE,
     };
 
     #[test]
@@ -3679,6 +3698,24 @@ mod tests {
             super::inflate_cursor_progress(0, 1),
             ::core::ffi::c_uint::MAX
         );
+    }
+
+    #[test]
+    fn output_checksum_selection_uses_wrap_length_and_flags() {
+        assert_eq!(
+            inflate_output_checksum(5, 0, 1),
+            Some(InflateOutputChecksum::Adler32)
+        );
+        assert_eq!(
+            inflate_output_checksum(4, 1, 1),
+            Some(InflateOutputChecksum::Crc32)
+        );
+        assert_eq!(
+            inflate_output_checksum(4, -1, 1),
+            Some(InflateOutputChecksum::Crc32)
+        );
+        assert_eq!(inflate_output_checksum(3, 1, 1), None);
+        assert_eq!(inflate_output_checksum(4, 1, 0), None);
     }
 
     #[test]

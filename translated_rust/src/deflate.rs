@@ -1709,14 +1709,17 @@ fn gzip_default_xfl(
     }
 }
 
+fn deflate_flush_rank(flush: ::core::ffi::c_int) -> ::core::ffi::c_int {
+    flush * 2 - if flush > 4 { 9 } else { 0 }
+}
+
 fn deflate_should_return_buf_error(
     avail_in: crate::stdlib::uInt,
     flush: ::core::ffi::c_int,
     old_flush: ::core::ffi::c_int,
 ) -> bool {
     avail_in == 0
-        && flush * 2 - if flush > 4 { 9 } else { 0 }
-            <= old_flush * 2 - if old_flush > 4 { 9 } else { 0 }
+        && deflate_flush_rank(flush) <= deflate_flush_rank(old_flush)
         && flush != crate::zlib_h::Z_FINISH
 }
 
@@ -3766,7 +3769,7 @@ unsafe extern "C" fn deflate_huff(
 mod tests {
     use super::{
         clamped_copy_len, deflate_bound_lengths, deflate_copyright, deflate_dictionary_len,
-        deflate_pending_value, deflate_preflight, deflate_prime_bits_valid,
+        deflate_flush_rank, deflate_pending_value, deflate_preflight, deflate_prime_bits_valid,
         deflate_request_is_invalid, deflate_should_return_buf_error, deflate_state_status_valid,
         deflate_version_matches, fill_window_available_space, fill_window_cursor,
         fill_window_insert_after_slide, fill_window_zero_range, flush_pending_accounting,
@@ -4185,6 +4188,17 @@ mod tests {
             crate::zlib_h::Z_FINISH,
             crate::zlib_h::Z_FINISH,
         ));
+    }
+
+    #[test]
+    fn deflate_flush_rank_preserves_flush_ordering() {
+        assert_eq!(deflate_flush_rank(0), 0);
+        assert_eq!(deflate_flush_rank(1), 2);
+        assert_eq!(deflate_flush_rank(2), 4);
+        assert_eq!(deflate_flush_rank(3), 6);
+        assert_eq!(deflate_flush_rank(4), 8);
+        assert_eq!(deflate_flush_rank(5), 1);
+        assert_eq!(deflate_flush_rank(6), 3);
     }
 
     #[test]
