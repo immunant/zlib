@@ -52,15 +52,18 @@ pub unsafe extern "C" fn uncompress2_z(
     let max: crate::stdlib::uInt = -1 as ::core::ffi::c_int as crate::stdlib::uInt;
     let mut len: crate::stdlib::z_size_t = 0;
     let mut left: crate::stdlib::z_size_t = 0;
-    if sourceLen.is_null()
-        || *sourceLen > 0 as crate::stdlib::z_size_t && source.is_null()
-        || destLen.is_null()
-        || *destLen > 0 as crate::stdlib::z_size_t && dest.is_null()
+    if sourceLen.is_null() || destLen.is_null() {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    }
+    let source_capacity = *sourceLen;
+    let dest_capacity = *destLen;
+    if source_capacity > 0 as crate::stdlib::z_size_t && source.is_null()
+        || dest_capacity > 0 as crate::stdlib::z_size_t && dest.is_null()
     {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    len = *sourceLen;
-    left = *destLen;
+    len = source_capacity;
+    left = dest_capacity;
     if left == 0 as crate::stdlib::z_size_t && dest.is_null() {
         dest = &raw mut stream.reserved as *mut crate::stdlib::Bytef;
     }
@@ -106,8 +109,13 @@ pub unsafe extern "C" fn uncompress2_z(
     }
     len = len.wrapping_add(stream.avail_in as crate::stdlib::z_size_t);
     left = left.wrapping_add(stream.avail_out as crate::stdlib::z_size_t);
-    *sourceLen = (*sourceLen).wrapping_sub(len);
-    *destLen = (*destLen).wrapping_sub(left);
+    if sourceLen == destLen {
+        // Preserve the C write order when callers alias the two length outputs.
+        *sourceLen = source_capacity.wrapping_sub(len).wrapping_sub(left);
+    } else {
+        *sourceLen = source_capacity.wrapping_sub(len);
+        *destLen = dest_capacity.wrapping_sub(left);
+    }
     crate::src::inflate::inflateEnd(&raw mut stream as *mut _ as *mut crate::zlib_h::z_stream_s);
     return if err == crate::zlib_h::Z_STREAM_END {
         crate::zlib_h::Z_OK

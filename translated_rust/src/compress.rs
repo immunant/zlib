@@ -51,13 +51,13 @@ pub unsafe extern "C" fn compress2_z(
     let max: crate::stdlib::uInt = -1 as ::core::ffi::c_int as crate::stdlib::uInt;
     let mut left: crate::stdlib::z_size_t = 0;
     let mut out_capacity: crate::stdlib::z_size_t = 0;
-    if sourceLen > 0 as crate::stdlib::z_size_t && source.is_null()
-        || destLen.is_null()
-        || *destLen > 0 as crate::stdlib::z_size_t && dest.is_null()
-    {
+    if sourceLen > 0 as crate::stdlib::z_size_t && source.is_null() || destLen.is_null() {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
     out_capacity = *destLen;
+    if out_capacity > 0 as crate::stdlib::z_size_t && dest.is_null() {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    }
     left = out_capacity;
     *destLen = 0 as crate::stdlib::z_size_t;
     stream.zalloc = None;
