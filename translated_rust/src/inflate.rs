@@ -209,7 +209,7 @@ pub struct inflate_state {
 // initially uninitialized. Construct the exact field-wise zero value before
 // exposing such an allocation as `inflate_state`, rather than relying on C's
 // bytewise initialization after allocation.
-fn inflate_state_zero_value() -> inflate_state {
+pub(crate) fn inflate_state_zero_value() -> inflate_state {
     let zero_code = crate::src::inftrees::code {
         op: 0,
         bits: 0,

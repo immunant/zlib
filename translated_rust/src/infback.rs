@@ -1157,9 +1157,14 @@ fn inflateBackInit_(
     if state.is_null() {
         return crate::zlib_h::Z_MEM_ERROR;
     }
-    // SAFETY: the allocator above returned a non-null state allocation with
-    // the exact layout requested for `inflate_state`.
-    let state_ref = unsafe { &mut *state };
+    // SAFETY: the allocator above returned a non-null allocation large enough
+    // for one `inflate_state`. Bind it as uninitialized storage only long
+    // enough to write the complete safe zero value, then retain the
+    // initialized reference for the rest of this function.
+    let state_ref = unsafe {
+        (&mut *state.cast::<::core::mem::MaybeUninit<crate::src::inflate::inflate_state>>())
+            .write(crate::src::inflate::inflate_state_zero_value())
+    };
     inflate_back_init_state(strm_ref, state_ref, window, config);
     return crate::zlib_h::Z_OK;
 }
