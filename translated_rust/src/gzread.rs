@@ -107,21 +107,12 @@ unsafe extern "C" fn gz_avail(mut state: crate::gzguts_h::gz_statep) -> ::core::
     } = plan
     {
         if buffered != 0 {
-            let mut p: *mut ::core::ffi::c_uchar = state.in_0;
-            let mut q: *const ::core::ffi::c_uchar = state.strm.next_in;
-            if q != p as *const ::core::ffi::c_uchar {
-                let mut n = buffered;
-                loop {
-                    let c2rust_fresh0 = q;
-                    q = q.offset(1);
-                    let c2rust_fresh1 = p;
-                    p = p.offset(1);
-                    *c2rust_fresh1 = *c2rust_fresh0;
-                    n = n.wrapping_sub(1);
-                    if n == 0 {
-                        break;
-                    }
-                }
+            let input = state.strm.next_in as *const ::core::ffi::c_uchar;
+            if input != state.in_0 as *const ::core::ffi::c_uchar {
+                // `next_in` points into the input buffer, so the source and
+                // destination may overlap.  `copy` preserves the translated
+                // forward-copy behavior for that compaction.
+                ::core::ptr::copy(input, state.in_0, buffered as usize);
             }
         }
         if gz_load(
