@@ -2820,7 +2820,7 @@ pub fn deflate(
         // This transitional dispatcher still uses raw cursors in its legacy
         // compression loop. Validate the safe stream and adopt its raw state
         // once at entry rather than routing through the private state checker.
-        let (s, pending, avail_in) = {
+        let (s, pending, avail_in, gzip_header) = {
             let stream = deflate_reborrow_mut(strm_ref);
             let state_ptr = stream.state as *mut crate::src::deflate::deflate_state;
             if state_ptr.is_null() {
@@ -2866,7 +2866,17 @@ pub fn deflate(
             old_flush = state.last_flush;
             state.last_flush = flush;
             let pending = state.pending != 0;
-            (state, pending, stream.avail_in)
+            // The retained gzip header belongs to the caller, but this
+            // dispatch only needs a value snapshot of its scalar fields and
+            // payload cursors.  Taking that snapshot while the existing
+            // state-adoption boundary is active avoids repeatedly lending the
+            // header through each gzip state transition (and, importantly,
+            // does not retain a header reference across pending flushes).
+            let gzip_header = match state.gzhead {
+                Some(header) => Some(*header.as_ptr()),
+                None => None,
+            };
+            (state, pending, stream.avail_in, gzip_header)
         };
         if pending {
             if flush_pending(
@@ -2989,9 +2999,7 @@ pub fn deflate(
                 let stream = deflate_reborrow_mut(strm_ref);
                 let state = deflate_reborrow_mut(s);
                 stream.adler = crate::src::crc32::crc32_slice(0, &[]);
-                let header = if let Some(header) = state.gzhead {
-                    let header = &*header.as_ptr();
-                    Some(GzipFixedHeader {
+                let header = gzip_header.map(|header| GzipFixedHeader {
                         text: header.text != 0,
                         hcrc: header.hcrc != 0,
                         has_extra: !header.extra.is_null(),
@@ -3000,10 +3008,7 @@ pub fn deflate(
                         time: header.time,
                         os: header.os,
                         extra_len: header.extra_len,
-                    })
-                } else {
-                    None
-                };
+                    });
                 let Ok(pending_len) = usize::try_from(state.pending_buf_size) else {
                     return crate::zlib_h::Z_STREAM_ERROR;
                 };
@@ -3044,21 +3049,17 @@ pub fn deflate(
                 }
             }
         }
-        // Keep the retained-header address with the status snapshot.  The
-        // EXTRA transition only needs that token after the check, so this
-        // avoids re-adopting the raw state record solely to retrieve it.
-        let (gzip_extra_pending, gzip_extra_header) = {
+        // The entry snapshot carries the retained-header values through the
+        // remaining gzip transitions without extending a borrow of caller
+        // memory across any flush.
+        let gzip_extra_pending = {
             let state = deflate_reborrow(s);
-            (
-                state.status == crate::src::deflate::EXTRA_STATE,
-                state.gzhead,
-            )
+            state.status == crate::src::deflate::EXTRA_STATE
         };
         if gzip_extra_pending {
-            // Keep the gzip-header compatibility pointer at this codec boundary,
-            // but use ordinary state and stream borrows for every chunk commit.
-            if let Some(header) = gzip_extra_header {
-                let header = &*header.as_ptr();
+            // The header value was snapshotted at the ABI boundary; ordinary
+            // state and stream borrows handle every chunk commit.
+            if let Some(header) = gzip_header {
                 if !header.extra.is_null() {
                     let extra_len = (header.extra_len & 0xffff as crate::stdlib::uInt) as usize;
                     let extra = ::core::slice::from_raw_parts(header.extra, extra_len);
@@ -3108,19 +3109,14 @@ pub fn deflate(
             let state = deflate_reborrow_mut(s);
             state.status = crate::src::deflate::NAME_STATE;
         }
-        // NAME follows the same status/header pairing as EXTRA.  Keep only a
-        // raw token here; the temporary C string view remains at the actual
-        // compatibility boundary below.
-        let (gzip_name_pending, gzip_name_header) = {
+        // NAME follows the same entry snapshot as EXTRA; the temporary C
+        // string view remains at the actual compatibility boundary below.
+        let gzip_name_pending = {
             let state = deflate_reborrow(s);
-            (
-                state.status == crate::src::deflate::NAME_STATE,
-                state.gzhead,
-            )
+            state.status == crate::src::deflate::NAME_STATE
         };
         if gzip_name_pending {
-            if let Some(header) = gzip_name_header {
-                let header = &*header.as_ptr();
+            if let Some(header) = gzip_header {
                 if !header.name.is_null() {
                     let name = ::std::ffi::CStr::from_ptr(header.name.cast()).to_bytes_with_nul();
                     loop {
@@ -3169,16 +3165,12 @@ pub fn deflate(
             let state = deflate_reborrow_mut(s);
             state.status = crate::src::deflate::COMMENT_STATE;
         }
-        let (gzip_comment_pending, gzip_comment_header) = {
+        let gzip_comment_pending = {
             let state = deflate_reborrow(s);
-            (
-                state.status == crate::src::deflate::COMMENT_STATE,
-                state.gzhead,
-            )
+            state.status == crate::src::deflate::COMMENT_STATE
         };
         if gzip_comment_pending {
-            if let Some(header) = gzip_comment_header {
-                let header = &*header.as_ptr();
+            if let Some(header) = gzip_header {
                 if !header.comment.is_null() {
                     let comment =
                         ::std::ffi::CStr::from_ptr(header.comment.cast()).to_bytes_with_nul();
@@ -3228,11 +3220,10 @@ pub fn deflate(
             let state = deflate_reborrow_mut(s);
             state.status = crate::src::deflate::HCRC_STATE;
         }
-        let (gzip_hcrc_pending, gzip_hcrc_header, hcrc_pending, hcrc_pending_buf_size) = {
+        let (gzip_hcrc_pending, hcrc_pending, hcrc_pending_buf_size) = {
             let state = deflate_reborrow(s);
             (
                 state.status == crate::src::deflate::HCRC_STATE,
-                state.gzhead,
                 state.pending,
                 state.pending_buf_size,
             )
@@ -3242,16 +3233,13 @@ pub fn deflate(
             // together.  The scalar planner then owns the two-byte admission
             // check, avoiding a second raw state adoption before a possible
             // flush.
-            let hcrc_plan = match gzip_hcrc_header {
+            let hcrc_plan = match gzip_header {
                 None => GzipHcrcPlan {
                     emit: false,
                     flush_before_emit: false,
                 },
-                Some(header) => gzip_hcrc_plan(
-                    (&*header.as_ptr()).hcrc != 0,
-                    hcrc_pending,
-                    hcrc_pending_buf_size,
-                ),
+                Some(header) =>
+                    gzip_hcrc_plan(header.hcrc != 0, hcrc_pending, hcrc_pending_buf_size),
             };
             if hcrc_plan.emit {
                 if hcrc_plan.flush_before_emit {
