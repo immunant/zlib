@@ -527,29 +527,27 @@ pub unsafe extern "C" fn gzread(
     mut buf: crate::stdlib::voidp,
     mut len: ::core::ffi::c_uint,
 ) -> ::core::ffi::c_int {
-    let mut state: crate::gzguts_h::gz_statep =
-        ::core::ptr::null_mut::<crate::gzguts_h::gz_state>();
     if file.is_null() {
         return -1 as ::core::ffi::c_int;
     }
-    state = file as crate::gzguts_h::gz_statep;
-    if (*state).mode != crate::gzguts_h::GZ_READ {
+    let state = &mut *(file as crate::gzguts_h::gz_statep);
+    if state.mode != crate::gzguts_h::GZ_READ {
         return -1 as ::core::ffi::c_int;
     }
-    if (*state).err != crate::zlib_h::Z_OK
-        && (*state).err != crate::zlib_h::Z_BUF_ERROR
-        && (*state).again == 0
+    if state.err != crate::zlib_h::Z_OK
+        && state.err != crate::zlib_h::Z_BUF_ERROR
+        && state.again == 0
     {
         return -1 as ::core::ffi::c_int;
     }
     crate::src::gzlib::gz_error(
-        state as *mut crate::gzguts_h::gz_state,
+        state,
         crate::zlib_h::Z_OK,
         ::core::ptr::null::<::core::ffi::c_char>(),
     );
     if (len as ::core::ffi::c_int) < 0 as ::core::ffi::c_int {
         crate::src::gzlib::gz_error(
-            state as *mut crate::gzguts_h::gz_state,
+            state,
             crate::zlib_h::Z_STREAM_ERROR,
             b"request does not fit in an int\0".as_ptr() as *const ::core::ffi::c_char,
         );
@@ -557,12 +555,12 @@ pub unsafe extern "C" fn gzread(
     }
     len = gz_read(state, buf, len as crate::stdlib::z_size_t) as ::core::ffi::c_uint;
     if len == 0 as ::core::ffi::c_uint {
-        if (*state).err != crate::zlib_h::Z_OK && (*state).err != crate::zlib_h::Z_BUF_ERROR {
+        if state.err != crate::zlib_h::Z_OK && state.err != crate::zlib_h::Z_BUF_ERROR {
             return -1 as ::core::ffi::c_int;
         }
-        if (*state).again != 0 {
+        if state.again != 0 {
             crate::src::gzlib::gz_error(
-                state as *mut crate::gzguts_h::gz_state,
+                state,
                 crate::zlib_h::Z_ERRNO,
                 crate::stdlib::strerror(*crate::stdlib::__errno_location()),
             );
