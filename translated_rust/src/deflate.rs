@@ -1929,7 +1929,12 @@ pub unsafe extern "C" fn deflate(
         if bstate as ::core::ffi::c_uint == block_done as ::core::ffi::c_int as ::core::ffi::c_uint
         {
             if flush == crate::zlib_h::Z_PARTIAL_FLUSH {
-                crate::src::trees::_tr_align(s as *mut crate::src::deflate::internal_state);
+                let state = &mut *s;
+                let pending_buf = ::core::slice::from_raw_parts_mut(
+                    state.pending_buf,
+                    state.pending_buf_size as usize,
+                );
+                crate::src::trees::_tr_align(state, pending_buf);
             } else if flush != crate::zlib_h::Z_BLOCK {
                 crate::src::trees::_tr_stored_block(
                     s as *mut crate::src::deflate::internal_state,
