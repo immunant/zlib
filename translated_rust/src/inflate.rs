@@ -840,6 +840,21 @@ fn inflate_match_copy_from_state_window(
     .expect("existing-window access cannot allocate or fail")
 }
 
+// Header parsing records only bounded source and destination ranges.  Once
+// the ABI adapter has bound a caller-provided header field, publishing one
+// record is ordinary slice work.  Keep that work separate from the narrow
+// raw-field binding at the decoder tail so it cannot drift back into an FFI
+// entry point.
+fn inflate_publish_header_field(
+    header: &mut [crate::stdlib::Bytef],
+    copy: (usize, usize, usize),
+    input: &[crate::stdlib::Bytef],
+) {
+    let (header_start, input_start, copy_len) = copy;
+    header[header_start..header_start + copy_len]
+        .copy_from_slice(&input[input_start..input_start + copy_len]);
+}
+
 // The inflater's window is an internal allocation.  Keep allocation, update,
 // and read-only inspection behind this existing implementation boundary so
 // ABI wrappers never need to bind that state-owned raw pointer themselves.
@@ -2627,14 +2642,13 @@ pub fn inflate(
             (head.name, head.name_max, header_name_copy),
             (head.comment, head.comm_max, header_comment_copy),
         ] {
-            let Some((header_start, input_start, copy_len)) = copy else {
+            let Some(copy) = copy else {
                 continue;
             };
             // Each record was collected only after this field's non-null
             // cursor and advertised bound accepted every copied byte.
             let header = unsafe { ::core::slice::from_raw_parts_mut(cursor, max as usize) };
-            header[header_start..header_start + copy_len]
-                .copy_from_slice(&input[input_start..input_start + copy_len]);
+            inflate_publish_header_field(header, copy, input);
         }
     }
     strm.next_out = put as *mut crate::stdlib::Bytef;
