@@ -390,6 +390,75 @@ fn read_buf_state(
     (len as ::core::ffi::c_uint, adler)
 }
 
+fn insert_pending_strings_state(
+    window: &[crate::stdlib::Byte],
+    head: &mut [crate::src::deflate::Posf],
+    prev: &mut [crate::src::deflate::Posf],
+    strstart: crate::stdlib::uInt,
+    lookahead: crate::stdlib::uInt,
+    insert: &mut crate::stdlib::uInt,
+    ins_h: &mut crate::stdlib::uInt,
+    hash_shift: crate::stdlib::uInt,
+    hash_mask: crate::stdlib::uInt,
+    w_mask: crate::stdlib::uInt,
+) -> bool {
+    if lookahead.wrapping_add(*insert) < crate::zutil_h::MIN_MATCH as crate::stdlib::uInt {
+        return true;
+    }
+
+    let Some(start) = strstart.checked_sub(*insert) else {
+        return false;
+    };
+    let Ok(start) = usize::try_from(start) else {
+        return false;
+    };
+    let Ok(insert_len) = usize::try_from(*insert) else {
+        return false;
+    };
+    let Some(last) = start
+        .checked_add(insert_len)
+        .and_then(|end| end.checked_add(1))
+    else {
+        return false;
+    };
+    let Ok(max_head_index) = usize::try_from(hash_mask) else {
+        return false;
+    };
+    let Ok(max_prev_index) = usize::try_from(w_mask) else {
+        return false;
+    };
+    if last >= window.len() || max_head_index >= head.len() || max_prev_index >= prev.len() {
+        return false;
+    }
+
+    let mut current = start;
+    *ins_h = window[current] as crate::stdlib::uInt;
+    *ins_h = ((*ins_h << hash_shift) ^ window[current + 1] as crate::stdlib::uInt) & hash_mask;
+    while *insert != 0 {
+        *ins_h = ((*ins_h << hash_shift) ^ window[current + 2] as crate::stdlib::uInt) & hash_mask;
+        let Ok(head_index) = usize::try_from(*ins_h) else {
+            return false;
+        };
+        let Ok(prev_index) = usize::try_from((current as crate::stdlib::uInt) & w_mask) else {
+            return false;
+        };
+        let Some(head_entry) = head.get_mut(head_index) else {
+            return false;
+        };
+        let Some(prev_entry) = prev.get_mut(prev_index) else {
+            return false;
+        };
+        *prev_entry = *head_entry;
+        *head_entry = current as crate::src::deflate::Posf;
+        current += 1;
+        *insert = insert.wrapping_sub(1);
+        if lookahead.wrapping_add(*insert) < crate::zutil_h::MIN_MATCH as crate::stdlib::uInt {
+            break;
+        }
+    }
+    true
+}
+
 unsafe extern "C" fn read_buf(
     mut strm: crate::zlib_h::z_streamp,
     mut buf: *mut crate::stdlib::Bytef,
@@ -466,33 +535,49 @@ unsafe extern "C" fn fill_window(mut s: *mut crate::src::deflate::deflate_state)
         if (*s).lookahead.wrapping_add((*s).insert)
             >= crate::zutil_h::MIN_MATCH as crate::stdlib::uInt
         {
-            let mut str: crate::stdlib::uInt = (*s).strstart.wrapping_sub((*s).insert);
-            (*s).ins_h = *(*s).window.offset(str as isize) as crate::stdlib::uInt;
-            (*s).ins_h = ((*s).ins_h << (*s).hash_shift
-                ^ *(*s)
-                    .window
-                    .offset(str.wrapping_add(1 as crate::stdlib::uInt) as isize)
-                    as crate::stdlib::uInt)
-                & (*s).hash_mask;
-            while (*s).insert != 0 {
-                (*s).ins_h = ((*s).ins_h << (*s).hash_shift
-                    ^ *(*s).window.offset(
-                        str.wrapping_add(3 as crate::stdlib::uInt)
-                            .wrapping_sub(1 as crate::stdlib::uInt)
-                            as isize,
-                    ) as crate::stdlib::uInt)
-                    & (*s).hash_mask;
-                *(*s).prev.offset((str & (*s).w_mask) as isize) =
-                    *(*s).head.offset((*s).ins_h as isize);
-                *(*s).head.offset((*s).ins_h as isize) =
-                    str as crate::src::deflate::Pos as crate::src::deflate::Posf;
-                str = str.wrapping_add(1);
-                (*s).insert = (*s).insert.wrapping_sub(1);
-                if (*s).lookahead.wrapping_add((*s).insert)
-                    < crate::zutil_h::MIN_MATCH as crate::stdlib::uInt
-                {
-                    break;
-                }
+            let Ok(window_len) = usize::try_from((*s).window_size) else {
+                return;
+            };
+            let Ok(head_len) = usize::try_from((*s).hash_size) else {
+                return;
+            };
+            let Ok(prev_len) = usize::try_from((*s).w_size) else {
+                return;
+            };
+            if (window_len != 0 && (*s).window.is_null())
+                || (head_len != 0 && (*s).head.is_null())
+                || (prev_len != 0 && (*s).prev.is_null())
+            {
+                return;
+            }
+            let window = if window_len == 0 {
+                &[]
+            } else {
+                ::core::slice::from_raw_parts((*s).window, window_len)
+            };
+            let head = if head_len == 0 {
+                &mut []
+            } else {
+                ::core::slice::from_raw_parts_mut((*s).head, head_len)
+            };
+            let prev = if prev_len == 0 {
+                &mut []
+            } else {
+                ::core::slice::from_raw_parts_mut((*s).prev, prev_len)
+            };
+            if !insert_pending_strings_state(
+                window,
+                head,
+                prev,
+                (*s).strstart,
+                (*s).lookahead,
+                &mut (*s).insert,
+                &mut (*s).ins_h,
+                (*s).hash_shift,
+                (*s).hash_mask,
+                (*s).w_mask,
+            ) {
+                return;
             }
         }
         if !((*s).lookahead < crate::src::deflate::MIN_LOOKAHEAD as crate::stdlib::uInt
