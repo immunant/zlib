@@ -491,6 +491,15 @@ fn read_buf_progress_state(
     )
 }
 
+/// Scalar progress returned by the raw stream adapter.  Keeping the updated
+/// input availability with the copied length lets callers make their next
+/// refill decision without re-dereferencing the compatibility stream.
+#[derive(Copy, Clone, Default)]
+struct ReadBufProgress {
+    copied: ::core::ffi::c_uint,
+    avail_in: crate::stdlib::uInt,
+}
+
 fn insert_pending_strings_state(
     window: &[crate::stdlib::Byte],
     head: &mut [crate::src::deflate::Posf],
@@ -734,17 +743,23 @@ unsafe fn read_buf(
     mut buf: *mut crate::stdlib::Bytef,
     mut size: ::core::ffi::c_uint,
     wrap: ::core::ffi::c_int,
-) -> ::core::ffi::c_uint {
+) -> ReadBufProgress {
     if strm.is_null() {
-        return 0 as ::core::ffi::c_uint;
+        return ReadBufProgress::default();
     }
     let strm = &mut *strm;
     let len = strm.avail_in.min(size);
     if len == 0 {
-        return 0;
+        return ReadBufProgress {
+            copied: 0,
+            avail_in: strm.avail_in,
+        };
     }
     if strm.next_in.is_null() || buf.is_null() {
-        return 0;
+        return ReadBufProgress {
+            copied: 0,
+            avail_in: strm.avail_in,
+        };
     }
     let input = ::core::slice::from_raw_parts(strm.next_in, len as usize);
     let output = ::core::slice::from_raw_parts_mut(buf, len as usize);
@@ -763,7 +778,10 @@ unsafe fn read_buf(
     // offset in this private adapter.
     strm.next_in = strm.next_in.wrapping_add(len as usize);
     strm.total_in = total_in;
-    len
+    ReadBufProgress {
+        copied: len,
+        avail_in,
+    }
 }
 
 fn fill_window_space_state(
@@ -830,11 +848,7 @@ unsafe fn fill_window(mut s: *mut crate::src::deflate::deflate_state) {
         // `read_buf()` consumes at most this exact available-input snapshot.
         // Retain it so the loop need not dereference the compatibility stream
         // again merely to decide whether more input remains.
-        let avail_in = (*state.strm).avail_in;
-        if avail_in == 0 as crate::stdlib::uInt {
-            break;
-        }
-        n = read_buf(
+        let progress = read_buf(
             state.strm,
             state
                 .window
@@ -843,6 +857,7 @@ unsafe fn fill_window(mut s: *mut crate::src::deflate::deflate_state) {
             more,
             state.wrap,
         );
+        n = progress.copied;
         state.lookahead = state.lookahead.wrapping_add(n);
         if state.lookahead.wrapping_add(state.insert)
             >= crate::zutil_h::MIN_MATCH as crate::stdlib::uInt
@@ -893,7 +908,7 @@ unsafe fn fill_window(mut s: *mut crate::src::deflate::deflate_state) {
             }
         }
         if !(state.lookahead < crate::src::deflate::MIN_LOOKAHEAD as crate::stdlib::uInt
-            && avail_in.wrapping_sub(n) != 0 as crate::stdlib::uInt)
+            && progress.avail_in != 0 as crate::stdlib::uInt)
         {
             break;
         }
