@@ -2872,7 +2872,7 @@ pub fn deflateCopy(
     ) else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
-    *dest_stream = *source_stream;
+    crate::zlib_h::copy_z_stream(dest_stream, source_stream);
     ds = unsafe {
         Some(dest_stream.zalloc.expect("non-null function pointer"))
             .expect("non-null function pointer")(

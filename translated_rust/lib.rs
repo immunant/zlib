@@ -118,9 +118,7 @@ pub mod zlib_h {
 
     pub type z_stream = crate::zlib_h::z_stream_s;
 
-    #[derive(Copy, Clone)]
     #[repr(C)]
-
     pub struct z_stream_s {
         pub next_in: *mut crate::stdlib::Bytef,
         pub avail_in: crate::stdlib::uInt,
@@ -136,6 +134,23 @@ pub mod zlib_h {
         pub data_type: ::core::ffi::c_int,
         pub adler: crate::stdlib::uLong,
         pub reserved: crate::stdlib::uLong,
+    }
+
+    pub fn copy_z_stream(dest: &mut z_stream, source: &z_stream) {
+        dest.next_in = source.next_in;
+        dest.avail_in = source.avail_in;
+        dest.total_in = source.total_in;
+        dest.next_out = source.next_out;
+        dest.avail_out = source.avail_out;
+        dest.total_out = source.total_out;
+        dest.msg = source.msg;
+        dest.state = source.state;
+        dest.zalloc = source.zalloc;
+        dest.zfree = source.zfree;
+        dest.opaque = source.opaque;
+        dest.data_type = source.data_type;
+        dest.adler = source.adler;
+        dest.reserved = source.reserved;
     }
 
     pub type z_streamp = *mut crate::zlib_h::z_stream;

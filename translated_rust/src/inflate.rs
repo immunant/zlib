@@ -2967,7 +2967,7 @@ pub fn inflateCopy(
             return crate::zlib_h::Z_MEM_ERROR;
         }
     }
-    *dest_ref = *source_ref;
+    crate::zlib_h::copy_z_stream(dest_ref, source_ref);
     let copy_ref = unsafe { &mut *copy };
     *copy_ref = copy_inflate_state(state_ref);
     copy_ref.strm = stream_identity(dest_ref);
