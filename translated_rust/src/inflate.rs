@@ -1876,6 +1876,7 @@ fn inflate_publish_cursors(
 pub fn inflate(
     strm_ref: &mut crate::zlib_h::z_stream,
     state_ref: &mut crate::src::inflate::inflate_state,
+    mut gzip_header: Option<&mut crate::zlib_h::gz_header>,
     mut flush: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
     // Rust callers pass both already-adopted compatibility records directly.
@@ -1966,16 +1967,11 @@ pub fn inflate(
             // are again possible.
             // zlib permits a null `next_in` when no input is available.  Do
             // not turn that valid empty ABI cursor into a Rust slice.
-            // The optional gzip header is likewise stable throughout this
-            // no-callback loop. Adopt it once so individual header
-            // transitions do not repeatedly dereference the retained ABI
-            // pointer. This borrow ends with the other invocation-local views
-            // before the exit path can invoke an allocation callback.
-            let mut gzip_header = if state_ref.head.is_null() {
-                None
-            } else {
-                Some(&mut *state_ref.head)
-            };
+            // The optional gzip header was adopted at the caller's existing
+            // ABI boundary and is stable throughout this no-callback loop.
+            // Keep that one invocation-local borrow for every header field
+            // update, then end it with the other cursor views before the exit
+            // path can invoke an allocation callback.
             let input = if have == 0 {
                 &[]
             } else {
@@ -3990,7 +3986,12 @@ pub unsafe extern "C" fn inflate_ffi(
     let Some(state_ref) = state.as_mut() else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
-    inflate(strm_ref, state_ref, flush)
+    let gzip_header = if state_ref.head.is_null() {
+        None
+    } else {
+        Some(&mut *state_ref.head)
+    };
+    inflate(strm_ref, state_ref, gzip_header, flush)
 }
 // This expands only in export-attributed ABI functions (including the
 // boundary macros used by gzip and one-shot decompression).  Destruction

@@ -158,9 +158,15 @@ macro_rules! uncompress2_z_at_boundary {
                     err = crate::zlib_h::Z_STREAM_ERROR;
                     break;
                 }
+                let gzip_header = if (*state).head.is_null() {
+                    None
+                } else {
+                    Some(&mut *(*state).head)
+                };
                 err = crate::src::inflate::inflate(
                     &mut stream,
                     &mut *state,
+                    gzip_header,
                     crate::zlib_h::Z_NO_FLUSH,
                 );
                 if err != crate::zlib_h::Z_OK {
