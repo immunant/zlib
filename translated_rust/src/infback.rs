@@ -133,7 +133,7 @@ pub unsafe extern "C" fn inflateBackInit__ffi(
     (*state).dmax = 32768 as ::core::ffi::c_uint;
     (*state).wbits = windowBits as crate::stdlib::uInt as ::core::ffi::c_uint;
     (*state).wsize = (1 as ::core::ffi::c_uint) << windowBits;
-    (*state).window = window;
+    (*state).window = ::core::ptr::NonNull::new(window);
     (*state).wnext = 0 as ::core::ffi::c_uint;
     (*state).whave = 0 as ::core::ffi::c_uint;
     (*state).sane = 1 as ::core::ffi::c_int;
@@ -207,7 +207,10 @@ pub unsafe extern "C" fn inflateBack_ffi(
     }) as ::core::ffi::c_uint;
     hold = 0 as ::core::ffi::c_ulong;
     bits = 0 as ::core::ffi::c_uint;
-    put = (*state).window;
+    put = match (*state).window {
+        Some(window) => window.as_ptr(),
+        None => ::core::ptr::null_mut(),
+    };
     left = (*state).wsize;
     '_inf_leave: loop {
         match (*state).mode as ::core::ffi::c_uint {
@@ -307,7 +310,10 @@ pub unsafe extern "C" fn inflateBack_ffi(
                             }
                         }
                         if left == 0 as ::core::ffi::c_uint {
-                            put = (*state).window;
+                            put = match (*state).window {
+                                Some(window) => window.as_ptr(),
+                                None => ::core::ptr::null_mut(),
+                            };
                             left = (*state).wsize;
                             (*state).whave = left;
                             if out.expect("non-null function pointer")(out_desc, put, left) != 0 {
@@ -787,9 +793,11 @@ pub unsafe extern "C" fn inflateBack_ffi(
             let fast = {
                 let state_ref = &mut *state;
                 if let Ok(wsize) = usize::try_from(state_ref.wsize) {
-                    let output_start = (put as usize)
-                        .checked_sub(state_ref.window as usize)
-                        .filter(|offset| *offset <= wsize);
+                    let output_start = match state_ref.window {
+                        Some(window) => (put as usize).checked_sub(window.as_ptr() as usize),
+                        None => None,
+                    }
+                    .filter(|offset| *offset <= wsize);
                     let tables = crate::src::inflate::inflate_fast_tables(
                         &state_ref.codes,
                         state_ref.lencode,
@@ -797,10 +805,13 @@ pub unsafe extern "C" fn inflateBack_ffi(
                     );
                     match (output_start, tables) {
                         (Some(output_start), Some((lcode, dcode)))
-                            if !next.is_null() && !state_ref.window.is_null() =>
+                            if !next.is_null() && state_ref.window.is_some() =>
                         {
                             let input = ::core::slice::from_raw_parts(next, have as usize);
-                            let output = ::core::slice::from_raw_parts_mut(state_ref.window, wsize);
+                            let output = ::core::slice::from_raw_parts_mut(
+                                state_ref.window.expect("checked history window").as_ptr(),
+                                wsize,
+                            );
                             Some(crate::src::inffast::inflate_fast_core(
                                 crate::src::inffast::InflateFastViews {
                                     input,
@@ -941,7 +952,10 @@ pub unsafe extern "C" fn inflateBack_ffi(
             (*state).length = here.val as ::core::ffi::c_uint;
             if here.op as ::core::ffi::c_int == 0 as ::core::ffi::c_int {
                 if left == 0 as ::core::ffi::c_uint {
-                    put = (*state).window;
+                    put = match (*state).window {
+                        Some(window) => window.as_ptr(),
+                        None => ::core::ptr::null_mut(),
+                    };
                     left = (*state).wsize;
                     (*state).whave = left;
                     if out.expect("non-null function pointer")(out_desc, put, left) != 0 {
@@ -1116,7 +1130,10 @@ pub unsafe extern "C" fn inflateBack_ffi(
                     } else {
                         loop {
                             if left == 0 as ::core::ffi::c_uint {
-                                put = (*state).window;
+                                put = match (*state).window {
+                                    Some(window) => window.as_ptr(),
+                                    None => ::core::ptr::null_mut(),
+                                };
                                 left = (*state).wsize;
                                 (*state).whave = left;
                                 if out.expect("non-null function pointer")(out_desc, put, left) != 0
@@ -1161,7 +1178,10 @@ pub unsafe extern "C" fn inflateBack_ffi(
     if left < (*state).wsize {
         if out.expect("non-null function pointer")(
             out_desc,
-            (*state).window,
+            match (*state).window {
+                Some(window) => window.as_ptr(),
+                None => ::core::ptr::null_mut(),
+            },
             (*state).wsize.wrapping_sub(left),
         ) != 0
             && ret == crate::zlib_h::Z_STREAM_END

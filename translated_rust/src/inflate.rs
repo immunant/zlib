@@ -91,7 +91,10 @@ pub struct inflate_state {
     pub wsize: ::core::ffi::c_uint,
     pub whave: ::core::ffi::c_uint,
     pub wnext: ::core::ffi::c_uint,
-    pub window: *mut ::core::ffi::c_uchar,
+    /// The callback-owned history allocation is optional until the decoder
+    /// first needs it.  Keeping that absence explicit avoids carrying a raw
+    /// nullable pointer through ordinary inflate state transitions.
+    pub window: Option<::core::ptr::NonNull<::core::ffi::c_uchar>>,
     pub hold: ::core::ffi::c_ulong,
     pub bits: ::core::ffi::c_uint,
     pub length: ::core::ffi::c_uint,
@@ -143,7 +146,7 @@ pub(crate) fn inflate_initial_state() -> inflate_state {
         wsize: 0,
         whave: 0,
         wnext: 0,
-        window: ::core::ptr::null_mut::<::core::ffi::c_uchar>(),
+        window: None,
         hold: 0,
         bits: 0,
         length: 0,
@@ -1161,8 +1164,15 @@ macro_rules! inflate_reset2_at_boundary {
                         let strm_ref = &mut *strm;
                         let state = strm_ref.state as *mut crate::src::inflate::inflate_state;
                         let state_ref = &mut *state;
-                        if !state_ref.window.is_null() && state_ref.wbits != window_bits {
-                            (state_ref.window, strm_ref.zfree, strm_ref.opaque)
+                        if state_ref.window.is_some() && state_ref.wbits != window_bits {
+                            (
+                                match state_ref.window {
+                                    Some(window) => window.as_ptr(),
+                                    None => ::core::ptr::null_mut(),
+                                },
+                                strm_ref.zfree,
+                                strm_ref.opaque,
+                            )
                         } else {
                             (
                                 ::core::ptr::null_mut::<::core::ffi::c_uchar>(),
@@ -1176,7 +1186,7 @@ macro_rules! inflate_reset2_at_boundary {
                             zfree(opaque, old_window as crate::stdlib::voidpf);
                             let strm_ref = &mut *strm;
                             let state = strm_ref.state as *mut crate::src::inflate::inflate_state;
-                            (&mut *state).window = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
+                            (&mut *state).window = None;
                         }
                     }
                     let strm_ref = &mut *strm;
@@ -1904,13 +1914,12 @@ macro_rules! inflate_buffers_at_boundary {
                 ::core::slice::from_raw_parts(strm.next_in, input_len)
             };
             let output = ::core::slice::from_raw_parts_mut(strm.next_out, output_len);
-            let window = if state.window.is_null() {
-                None
-            } else {
-                Some(::core::slice::from_raw_parts(
-                    state.window,
+            let window = match state.window {
+                Some(window) => Some(::core::slice::from_raw_parts(
+                    window.as_ptr(),
                     state.wsize as usize,
-                ))
+                )),
+                None => None,
             };
             Some(crate::src::inflate::InflateBuffers {
                 input,
@@ -1986,9 +1995,9 @@ pub fn inflate(
     // ABI/caller boundary already adopted the stream and decoder state, so
     // Rust callers of the dispatcher do not inherit an unsafe-function
     // contract while the safe owned/slice core is still being extracted.
+    // Keep the scalar compatibility checks here, shared with the smaller
+    // inflate boundaries. The state reference was adopted by the caller.
     unsafe {
-        // Keep the scalar compatibility checks here, shared with the smaller
-        // inflate boundaries. The state reference was adopted by the caller.
         let Some(entry_mode) = inflate_entry_mode(
             strm_ref.zalloc.is_some(),
             strm_ref.zfree.is_some(),
@@ -2010,9 +2019,9 @@ pub fn inflate(
         out = left;
         ret = crate::zlib_h::Z_OK;
         // Retain the validated output base for the exit-only history/checksum
-        // view.  The loop publishes `next_out` before an allocator callback
-        // can run, so deriving that view from the final ABI cursor would need
-        // raw pointer subtraction after the callback boundary.
+        // view. The loop publishes `next_out` before an allocator callback can
+        // run, so deriving that view from the final ABI cursor would need raw
+        // pointer subtraction after the callback boundary.
         let output_base = strm_ref.next_out;
         {
             // Lend the immutable input, mutable output, and separate history
@@ -2863,7 +2872,12 @@ pub fn inflate(
                                                                                     ret = crate::zlib_h::Z_DATA_ERROR;
                                                                                     break '_inf_leave;
                                                                                 };
-                                                                                let Some(input_end) = input_start.checked_add(copy_len) else {
+                                                                                let Some(input_end) =
+                                                                                input_start
+                                                                                    .checked_add(
+                                                                                        copy_len,
+                                                                                    )
+                                                                            else {
                                                                                 state_ref.mode = crate::src::inflate::BAD;
                                                                                 ret = crate::zlib_h::Z_DATA_ERROR;
                                                                                 break '_inf_leave;
@@ -2879,7 +2893,12 @@ pub fn inflate(
                                                                                     ret = crate::zlib_h::Z_DATA_ERROR;
                                                                                     break '_inf_leave;
                                                                                 };
-                                                                                let Some(source) = input.get(input_start..input_end) else {
+                                                                                let Some(source) =
+                                                                                input.get(
+                                                                                    input_start
+                                                                                        ..input_end,
+                                                                                )
+                                                                            else {
                                                                                 state_ref.mode = crate::src::inflate::BAD;
                                                                                 ret = crate::zlib_h::Z_DATA_ERROR;
                                                                                 break '_inf_leave;
@@ -2889,7 +2908,10 @@ pub fn inflate(
                                                                                 ret = crate::zlib_h::Z_DATA_ERROR;
                                                                                 break '_inf_leave;
                                                                             };
-                                                                                destination.copy_from_slice(source);
+                                                                                destination
+                                                                                .copy_from_slice(
+                                                                                    source,
+                                                                                );
                                                                                 have = have
                                                                                     .wrapping_sub(
                                                                                         copy,
@@ -3854,7 +3876,7 @@ pub fn inflate(
                     state_ref.whave,
                     state_ref.wnext,
                     state_ref.wsize,
-                    !state_ref.window.is_null(),
+                    state_ref.window.is_some(),
                     state_ref.sane != 0,
                 ) else {
                     strm_ref.msg = INFLATE_ERROR_MESSAGES[17].as_ptr() as *const ::core::ffi::c_char
@@ -3970,7 +3992,7 @@ pub fn inflate(
                     // history update remain slice/scalar-only, so no private
                     // unsafe window adapter is needed.
                     let Some(plan) = inflate_window_boundary_plan(
-                        state_ref.window.is_null(),
+                        state_ref.window.is_none(),
                         state_ref.wbits,
                         state_ref.wsize,
                         exit.output_used,
@@ -3988,17 +4010,18 @@ pub fn inflate(
                         let Some(zalloc) = strm_ref.zalloc else {
                             break 'window (true, None);
                         };
-                        state_ref.window = zalloc(
+                        state_ref.window = ::core::ptr::NonNull::new(zalloc(
                             strm_ref.opaque,
                             requested_wsize,
                             ::core::mem::size_of::<::core::ffi::c_uchar>() as crate::stdlib::uInt,
-                        ) as *mut ::core::ffi::c_uchar;
-                        if state_ref.window.is_null() {
+                        )
+                            as *mut ::core::ffi::c_uchar);
+                        if state_ref.window.is_none() {
                             break 'window (true, None);
                         }
                     }
                     Some(::core::slice::from_raw_parts_mut(
-                        state_ref.window,
+                        state_ref.window.expect("allocated history window").as_ptr(),
                         plan.window_len,
                     ))
                 } else {
@@ -4096,7 +4119,14 @@ macro_rules! inflate_end_at_boundary {
                 let state = strm_ref.state as *mut crate::src::inflate::inflate_state;
                 let state_ref = &mut *state;
                 match strm_ref.zfree {
-                    Some(zfree) => (state_ref.window, zfree, strm_ref.opaque),
+                    Some(zfree) => (
+                        match state_ref.window {
+                            Some(window) => window.as_ptr(),
+                            None => ::core::ptr::null_mut(),
+                        },
+                        zfree,
+                        strm_ref.opaque,
+                    ),
                     None => return crate::zlib_h::Z_STREAM_ERROR,
                 }
             };
@@ -4166,7 +4196,7 @@ fn inflate_dictionary_admission(
     }
     let copy =
         ::core::ffi::c_uint::try_from(dictionary.len()).map_err(|_| crate::zlib_h::Z_MEM_ERROR)?;
-    inflate_window_boundary_plan(state.window.is_null(), state.wbits, state.wsize, copy)
+    inflate_window_boundary_plan(state.window.is_none(), state.wbits, state.wsize, copy)
         .ok_or(crate::zlib_h::Z_MEM_ERROR)
 }
 
@@ -4245,18 +4275,18 @@ pub unsafe extern "C" fn inflateGetDictionary_ffi(
         let Ok(whave) = usize::try_from(state.whave) else {
             return crate::zlib_h::Z_STREAM_ERROR;
         };
-        if state.window.is_null() {
+        let Some(window_ptr) = state.window else {
             return crate::zlib_h::Z_STREAM_ERROR;
-        }
+        };
         if !inflate_spans_are_disjoint(
-            state.window as usize,
+            window_ptr.as_ptr() as usize,
             window_len,
             dictionary as usize,
             whave,
         ) {
             return crate::zlib_h::Z_STREAM_ERROR;
         }
-        let window = ::core::slice::from_raw_parts(state.window, window_len);
+        let window = ::core::slice::from_raw_parts(window_ptr.as_ptr(), window_len);
         let output = ::core::slice::from_raw_parts_mut(dictionary, whave);
         if inflate_dictionary_copy(window, wnext, whave, output).is_none() {
             return crate::zlib_h::Z_STREAM_ERROR;
@@ -4320,8 +4350,8 @@ pub unsafe extern "C" fn inflateSetDictionary_ffi(
     let strm_ref = &mut *strm;
     let state = &mut *(strm_ref.state as *mut crate::src::inflate::inflate_state);
     if let Some(window) = allocated_window {
-        state.window = window;
-        if state.window.is_null() {
+        state.window = ::core::ptr::NonNull::new(window);
+        if state.window.is_none() {
             state.mode = crate::src::inflate::MEM;
             return crate::zlib_h::Z_MEM_ERROR;
         }
@@ -4335,11 +4365,14 @@ pub unsafe extern "C" fn inflateSetDictionary_ffi(
             return status;
         }
     };
-    if admission.allocate || state.window.is_null() {
+    if admission.allocate || state.window.is_none() {
         state.mode = crate::src::inflate::MEM;
         return crate::zlib_h::Z_MEM_ERROR;
     }
-    let window = core::slice::from_raw_parts_mut(state.window, admission.window_len);
+    let window = core::slice::from_raw_parts_mut(
+        state.window.expect("validated history window").as_ptr(),
+        admission.window_len,
+    );
     match inflate_dictionary_commit(state, dictionary, window) {
         Ok(()) => crate::zlib_h::Z_OK,
         Err(status) => {
@@ -4606,7 +4639,7 @@ pub unsafe extern "C" fn inflateCopy_ffi(
             source_ref.zalloc,
             source_ref.zfree,
             source_ref.opaque,
-            !state_ref.window.is_null(),
+            state_ref.window.is_some(),
             state_ref.whave,
             state_ref.wsize,
             state_ref.wbits,
@@ -4665,11 +4698,14 @@ pub unsafe extern "C" fn inflateCopy_ffi(
     copy_ref.next = copy_ref.next.min(crate::src::inftrees::ENOUGH as usize);
     if !window.is_null() {
         let length = state_ref.whave as usize;
-        let source_window = ::core::slice::from_raw_parts(state_ref.window, length);
+        let source_window = ::core::slice::from_raw_parts(
+            state_ref.window.expect("copied history window").as_ptr(),
+            length,
+        );
         let copied_window = ::core::slice::from_raw_parts_mut(window, length);
         copied_window.copy_from_slice(source_window);
     }
-    copy_ref.window = window;
+    copy_ref.window = ::core::ptr::NonNull::new(window);
     dest_ref.state = copy as *mut crate::src::deflate::internal_state;
     return crate::zlib_h::Z_OK;
 }
