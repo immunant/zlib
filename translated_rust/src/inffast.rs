@@ -338,7 +338,7 @@ pub unsafe extern "C" fn inflate_fast(
                 }
                 match c2rust_current_block_141 {
                     6072622540298447352 => {
-                        from = out.offset(-(dist as isize));
+                        from = out.wrapping_sub(dist as usize);
                         loop {
                             let c2rust_fresh26 = from;
                             from = from.wrapping_add(1);
@@ -416,7 +416,7 @@ pub unsafe extern "C" fn inflate_fast(
                                         break;
                                     }
                                 }
-                                from = out.offset(-(dist as isize));
+                                from = out.wrapping_sub(dist as usize);
                             }
                         } else if wnext < op {
                             from = from.offset(wsize.wrapping_add(wnext).wrapping_sub(op) as isize);
@@ -458,7 +458,7 @@ pub unsafe extern "C" fn inflate_fast(
                                             break;
                                         }
                                     }
-                                    from = out.offset(-(dist as isize));
+                                    from = out.wrapping_sub(dist as usize);
                                 }
                             }
                         } else {
@@ -480,7 +480,7 @@ pub unsafe extern "C" fn inflate_fast(
                                         break;
                                     }
                                 }
-                                from = out.offset(-(dist as isize));
+                                from = out.wrapping_sub(dist as usize);
                             }
                         }
                         while len > 2 as ::core::ffi::c_uint {
