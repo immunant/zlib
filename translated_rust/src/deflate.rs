@@ -2535,36 +2535,30 @@ fn set_stored_block_length(
 unsafe fn flush_pending(
     strm: &mut crate::zlib_h::z_stream_s,
     state: &mut crate::src::deflate::deflate_state,
+    pending_buf: &mut [crate::stdlib::Bytef],
+    output: &mut [crate::stdlib::Bytef],
+    output_pos: &mut usize,
 ) -> crate::stdlib::uInt {
-    let mut len: ::core::ffi::c_uint = 0;
-    let pending_buf = ::core::slice::from_raw_parts_mut(
-        state
-            .pending_buf
-            .expect("initialized pending buffer")
-            .as_ptr(),
-        state.pending_buf_size as usize,
-    );
     crate::src::trees::flush_pending_bits(
         pending_buf,
         &mut state.pending,
         &mut state.bi_buf,
         &mut state.bi_valid,
     );
-    len = if state.pending > strm.avail_out as crate::zutil_h::ulg {
-        strm.avail_out as ::core::ffi::c_uint
-    } else {
-        state.pending as ::core::ffi::c_uint
-    };
+    let len = state
+        .pending
+        .min(output.len().saturating_sub(*output_pos) as crate::zutil_h::ulg)
+        as ::core::ffi::c_uint;
     if len == 0 as ::core::ffi::c_uint {
         return strm.avail_out;
     }
-    let output = ::core::slice::from_raw_parts_mut(strm.next_out, len as usize);
     let len = flush_pending_bytes(
-        output,
+        &mut output[*output_pos..*output_pos + len as usize],
         pending_buf,
         &mut state.pending_out,
         &mut state.pending,
     );
+    *output_pos += len as usize;
     strm.next_out = strm.next_out.wrapping_add(len as usize);
     strm.total_out = strm.total_out.wrapping_add(len as crate::stdlib::uLong);
     strm.avail_out = strm.avail_out.wrapping_sub(len);
@@ -2612,10 +2606,26 @@ pub unsafe extern "C" fn deflate(
             .load(::core::sync::atomic::Ordering::Relaxed);
         return -5 as ::core::ffi::c_int;
     }
+    // Each initialized callback allocation is valid for its planned extent.
+    // Project the input, output, and pending regions once for this call so
+    // the format-state branches below operate on bounded slices instead of
+    // repeatedly rebuilding raw views. These borrows are strictly
+    // call-scoped: no reference is stored in the callback-owned state.
+    let input = if strm.avail_in == 0 {
+        &[]
+    } else {
+        ::core::slice::from_raw_parts(strm.next_in, strm.avail_in as usize)
+    };
+    let output = ::core::slice::from_raw_parts_mut(strm.next_out, strm.avail_out as usize);
+    let mut output_pos = 0usize;
+    let pending_buf = ::core::slice::from_raw_parts_mut(
+        s.pending_buf.expect("initialized pending buffer").as_ptr(),
+        s.pending_buf_size as usize,
+    );
     old_flush = s.last_flush;
     s.last_flush = flush;
     if s.pending != 0 as crate::zutil_h::ulg {
-        flush_pending(strm, s);
+        flush_pending(strm, s, pending_buf, output, &mut output_pos);
         if strm.avail_out == 0 as crate::stdlib::uInt {
             s.last_flush = -1 as ::core::ffi::c_int;
             return crate::zlib_h::Z_OK;
@@ -2664,15 +2674,6 @@ pub unsafe extern "C" fn deflate(
     if s.status == crate::src::deflate::INIT_STATE {
         {
             let state = &mut *s;
-            // `pending_buf` has exactly `pending_buf_size` bytes (allocated in
-            // `deflateInit2_()` and copied at that extent in `deflateCopy()`).
-            let pending_buf = ::core::slice::from_raw_parts_mut(
-                state
-                    .pending_buf
-                    .expect("initialized pending buffer")
-                    .as_ptr(),
-                state.pending_buf_size as usize,
-            );
             strm.adler = append_zlib_header(
                 pending_buf,
                 &mut state.pending,
@@ -2684,7 +2685,7 @@ pub unsafe extern "C" fn deflate(
             );
         }
         s.status = crate::src::deflate::BUSY_STATE;
-        flush_pending(strm, s);
+        flush_pending(strm, s, pending_buf, output, &mut output_pos);
         if s.pending != 0 as crate::zutil_h::ulg {
             s.last_flush = -1 as ::core::ffi::c_int;
             return crate::zlib_h::Z_OK;
@@ -2695,13 +2696,6 @@ pub unsafe extern "C" fn deflate(
         let state = &mut *s;
         // This initial gzip header always fits in the pending allocation. Keep
         // a single exact-capacity view for the contiguous write sequence.
-        let pending_buf = ::core::slice::from_raw_parts_mut(
-            state
-                .pending_buf
-                .expect("initialized pending buffer")
-                .as_ptr(),
-            state.pending_buf_size as usize,
-        );
         match append_gzip_header_prefix(
             pending_buf,
             &mut state.pending,
@@ -2711,7 +2705,7 @@ pub unsafe extern "C" fn deflate(
         ) {
             None => {
                 state.status = crate::src::deflate::BUSY_STATE;
-                flush_pending(strm, s);
+                flush_pending(strm, s, pending_buf, output, &mut output_pos);
                 if s.pending != 0 as crate::zutil_h::ulg {
                     s.last_flush = -1 as ::core::ffi::c_int;
                     return crate::zlib_h::Z_OK;
@@ -2738,10 +2732,6 @@ pub unsafe extern "C" fn deflate(
                 let complete = {
                     let header = s.gzhead.as_ref().expect("gzip header was checked");
                     let extra = header.extra.as_deref().expect("gzip extra was checked");
-                    let pending_buf = ::core::slice::from_raw_parts_mut(
-                        s.pending_buf.expect("initialized pending buffer").as_ptr(),
-                        s.pending_buf_size as usize,
-                    );
                     append_gzip_extra_chunk(
                         extra,
                         &mut s.gzindex,
@@ -2754,7 +2744,7 @@ pub unsafe extern "C" fn deflate(
                 if complete {
                     break;
                 }
-                flush_pending(strm, s);
+                flush_pending(strm, s, pending_buf, output, &mut output_pos);
                 if s.pending != 0 as crate::zutil_h::ulg {
                     s.last_flush = -1 as ::core::ffi::c_int;
                     return crate::zlib_h::Z_OK;
@@ -2785,7 +2775,7 @@ pub unsafe extern "C" fn deflate(
             };
             loop {
                 if s.pending == s.pending_buf_size {
-                    flush_pending(strm, s);
+                    flush_pending(strm, s, pending_buf, output, &mut output_pos);
                     if s.pending != 0 as crate::zutil_h::ulg {
                         s.last_flush = -1 as ::core::ffi::c_int;
                         return crate::zlib_h::Z_OK;
@@ -2794,13 +2784,6 @@ pub unsafe extern "C" fn deflate(
                 let complete = {
                     let state = &mut *s;
                     let mut source_index = state.gzindex;
-                    let pending_buf = ::core::slice::from_raw_parts_mut(
-                        state
-                            .pending_buf
-                            .expect("initialized pending buffer")
-                            .as_ptr(),
-                        state.pending_buf_size as usize,
-                    );
                     let complete = append_gzip_cstring_bytes(
                         &name,
                         &mut source_index,
@@ -2840,7 +2823,7 @@ pub unsafe extern "C" fn deflate(
             };
             loop {
                 if s.pending == s.pending_buf_size {
-                    flush_pending(strm, s);
+                    flush_pending(strm, s, pending_buf, output, &mut output_pos);
                     if s.pending != 0 as crate::zutil_h::ulg {
                         s.last_flush = -1 as ::core::ffi::c_int;
                         return crate::zlib_h::Z_OK;
@@ -2849,13 +2832,6 @@ pub unsafe extern "C" fn deflate(
                 let complete = {
                     let state = &mut *s;
                     let mut source_index = state.gzindex;
-                    let pending_buf = ::core::slice::from_raw_parts_mut(
-                        state
-                            .pending_buf
-                            .expect("initialized pending buffer")
-                            .as_ptr(),
-                        state.pending_buf_size as usize,
-                    );
                     let complete = append_gzip_cstring_bytes(
                         &comment,
                         &mut source_index,
@@ -2877,7 +2853,7 @@ pub unsafe extern "C" fn deflate(
     if s.status == crate::src::deflate::HCRC_STATE {
         if s.gzhead.as_ref().is_some_and(|header| header.hcrc) {
             if s.pending.wrapping_add(2 as crate::zutil_h::ulg) > s.pending_buf_size {
-                flush_pending(strm, s);
+                flush_pending(strm, s, pending_buf, output, &mut output_pos);
                 if s.pending != 0 as crate::zutil_h::ulg {
                     s.last_flush = -1 as ::core::ffi::c_int;
                     return crate::zlib_h::Z_OK;
@@ -2887,13 +2863,6 @@ pub unsafe extern "C" fn deflate(
             let state = &mut *s;
             // The preceding capacity check ensures that both HCRC bytes fit
             // in this exact pending allocation.
-            let pending_buf = ::core::slice::from_raw_parts_mut(
-                state
-                    .pending_buf
-                    .expect("initialized pending buffer")
-                    .as_ptr(),
-                state.pending_buf_size as usize,
-            );
             append_pending_bytes(
                 pending_buf,
                 &mut state.pending,
@@ -2906,7 +2875,7 @@ pub unsafe extern "C" fn deflate(
             strm.adler = crate::src::crc32::crc32_z(0 as crate::stdlib::uLong, None);
         }
         s.status = crate::src::deflate::BUSY_STATE;
-        flush_pending(strm, s);
+        flush_pending(strm, s, pending_buf, output, &mut output_pos);
         if s.pending != 0 as crate::zutil_h::ulg {
             s.last_flush = -1 as ::core::ffi::c_int;
             return crate::zlib_h::Z_OK;
@@ -2921,27 +2890,12 @@ pub unsafe extern "C" fn deflate(
             // Level zero has no parser-specific state.  Project its three
             // callback-owned buffers once here, then keep the stored-block
             // policy entirely in the slice-based core.
-            let input_len = strm.avail_in as usize;
-            let input = if input_len == 0 {
-                &[]
-            } else {
-                ::core::slice::from_raw_parts(strm.next_in, input_len)
-            };
-            let output_len = strm.avail_out as usize;
-            let output = if output_len == 0 {
-                &mut []
-            } else {
-                ::core::slice::from_raw_parts_mut(strm.next_out, output_len)
-            };
+            let output = &mut output[output_pos..];
             let window = ::core::slice::from_raw_parts_mut(
                 s.window.expect("initialized window").as_ptr(),
                 s.window_size as usize,
             );
-            let pending_buf = ::core::slice::from_raw_parts_mut(
-                s.pending_buf.expect("initialized pending buffer").as_ptr(),
-                s.pending_buf_size as usize,
-            );
-            let (result, input_pos, output_pos, total_in, total_out, adler) = {
+            let (result, input_pos, produced, total_in, total_out, adler) = {
                 let mut stored_stream = DeflateStoredStream {
                     input,
                     input_pos: 0,
@@ -2982,10 +2936,9 @@ pub unsafe extern "C" fn deflate(
                 strm.next_in = strm.next_in.wrapping_add(input_pos);
             }
             strm.avail_in = strm.avail_in.wrapping_sub(input_pos as crate::stdlib::uInt);
-            strm.next_out = strm.next_out.wrapping_add(output_pos);
-            strm.avail_out = strm
-                .avail_out
-                .wrapping_sub(output_pos as crate::stdlib::uInt);
+            output_pos += produced;
+            strm.next_out = strm.next_out.wrapping_add(produced);
+            strm.avail_out = strm.avail_out.wrapping_sub(produced as crate::stdlib::uInt);
             strm.total_in = total_in;
             strm.total_out = total_out;
             strm.adler = adler;
@@ -3007,16 +2960,7 @@ pub unsafe extern "C" fn deflate(
                     DeflateAlgorithm::Slow => deflate_slow_from_views,
                 }
             };
-            let input = if strm.avail_in == 0 {
-                &[]
-            } else {
-                ::core::slice::from_raw_parts(strm.next_in, strm.avail_in as usize)
-            };
-            let output = if strm.avail_out == 0 {
-                &mut []
-            } else {
-                ::core::slice::from_raw_parts_mut(strm.next_out, strm.avail_out as usize)
-            };
+            let output = &mut output[output_pos..];
             let window = ::core::slice::from_raw_parts_mut(
                 s.window.expect("initialized window").as_ptr(),
                 s.window_size as usize,
@@ -3028,10 +2972,6 @@ pub unsafe extern "C" fn deflate(
             let head = ::core::slice::from_raw_parts_mut(
                 s.head.expect("initialized head table").as_ptr(),
                 s.hash_size as usize,
-            );
-            let pending_buf = ::core::slice::from_raw_parts_mut(
-                s.pending_buf.expect("initialized pending buffer").as_ptr(),
-                s.pending_buf_size as usize,
             );
             let (result, progress) = {
                 let mut matched = DeflateFastState {
@@ -3105,6 +3045,7 @@ pub unsafe extern "C" fn deflate(
             strm.avail_in = strm
                 .avail_in
                 .wrapping_sub(progress.input_consumed as crate::stdlib::uInt);
+            output_pos += progress.output_produced;
             strm.next_out = strm.next_out.wrapping_add(progress.output_produced);
             strm.avail_out = progress.avail_out;
             strm.total_in = progress.total_in;
@@ -3154,10 +3095,6 @@ pub unsafe extern "C" fn deflate(
         if bstate as ::core::ffi::c_uint == block_done as ::core::ffi::c_int as ::core::ffi::c_uint
         {
             if flush == crate::zlib_h::Z_PARTIAL_FLUSH {
-                let pending_buf = ::core::slice::from_raw_parts_mut(
-                    s.pending_buf.expect("initialized pending buffer").as_ptr(),
-                    s.pending_buf_size as usize,
-                );
                 crate::src::trees::bit_output(
                     crate::src::trees::BitOutputState {
                         pending_buf,
@@ -3176,10 +3113,6 @@ pub unsafe extern "C" fn deflate(
                 // keep the zero-length input as a real empty slice rather
                 // than reconstructing the C null cursor accepted by the ABI
                 // adapter.
-                let pending_buf = ::core::slice::from_raw_parts_mut(
-                    s.pending_buf.expect("initialized pending buffer").as_ptr(),
-                    s.pending_buf_size as usize,
-                );
                 crate::src::trees::stored_block_bytes(
                     pending_buf,
                     &mut s.pending,
@@ -3206,7 +3139,7 @@ pub unsafe extern "C" fn deflate(
                     }
                 }
             }
-            flush_pending(strm, s);
+            flush_pending(strm, s, pending_buf, output, &mut output_pos);
             if strm.avail_out == 0 as crate::stdlib::uInt {
                 s.last_flush = -1 as ::core::ffi::c_int;
                 return crate::zlib_h::Z_OK;
@@ -3223,13 +3156,6 @@ pub unsafe extern "C" fn deflate(
     // keep its projection at this boundary and hand the format choice to the
     // pointer-free encoder above.
     let state = &mut *s;
-    let pending_buf = ::core::slice::from_raw_parts_mut(
-        state
-            .pending_buf
-            .expect("initialized pending buffer")
-            .as_ptr(),
-        state.pending_buf_size as usize,
-    );
     append_deflate_trailer(
         pending_buf,
         &mut state.pending,
@@ -3237,7 +3163,7 @@ pub unsafe extern "C" fn deflate(
         strm.adler,
         strm.total_in,
     );
-    flush_pending(strm, s);
+    flush_pending(strm, s, pending_buf, output, &mut output_pos);
     if s.wrap > 0 as ::core::ffi::c_int {
         s.wrap = -s.wrap;
     }
@@ -4134,7 +4060,9 @@ fn flush_fast_pending(state: &mut DeflateFastState<'_>, stream: &mut DeflateFast
         &mut state.pending,
     );
     stream.output_pos += copied as usize;
-    stream.total_out = stream.total_out.wrapping_add(copied as crate::stdlib::uLong);
+    stream.total_out = stream
+        .total_out
+        .wrapping_add(copied as crate::stdlib::uLong);
     stream.avail_out = stream.avail_out.wrapping_sub(copied);
 }
 
