@@ -323,6 +323,9 @@ pub fn inflate_fast(
     let Some((strm, state)) = crate::src::inflate::inflateStateCheck(strm) else {
         return;
     };
+    // `inflateStateCheck()` already returned a validated reference. Snapshot
+    // the scalar fast-loop state before binding the remaining raw cursors.
+    let mut fast_state = InflateFastState::from(&*state);
     // SAFETY: `inflate()` invokes this adapter only after the checked
     // stream/state pair above has been validated. Its input, output, window,
     // and decode-table cursors are the bounded ranges maintained by that
@@ -339,7 +342,6 @@ pub fn inflate_fast(
         } else {
             ::core::slice::from_raw_parts(state.window, state.wsize as usize)
         };
-        let mut fast_state = InflateFastState::from(&*state);
         let lcode_fixed = ::core::ptr::eq(
             state.lencode,
             crate::src::inftrees::inffixed_h::lenfix.as_ptr(),
