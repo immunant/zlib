@@ -2395,7 +2395,11 @@ pub unsafe fn inflate(
                                                 state_ref.mode = crate::src::inflate::EXTRA;
                                                 break 'c_2319;
                                             }
-                                            (*state).mode = crate::src::inflate::LEN;
+                                            // The EXLEN branch above owns a scoped state borrow.
+                                            // Re-adopt the already-validated compatibility record
+                                            // only for this fall-through mode commit.
+                                            let state_ref = &mut *state;
+                                            state_ref.mode = crate::src::inflate::LEN;
                                         }
                                         let strm_ref = &mut *strm;
                                         let state_ref = &mut *state;
@@ -2986,13 +2990,14 @@ pub unsafe fn inflate(
         // so keep its scalar state bookkeeping on one short-lived adopted
         // state record. The cursor copy below remains in the transitional
         // decoder boundary.
+        let strm_ref = &mut *strm;
         let state_ref = &mut *state;
         copy = out.wrapping_sub(left);
         if state_ref.offset > copy {
             copy = state_ref.offset.wrapping_sub(copy);
             if copy > state_ref.whave {
                 if state_ref.sane != 0 {
-                    (*strm).msg = INFLATE_ERROR_MESSAGES[17].as_ptr() as *const ::core::ffi::c_char
+                    strm_ref.msg = INFLATE_ERROR_MESSAGES[17].as_ptr() as *const ::core::ffi::c_char
                         as *mut ::core::ffi::c_char;
                     state_ref.mode = crate::src::inflate::BAD;
                     continue;
