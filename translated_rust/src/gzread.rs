@@ -270,44 +270,47 @@ fn gz_look(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
         ::core::mem::forget(output_buf);
         state.size = state.want;
     }
-    if state.direct == -1 as ::core::ffi::c_int || state.junk == 0 as ::core::ffi::c_int {
+    let reset_junk = if state.direct == -1 as ::core::ffi::c_int
+        || state.junk == 0 as ::core::ffi::c_int
+    {
+        Some((state.junk != -1 as ::core::ffi::c_int) as ::core::ffi::c_int)
+    } else {
+        if gz_avail(state) == -1 as ::core::ffi::c_int {
+            return -1 as ::core::ffi::c_int;
+        }
+        if gz_look_needs_more_header_input(state.strm.avail_in, state.again) {
+            return 0 as ::core::ffi::c_int;
+        }
+        let input = unsafe {
+            &*::core::ptr::slice_from_raw_parts(state.strm.next_in, state.strm.avail_in as usize)
+        };
+        let gzip_header = input.len() > 3 && {
+            let header = [input[0], input[1], input[2], input[3]];
+            gz_is_gzip_header(header)
+        };
+        if gzip_header {
+            Some(1 as ::core::ffi::c_int)
+        } else {
+            state.x.next = state.out;
+            let output =
+                unsafe { &mut *::core::ptr::slice_from_raw_parts_mut(state.x.next, input.len()) };
+            output.copy_from_slice(input);
+            state.x.have = state.strm.avail_in as ::core::ffi::c_uint;
+            state.strm.avail_in = 0 as crate::stdlib::uInt;
+            state.how = crate::gzguts_h::COPY;
+            return 0 as ::core::ffi::c_int;
+        }
+    };
+    if let Some(junk) = reset_junk {
         unsafe {
             crate::src::inflate::inflateReset_ffi(
                 &raw mut state.strm as *mut _ as *mut crate::zlib_h::z_stream_s,
             );
         }
-        let junk = (state.junk != -1 as ::core::ffi::c_int) as ::core::ffi::c_int;
         gz_set_gzip_mode(state, junk);
         return 0 as ::core::ffi::c_int;
     }
-    if gz_avail(state) == -1 as ::core::ffi::c_int {
-        return -1 as ::core::ffi::c_int;
-    }
-    if gz_look_needs_more_header_input(state.strm.avail_in, state.again) {
-        return 0 as ::core::ffi::c_int;
-    }
-    let input = unsafe {
-        &*::core::ptr::slice_from_raw_parts(state.strm.next_in, state.strm.avail_in as usize)
-    };
-    if input.len() > 3 {
-        let header = [input[0], input[1], input[2], input[3]];
-        if gz_is_gzip_header(header) {
-            unsafe {
-                crate::src::inflate::inflateReset_ffi(
-                    &raw mut state.strm as *mut _ as *mut crate::zlib_h::z_stream_s,
-                );
-            }
-            gz_set_gzip_mode(state, 1 as ::core::ffi::c_int);
-            return 0 as ::core::ffi::c_int;
-        }
-    }
-    state.x.next = state.out;
-    let output = unsafe { &mut *::core::ptr::slice_from_raw_parts_mut(state.x.next, input.len()) };
-    output.copy_from_slice(input);
-    state.x.have = state.strm.avail_in as ::core::ffi::c_uint;
-    state.strm.avail_in = 0 as crate::stdlib::uInt;
-    state.how = crate::gzguts_h::COPY;
-    return 0 as ::core::ffi::c_int;
+    unreachable!()
 }
 
 fn gz_decomp(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
