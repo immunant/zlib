@@ -2491,14 +2491,14 @@ pub(crate) fn bit_output(state: BitOutputState<'_>, action: BitOutputAction) {
     }
 }
 
-// Keep the raw ABI-state projection out of export-attributed wrappers.  The
-// implementation operation itself receives only the bounded, pointer-free
-// view above.
+// The export boundary validates and borrows the opaque state.  Keep the
+// callback-backed pending-buffer projection here, so the implementation owns
+// the bounded view and the export remains only a conversion-and-dispatch
+// boundary.
 pub(crate) unsafe fn bi_flush_or_windup(
-    s: *mut crate::src::deflate::deflate_state,
+    state: &mut crate::src::deflate::deflate_state,
     action: BitOutputAction,
 ) {
-    let state = &mut *s;
     let pending_buf = ::core::slice::from_raw_parts_mut(
         state
             .pending_buf
@@ -3272,12 +3272,18 @@ pub unsafe extern "C" fn _tr_stored_block_ffi(
 #[export_name = "_tr_flush_bits"]
 
 pub unsafe extern "C" fn _tr_flush_bits_ffi(mut s: *mut crate::src::deflate::deflate_state) {
-    bi_flush_or_windup(s, BitOutputAction::Flush)
+    let Some(state) = s.as_mut() else {
+        return;
+    };
+    bi_flush_or_windup(state, BitOutputAction::Flush)
 }
 #[export_name = "_tr_align"]
 
 pub unsafe extern "C" fn _tr_align_ffi(mut s: *mut crate::src::deflate::deflate_state) {
-    bi_flush_or_windup(s, BitOutputAction::Align)
+    let Some(state) = s.as_mut() else {
+        return;
+    };
+    bi_flush_or_windup(state, BitOutputAction::Align)
 }
 fn compress_block(
     pending_buf: &mut [crate::stdlib::Bytef],
