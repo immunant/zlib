@@ -3426,7 +3426,9 @@ pub unsafe extern "C" fn deflateCopy_ffi(
     let source_state = &*(source_stream.state as *mut crate::src::deflate::deflate_state);
     let dest_stream = &mut *dest;
     *dest_stream = *source_stream;
-    let zalloc = dest_stream.zalloc.expect("validated stream allocator");
+    let Some(zalloc) = dest_stream.zalloc else {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    };
     let opaque = dest_stream.opaque;
     let ds = zalloc(
         opaque,
@@ -3547,6 +3549,7 @@ pub unsafe extern "C" fn deflateCopy_ffi(
         deflateEnd(&mut *dest);
         return crate::zlib_h::Z_STREAM_ERROR;
     };
+    let dest_sym_start = dst_sym.start;
     let src_window = if window_len == 0 {
         &[]
     } else {
@@ -3607,10 +3610,8 @@ pub unsafe extern "C" fn deflateCopy_ffi(
         return crate::zlib_h::Z_STREAM_ERROR;
     }
     dest_state.pending_out = dest_state.pending_buf.wrapping_add(pending_range.start);
-    dest_state.sym_buf = dest_state
-        .pending_buf
-        .wrapping_add(usize::try_from(dest_state.lit_bufsize).expect("validated pending range"))
-        as *mut crate::zutil_h::uchf;
+    dest_state.sym_buf =
+        dest_state.pending_buf.wrapping_add(dest_sym_start) as *mut crate::zutil_h::uchf;
     return crate::zlib_h::Z_OK;
 }
 fn longest_match_state(
