@@ -216,7 +216,6 @@ pub type compress_func = Option<
 >;
 
 pub type config = config_s;
-#[derive(Copy, Clone)]
 #[repr(C)]
 
 pub struct config_s {
