@@ -1046,9 +1046,9 @@ pub fn deflateInit2_(
     ) {
         Ok(buffers) => Some(Box::new(buffers)),
         Err(()) => {
-            // `z_errmsg` is still a legacy mutable C export. Its fixed
-            // memory-error entry is read only at this FFI-facing boundary.
-            strm.msg = unsafe { crate::src::zutil::z_errmsg[6] };
+            // This is the fixed `z_errmsg[6]` string.  Use immutable local
+            // storage instead of reading the legacy mutable C export.
+            strm.msg = b"insufficient memory\0".as_ptr().cast_mut().cast();
             return crate::zlib_h::Z_MEM_ERROR;
         }
     };
