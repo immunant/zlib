@@ -3193,46 +3193,35 @@ impl LengthState {
     }
 }
 
-/// Builds an inflate decoding table using bounded Rust slices.
-///
-/// `table_cursor` is the index at which the table starts and is advanced by
-/// the number of entries used on success. `work` must have at least
-/// `lens.len()` elements. As in zlib, `0` is success, `-1` reports an invalid
-/// code-length set, and `1` reports insufficient table or workspace capacity.
-pub fn inflate_table_safe(
+fn inflate_table_core(
     type_0: crate::src::inftrees::codetype,
     lens: &[u16],
     table: &mut [crate::src::inftrees::code],
-    table_cursor_out: &mut usize,
     bits: &mut u32,
     work: &mut [u16],
-) -> ::core::ffi::c_int {
-    let codes = lens.len();
-    if !table_inputs_fit(codes, work.len()) {
-        return 1;
-    }
-    let Some(table_cursor) = TableCursor::new(*table_cursor_out, table.len()) else {
-        return 1;
+) -> Result<usize, ::core::ffi::c_int> {
+    let table_cursor = TableCursor {
+        start: 0,
+        table_len: table.len(),
     };
 
     let Some(type_0) = code_type(type_0) else {
-        return -1;
+        return Err(-1);
     };
 
     let length_state = match LengthState::try_new(type_0, lens, *bits) {
-        Err(error) => return error,
+        Err(error) => return Err(error),
         Ok(None) => {
             let here = crate::src::inftrees::code {
                 op: 64,
                 bits: 1,
                 val: 0,
             };
-            let Some(end) = table_cursor.write_entries(table, 0, &[here; 2]) else {
-                return 1;
+            if table_cursor.write_entries(table, 0, &[here; 2]).is_none() {
+                return Err(1);
             };
-            *table_cursor_out = end;
             *bits = 1;
-            return 0;
+            return Ok(2);
         }
         Ok(Some(length_state)) => length_state,
     };
@@ -3241,7 +3230,7 @@ pub fn inflate_table_safe(
     let max = length_state.max;
     let root = length_state.root;
     if length_state.write_symbol_order(lens, work).is_err() {
-        return 1;
+        return Err(1);
     }
 
     let mut huff = 0u32;
@@ -3254,16 +3243,16 @@ pub fn inflate_table_safe(
     let mut used = 1u32 << root;
     let mask = used - 1;
     if !table_usage_fits(type_0, used, table_cursor) {
-        return 1;
+        return Err(1);
     }
 
     loop {
         let Some(&work_code) = work.get(symbol) else {
-            return 1;
+            return Err(1);
         };
         let Some(here) = table_entry_for_symbol(type_0, work_code, (length - drop_bits) as u8)
         else {
-            return -1;
+            return Err(-1);
         };
 
         let next_table_size = match write_replicated_table_entries(
@@ -3277,13 +3266,13 @@ pub fn inflate_table_safe(
             here,
         ) {
             Ok(table_size) => table_size,
-            Err(error) => return error,
+            Err(error) => return Err(error),
         };
 
         huff = next_huffman_code(huff, length);
 
         match advance_symbol(symbol, length, max, &mut count, work, lens) {
-            Err(error) => return error,
+            Err(error) => return Err(error),
             Ok(SymbolAdvance::Complete) => break,
             Ok(SymbolAdvance::Next {
                 symbol: next_symbol,
@@ -3299,17 +3288,17 @@ pub fn inflate_table_safe(
         {
             drop_bits = layout.drop_bits;
             let Some(next_cursor) = table_cursor.advance(next, next_table_size) else {
-                return 1;
+                return Err(1);
             };
             next = next_cursor;
             curr = layout.curr;
             used = layout.used;
             if !table_usage_fits(type_0, used, table_cursor) {
-                return 1;
+                return Err(1);
             }
             low = layout.low;
             let Some(entry) = table_cursor.entry_mut(table, 0, low as usize) else {
-                return 1;
+                return Err(1);
             };
             entry.op = curr as u8;
             entry.bits = root as u8;
@@ -3319,7 +3308,7 @@ pub fn inflate_table_safe(
 
     if huff != 0 {
         let Some(entry) = table_cursor.entry_mut(table, next, huff as usize) else {
-            return 1;
+            return Err(1);
         };
         *entry = crate::src::inftrees::code {
             op: 64,
@@ -3327,12 +3316,47 @@ pub fn inflate_table_safe(
             val: 0,
         };
     }
-    let Some(table_end) = table_cursor.end(used as usize) else {
+    if table_cursor.end(used as usize).is_none() {
+        return Err(1);
+    };
+    *bits = root;
+    Ok(used as usize)
+}
+
+/// Builds an inflate decoding table using bounded Rust slices.
+///
+/// `table_cursor` is the index at which the table starts and is advanced by
+/// the number of entries used on success. `work` must have at least
+/// `lens.len()` elements. As in zlib, `0` is success, `-1` reports an invalid
+/// code-length set, and `1` reports insufficient table or workspace capacity.
+pub fn inflate_table_safe(
+    type_0: crate::src::inftrees::codetype,
+    lens: &[u16],
+    table: &mut [crate::src::inftrees::code],
+    table_cursor_out: &mut usize,
+    bits: &mut u32,
+    work: &mut [u16],
+) -> ::core::ffi::c_int {
+    if !table_inputs_fit(lens.len(), work.len()) {
+        return 1;
+    }
+    let Some(table_cursor) = TableCursor::new(*table_cursor_out, table.len()) else {
         return 1;
     };
-    *table_cursor_out = table_end;
-    *bits = root;
-    0
+    let Some(table) = table.get_mut(table_cursor.start..) else {
+        return 1;
+    };
+
+    match inflate_table_core(type_0, lens, table, bits, work) {
+        Ok(used) => {
+            let Some(end) = table_cursor.end(used) else {
+                return 1;
+            };
+            *table_cursor_out = end;
+            0
+        }
+        Err(error) => error,
+    }
 }
 
 #[export_name = "inflate_table"]
@@ -3765,6 +3789,52 @@ mod tests {
             0
         );
         assert_eq!(cursor, 2);
+        assert_eq!(bits, 1);
+        assert_eq!(table[0].val, 0);
+        assert_eq!(table[1].val, 1);
+    }
+
+    #[test]
+    fn safe_table_builds_after_cursor_without_touching_prefix() {
+        let lens = [1u16, 1];
+        let prefix = code {
+            op: 7,
+            bits: 8,
+            val: 9,
+        };
+        let mut table = [prefix; 3];
+        let mut cursor = 1;
+        let mut bits = 7;
+        let mut work = [0u16; 2];
+
+        assert_eq!(
+            inflate_table_safe(CODES, &lens, &mut table, &mut cursor, &mut bits, &mut work),
+            0
+        );
+        assert_eq!(cursor, 3);
+        assert_eq!(bits, 1);
+        assert_eq!(table[0].op, prefix.op);
+        assert_eq!(table[0].bits, prefix.bits);
+        assert_eq!(table[0].val, prefix.val);
+        assert_eq!(table[1].val, 0);
+        assert_eq!(table[2].val, 1);
+    }
+
+    #[test]
+    fn table_core_reports_entries_used_from_slice_start() {
+        let lens = [1u16, 1];
+        let mut table = [code {
+            op: 0,
+            bits: 0,
+            val: 0,
+        }; 2];
+        let mut bits = 7;
+        let mut work = [0u16; 2];
+
+        assert_eq!(
+            inflate_table_core(CODES, &lens, &mut table, &mut bits, &mut work),
+            Ok(2)
+        );
         assert_eq!(bits, 1);
         assert_eq!(table[0].val, 0);
         assert_eq!(table[1].val, 1);

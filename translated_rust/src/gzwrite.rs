@@ -316,6 +316,22 @@ fn gzflush_action(zero_result: Option<::core::ffi::c_int>) -> GzFlushAction {
     }
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum GzFwriteRequest {
+    Write { len: crate::stdlib::z_size_t },
+    Overflow,
+}
+
+fn gzfwrite_request(
+    size: crate::stdlib::z_size_t,
+    nitems: crate::stdlib::z_size_t,
+) -> GzFwriteRequest {
+    match crate::src::gzlib::gz_request_len(size, nitems) {
+        Some(len) => GzFwriteRequest::Write { len },
+        None => GzFwriteRequest::Overflow,
+    }
+}
+
 fn gzfwrite_result(
     size: crate::stdlib::z_size_t,
     len: crate::stdlib::z_size_t,
@@ -1652,13 +1668,16 @@ pub unsafe extern "C" fn gzfwrite_ffi(
         crate::zlib_h::Z_OK,
         ::core::ptr::null::<::core::ffi::c_char>(),
     );
-    let Some(len) = crate::src::gzlib::gz_request_len(size, nitems) else {
-        crate::src::gzlib::gz_error(
-            state as *mut crate::gzguts_h::gz_state,
-            crate::zlib_h::Z_STREAM_ERROR,
-            b"request does not fit in a size_t\0".as_ptr() as *const ::core::ffi::c_char,
-        );
-        return 0 as crate::stdlib::z_size_t;
+    let len = match gzfwrite_request(size, nitems) {
+        GzFwriteRequest::Write { len } => len,
+        GzFwriteRequest::Overflow => {
+            crate::src::gzlib::gz_error(
+                state as *mut crate::gzguts_h::gz_state,
+                crate::zlib_h::Z_STREAM_ERROR,
+                b"request does not fit in a size_t\0".as_ptr() as *const ::core::ffi::c_char,
+            );
+            return 0 as crate::stdlib::z_size_t;
+        }
     };
     gzfwrite_result(size, len, gz_write(state, buf, len))
 }
@@ -1890,15 +1909,16 @@ mod tests {
         gz_zero_initialize_buffer, gz_zero_initialize_chunk_buffer, gz_zero_needs_initialization,
         gz_zero_pending_step, gz_zero_prepare_and_initialize_chunk, gz_zero_progress,
         gzclose_buffer_action, gzclose_mode_is_writable, gzclose_operation_error, gzclose_w_result,
-        gzflush_action, gzflush_mode_is_valid, gzfwrite_result, gzputc_result, gzputc_write_action,
-        gzputs_len_fits_int, gzputs_result, gzsetparams_action, gzsetparams_buffer_action,
-        gzsetparams_requires_deflate, gzsetparams_settings_match, gzsetparams_state_is_usable,
-        gzsetparams_zero_action, gzwrite_request, GzCloseBufferAction, GzCompDeflateAction,
-        GzCompDirectLoopAction, GzCompDirectWriteProgress, GzCompDirectWriteResult,
-        GzCompOutputBufferAction, GzCompOutputBufferProgress, GzCompOutputFlushStep,
-        GzCompOutputWriteProgress, GzCompOutputWriteResult, GzCompResetAction, GzCompWriteFailure,
-        GzCompWriteResult, GzFlushAction, GzInitAllocationPlan, GzInitMode, GzPutcWriteAction,
-        GzSetParamsAction, GzSetParamsBufferAction, GzSetParamsZeroAction, GzWriteBufferedCopyPlan,
+        gzflush_action, gzflush_mode_is_valid, gzfwrite_request, gzfwrite_result, gzputc_result,
+        gzputc_write_action, gzputs_len_fits_int, gzputs_result, gzsetparams_action,
+        gzsetparams_buffer_action, gzsetparams_requires_deflate, gzsetparams_settings_match,
+        gzsetparams_state_is_usable, gzsetparams_zero_action, gzwrite_request, GzCloseBufferAction,
+        GzCompDeflateAction, GzCompDirectLoopAction, GzCompDirectWriteProgress,
+        GzCompDirectWriteResult, GzCompOutputBufferAction, GzCompOutputBufferProgress,
+        GzCompOutputFlushStep, GzCompOutputWriteProgress, GzCompOutputWriteResult,
+        GzCompResetAction, GzCompWriteFailure, GzCompWriteResult, GzFlushAction, GzFwriteRequest,
+        GzInitAllocationPlan, GzInitMode, GzPutcWriteAction, GzSetParamsAction,
+        GzSetParamsBufferAction, GzSetParamsZeroAction, GzWriteBufferedCopyPlan,
         GzWriteBufferedInputAction, GzWriteDirectAction, GzWriteInputStorage, GzWritePreparation,
         GzZeroAction, GzZeroChunkLimits, GzZeroCore, GzZeroInitialAction, GzZeroPreparedChunk,
         GzZeroStep,
@@ -3052,6 +3072,15 @@ mod tests {
     #[test]
     fn gzfwrite_result_handles_zero_size_requests_without_division() {
         assert_eq!(gzfwrite_result(0, 0, 0), 0);
+    }
+
+    #[test]
+    fn gzfwrite_request_distinguishes_representable_and_overflowed_lengths() {
+        assert_eq!(gzfwrite_request(4, 3), GzFwriteRequest::Write { len: 12 });
+        assert_eq!(
+            gzfwrite_request(crate::stdlib::z_size_t::MAX, 2),
+            GzFwriteRequest::Overflow
+        );
     }
 
     #[test]
