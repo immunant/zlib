@@ -1009,12 +1009,9 @@ unsafe fn gz_avail(
         _ => {}
     }
 
-    let p = state.in_0;
-    if p.is_null() {
-        return -1 as ::core::ffi::c_int;
-    }
+    let input = core::slice::from_raw_parts_mut(state.in_0, state.size as usize);
+    let p = input.as_mut_ptr();
     let q = state.strm.next_in;
-    let input = core::slice::from_raw_parts_mut(p, state.size as usize);
     let Some(input_offset) = gz_avail_input_offset(p as usize, q as usize, state.strm.avail_in)
     else {
         return -1 as ::core::ffi::c_int;
@@ -1457,7 +1454,11 @@ unsafe fn gz_decomp(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int
     loop {
         let needs_input_load =
             gz_decomp_needs_input_load(gz_decomp_stream_state(&state.strm).avail_in);
-        let load_failed = needs_input_load && gz_decomp_input_load_failed(gz_avail(state, None));
+        let load_failed = if needs_input_load {
+            gz_decomp_input_load_failed(gz_avail(state, None))
+        } else {
+            false
+        };
         let stream_state = gz_decomp_stream_state(&state.strm);
         match gz_decomp_input_action(load_failed, stream_state.avail_in) {
             GzDecompInputAction::InputError => {

@@ -1450,87 +1450,96 @@ where
     }
 }
 
-unsafe fn gz_write(
-    state: &mut crate::gzguts_h::gz_state,
-    mut buf: crate::stdlib::voidpc,
-    mut len: crate::stdlib::z_size_t,
-) -> crate::stdlib::z_size_t {
-    let put: crate::stdlib::z_size_t = len;
-    match gz_write_preparation(len, state.size, state.skip) {
-        GzWritePreparation::Empty => return 0 as crate::stdlib::z_size_t,
-        GzWritePreparation::Initialize => {
-            if gz_init_failed(gz_init(state)) {
-                return 0 as crate::stdlib::z_size_t;
+// The raw input pointer and the compression boundary belong to the exported
+// write APIs. Keeping this as a macro makes those operations part of each FFI
+// wrapper instead of a private unsafe adapter.
+macro_rules! gz_write_at_ffi_boundary {
+    ($state:expr, $buf:expr, $len:expr $(,)?) => {{
+        let state = $state;
+        let mut buf = $buf;
+        let mut len = $len;
+        let put: crate::stdlib::z_size_t = len;
+        'write: {
+            match gz_write_preparation(len, state.size, state.skip) {
+                GzWritePreparation::Empty => break 'write 0 as crate::stdlib::z_size_t,
+                GzWritePreparation::Initialize => {
+                    if gz_init_failed(gz_init(state)) {
+                        break 'write 0 as crate::stdlib::z_size_t;
+                    }
+                }
+                // Exported write wrappers flush pending seek zeroes before this
+                // boundary operation. This branch is unreachable in that flow.
+                GzWritePreparation::ZeroSkip => break 'write 0 as crate::stdlib::z_size_t,
+                GzWritePreparation::Ready => {}
             }
+            if gz_write_uses_buffered_path(len, state.size) {
+                loop {
+                    let plan = gz_write_buffered_copy_plan(
+                        state.size,
+                        state.strm.avail_in,
+                        state.x.have,
+                        state.x.pos,
+                        len,
+                    );
+                    if plan.reset_input_cursor {
+                        state.strm.next_in = state.in_0;
+                    }
+                    gz_write_apply_buffered_copy_plan(
+                        &mut state.strm.avail_in,
+                        &mut state.x.have,
+                        &mut state.x.pos,
+                        &mut len,
+                        &plan,
+                    );
+                    crate::stdlib::memcpy(
+                        state.in_0.wrapping_add(plan.destination_offset)
+                            as *mut ::core::ffi::c_void,
+                        buf as *const ::core::ffi::c_void,
+                        plan.copy as crate::__stddef_size_t_h::size_t,
+                    );
+                    buf = (buf as *mut crate::stdlib::Bytef).wrapping_add(plan.copy as usize)
+                        as crate::stdlib::voidpc;
+                    if gz_write_is_empty(len) {
+                        break;
+                    }
+                    if let Some(result) = gz_write_buffered_comp_result(
+                        gz_comp(state, crate::zlib_h::Z_NO_FLUSH),
+                        state.again,
+                        put,
+                        len,
+                    ) {
+                        break 'write result;
+                    }
+                }
+            } else {
+                if gz_has_pending_input(state.strm.avail_in)
+                    && gz_write_comp_failed(gz_comp(state, crate::zlib_h::Z_NO_FLUSH))
+                {
+                    break 'write 0 as crate::stdlib::z_size_t;
+                }
+                state.strm.next_in = buf as *mut crate::stdlib::Bytef;
+                loop {
+                    let n = gz_write_chunk_len(len);
+                    state.strm.avail_in = n as crate::stdlib::uInt;
+                    let ret = gz_comp(state, crate::zlib_h::Z_NO_FLUSH);
+                    match gz_write_apply_direct_progress(
+                        &mut state.x.pos,
+                        &mut len,
+                        n,
+                        state.strm.avail_in,
+                        ret,
+                    ) {
+                        GzWriteDirectAction::Error => {
+                            break 'write gz_write_error_result(state.again, put, len);
+                        }
+                        GzWriteDirectAction::Done => break,
+                        GzWriteDirectAction::Continue => {}
+                    }
+                }
+            }
+            put
         }
-        // Exported write wrappers flush pending seek zeroes before calling this
-        // implementation. This branch is unreachable for the private call graph.
-        GzWritePreparation::ZeroSkip => return 0 as crate::stdlib::z_size_t,
-        GzWritePreparation::Ready => {}
-    }
-    if gz_write_uses_buffered_path(len, state.size) {
-        loop {
-            let plan = gz_write_buffered_copy_plan(
-                state.size,
-                state.strm.avail_in,
-                state.x.have,
-                state.x.pos,
-                len,
-            );
-            if plan.reset_input_cursor {
-                state.strm.next_in = state.in_0;
-            }
-            gz_write_apply_buffered_copy_plan(
-                &mut state.strm.avail_in,
-                &mut state.x.have,
-                &mut state.x.pos,
-                &mut len,
-                &plan,
-            );
-            crate::stdlib::memcpy(
-                state.in_0.wrapping_add(plan.destination_offset) as *mut ::core::ffi::c_void,
-                buf as *const ::core::ffi::c_void,
-                plan.copy as crate::__stddef_size_t_h::size_t,
-            );
-            buf = (buf as *mut crate::stdlib::Bytef).wrapping_add(plan.copy as usize)
-                as crate::stdlib::voidpc;
-            if gz_write_is_empty(len) {
-                break;
-            }
-            if let Some(result) = gz_write_buffered_comp_result(
-                gz_comp(state, crate::zlib_h::Z_NO_FLUSH),
-                state.again,
-                put,
-                len,
-            ) {
-                return result;
-            }
-        }
-    } else {
-        if gz_has_pending_input(state.strm.avail_in)
-            && gz_write_comp_failed(gz_comp(state, crate::zlib_h::Z_NO_FLUSH))
-        {
-            return 0 as crate::stdlib::z_size_t;
-        }
-        state.strm.next_in = buf as *mut crate::stdlib::Bytef;
-        loop {
-            let n = gz_write_chunk_len(len);
-            state.strm.avail_in = n as crate::stdlib::uInt;
-            let ret = gz_comp(state, crate::zlib_h::Z_NO_FLUSH);
-            match gz_write_apply_direct_progress(
-                &mut state.x.pos,
-                &mut len,
-                n,
-                state.strm.avail_in,
-                ret,
-            ) {
-                GzWriteDirectAction::Error => return gz_write_error_result(state.again, put, len),
-                GzWriteDirectAction::Done => break,
-                GzWriteDirectAction::Continue => {}
-            }
-        }
-    }
-    return put;
+    }};
 }
 
 fn gzsetparams_settings_match(
@@ -1704,12 +1713,13 @@ pub unsafe extern "C" fn gzwrite_ffi(
         );
         return 0 as ::core::ffi::c_int;
     };
-    if len != 0 && gz_has_pending_skip(state.skip)
+    if len != 0
+        && gz_has_pending_skip(state.skip)
         && gz_zero_at_ffi_boundary!(state) == -1 as ::core::ffi::c_int
     {
         return 0 as ::core::ffi::c_int;
     }
-    return gz_write(state, buf, len) as ::core::ffi::c_int;
+    return gz_write_at_ffi_boundary!(state, buf, len) as ::core::ffi::c_int;
 }
 #[export_name = "gzfwrite"]
 
@@ -1745,12 +1755,13 @@ pub unsafe extern "C" fn gzfwrite_ffi(
             return 0 as crate::stdlib::z_size_t;
         }
     };
-    if len != 0 && gz_has_pending_skip(state.skip)
+    if len != 0
+        && gz_has_pending_skip(state.skip)
         && gz_zero_at_ffi_boundary!(state) == -1 as ::core::ffi::c_int
     {
         return 0 as crate::stdlib::z_size_t;
     }
-    gzfwrite_result(size, len, gz_write(state, buf, len))
+    gzfwrite_result(size, len, gz_write_at_ffi_boundary!(state, buf, len))
 }
 #[export_name = "gzputc"]
 
@@ -1779,7 +1790,7 @@ pub unsafe extern "C" fn gzputc_ffi(
     {
         return -1 as ::core::ffi::c_int;
     }
-    let written = gz_write(
+    let written = gz_write_at_ffi_boundary!(
         state,
         buf.as_ptr() as crate::stdlib::voidpc,
         1 as crate::stdlib::z_size_t,
@@ -1822,12 +1833,13 @@ pub unsafe extern "C" fn gzputs_ffi(
         );
         return -1 as ::core::ffi::c_int;
     }
-    if len != 0 && gz_has_pending_skip(state.skip)
+    if len != 0
+        && gz_has_pending_skip(state.skip)
         && gz_zero_at_ffi_boundary!(state) == -1 as ::core::ffi::c_int
     {
         return -1 as ::core::ffi::c_int;
     }
-    put = gz_write(state, s as crate::stdlib::voidpc, len);
+    put = gz_write_at_ffi_boundary!(state, s as crate::stdlib::voidpc, len);
     return gzputs_result(len, put);
 }
 #[export_name = "gzflush"]

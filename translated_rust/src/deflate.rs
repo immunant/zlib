@@ -987,25 +987,26 @@ unsafe fn read_buf(
     mut buf: *mut crate::stdlib::Bytef,
     mut size: ::core::ffi::c_uint,
 ) -> ::core::ffi::c_uint {
-    let len = read_buf_len((*strm).avail_in, size);
+    let stream = &mut *strm;
+    let len = read_buf_len(stream.avail_in, size);
     if len == 0 {
         return 0 as ::core::ffi::c_uint;
     }
-    let input = core::slice::from_raw_parts((*strm).next_in, len as usize);
+    let input = core::slice::from_raw_parts(stream.next_in, len as usize);
     let output = core::slice::from_raw_parts_mut(buf, len as usize);
     let result = read_buf_core(
         input,
         output,
-        (*strm).avail_in,
+        stream.avail_in,
         size,
-        (*strm).total_in,
-        (*strm).adler,
-        (*(*strm).state).wrap,
+        stream.total_in,
+        stream.adler,
+        (*stream.state).wrap,
     );
-    (*strm).avail_in = result.avail_in;
-    (*strm).adler = result.adler;
-    (*strm).next_in = (*strm).next_in.wrapping_add(result.copied as usize);
-    (*strm).total_in = result.total_in;
+    stream.avail_in = result.avail_in;
+    stream.adler = result.adler;
+    stream.next_in = stream.next_in.wrapping_add(result.copied as usize);
+    stream.total_in = result.total_in;
     result.copied
 }
 
@@ -5991,6 +5992,26 @@ mod tests {
                 avail_in: 0,
                 total_in: 13,
                 adler,
+            }
+        );
+        assert_eq!(output, [1, 2, 3, 0]);
+    }
+
+    #[test]
+    fn read_buf_core_copies_clamped_input_and_updates_gzip_crc() {
+        let input = [1, 2, 3, 4];
+        let mut output = [0; 4];
+        let crc = crate::src::crc32::crc32_z(0, &input[..3]);
+
+        let result = read_buf_core(&input, &mut output, 4, 3, 10, 0, 2);
+
+        assert_eq!(
+            result,
+            ReadBufResult {
+                copied: 3,
+                avail_in: 1,
+                total_in: 13,
+                adler: crc,
             }
         );
         assert_eq!(output, [1, 2, 3, 0]);
