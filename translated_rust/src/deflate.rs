@@ -1734,17 +1734,15 @@ fn flush_pending_account(
     );
 }
 
-// Private raw adapters are Rust-ABI functions.  The public `_ffi` wrappers
-// remain the only C ABI boundary for callers outside this crate.
-unsafe fn flush_pending(mut strm: crate::zlib_h::z_streamp) {
-    let mut s: *mut crate::src::deflate::deflate_state =
-        (*strm).state as *mut crate::src::deflate::deflate_state;
-    let stream = &mut *strm;
-    let state = &mut *s;
-    let pending_buf = ::core::slice::from_raw_parts_mut(
-        state.pending_buf,
-        state.pending_buf_size as usize,
-    );
+// Once the stream, deflater, and pending allocation are bound, copying one
+// pending chunk and publishing its progress is ordinary reference-and-slice
+// work.  Keeping it here makes the raw adapter below only a binding boundary.
+fn flush_pending_bound(
+    state: &mut crate::src::deflate::deflate_state,
+    stream: &mut crate::zlib_h::z_stream,
+    pending_buf: &mut [crate::zutil_h::uch],
+    output: Option<&mut [crate::stdlib::Bytef]>,
+) {
     let len = flush_pending_bytes(state, stream, pending_buf);
     if len == 0 as ::core::ffi::c_uint {
         return;
@@ -1755,8 +1753,8 @@ unsafe fn flush_pending(mut strm: crate::zlib_h::z_streamp) {
     // work instead of a C memory call.
     let pending_start = (state.pending_out as usize).wrapping_sub(state.pending_buf as usize);
     let pending = &pending_buf[pending_start..pending_start + len as usize];
-    let output = ::core::slice::from_raw_parts_mut(stream.next_out, len as usize);
-    output.copy_from_slice(pending);
+    output.expect("a pending transfer requires output space")[..len as usize]
+        .copy_from_slice(pending);
     flush_pending_account(state, stream, len);
     // Both ranges were validated by the deflater before this flush. Advance
     // their addresses without requiring an in-bounds raw-pointer operation.
@@ -1765,6 +1763,26 @@ unsafe fn flush_pending(mut strm: crate::zlib_h::z_streamp) {
     if state.pending == 0 as crate::zutil_h::ulg {
         state.pending_out = state.pending_buf;
     }
+}
+
+// Private raw adapters are Rust-ABI functions. The public `_ffi` wrappers
+// remain the only C ABI boundary for callers outside this crate.
+unsafe fn flush_pending(mut strm: crate::zlib_h::z_streamp) {
+    let state = &mut *((*strm).state as *mut crate::src::deflate::deflate_state);
+    let stream = &mut *strm;
+    let pending_buf = ::core::slice::from_raw_parts_mut(
+        state.pending_buf,
+        state.pending_buf_size as usize,
+    );
+    let output = if stream.avail_out == 0 {
+        None
+    } else {
+        Some(::core::slice::from_raw_parts_mut(
+            stream.next_out,
+            stream.avail_out as usize,
+        ))
+    };
+    flush_pending_bound(state, stream, pending_buf, output);
 }
 
 fn deflate_flush_rank(flush: ::core::ffi::c_int) -> ::core::ffi::c_int {
