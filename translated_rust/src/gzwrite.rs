@@ -279,7 +279,13 @@ macro_rules! gz_comp_at_boundary {
                     break 'gz_comp_result -1;
                 };
                 let mut output = crate::src::deflate::DeflateOutput::new(output);
-                ret = crate::src::deflate::deflate(strm, &mut input, &mut output, flush);
+                ret = crate::src::deflate::deflate(
+                    strm,
+                    &mut input,
+                    &mut output,
+                    crate::src::deflate::DeflateGzipPayloads::empty(),
+                    flush,
+                );
                 match crate::src::gzwrite::gz_comp_after_deflate(
                     have,
                     state_ref.strm.avail_out,

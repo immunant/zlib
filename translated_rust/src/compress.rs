@@ -131,6 +131,7 @@ macro_rules! compress2_z_at_boundary {
                 &mut stream,
                 &mut input,
                 &mut output,
+                crate::src::deflate::DeflateGzipPayloads::empty(),
                 if sourceLen != 0 {
                     crate::zlib_h::Z_NO_FLUSH
                 } else {

@@ -1968,10 +1968,16 @@ macro_rules! deflate_params_at_boundary {
                     ::core::slice::from_raw_parts_mut((*strm).next_out, output_len)
                 };
                 let mut output = crate::src::deflate::DeflateOutput::new(output);
+                let Some(gzip_payloads) =
+                    crate::src::deflate::deflate_gzip_payloads_at_boundary!(strm)
+                else {
+                    break 'deflate_params_result crate::zlib_h::Z_STREAM_ERROR;
+                };
                 let err = crate::src::deflate::deflate(
                     &mut *strm,
                     &mut input,
                     &mut output,
+                    gzip_payloads,
                     crate::zlib_h::Z_BLOCK,
                 );
                 if err == crate::zlib_h::Z_STREAM_ERROR {
@@ -2358,6 +2364,80 @@ struct GzipHeaderFields {
     os: ::core::ffi::c_int,
     extra_len: crate::stdlib::uInt,
 }
+
+/// The caller-owned gzip header payloads borrowed for one ordinary
+/// `deflate()` call.  The ABI boundary creates these views alongside the
+/// input and output views, leaving the compressor to copy only bounded safe
+/// slices.  They must not be retained after the call: an application remains
+/// free to replace its header buffers between calls.
+pub struct DeflateGzipPayloads<'a> {
+    extra: Option<&'a [crate::stdlib::Byte]>,
+    name: Option<&'a [u8]>,
+    comment: Option<&'a [u8]>,
+}
+
+impl<'a> DeflateGzipPayloads<'a> {
+    pub const fn empty() -> Self {
+        Self {
+            extra: None,
+            name: None,
+            comment: None,
+        }
+    }
+
+    pub fn new(
+        extra: Option<&'a [crate::stdlib::Byte]>,
+        name: Option<&'a [u8]>,
+        comment: Option<&'a [u8]>,
+    ) -> Self {
+        Self {
+            extra,
+            name,
+            comment,
+        }
+    }
+}
+
+// This expands only at existing ABI boundaries.  It lends the optional gzip
+// header payloads once per ordinary deflate invocation; the compressor itself
+// receives only safe views and never reconstructs slices from retained header
+// pointers.  The state pointer is checked before it is adopted so malformed
+// streams remain ordinary stream errors at the caller.
+macro_rules! deflate_gzip_payloads_at_boundary {
+    ($strm:expr $(,)?) => {{
+        let strm = $strm;
+        let state = (*strm).state as *mut crate::src::deflate::deflate_state;
+        if state.is_null() {
+            None
+        } else {
+            let payloads = match (&*state).gzhead {
+                None => crate::src::deflate::DeflateGzipPayloads::empty(),
+                Some(header) => {
+                    let header = &*header.as_ptr();
+                    let extra = if header.extra.is_null() {
+                        None
+                    } else {
+                        let len = (header.extra_len & 0xffff as crate::stdlib::uInt) as usize;
+                        Some(::core::slice::from_raw_parts(header.extra, len))
+                    };
+                    let name = if header.name.is_null() {
+                        None
+                    } else {
+                        Some(::std::ffi::CStr::from_ptr(header.name.cast()).to_bytes_with_nul())
+                    };
+                    let comment = if header.comment.is_null() {
+                        None
+                    } else {
+                        Some(::std::ffi::CStr::from_ptr(header.comment.cast()).to_bytes_with_nul())
+                    };
+                    crate::src::deflate::DeflateGzipPayloads::new(extra, name, comment)
+                }
+            };
+            Some(payloads)
+        }
+    }};
+}
+pub(crate) use deflate_gzip_payloads_at_boundary;
 
 /// Reduce the copied caller-owned ABI header to fields used by the fixed
 /// header and HCRC transitions.  Payload pointer handling stays at its
@@ -2931,6 +3011,7 @@ pub fn deflate(
     strm_ref: &mut crate::zlib_h::z_stream,
     mut input: &mut &[crate::stdlib::Byte],
     output: &mut DeflateOutput<'_>,
+    gzip_payloads: DeflateGzipPayloads<'_>,
     mut flush: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
     // This legacy dispatcher still has to adopt the callback-owned state,
@@ -2945,7 +3026,7 @@ pub fn deflate(
         // This transitional dispatcher still uses raw cursors in its legacy
         // compression loop. Validate the safe stream and adopt its raw state
         // once at entry rather than routing through the private state checker.
-        let (s, pending, avail_in, gzip_header, gzip_header_fields) = {
+        let (s, pending, avail_in, gzip_header_fields) = {
             let stream = deflate_reborrow_mut(strm_ref);
             let state_ptr = stream.state as *mut crate::src::deflate::deflate_state;
             if state_ptr.is_null() {
@@ -2997,12 +3078,11 @@ pub fn deflate(
             // state-adoption boundary is active avoids repeatedly lending the
             // header through each gzip state transition (and, importantly,
             // does not retain a header reference across pending flushes).
-            let gzip_header = match state.gzhead {
-                Some(header) => Some(*header.as_ptr()),
+            let gzip_header_fields = match state.gzhead {
+                Some(header) => Some(gzip_header_fields(&*header.as_ptr())),
                 None => None,
             };
-            let gzip_header_fields = gzip_header.map(|header| gzip_header_fields(&header));
-            (state, pending, stream.avail_in, gzip_header, gzip_header_fields)
+            (state, pending, stream.avail_in, gzip_header_fields)
         };
         let Ok(input_len) = usize::try_from(avail_in) else {
             return crate::zlib_h::Z_STREAM_ERROR;
@@ -3181,9 +3261,9 @@ pub fn deflate(
                 }
             }
         }
-        // The entry snapshot carries the retained-header values through the
-        // remaining gzip transitions without extending a borrow of caller
-        // memory across any flush.
+        // The scalar snapshot carries the retained-header metadata through
+        // the remaining gzip transitions. Payload views were lent by the ABI
+        // boundary for this invocation and stay as ordinary safe slices here.
         let gzip_extra_pending = {
             let state = deflate_reborrow(s);
             state.status == crate::src::deflate::EXTRA_STATE
@@ -3191,10 +3271,7 @@ pub fn deflate(
         if gzip_extra_pending {
             // The header value was snapshotted at the ABI boundary; ordinary
             // state and stream borrows handle every chunk commit.
-            if let Some(header) = gzip_header {
-                if !header.extra.is_null() {
-                    let extra_len = (header.extra_len & 0xffff as crate::stdlib::uInt) as usize;
-                    let extra = ::core::slice::from_raw_parts(header.extra, extra_len);
+            if let Some(extra) = gzip_payloads.extra {
                     loop {
                         let state = deflate_reborrow_mut(s);
                         let stream = deflate_reborrow_mut(strm_ref);
@@ -3214,7 +3291,7 @@ pub fn deflate(
                         &mut state.pending,
                         &mut state.gzindex,
                         extra,
-                        header.hcrc != 0,
+                        gzip_header_fields.is_some_and(|header| header.hcrc),
                         &mut stream.adler,
                     ) else {
                         return crate::zlib_h::Z_STREAM_ERROR;
@@ -3236,7 +3313,6 @@ pub fn deflate(
                             return crate::zlib_h::Z_OK;
                         }
                     }
-                }
             }
             let state = deflate_reborrow_mut(s);
             state.status = crate::src::deflate::NAME_STATE;
@@ -3248,9 +3324,7 @@ pub fn deflate(
             state.status == crate::src::deflate::NAME_STATE
         };
         if gzip_name_pending {
-            if let Some(header) = gzip_header {
-                if !header.name.is_null() {
-                    let name = ::std::ffi::CStr::from_ptr(header.name.cast()).to_bytes_with_nul();
+            if let Some(name) = gzip_payloads.name {
                     loop {
                         let state = deflate_reborrow_mut(s);
                         let stream = deflate_reborrow_mut(strm_ref);
@@ -3270,7 +3344,7 @@ pub fn deflate(
                         &mut state.pending,
                         &mut state.gzindex,
                         name,
-                        header.hcrc != 0,
+                        gzip_header_fields.is_some_and(|header| header.hcrc),
                         &mut stream.adler,
                     ) else {
                         return crate::zlib_h::Z_STREAM_ERROR;
@@ -3292,7 +3366,6 @@ pub fn deflate(
                             return crate::zlib_h::Z_OK;
                         }
                     }
-                }
             }
             let state = deflate_reborrow_mut(s);
             state.status = crate::src::deflate::COMMENT_STATE;
@@ -3302,10 +3375,7 @@ pub fn deflate(
             state.status == crate::src::deflate::COMMENT_STATE
         };
         if gzip_comment_pending {
-            if let Some(header) = gzip_header {
-                if !header.comment.is_null() {
-                    let comment =
-                        ::std::ffi::CStr::from_ptr(header.comment.cast()).to_bytes_with_nul();
+            if let Some(comment) = gzip_payloads.comment {
                     loop {
                         let state = deflate_reborrow_mut(s);
                         let stream = deflate_reborrow_mut(strm_ref);
@@ -3325,7 +3395,7 @@ pub fn deflate(
                         &mut state.pending,
                         &mut state.gzindex,
                         comment,
-                        header.hcrc != 0,
+                        gzip_header_fields.is_some_and(|header| header.hcrc),
                         &mut stream.adler,
                     ) else {
                         return crate::zlib_h::Z_STREAM_ERROR;
@@ -3347,7 +3417,6 @@ pub fn deflate(
                             return crate::zlib_h::Z_OK;
                         }
                     }
-                }
             }
             let state = deflate_reborrow_mut(s);
             state.status = crate::src::deflate::HCRC_STATE;
@@ -3638,7 +3707,10 @@ pub unsafe extern "C" fn deflate_ffi(
             ::core::slice::from_raw_parts_mut((*strm).next_out, output_len)
         };
         let mut output = DeflateOutput::new(output);
-        deflate(&mut *strm, &mut input, &mut output, flush)
+        let Some(gzip_payloads) = deflate_gzip_payloads_at_boundary!(strm) else {
+            return crate::zlib_h::Z_STREAM_ERROR;
+        };
+        deflate(&mut *strm, &mut input, &mut output, gzip_payloads, flush)
     }
 }
 fn deflate_end_status(status: ::core::ffi::c_int) -> ::core::ffi::c_int {
