@@ -3899,7 +3899,7 @@ unsafe fn pqdownheap(
             if heap_node_precedes(
                 (*tree.wrapping_add(right as usize)).fc.value,
                 (*s).depth[right as usize],
-                (*tree.offset(left as isize)).fc.value,
+                (*tree.wrapping_add(left as usize)).fc.value,
                 (*s).depth[left as usize],
             ) {
                 j += 1;
@@ -3907,9 +3907,9 @@ unsafe fn pqdownheap(
         }
         let child = (*s).heap[j as usize];
         if heap_node_precedes(
-            (*tree.offset(v as isize)).fc.value,
+            (*tree.wrapping_add(v as usize)).fc.value,
             (*s).depth[v as usize],
-            (*tree.offset(child as isize)).fc.value,
+            (*tree.wrapping_add(child as usize)).fc.value,
             (*s).depth[child as usize],
         ) {
             break;
