@@ -2520,41 +2520,43 @@ pub unsafe extern "C" fn _tr_init_ffi(mut s: *mut crate::src::deflate::deflate_s
 }
 pub const SMALLEST: ::core::ffi::c_int = 1 as ::core::ffi::c_int;
 
-unsafe extern "C" fn pqdownheap(
-    mut s: *mut crate::src::deflate::deflate_state,
-    mut tree: *mut crate::src::deflate::ct_data,
+fn pqdownheap(
+    heap: &mut [::core::ffi::c_int; 573],
+    heap_len: ::core::ffi::c_int,
+    depth: &[crate::zutil_h::uch; 573],
+    tree: &[crate::src::deflate::ct_data],
     mut k: ::core::ffi::c_int,
 ) {
-    let mut v: ::core::ffi::c_int = (*s).heap[k as usize];
+    let mut v: ::core::ffi::c_int = heap[k as usize];
     let mut j: ::core::ffi::c_int = k << 1 as ::core::ffi::c_int;
-    while j <= (*s).heap_len {
-        if j < (*s).heap_len
-            && (((*tree.offset((*s).heap[(j + 1 as ::core::ffi::c_int) as usize] as isize)).freq
+    while j <= heap_len {
+        if j < heap_len
+            && ((tree[heap[(j + 1 as ::core::ffi::c_int) as usize] as usize].freq
                 as ::core::ffi::c_int)
-                < (*tree.offset((*s).heap[j as usize] as isize)).freq as ::core::ffi::c_int
-                || (*tree.offset((*s).heap[(j + 1 as ::core::ffi::c_int) as usize] as isize)).freq
+                < tree[heap[j as usize] as usize].freq as ::core::ffi::c_int
+                || tree[heap[(j + 1 as ::core::ffi::c_int) as usize] as usize].freq
                     as ::core::ffi::c_int
-                    == (*tree.offset((*s).heap[j as usize] as isize)).freq as ::core::ffi::c_int
-                    && (*s).depth[(*s).heap[(j + 1 as ::core::ffi::c_int) as usize] as usize]
+                    == tree[heap[j as usize] as usize].freq as ::core::ffi::c_int
+                    && depth[heap[(j + 1 as ::core::ffi::c_int) as usize] as usize]
                         as ::core::ffi::c_int
-                        <= (*s).depth[(*s).heap[j as usize] as usize] as ::core::ffi::c_int)
+                        <= depth[heap[j as usize] as usize] as ::core::ffi::c_int)
         {
             j += 1;
         }
-        if ((*tree.offset(v as isize)).freq as ::core::ffi::c_int)
-            < (*tree.offset((*s).heap[j as usize] as isize)).freq as ::core::ffi::c_int
-            || (*tree.offset(v as isize)).freq as ::core::ffi::c_int
-                == (*tree.offset((*s).heap[j as usize] as isize)).freq as ::core::ffi::c_int
-                && (*s).depth[v as usize] as ::core::ffi::c_int
-                    <= (*s).depth[(*s).heap[j as usize] as usize] as ::core::ffi::c_int
+        if (tree[v as usize].freq as ::core::ffi::c_int)
+            < tree[heap[j as usize] as usize].freq as ::core::ffi::c_int
+            || tree[v as usize].freq as ::core::ffi::c_int
+                == tree[heap[j as usize] as usize].freq as ::core::ffi::c_int
+                && depth[v as usize] as ::core::ffi::c_int
+                    <= depth[heap[j as usize] as usize] as ::core::ffi::c_int
         {
             break;
         }
-        (*s).heap[k as usize] = (*s).heap[j as usize];
+        heap[k as usize] = heap[j as usize];
         k = j;
         j <<= 1 as ::core::ffi::c_int;
     }
-    (*s).heap[k as usize] = v;
+    heap[k as usize] = v;
 }
 
 unsafe extern "C" fn gen_bitlen(
@@ -2670,15 +2672,19 @@ unsafe extern "C" fn build_tree(
     let mut m: ::core::ffi::c_int = 0;
     let mut max_code: ::core::ffi::c_int = -1 as ::core::ffi::c_int;
     let mut node: ::core::ffi::c_int = 0;
-    (*s).heap_len = 0 as ::core::ffi::c_int;
-    (*s).heap_max = crate::src::deflate::HEAP_SIZE;
+    {
+        let state = &mut *s;
+        state.heap_len = 0 as ::core::ffi::c_int;
+        state.heap_max = crate::src::deflate::HEAP_SIZE;
+    }
     n = 0 as ::core::ffi::c_int;
     while n < elems {
         if (*tree.offset(n as isize)).freq as ::core::ffi::c_int != 0 as ::core::ffi::c_int {
             max_code = n;
-            (*s).heap_len += 1;
-            (*s).heap[(*s).heap_len as usize] = max_code;
-            (*s).depth[n as usize] = 0 as crate::zutil_h::uch;
+            let state = &mut *s;
+            state.heap_len += 1;
+            state.heap[state.heap_len as usize] = max_code;
+            state.depth[n as usize] = 0 as crate::zutil_h::uch;
         } else {
             (*tree.offset(n as isize)).dad = 0 as crate::zutil_h::ush;
         }
@@ -2705,7 +2711,30 @@ unsafe extern "C" fn build_tree(
     (*desc).max_code = max_code;
     n = (*s).heap_len / 2 as ::core::ffi::c_int;
     while n >= 1 as ::core::ffi::c_int {
-        pqdownheap(s, tree, n);
+        let state = &mut *s;
+        match desc_kind {
+            STATIC_L_DESC_KIND => pqdownheap(
+                &mut state.heap,
+                state.heap_len,
+                &state.depth,
+                &state.dyn_ltree,
+                n,
+            ),
+            STATIC_D_DESC_KIND => pqdownheap(
+                &mut state.heap,
+                state.heap_len,
+                &state.depth,
+                &state.dyn_dtree,
+                n,
+            ),
+            _ => pqdownheap(
+                &mut state.heap,
+                state.heap_len,
+                &state.depth,
+                &state.bl_tree,
+                n,
+            ),
+        }
         n -= 1;
     }
     node = elems;
@@ -2714,7 +2743,30 @@ unsafe extern "C" fn build_tree(
         let c2rust_fresh55 = (*s).heap_len;
         (*s).heap_len = (*s).heap_len - 1;
         (*s).heap[SMALLEST as usize] = (*s).heap[c2rust_fresh55 as usize];
-        pqdownheap(s, tree, SMALLEST);
+        let state = &mut *s;
+        match desc_kind {
+            STATIC_L_DESC_KIND => pqdownheap(
+                &mut state.heap,
+                state.heap_len,
+                &state.depth,
+                &state.dyn_ltree,
+                SMALLEST,
+            ),
+            STATIC_D_DESC_KIND => pqdownheap(
+                &mut state.heap,
+                state.heap_len,
+                &state.depth,
+                &state.dyn_dtree,
+                SMALLEST,
+            ),
+            _ => pqdownheap(
+                &mut state.heap,
+                state.heap_len,
+                &state.depth,
+                &state.bl_tree,
+                SMALLEST,
+            ),
+        }
         m = (*s).heap[SMALLEST as usize];
         (*s).heap_max -= 1;
         (*s).heap[(*s).heap_max as usize] = n;
@@ -2736,7 +2788,30 @@ unsafe extern "C" fn build_tree(
         let c2rust_fresh57 = node;
         node = node + 1;
         (*s).heap[SMALLEST as usize] = c2rust_fresh57;
-        pqdownheap(s, tree, SMALLEST);
+        let state = &mut *s;
+        match desc_kind {
+            STATIC_L_DESC_KIND => pqdownheap(
+                &mut state.heap,
+                state.heap_len,
+                &state.depth,
+                &state.dyn_ltree,
+                SMALLEST,
+            ),
+            STATIC_D_DESC_KIND => pqdownheap(
+                &mut state.heap,
+                state.heap_len,
+                &state.depth,
+                &state.dyn_dtree,
+                SMALLEST,
+            ),
+            _ => pqdownheap(
+                &mut state.heap,
+                state.heap_len,
+                &state.depth,
+                &state.bl_tree,
+                SMALLEST,
+            ),
+        }
         if !((*s).heap_len >= 2 as ::core::ffi::c_int) {
             break;
         }
@@ -3262,6 +3337,17 @@ unsafe extern "C" fn send_all_trees(
         dcodes - 1 as ::core::ffi::c_int,
     );
 }
+
+pub(crate) fn stored_block_len_bytes(stored_len: crate::zutil_h::ulg) -> [crate::stdlib::Bytef; 4] {
+    let len = stored_len as crate::zutil_h::ush;
+    let nlen = !len;
+    [
+        (len as ::core::ffi::c_int & 0xff as ::core::ffi::c_int) as crate::stdlib::Bytef,
+        (len as ::core::ffi::c_int >> 8 as ::core::ffi::c_int) as crate::stdlib::Bytef,
+        (nlen as ::core::ffi::c_int & 0xff as ::core::ffi::c_int) as crate::stdlib::Bytef,
+        (nlen as ::core::ffi::c_int >> 8 as ::core::ffi::c_int) as crate::stdlib::Bytef,
+    ]
+}
 #[export_name = "_tr_stored_block"]
 
 pub unsafe extern "C" fn _tr_stored_block_ffi(
@@ -3297,26 +3383,19 @@ pub unsafe extern "C" fn _tr_stored_block_ffi(
         (*s).bi_valid += len;
     }
     bi_windup(s);
+    let len_bytes = stored_block_len_bytes(stored_len);
     let c2rust_fresh51 = (*s).pending;
     (*s).pending = (*s).pending.wrapping_add(1);
-    *(*s).pending_buf.offset(c2rust_fresh51 as isize) =
-        (stored_len as crate::zutil_h::ush as ::core::ffi::c_int & 0xff as ::core::ffi::c_int)
-            as crate::zutil_h::uch;
+    *(*s).pending_buf.offset(c2rust_fresh51 as isize) = len_bytes[0];
     let c2rust_fresh52 = (*s).pending;
     (*s).pending = (*s).pending.wrapping_add(1);
-    *(*s).pending_buf.offset(c2rust_fresh52 as isize) =
-        (stored_len as crate::zutil_h::ush as ::core::ffi::c_int >> 8 as ::core::ffi::c_int)
-            as crate::zutil_h::uch;
+    *(*s).pending_buf.offset(c2rust_fresh52 as isize) = len_bytes[1];
     let c2rust_fresh53 = (*s).pending;
     (*s).pending = (*s).pending.wrapping_add(1);
-    *(*s).pending_buf.offset(c2rust_fresh53 as isize) =
-        (!stored_len as crate::zutil_h::ush as ::core::ffi::c_int & 0xff as ::core::ffi::c_int)
-            as crate::zutil_h::uch;
+    *(*s).pending_buf.offset(c2rust_fresh53 as isize) = len_bytes[2];
     let c2rust_fresh54 = (*s).pending;
     (*s).pending = (*s).pending.wrapping_add(1);
-    *(*s).pending_buf.offset(c2rust_fresh54 as isize) =
-        (!stored_len as crate::zutil_h::ush as ::core::ffi::c_int >> 8 as ::core::ffi::c_int)
-            as crate::zutil_h::uch;
+    *(*s).pending_buf.offset(c2rust_fresh54 as isize) = len_bytes[3];
     if stored_len != 0 {
         crate::stdlib::memcpy(
             (*s).pending_buf.offset((*s).pending as isize) as *mut ::core::ffi::c_void,

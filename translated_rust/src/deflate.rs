@@ -2340,22 +2340,23 @@ unsafe extern "C" fn deflate_stored(
             0 as crate::zutil_h::ulg,
             last,
         );
+        let len_bytes = crate::src::trees::stored_block_len_bytes(len as crate::zutil_h::ulg);
         *(*s)
             .pending_buf
             .offset((*s).pending.wrapping_sub(4 as crate::zutil_h::ulg) as isize) =
-            len as crate::stdlib::Bytef;
+            len_bytes[0];
         *(*s)
             .pending_buf
             .offset((*s).pending.wrapping_sub(3 as crate::zutil_h::ulg) as isize) =
-            (len >> 8 as ::core::ffi::c_int) as crate::stdlib::Bytef;
+            len_bytes[1];
         *(*s)
             .pending_buf
             .offset((*s).pending.wrapping_sub(2 as crate::zutil_h::ulg) as isize) =
-            !len as crate::stdlib::Bytef;
+            len_bytes[2];
         *(*s)
             .pending_buf
             .offset((*s).pending.wrapping_sub(1 as crate::zutil_h::ulg) as isize) =
-            (!len >> 8 as ::core::ffi::c_int) as crate::stdlib::Bytef;
+            len_bytes[3];
         flush_pending((*s).strm);
         if left != 0 {
             if left > len {
