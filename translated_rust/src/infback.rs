@@ -237,6 +237,15 @@ fn inflate_back_code_length_repeat(symbol: ::core::ffi::c_ushort) -> InflateBack
     }
 }
 
+fn inflate_back_code_length_repeat_extra_bits(
+    repeat: &InflateBackCodeLengthRepeat,
+) -> ::core::ffi::c_uint {
+    match repeat {
+        InflateBackCodeLengthRepeat::Previous { extra_bits }
+        | InflateBackCodeLengthRepeat::Zero { extra_bits, .. } => *extra_bits,
+    }
+}
+
 #[derive(Debug, PartialEq, Eq)]
 struct InflateBackCodeLengthRepeatPlan {
     length: ::core::ffi::c_uint,
@@ -685,12 +694,8 @@ pub unsafe extern "C" fn inflateBack(
                                 (*state).lens[c2rust_fresh7 as usize] = here.val;
                             } else {
                                 let repeat = inflate_back_code_length_repeat(here.val);
-                                let extra_bits = match &repeat {
-                                    InflateBackCodeLengthRepeat::Previous { extra_bits }
-                                    | InflateBackCodeLengthRepeat::Zero { extra_bits, .. } => {
-                                        *extra_bits
-                                    }
-                                };
+                                let extra_bits =
+                                    inflate_back_code_length_repeat_extra_bits(&repeat);
                                 while bits < here.bits as ::core::ffi::c_uint + extra_bits {
                                     if have == 0 as ::core::ffi::c_uint {
                                         have = in_0.expect("non-null function pointer")(
@@ -1156,14 +1161,14 @@ pub unsafe extern "C" fn inflateBackEnd_ffi(
 mod tests {
     use super::{
         inflate_back_align_to_byte_boundary, inflate_back_block_header,
-        inflate_back_code_length_repeat, inflate_back_code_length_repeat_plan,
-        inflate_back_consume_input_byte, inflate_back_copy_count, inflate_back_copy_match,
-        inflate_back_distance_exceeds_window, inflate_back_finish_flush_status,
-        inflate_back_init_metadata_is_valid, inflate_back_litlen_action,
-        inflate_back_match_copy_plan, inflate_back_stored_block_length, inflate_back_take_bits,
-        inflate_back_window_bits_are_valid, inflate_back_window_size, InflateBackBlockKind,
-        InflateBackCodeLengthRepeat, InflateBackCodeLengthRepeatPlan, InflateBackLitLenAction,
-        InflateBackMatchSource,
+        inflate_back_code_length_repeat, inflate_back_code_length_repeat_extra_bits,
+        inflate_back_code_length_repeat_plan, inflate_back_consume_input_byte,
+        inflate_back_copy_count, inflate_back_copy_match, inflate_back_distance_exceeds_window,
+        inflate_back_finish_flush_status, inflate_back_init_metadata_is_valid,
+        inflate_back_litlen_action, inflate_back_match_copy_plan, inflate_back_stored_block_length,
+        inflate_back_take_bits, inflate_back_window_bits_are_valid, inflate_back_window_size,
+        InflateBackBlockKind, InflateBackCodeLengthRepeat, InflateBackCodeLengthRepeatPlan,
+        InflateBackLitLenAction, InflateBackMatchSource,
     };
 
     #[test]
@@ -1372,6 +1377,29 @@ mod tests {
                 extra_bits: 7,
                 base: 11,
             }
+        );
+    }
+
+    #[test]
+    fn inflate_back_code_length_repeat_extra_bits_preserves_repeat_width() {
+        let previous = InflateBackCodeLengthRepeat::Previous { extra_bits: 2 };
+        let short_zero_run = InflateBackCodeLengthRepeat::Zero {
+            extra_bits: 3,
+            base: 3,
+        };
+        let long_zero_run = InflateBackCodeLengthRepeat::Zero {
+            extra_bits: 7,
+            base: 11,
+        };
+
+        assert_eq!(inflate_back_code_length_repeat_extra_bits(&previous), 2);
+        assert_eq!(
+            inflate_back_code_length_repeat_extra_bits(&short_zero_run),
+            3
+        );
+        assert_eq!(
+            inflate_back_code_length_repeat_extra_bits(&long_zero_run),
+            7
         );
     }
 

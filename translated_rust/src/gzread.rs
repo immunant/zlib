@@ -1294,8 +1294,7 @@ unsafe fn gz_fetch(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int 
                 let out = state.out;
                 let size = state.size;
                 let load = gz_load(state, out, gz_output_buffer_len(size));
-                state.x.have = load.have;
-                if gz_load_checked_have(load.have, load.failed).is_err() {
+                if !gz_fetch_apply_copy_load(&mut state.x.have, &load) {
                     return -1 as ::core::ffi::c_int;
                 }
                 state.x.next = state.out;
@@ -1361,6 +1360,11 @@ fn gz_fetch_should_continue(
     avail_in: crate::stdlib::uInt,
 ) -> bool {
     have == 0 && (eof == 0 || avail_in != 0)
+}
+
+fn gz_fetch_apply_copy_load(have: &mut ::core::ffi::c_uint, load: &GzLoadResult) -> bool {
+    *have = load.have;
+    gz_load_checked_have(load.have, load.failed).is_ok()
 }
 
 #[derive(Debug, Eq, PartialEq)]
@@ -1732,6 +1736,29 @@ mod tests {
     fn gz_load_checked_have_preserves_load_failure_status() {
         assert_eq!(gz_load_checked_have(3, true), Err(()));
         assert_eq!(gz_load_checked_have(0, false), Ok(0));
+    }
+
+    #[test]
+    fn gz_fetch_apply_copy_load_commits_count_before_returning_status() {
+        let mut have = 0;
+
+        assert!(!gz_fetch_apply_copy_load(
+            &mut have,
+            &GzLoadResult {
+                have: 3,
+                failed: true,
+            },
+        ));
+        assert_eq!(have, 3);
+
+        assert!(gz_fetch_apply_copy_load(
+            &mut have,
+            &GzLoadResult {
+                have: 5,
+                failed: false,
+            },
+        ));
+        assert_eq!(have, 5);
     }
 
     #[test]

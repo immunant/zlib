@@ -3248,6 +3248,14 @@ fn stored_block_payload_len(
     payload_len.min(available_output)
 }
 
+fn stored_block_copy_lengths(
+    buffered_len: ::core::ffi::c_uint,
+    payload_len: ::core::ffi::c_uint,
+) -> (::core::ffi::c_uint, ::core::ffi::c_uint) {
+    let window_len = buffered_len.min(payload_len);
+    (window_len, payload_len.wrapping_sub(window_len))
+}
+
 fn stored_block_should_wait(
     len: ::core::ffi::c_uint,
     min_block: ::core::ffi::c_uint,
@@ -3344,30 +3352,27 @@ unsafe extern "C" fn deflate_stored(
             .offset((*s).pending.wrapping_sub(1 as crate::zutil_h::ulg) as isize) =
             (!len >> 8 as ::core::ffi::c_int) as crate::stdlib::Bytef;
         flush_pending((*s).strm);
-        if left != 0 {
-            if left > len {
-                left = len;
-            }
+        let (window_len, input_len) = stored_block_copy_lengths(left, len);
+        if window_len != 0 {
             crate::stdlib::memcpy(
                 (*(*s).strm).next_out as *mut ::core::ffi::c_void,
                 (*s).window.offset((*s).block_start as isize) as *const ::core::ffi::c_void,
-                left as crate::__stddef_size_t_h::size_t,
+                window_len as crate::__stddef_size_t_h::size_t,
             );
-            (*(*s).strm).next_out = (*(*s).strm).next_out.offset(left as isize);
-            (*(*s).strm).avail_out = (*(*s).strm).avail_out.wrapping_sub(left);
+            (*(*s).strm).next_out = (*(*s).strm).next_out.offset(window_len as isize);
+            (*(*s).strm).avail_out = (*(*s).strm).avail_out.wrapping_sub(window_len);
             (*(*s).strm).total_out = (*(*s).strm)
                 .total_out
-                .wrapping_add(left as crate::stdlib::uLong);
-            (*s).block_start += left as ::core::ffi::c_long;
-            len = len.wrapping_sub(left);
+                .wrapping_add(window_len as crate::stdlib::uLong);
+            (*s).block_start += window_len as ::core::ffi::c_long;
         }
-        if len != 0 {
-            read_buf((*s).strm, (*(*s).strm).next_out, len);
-            (*(*s).strm).next_out = (*(*s).strm).next_out.offset(len as isize);
-            (*(*s).strm).avail_out = (*(*s).strm).avail_out.wrapping_sub(len);
+        if input_len != 0 {
+            read_buf((*s).strm, (*(*s).strm).next_out, input_len);
+            (*(*s).strm).next_out = (*(*s).strm).next_out.offset(input_len as isize);
+            (*(*s).strm).avail_out = (*(*s).strm).avail_out.wrapping_sub(input_len);
             (*(*s).strm).total_out = (*(*s).strm)
                 .total_out
-                .wrapping_add(len as crate::stdlib::uLong);
+                .wrapping_add(input_len as crate::stdlib::uLong);
         }
         if !(last == 0 as ::core::ffi::c_int) {
             break;
@@ -4373,12 +4378,12 @@ mod tests {
         pending_buffer_needs_flush, pending_output_len, pending_short_cursors, read_buf_checksum,
         read_buf_input_progress_after_copy, read_buf_len, read_buf_total_in_after_copy,
         short_msb_bytes, slide_hash_entry, stored_block_available_output,
-        stored_block_buffered_len, stored_block_can_emit, stored_block_header_bytes,
-        stored_block_is_last, stored_block_min_size, stored_block_payload_len,
-        stored_block_should_wait, stored_insert_after_input, symbol_buffer_is_full,
-        symbol_triplet_cursors, zlib_header, DeflateFastMatchProgress, DeflateFinalFlushAction,
-        DeflateMatchRefillAction, DeflatePreflight, DeflateRleRefillAction, DeflateRleTallyPlan,
-        ReadBufChecksum,
+        stored_block_buffered_len, stored_block_can_emit, stored_block_copy_lengths,
+        stored_block_header_bytes, stored_block_is_last, stored_block_min_size,
+        stored_block_payload_len, stored_block_should_wait, stored_insert_after_input,
+        symbol_buffer_is_full, symbol_triplet_cursors, zlib_header, DeflateFastMatchProgress,
+        DeflateFinalFlushAction, DeflateMatchRefillAction, DeflatePreflight,
+        DeflateRleRefillAction, DeflateRleTallyPlan, ReadBufChecksum,
     };
 
     #[test]
@@ -5488,6 +5493,14 @@ mod tests {
             ),
             crate::src::deflate::MAX_STORED as u32,
         );
+    }
+
+    #[test]
+    fn stored_block_copy_lengths_split_buffered_and_input_bytes() {
+        assert_eq!(stored_block_copy_lengths(0, 8), (0, 8));
+        assert_eq!(stored_block_copy_lengths(3, 8), (3, 5));
+        assert_eq!(stored_block_copy_lengths(8, 8), (8, 0));
+        assert_eq!(stored_block_copy_lengths(12, 8), (8, 0));
     }
 
     #[test]
