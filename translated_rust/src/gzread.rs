@@ -50,6 +50,69 @@ enum GzLoadBuffer<'a> {
     Output,
 }
 
+/// The owned output-buffer cursor used by the read side of a gzip handle.
+///
+/// `gzFile_s::next` remains the ABI-visible cursor, but pushback only needs
+/// an offset into the state-owned buffer.  Keeping that transition separate
+/// makes the buffer manipulation independent of the raw ABI cursor.
+#[derive(Clone, Copy)]
+struct GzReadCursor {
+    have: usize,
+    next: usize,
+    pos: crate::stdlib::off64_t,
+}
+
+enum GzUngetcError {
+    InvalidCharacter,
+    StateCorrupt,
+    OutOfRoom,
+}
+
+/// Insert one byte before the unread portion of an owned gzip output buffer.
+///
+/// The caller converts the ABI cursor to and from `GzReadCursor`; this helper
+/// deliberately operates only on an owned byte slice and checked indices.
+fn gzungetc_cursor(
+    c: ::core::ffi::c_int,
+    cursor: &mut GzReadCursor,
+    output: &mut [u8],
+) -> Result<(), GzUngetcError> {
+    if c < 0 {
+        return Err(GzUngetcError::InvalidCharacter);
+    }
+    if cursor.have == 0 {
+        let last = output
+            .len()
+            .checked_sub(1)
+            .ok_or(GzUngetcError::StateCorrupt)?;
+        output[last] = c as ::core::ffi::c_uchar;
+        cursor.have = 1;
+        cursor.next = last;
+        cursor.pos -= 1;
+        return Ok(());
+    }
+    if cursor.have == output.len() {
+        return Err(GzUngetcError::OutOfRoom);
+    }
+    if cursor.next > output.len() || cursor.have > output.len() - cursor.next {
+        return Err(GzUngetcError::StateCorrupt);
+    }
+
+    if cursor.next == 0 {
+        let moved = output.len() - cursor.have;
+        output.copy_within(..cursor.have, moved);
+        cursor.next = moved;
+    }
+    cursor.next = cursor
+        .next
+        .checked_sub(1)
+        .ok_or(GzUngetcError::StateCorrupt)?;
+    output[cursor.next] = c as ::core::ffi::c_uchar;
+    cursor.have += 1;
+    cursor.pos -= 1;
+    Ok(())
+}
+
 /// Read from a descriptor that is owned by the gzip state for the duration of
 /// the call. The borrowed descriptor and slice cover exactly one `read`.
 fn gz_read_fd(fd: &std::os::fd::OwnedFd, buffer: &mut [u8]) -> Result<usize, std::io::Error> {
@@ -801,8 +864,11 @@ unsafe fn gzungetc(
         );
         return -1 as ::core::ffi::c_int;
     }
-    if state.x.have == 0 as ::core::ffi::c_uint {
-        let Some(last) = output_len.checked_sub(1) else {
+    let have = state.x.have as usize;
+    let next = if have == 0 {
+        output_len
+    } else {
+        let Some(next) = state.x.next.addr().checked_sub(state.out.as_ptr().addr()) else {
             crate::src::gzlib::gz_error_state(
                 state,
                 crate::zlib_h::Z_STREAM_ERROR,
@@ -810,65 +876,39 @@ unsafe fn gzungetc(
             );
             return -1 as ::core::ffi::c_int;
         };
-        state.x.have = 1 as ::core::ffi::c_uint;
-        state.x.next = state.out.as_mut_ptr().wrapping_add(last);
-        state.out[last] = c as ::core::ffi::c_uchar;
-        state.x.pos -= 1;
-        state.past = 0 as ::core::ffi::c_int;
-        return c;
-    }
-    if state.x.have as usize == output_len {
-        crate::src::gzlib::gz_error_state(
-            state,
-            crate::zlib_h::Z_DATA_ERROR,
-            Some(c"out of room to push characters"),
-        );
-        return -1 as ::core::ffi::c_int;
-    }
-    let have = state.x.have as usize;
-    if have > output_len {
-        crate::src::gzlib::gz_error_state(
-            state,
-            crate::zlib_h::Z_STREAM_ERROR,
-            Some(c"state corrupt"),
-        );
-        return -1 as ::core::ffi::c_int;
-    }
-    let Some(mut next) = state.x.next.addr().checked_sub(state.out.as_ptr().addr()) else {
-        crate::src::gzlib::gz_error_state(
-            state,
-            crate::zlib_h::Z_STREAM_ERROR,
-            Some(c"state corrupt"),
-        );
-        return -1 as ::core::ffi::c_int;
+        next
     };
-    if next > output_len || have > output_len - next {
-        crate::src::gzlib::gz_error_state(
-            state,
-            crate::zlib_h::Z_STREAM_ERROR,
-            Some(c"state corrupt"),
-        );
-        return -1 as ::core::ffi::c_int;
-    }
-    if next == 0 {
-        let moved = output_len - have;
-        state.out.copy_within(..have, moved);
-        next = moved;
-    }
-    state.x.have = state.x.have.wrapping_add(1);
-    let Some(next_byte) = next.checked_sub(1) else {
-        crate::src::gzlib::gz_error_state(
-            state,
-            crate::zlib_h::Z_STREAM_ERROR,
-            Some(c"state corrupt"),
-        );
-        return -1 as ::core::ffi::c_int;
+    let mut cursor = GzReadCursor {
+        have,
+        next,
+        pos: state.x.pos,
     };
-    state.x.next = state.out.as_mut_ptr().wrapping_add(next_byte);
-    state.out[next_byte] = c as ::core::ffi::c_uchar;
-    state.x.pos -= 1;
-    state.past = 0 as ::core::ffi::c_int;
-    return c;
+    match gzungetc_cursor(c, &mut cursor, &mut state.out) {
+        Ok(()) => {
+            state.x.have = cursor.have as ::core::ffi::c_uint;
+            state.x.next = state.out.as_mut_ptr().wrapping_add(cursor.next);
+            state.x.pos = cursor.pos;
+            state.past = 0 as ::core::ffi::c_int;
+            c
+        }
+        Err(GzUngetcError::InvalidCharacter) => -1 as ::core::ffi::c_int,
+        Err(GzUngetcError::OutOfRoom) => {
+            crate::src::gzlib::gz_error_state(
+                state,
+                crate::zlib_h::Z_DATA_ERROR,
+                Some(c"out of room to push characters"),
+            );
+            -1 as ::core::ffi::c_int
+        }
+        Err(GzUngetcError::StateCorrupt) => {
+            crate::src::gzlib::gz_error_state(
+                state,
+                crate::zlib_h::Z_STREAM_ERROR,
+                Some(c"state corrupt"),
+            );
+            -1 as ::core::ffi::c_int
+        }
+    }
 }
 #[export_name = "gzungetc"]
 
