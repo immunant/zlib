@@ -104,22 +104,16 @@ fn gzsetparams_plan(
 }
 
 // The zero-fill step may initialize the write buffers, so form this second
-// plan only after it has completed.  It describes the remaining scalar codec
-// transition without retaining any ABI cursor or storage borrow.
-struct GzSetParamsCodecPlan {
-    retune: bool,
-    flush_buffered_input: bool,
+// plan only after it has completed.  The existing compressor adapter then
+// decides whether it must drain buffered input before applying this scalar
+// transition.
+struct GzDeflateRetune {
+    level: ::core::ffi::c_int,
+    strategy: ::core::ffi::c_int,
 }
 
-fn gzsetparams_codec_plan(
-    buffers_size: crate::stdlib::uInt,
-    buffered_input: bool,
-) -> GzSetParamsCodecPlan {
-    let retune = buffers_size != 0;
-    GzSetParamsCodecPlan {
-        retune,
-        flush_buffered_input: retune && buffered_input,
-    }
+fn gzsetparams_needs_retune(buffers_size: crate::stdlib::uInt) -> bool {
+    buffers_size != 0
 }
 
 // Closing a writer has a small, but externally visible, error-precedence
@@ -445,6 +439,7 @@ unsafe fn gz_comp(
     state: &mut crate::gzguts_h::gz_state,
     mut flush: ::core::ffi::c_int,
     external_input: Option<&[u8]>,
+    retune: Option<GzDeflateRetune>,
 ) -> ::core::ffi::c_int {
     let mut ret: ::core::ffi::c_int = 0;
     let mut writ: ::core::ffi::c_int = 0;
@@ -457,6 +452,16 @@ unsafe fn gz_comp(
     {
         return -1 as ::core::ffi::c_int;
     }
+    // `gzsetparams()` only needs a block flush when the persistent input
+    // owner has a pending prefix.  An empty owner bypasses the codec request
+    // below, then reaches the shared scalar retune completion at the end.
+    let retune_empty_owner = retune.is_some()
+        && state
+            .buffers
+            .write_owner
+            .as_ref()
+            .is_some_and(|owner| owner.input().available() == 0);
+    if !retune_empty_owner {
     if state.direct != 0 {
         while state.strm.avail_in != 0 {
             state.again = 0;
@@ -722,6 +727,14 @@ unsafe fn gz_comp(
     if flush == crate::zlib_h::Z_FINISH {
         state.reset = 1 as ::core::ffi::c_int;
     }
+    }
+    if let Some(retune) = retune {
+        crate::src::deflate::deflate_params_from_stream(
+            &mut state.strm,
+            retune.level,
+            retune.strategy,
+        );
+    }
     return 0 as ::core::ffi::c_int;
 }
 
@@ -735,7 +748,7 @@ unsafe fn gz_zero(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
     let mut first = true;
     loop {
         if needs_compress {
-            let ret = gz_comp(state, crate::zlib_h::Z_NO_FLUSH, None);
+            let ret = gz_comp(state, crate::zlib_h::Z_NO_FLUSH, None, None);
             if let Some(step) = staged_zero.take() {
                 let progress = step.finish(state.strm.avail_in, state.x.pos, state.skip);
                 state.x.pos = progress.position;
@@ -838,7 +851,7 @@ unsafe fn gzip_write_state_adapter(
             if request.is_empty() {
                 break;
             }
-            if gz_comp(state, crate::zlib_h::Z_NO_FLUSH, None) == -1 as ::core::ffi::c_int {
+            if gz_comp(state, crate::zlib_h::Z_NO_FLUSH, None, None) == -1 as ::core::ffi::c_int {
                 return request.partial_or_zero(state.again);
             }
         }
@@ -848,7 +861,7 @@ unsafe fn gzip_write_state_adapter(
             .write_owner
             .as_ref()
             .is_some_and(|owner| owner.input().available() != 0)
-            && gz_comp(state, crate::zlib_h::Z_NO_FLUSH, None) == -1 as ::core::ffi::c_int
+            && gz_comp(state, crate::zlib_h::Z_NO_FLUSH, None, None) == -1 as ::core::ffi::c_int
         {
             return 0 as crate::stdlib::z_size_t;
         }
@@ -887,7 +900,12 @@ unsafe fn gzip_write_state_adapter(
         loop {
             let chunk = GzCompressionChunk::next(request.len());
             state.strm.avail_in = chunk.input_len;
-            ret = gz_comp(state, crate::zlib_h::Z_NO_FLUSH, Some(request.remaining()));
+            ret = gz_comp(
+                state,
+                crate::zlib_h::Z_NO_FLUSH,
+                Some(request.remaining()),
+                None,
+            );
             let consumed = chunk.consumed(state.strm.avail_in);
             state.x.pos += consumed as crate::stdlib::off64_t;
             if request.advance(consumed as usize).is_none() {
@@ -1156,7 +1174,7 @@ unsafe fn gzflush(
     if state.skip != 0 && gz_zero(state) == -1 as ::core::ffi::c_int {
         return state.err;
     }
-    gz_comp(state, flush, None);
+    gz_comp(state, flush, None, None);
     return state.err;
 }
 #[export_name = "gzflush"]
@@ -1206,21 +1224,16 @@ unsafe fn gzsetparams(
     if materialize_skip && gz_zero(state) == -1 as ::core::ffi::c_int {
         return state.err;
     }
-    let codec = gzsetparams_codec_plan(
-        state.buffers.size,
-        state
-            .buffers
-            .write_owner
-            .as_ref()
-            .is_some_and(|owner| owner.input().available() != 0),
-    );
-    if codec.retune {
-        if codec.flush_buffered_input
-            && gz_comp(state, crate::zlib_h::Z_BLOCK, None) == -1 as ::core::ffi::c_int
+    if gzsetparams_needs_retune(state.buffers.size) {
+        if gz_comp(
+            state,
+            crate::zlib_h::Z_BLOCK,
+            None,
+            Some(GzDeflateRetune { level, strategy }),
+        ) == -1 as ::core::ffi::c_int
         {
             return state.err;
         }
-        crate::src::deflate::deflate_params_from_stream(&mut state.strm, level, strategy);
     }
     state.level = level;
     state.strategy = strategy;
@@ -1246,7 +1259,7 @@ pub unsafe fn gzclose_w(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c
         let status = gz_zero(state);
         result.record_codec_result(status, state.err);
     }
-    let status = gz_comp(state, crate::zlib_h::Z_FINISH, None);
+    let status = gz_comp(state, crate::zlib_h::Z_FINISH, None, None);
     result.record_codec_result(status, state.err);
     // The lifecycle tag, not mode or allocated-buffer size, authorizes the
     // matching codec end operation.  Consume it before either buffer is
