@@ -2168,7 +2168,6 @@ pub use crate::zutil_h::uchf;
 pub use crate::zutil_h::ulg;
 pub use crate::zutil_h::ush;
 pub use crate::zutil_h::ushf;
-#[derive(Copy, Clone)]
 pub struct static_tree_desc_s {
     pub static_tree: Option<&'static [crate::src::deflate::ct_data]>,
     pub extra_bits: &'static [crate::stdlib::intf],

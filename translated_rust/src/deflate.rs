@@ -36,7 +36,6 @@ pub const BUSY_STATE: ::core::ffi::c_int = 113 as ::core::ffi::c_int;
 pub const FINISH_STATE: ::core::ffi::c_int = 666 as ::core::ffi::c_int;
 
 pub type ct_data = crate::src::deflate::ct_data_s;
-#[derive(Copy, Clone)]
 #[repr(C)]
 
 pub struct ct_data_s {
