@@ -54,17 +54,11 @@ unsafe extern "C" fn gz_load(
 ) -> ::core::ffi::c_int {
     let mut ret: ::core::ffi::c_int = 0;
     let mut get: ::core::ffi::c_uint = 0;
-    let mut max: ::core::ffi::c_uint = (-1 as ::core::ffi::c_int as ::core::ffi::c_uint
-        >> 2 as ::core::ffi::c_int)
-        .wrapping_add(1 as ::core::ffi::c_uint);
     (*state).again = 0 as ::core::ffi::c_int;
     *crate::stdlib::__errno_location() = 0 as ::core::ffi::c_int;
     *have = 0 as ::core::ffi::c_uint;
     loop {
-        get = len.wrapping_sub(*have);
-        if get > max {
-            get = max;
-        }
+        get = crate::src::gzlib::gz_syscall_chunk(len.wrapping_sub(*have));
         ret = crate::stdlib::read(
             (*state).fd,
             buf.offset(*have as isize) as *mut ::core::ffi::c_void,
@@ -402,10 +396,7 @@ unsafe extern "C" fn gz_read(
     got = 0 as crate::stdlib::z_size_t;
     err = 0 as ::core::ffi::c_int;
     's_140: loop {
-        n = -1 as ::core::ffi::c_int as ::core::ffi::c_uint;
-        if n as crate::stdlib::z_size_t > len {
-            n = len as ::core::ffi::c_uint;
-        }
+        n = crate::src::gzlib::gz_stream_chunk(len);
         's_28: {
             if (*state).x.have != 0 {
                 if (*state).x.have < n {

@@ -61,6 +61,23 @@ pub use crate::zlib_h::Z_MEM_ERROR;
 pub use crate::zlib_h::Z_OK;
 pub use crate::zlib_h::Z_RLE;
 
+// Keep gzip I/O requests within the unsigned-int sizes used by zlib's stream
+// fields and the POSIX read/write adapters.
+pub fn gz_stream_chunk(len: crate::stdlib::z_size_t) -> ::core::ffi::c_uint {
+    let max = -1 as ::core::ffi::c_int as ::core::ffi::c_uint;
+    if max as crate::stdlib::z_size_t > len {
+        len as ::core::ffi::c_uint
+    } else {
+        max
+    }
+}
+
+pub fn gz_syscall_chunk(len: ::core::ffi::c_uint) -> ::core::ffi::c_uint {
+    let max = (-1 as ::core::ffi::c_int as ::core::ffi::c_uint >> 2)
+        .wrapping_add(1 as ::core::ffi::c_uint);
+    if len > max { max } else { len }
+}
+
 unsafe extern "C" fn gz_reset(mut state: crate::gzguts_h::gz_statep) {
     (*state).x.have = 0 as ::core::ffi::c_uint;
     if (*state).mode == crate::gzguts_h::GZ_READ {

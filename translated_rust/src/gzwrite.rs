@@ -112,9 +112,6 @@ unsafe extern "C" fn gz_comp(
     let mut writ: ::core::ffi::c_int = 0;
     let mut have: ::core::ffi::c_uint = 0;
     let mut put: ::core::ffi::c_uint = 0;
-    let mut max: ::core::ffi::c_uint = (-1 as ::core::ffi::c_int as ::core::ffi::c_uint
-        >> 2 as ::core::ffi::c_int)
-        .wrapping_add(1 as ::core::ffi::c_uint);
     let mut strm: crate::zlib_h::z_streamp = &raw mut (*state).strm;
     if (*state).size == 0 as ::core::ffi::c_uint && gz_init(state) == -1 as ::core::ffi::c_int {
         return -1 as ::core::ffi::c_int;
@@ -123,11 +120,7 @@ unsafe extern "C" fn gz_comp(
         while (*strm).avail_in != 0 {
             *crate::stdlib::__errno_location() = 0 as ::core::ffi::c_int;
             (*state).again = 0 as ::core::ffi::c_int;
-            put = if (*strm).avail_in > max {
-                max
-            } else {
-                (*strm).avail_in as ::core::ffi::c_uint
-            };
+            put = crate::src::gzlib::gz_syscall_chunk((*strm).avail_in);
             writ = crate::stdlib::write(
                 (*state).fd,
                 (*strm).next_in as *const ::core::ffi::c_void,
@@ -167,13 +160,9 @@ unsafe extern "C" fn gz_comp(
             while (*strm).next_out > (*state).x.next {
                 *crate::stdlib::__errno_location() = 0 as ::core::ffi::c_int;
                 (*state).again = 0 as ::core::ffi::c_int;
-                put = if (*strm).next_out.offset_from((*state).x.next)
-                    > max as ::core::ffi::c_int as isize
-                {
-                    max
-                } else {
-                    (*strm).next_out.offset_from((*state).x.next) as ::core::ffi::c_uint
-                };
+                put = crate::src::gzlib::gz_syscall_chunk(
+                    (*strm).next_out.offset_from((*state).x.next) as ::core::ffi::c_uint,
+                );
                 writ = crate::stdlib::write(
                     (*state).fd,
                     (*state).x.next as *const ::core::ffi::c_void,
@@ -319,10 +308,7 @@ unsafe extern "C" fn gz_write(
         }
         (*state).strm.next_in = buf as *mut crate::stdlib::Bytef;
         loop {
-            let mut n: ::core::ffi::c_uint = -1 as ::core::ffi::c_int as ::core::ffi::c_uint;
-            if n as crate::stdlib::z_size_t > len {
-                n = len as ::core::ffi::c_uint;
-            }
+            let mut n: ::core::ffi::c_uint = crate::src::gzlib::gz_stream_chunk(len);
             (*state).strm.avail_in = n as crate::stdlib::uInt;
             ret = gz_comp(state, crate::zlib_h::Z_NO_FLUSH);
             n = n.wrapping_sub((*state).strm.avail_in as ::core::ffi::c_uint);
