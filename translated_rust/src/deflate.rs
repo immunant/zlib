@@ -249,6 +249,23 @@ pub(crate) struct PendingStorageAllocationPlan {
     pub total_len: usize,
 }
 
+impl PendingStorageAllocationPlan {
+    /// Describe the two temporal views of this one callback allocation.
+    ///
+    /// Keeping this derivation on the checked allocation plan prevents a
+    /// lifecycle boundary from validating one geometry and allocating another
+    /// one with a hand-written item size.
+    pub(crate) fn layout(self) -> PendingStorageLayout {
+        let symbol_offset = self.items as usize;
+        PendingStorageLayout {
+            total_len: self.total_len,
+            symbol_offset,
+            symbol_len: self.total_len.wrapping_sub(symbol_offset),
+            symbol_flush_threshold: self.items.wrapping_sub(1).wrapping_mul(3),
+        }
+    }
+}
+
 pub(crate) fn pending_storage_allocation_plan(
     lit_bufsize: crate::stdlib::uInt,
 ) -> Option<PendingStorageAllocationPlan> {
@@ -267,15 +284,15 @@ pub(crate) fn pending_storage_layout(lit_bufsize: crate::stdlib::uInt) -> Pendin
     // Valid deflate states use the checked callback allocation plan.  Retain
     // the translated wrapping layout for malformed/internal state so the
     // callers that only inspect layout keep their existing behavior.
-    let total_len = pending_storage_allocation_plan(lit_bufsize)
-        .map_or_else(|| symbol_offset.wrapping_mul(4), |plan| plan.total_len);
-
-    PendingStorageLayout {
-        total_len,
-        symbol_offset,
-        symbol_len: total_len.wrapping_sub(symbol_offset),
-        symbol_flush_threshold: lit_bufsize.wrapping_sub(1).wrapping_mul(3),
-    }
+    pending_storage_allocation_plan(lit_bufsize).map_or_else(
+        || PendingStorageLayout {
+            total_len: symbol_offset.wrapping_mul(4),
+            symbol_offset,
+            symbol_len: symbol_offset.wrapping_mul(3),
+            symbol_flush_threshold: lit_bufsize.wrapping_sub(1).wrapping_mul(3),
+        },
+        PendingStorageAllocationPlan::layout,
+    )
 }
 
 pub(crate) struct PendingStorageView<'a> {
@@ -1572,14 +1589,23 @@ pub unsafe extern "C" fn deflateInit2_(
         ::core::mem::size_of::<crate::src::deflate::Pos>() as crate::stdlib::uInt,
     ) as *mut crate::src::deflate::Posf;
     (*s).high_water = 0 as crate::zutil_h::ulg;
-    (*s).lit_bufsize =
+    let lit_bufsize =
         ((1 as ::core::ffi::c_int) << memLevel + 6 as ::core::ffi::c_int) as crate::stdlib::uInt;
-    let pending_layout = pending_storage_layout((*s).lit_bufsize);
+    (*s).lit_bufsize = lit_bufsize;
+    // The pending bytes and symbol triplets share exactly one callback
+    // allocation.  Derive both its request and its safe view geometry from
+    // one checked plan before crossing the allocator boundary.
+    // `memLevel` was constrained to 1..=MAX_MEM_LEVEL above, so this fixed
+    // C-width request is representable.  Keep the checked-plan derivation as
+    // the single allocation/layout source of truth.
+    let pending_plan = pending_storage_allocation_plan(lit_bufsize)
+        .expect("validated deflate pending allocation");
+    let pending_layout = pending_plan.layout();
     (*s).pending_buf = Some((*strm).zalloc.expect("non-null function pointer"))
         .expect("non-null function pointer")(
         (*strm).opaque,
-        (*s).lit_bufsize,
-        4 as crate::stdlib::uInt,
+        pending_plan.items,
+        pending_plan.item_size,
     ) as *mut crate::zutil_h::uchf as *mut crate::stdlib::Bytef;
     (*s).pending_buf_size = pending_layout.total_len as crate::zutil_h::ulg;
     if (*s).window.is_null()
@@ -3560,6 +3586,12 @@ pub unsafe extern "C" fn deflateCopy_ffi(
         return crate::zlib_h::Z_STREAM_ERROR;
     }
     ss = (*source).state as *mut crate::src::deflate::deflate_state;
+    // Reject an impossible callback request before allocating or copying any
+    // destination state.  Normal states always originate from deflateInit2_,
+    // which established this same plan.
+    let Some(pending_plan) = pending_storage_allocation_plan((*ss).lit_bufsize) else {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    };
     crate::stdlib::memcpy(
         dest as *mut ::core::ffi::c_void,
         source as *const ::core::ffi::c_void,
@@ -3606,8 +3638,8 @@ pub unsafe extern "C" fn deflateCopy_ffi(
     (*ds).pending_buf = Some((*dest).zalloc.expect("non-null function pointer"))
         .expect("non-null function pointer")(
         (*dest).opaque,
-        (*ds).lit_bufsize,
-        4 as crate::stdlib::uInt,
+        pending_plan.items,
+        pending_plan.item_size,
     ) as *mut crate::zutil_h::uchf as *mut crate::stdlib::Bytef;
     if (*ds).window.is_null()
         || (*ds).prev.is_null()
@@ -3637,7 +3669,7 @@ pub unsafe extern "C" fn deflateCopy_ffi(
             .wrapping_mul(::core::mem::size_of::<crate::src::deflate::Pos>()
                 as crate::__stddef_size_t_h::size_t),
     );
-    let pending_layout = pending_storage_layout((*ds).lit_bufsize);
+    let pending_layout = pending_plan.layout();
     let Some(pending_copy) = pending_storage_copy_plan(
         pending_layout,
         (*ss).pending_out_offset,
@@ -6162,6 +6194,21 @@ mod tests {
                 item_size: 4,
                 total_len: (crate::stdlib::uInt::MAX / 4 * 4) as usize,
             })
+        );
+    }
+
+    #[test]
+    fn pending_storage_plan_and_layout_share_exact_geometry() {
+        let plan = super::pending_storage_allocation_plan(16).unwrap();
+        assert_eq!(plan.layout(), pending_storage_layout(16));
+        assert_eq!(
+            plan.layout(),
+            super::PendingStorageLayout {
+                total_len: plan.total_len,
+                symbol_offset: plan.items as usize,
+                symbol_len: plan.total_len - plan.items as usize,
+                symbol_flush_threshold: plan.items.wrapping_sub(1).wrapping_mul(3),
+            }
         );
     }
 
