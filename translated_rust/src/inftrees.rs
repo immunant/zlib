@@ -3443,6 +3443,14 @@ pub(crate) fn inflate_fixed(state: &mut crate::src::inflate::inflate_state) {
 #[export_name = "inflate_fixed"]
 
 pub unsafe extern "C" fn inflate_fixed_ffi(mut state: *mut crate::src::inflate::inflate_state) {
+    // `inflate_fixed` is a safe state-only core.  Establish its reference at
+    // this exported boundary only after rejecting the invalid C pointers that
+    // would violate Rust's reference requirements.
+    if state.is_null()
+        || state.align_offset(core::mem::align_of::<crate::src::inflate::inflate_state>()) != 0
+    {
+        return;
+    }
     inflate_fixed(&mut *state)
 }
 
@@ -3764,6 +3772,38 @@ mod tests {
             },
             -1
         );
+    }
+
+    #[test]
+    fn ffi_fixed_rejects_null_or_misaligned_state_before_creating_a_reference() {
+        unsafe { inflate_fixed_ffi(core::ptr::null_mut()) };
+
+        #[repr(align(8))]
+        struct AlignedBytes([u8; 256]);
+
+        let mut bytes = AlignedBytes([0; 256]);
+        let misaligned = bytes.0[1..]
+            .as_mut_ptr()
+            .cast::<crate::src::inflate::inflate_state>();
+        unsafe { inflate_fixed_ffi(misaligned) };
+    }
+
+    #[test]
+    fn ffi_fixed_initializes_decode_table_locations() {
+        let mut state = crate::src::inflate::inflate_state::newly_allocated();
+
+        unsafe { inflate_fixed_ffi(&mut state) };
+
+        assert_eq!(
+            state.lencode,
+            crate::src::inflate::DecodeTableLocation::fixed_lens()
+        );
+        assert_eq!(state.lenbits, 9);
+        assert_eq!(
+            state.distcode,
+            crate::src::inflate::DecodeTableLocation::fixed_dists()
+        );
+        assert_eq!(state.distbits, 5);
     }
 
     #[test]
