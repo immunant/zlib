@@ -1500,32 +1500,35 @@ fn flush_pending_bytes(
 
 unsafe extern "C" fn flush_pending(mut strm: crate::zlib_h::z_streamp) {
     let mut len: ::core::ffi::c_uint = 0;
-    let mut s: *mut crate::src::deflate::deflate_state =
-        (*strm).state as *mut crate::src::deflate::deflate_state;
+    // The stream and its opaque state are distinct allocations.  Project each
+    // once so the bounded pending/output helpers operate on Rust references
+    // rather than repeatedly dereferencing the ABI pointers.
+    let strm = &mut *strm;
+    let state = &mut *(strm.state as *mut crate::src::deflate::deflate_state);
     crate::src::trees::bi_flush_or_windup(
-        s as *mut crate::src::deflate::internal_state,
+        state as *mut crate::src::deflate::internal_state,
         false,
     );
-    len = if (*s).pending > (*strm).avail_out as crate::zutil_h::ulg {
-        (*strm).avail_out as ::core::ffi::c_uint
+    len = if state.pending > strm.avail_out as crate::zutil_h::ulg {
+        strm.avail_out as ::core::ffi::c_uint
     } else {
-        (*s).pending as ::core::ffi::c_uint
+        state.pending as ::core::ffi::c_uint
     };
     if len == 0 as ::core::ffi::c_uint {
         return;
     }
-    let output = ::core::slice::from_raw_parts_mut((*strm).next_out, len as usize);
+    let output = ::core::slice::from_raw_parts_mut(strm.next_out, len as usize);
     let pending_buf =
-        ::core::slice::from_raw_parts((*s).pending_buf, (*s).pending_buf_size as usize);
+        ::core::slice::from_raw_parts(state.pending_buf, state.pending_buf_size as usize);
     let len = flush_pending_bytes(
         output,
         pending_buf,
-        &mut (*s).pending_out,
-        &mut (*s).pending,
+        &mut state.pending_out,
+        &mut state.pending,
     );
-    (*strm).next_out = (*strm).next_out.offset(len as isize);
-    (*strm).total_out = (*strm).total_out.wrapping_add(len as crate::stdlib::uLong);
-    (*strm).avail_out = (*strm).avail_out.wrapping_sub(len);
+    strm.next_out = strm.next_out.offset(len as isize);
+    strm.total_out = strm.total_out.wrapping_add(len as crate::stdlib::uLong);
+    strm.avail_out = strm.avail_out.wrapping_sub(len);
 }
 pub unsafe extern "C" fn deflate(
     mut strm: crate::zlib_h::z_streamp,
