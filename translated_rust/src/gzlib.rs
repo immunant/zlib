@@ -17,7 +17,6 @@ pub use crate::stdlib::fcntl;
 
 pub use crate::stdlib::open;
 
-pub use crate::stdlib::__O_CLOEXEC;
 pub use crate::stdlib::F_GETFD;
 pub use crate::stdlib::F_GETFL;
 pub use crate::stdlib::F_SETFD;
@@ -34,6 +33,7 @@ pub use crate::stdlib::O_WRONLY;
 pub use crate::stdlib::SEEK_CUR;
 pub use crate::stdlib::SEEK_END;
 pub use crate::stdlib::SEEK_SET;
+pub use crate::stdlib::__O_CLOEXEC;
 
 pub use crate::stdlib::__off64_t;
 pub use crate::stdlib::__off_t;
@@ -135,6 +135,11 @@ fn gzseek_request_is_valid(
     gz_is_read_or_write_mode(mode)
         && (err == crate::zlib_h::Z_OK || err == crate::zlib_h::Z_BUF_ERROR)
         && (whence == crate::stdlib::SEEK_SET || whence == crate::stdlib::SEEK_CUR)
+}
+
+fn gzrewind_request_is_valid(mode: ::core::ffi::c_int, err: ::core::ffi::c_int) -> bool {
+    mode == crate::gzguts_h::GZ_READ
+        && (err == crate::zlib_h::Z_OK || err == crate::zlib_h::Z_BUF_ERROR)
 }
 
 fn gzseek_adjust_offset(
@@ -504,9 +509,7 @@ pub unsafe extern "C" fn gzrewind(mut file: crate::zlib_h::gzFile) -> ::core::ff
         return -1 as ::core::ffi::c_int;
     }
     state = file as crate::gzguts_h::gz_statep;
-    if (*state).mode != crate::gzguts_h::GZ_READ
-        || (*state).err != crate::zlib_h::Z_OK && (*state).err != crate::zlib_h::Z_BUF_ERROR
-    {
+    if !gzrewind_request_is_valid((*state).mode, (*state).err) {
         return -1 as ::core::ffi::c_int;
     }
     if crate::stdlib::lseek64(
@@ -877,8 +880,9 @@ pub unsafe extern "C" fn gz_intmax_ffi() -> ::core::ffi::c_uint {
 mod tests {
     use super::{
         gz_clear_read_flags, gz_is_read_or_write_mode, gz_parse_open_mode, gz_post_open_metadata,
-        gz_prepare_open, gzerror_core, gzoffset64_adjust_for_buffered_read, gzseek_adjust_offset,
-        gzseek_read_buffer_consumed, gzseek_request_is_valid, gztell64_core, GzErrorMessage,
+        gz_prepare_open, gzerror_core, gzoffset64_adjust_for_buffered_read,
+        gzrewind_request_is_valid, gzseek_adjust_offset, gzseek_read_buffer_consumed,
+        gzseek_request_is_valid, gztell64_core, GzErrorMessage,
     };
 
     #[test]
@@ -992,6 +996,26 @@ mod tests {
             crate::gzguts_h::GZ_READ,
             crate::zlib_h::Z_OK,
             crate::stdlib::SEEK_END
+        ));
+    }
+
+    #[test]
+    fn gzrewind_request_validation_requires_read_mode_and_recoverable_error() {
+        assert!(gzrewind_request_is_valid(
+            crate::gzguts_h::GZ_READ,
+            crate::zlib_h::Z_OK
+        ));
+        assert!(gzrewind_request_is_valid(
+            crate::gzguts_h::GZ_READ,
+            crate::zlib_h::Z_BUF_ERROR
+        ));
+        assert!(!gzrewind_request_is_valid(
+            crate::gzguts_h::GZ_WRITE,
+            crate::zlib_h::Z_OK
+        ));
+        assert!(!gzrewind_request_is_valid(
+            crate::gzguts_h::GZ_READ,
+            crate::zlib_h::Z_MEM_ERROR
         ));
     }
 

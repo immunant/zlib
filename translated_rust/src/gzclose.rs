@@ -35,10 +35,18 @@ fn gz_close_mode(mode: ::core::ffi::c_int) -> GzCloseMode {
     }
 }
 
+fn gz_close_validation_status(file_is_null: bool) -> Result<(), ::core::ffi::c_int> {
+    if file_is_null {
+        Err(crate::zlib_h::Z_STREAM_ERROR)
+    } else {
+        Ok(())
+    }
+}
+
 #[export_name = "gzclose"]
 pub unsafe extern "C" fn gzclose_ffi(file: crate::zlib_h::gzFile) -> ::core::ffi::c_int {
-    if file.is_null() {
-        return crate::zlib_h::Z_STREAM_ERROR;
+    if let Err(status) = gz_close_validation_status(file.is_null()) {
+        return status;
     }
 
     let state = unsafe { &*(file as *const crate::gzguts_h::gz_state) };
@@ -54,7 +62,7 @@ pub unsafe extern "C" fn gzclose_ffi(file: crate::zlib_h::gzFile) -> ::core::ffi
 
 #[cfg(test)]
 mod tests {
-    use super::{gz_close_mode, GzCloseMode};
+    use super::{gz_close_mode, gz_close_validation_status, GzCloseMode};
 
     #[test]
     fn selects_read_close_for_read_mode() {
@@ -65,5 +73,18 @@ mod tests {
     fn selects_write_close_for_non_read_modes() {
         assert_eq!(gz_close_mode(crate::gzguts_h::GZ_WRITE), GzCloseMode::Write);
         assert_eq!(gz_close_mode(crate::gzguts_h::GZ_NONE), GzCloseMode::Write);
+    }
+
+    #[test]
+    fn rejects_null_file_with_stream_error() {
+        assert_eq!(
+            gz_close_validation_status(true),
+            Err(crate::zlib_h::Z_STREAM_ERROR)
+        );
+    }
+
+    #[test]
+    fn accepts_non_null_file() {
+        assert_eq!(gz_close_validation_status(false), Ok(()));
     }
 }

@@ -78,6 +78,10 @@ fn gzwrite_len_fits_int(len: ::core::ffi::c_uint) -> bool {
     (len as ::core::ffi::c_int) >= 0
 }
 
+fn gzflush_mode_is_valid(flush: ::core::ffi::c_int) -> bool {
+    flush >= 0 && flush <= crate::zlib_h::Z_FINISH
+}
+
 fn gzfwrite_len(
     size: crate::stdlib::z_size_t,
     nitems: crate::stdlib::z_size_t,
@@ -603,7 +607,7 @@ pub unsafe extern "C" fn gzflush(
         crate::zlib_h::Z_OK,
         ::core::ptr::null::<::core::ffi::c_char>(),
     );
-    if flush < 0 as ::core::ffi::c_int || flush > crate::zlib_h::Z_FINISH {
+    if !gzflush_mode_is_valid(flush) {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
     if (*state).skip != 0 && gz_zero(state) == -1 as ::core::ffi::c_int {
@@ -718,8 +722,8 @@ pub unsafe extern "C" fn gzclose_w_ffi(mut file: crate::zlib_h::gzFile) -> ::cor
 #[cfg(test)]
 mod tests {
     use super::{
-        gz_write_error_result, gz_zero_chunk_len, gzfwrite_len, gzputs_len_fits_int,
-        gzwrite_len_fits_int,
+        gz_write_error_result, gz_zero_chunk_len, gzflush_mode_is_valid, gzfwrite_len,
+        gzputs_len_fits_int, gzwrite_len_fits_int,
     };
 
     #[test]
@@ -774,6 +778,18 @@ mod tests {
             (::core::ffi::c_int::MAX as ::core::ffi::c_uint) + 1
         ));
         assert!(!gzwrite_len_fits_int(::core::ffi::c_uint::MAX));
+    }
+
+    #[test]
+    fn gzflush_mode_is_valid_accepts_supported_range() {
+        assert!(gzflush_mode_is_valid(0));
+        assert!(gzflush_mode_is_valid(crate::zlib_h::Z_FINISH));
+    }
+
+    #[test]
+    fn gzflush_mode_is_valid_rejects_values_outside_supported_range() {
+        assert!(!gzflush_mode_is_valid(-1));
+        assert!(!gzflush_mode_is_valid(crate::zlib_h::Z_FINISH + 1));
     }
 
     #[test]

@@ -87,6 +87,39 @@ fn gzread_request_fits_int(len: ::core::ffi::c_uint) -> bool {
     (len as ::core::ffi::c_int) >= 0
 }
 
+enum GzreadOutcome {
+    Read(::core::ffi::c_int),
+    Error,
+    Again,
+}
+
+fn gzread_outcome(
+    len: ::core::ffi::c_uint,
+    err: ::core::ffi::c_int,
+    again: ::core::ffi::c_int,
+) -> GzreadOutcome {
+    if len != 0 {
+        GzreadOutcome::Read(len as ::core::ffi::c_int)
+    } else if err != crate::zlib_h::Z_OK && err != crate::zlib_h::Z_BUF_ERROR {
+        GzreadOutcome::Error
+    } else if again != 0 {
+        GzreadOutcome::Again
+    } else {
+        GzreadOutcome::Read(0)
+    }
+}
+
+fn gz_fread_items_read(
+    size: crate::stdlib::z_size_t,
+    bytes_read: crate::stdlib::z_size_t,
+) -> crate::stdlib::z_size_t {
+    if size == 0 {
+        0
+    } else {
+        bytes_read / size
+    }
+}
+
 fn gz_read_chunk_len(
     len: crate::stdlib::z_size_t,
     buffered: ::core::ffi::c_uint,
@@ -490,6 +523,41 @@ mod tests {
     }
 
     #[test]
+    fn gzread_outcome_returns_nonzero_reads_even_with_state_flags() {
+        assert!(matches!(
+            gzread_outcome(5, crate::zlib_h::Z_DATA_ERROR, 1),
+            GzreadOutcome::Read(5)
+        ));
+    }
+
+    #[test]
+    fn gzread_outcome_classifies_empty_reads() {
+        assert!(matches!(
+            gzread_outcome(0, crate::zlib_h::Z_DATA_ERROR, 0),
+            GzreadOutcome::Error
+        ));
+        assert!(matches!(
+            gzread_outcome(0, crate::zlib_h::Z_BUF_ERROR, 1),
+            GzreadOutcome::Again
+        ));
+        assert!(matches!(
+            gzread_outcome(0, crate::zlib_h::Z_OK, 0),
+            GzreadOutcome::Read(0)
+        ));
+    }
+
+    #[test]
+    fn gz_fread_items_read_counts_only_complete_items() {
+        assert_eq!(gz_fread_items_read(4, 11), 2);
+        assert_eq!(gz_fread_items_read(4, 12), 3);
+    }
+
+    #[test]
+    fn gz_fread_items_read_handles_zero_item_size() {
+        assert_eq!(gz_fread_items_read(0, 12), 0);
+    }
+
+    #[test]
     fn gz_read_chunk_len_limits_requests_to_remaining_length() {
         assert_eq!(gz_read_chunk_len(17, 0), 17);
     }
@@ -670,20 +738,18 @@ pub unsafe extern "C" fn gzread(
         return -1 as ::core::ffi::c_int;
     }
     len = gz_read(state, buf, len as crate::stdlib::z_size_t) as ::core::ffi::c_uint;
-    if len == 0 as ::core::ffi::c_uint {
-        if (*state).err != crate::zlib_h::Z_OK && (*state).err != crate::zlib_h::Z_BUF_ERROR {
-            return -1 as ::core::ffi::c_int;
-        }
-        if (*state).again != 0 {
+    match gzread_outcome(len, (*state).err, (*state).again) {
+        GzreadOutcome::Read(read) => read,
+        GzreadOutcome::Error => -1 as ::core::ffi::c_int,
+        GzreadOutcome::Again => {
             crate::src::gzlib::gz_error(
                 state as *mut crate::gzguts_h::gz_state,
                 crate::zlib_h::Z_ERRNO,
                 crate::stdlib::strerror(*crate::stdlib::__errno_location()),
             );
-            return -1 as ::core::ffi::c_int;
+            -1 as ::core::ffi::c_int
         }
     }
-    return len as ::core::ffi::c_int;
 }
 #[export_name = "gzread"]
 
@@ -731,7 +797,7 @@ pub unsafe extern "C" fn gzfread(
     };
     len = request_len;
     return if len != 0 {
-        gz_read(state, buf, len).wrapping_div(size)
+        gz_fread_items_read(size, gz_read(state, buf, len))
     } else {
         0 as crate::stdlib::z_size_t
     };
