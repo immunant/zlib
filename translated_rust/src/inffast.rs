@@ -70,6 +70,7 @@ struct InflateFastViews<'a> {
     wsize: usize,
     whave: usize,
     wnext: usize,
+    sane: bool,
     hold: u64,
     bits: u32,
     lenbits: u32,
@@ -213,6 +214,7 @@ fn inflate_fast_core(mut views: InflateFastViews<'_>) -> InflateFastProgress {
         wsize,
         whave,
         wnext,
+        sane,
         mut hold,
         mut bits,
         lenbits,
@@ -387,7 +389,12 @@ fn inflate_fast_core(mut views: InflateFastViews<'_>) -> InflateFastProgress {
                     // any remaining match bytes.  Advancing modulo `wsize`
                     // preserves both of the legacy window-wrap branches.
                     let back = dist - output_at;
-                    if back > whave || back > wsize {
+                    // `inflateUndermine()` retains zlib's permissive
+                    // history behavior: only the normal sane mode rejects
+                    // a distance beyond the recorded history.  A future
+                    // safe boundary must still lend a fully initialized
+                    // window slice for the permissive mode.
+                    if back > wsize || (sane && back > whave) {
                         mode = Some(crate::src::inflate::BAD);
                         error = Some(17);
                         break 'fast;
