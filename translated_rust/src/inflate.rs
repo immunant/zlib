@@ -559,19 +559,15 @@ fn inflate_prime_impl(
     return crate::zlib_h::Z_OK;
 }
 
-unsafe fn inflate_prime_from_stream(
-    strm: &mut crate::zlib_h::z_stream_s,
+fn inflate_prime_from_state(
+    allocators_present: bool,
+    state: &mut crate::src::inflate::inflate_state,
     bits: ::core::ffi::c_int,
     value: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
-    if strm.zalloc.is_none() || strm.zfree.is_none() {
+    if !allocators_present {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    let state = strm.state as *mut crate::src::inflate::inflate_state;
-    if state.is_null() {
-        return crate::zlib_h::Z_STREAM_ERROR;
-    }
-    let state = &mut *state;
     inflate_prime_impl(state.mode, &mut state.hold, &mut state.bits, bits, value)
 }
 #[export_name = "inflatePrime"]
@@ -581,10 +577,15 @@ pub unsafe extern "C" fn inflatePrime_ffi(
     mut bits: ::core::ffi::c_int,
     mut value: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
-    if strm.is_null() {
+    let Some(strm) = strm.as_mut() else {
         return crate::zlib_h::Z_STREAM_ERROR;
-    }
-    inflate_prime_from_stream(&mut *strm, bits, value)
+    };
+    let allocators_present = strm.zalloc.is_some() && strm.zfree.is_some();
+    let state = strm.state.cast::<crate::src::inflate::inflate_state>();
+    let Some(state) = state.as_mut() else {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    };
+    inflate_prime_from_state(allocators_present, state, bits, value)
 }
 unsafe fn updatewindow(
     strm: &mut crate::zlib_h::z_stream_s,
