@@ -284,6 +284,49 @@ fn inflate_stored_block_len(hold: ::core::ffi::c_ulong) -> Option<::core::ffi::c
     }
 }
 
+/// The kind of DEFLATE block selected by the three bits at the front of a
+/// block. This remains scalar-only: the decoder boundary installs fixed
+/// tables and publishes the existing invalid-block diagnostic.
+#[derive(Copy, Clone)]
+enum InflateBlockKind {
+    Stored,
+    Fixed,
+    Dynamic,
+    Invalid,
+}
+
+/// Consume a complete ordinary-inflate block header without touching stream
+/// or state records. The caller must first gather three bits from its input
+/// cursor; invalid or incoherent bit counts are rejected instead of allowing
+/// a malformed state to underflow the bit counter.
+#[derive(Copy, Clone)]
+struct InflateBlockHeaderPlan {
+    last: ::core::ffi::c_int,
+    kind: InflateBlockKind,
+    hold: ::core::ffi::c_ulong,
+    bits: ::core::ffi::c_uint,
+}
+
+fn inflate_block_header_plan(
+    hold: ::core::ffi::c_ulong,
+    bits: ::core::ffi::c_uint,
+) -> Option<InflateBlockHeaderPlan> {
+    let bits = bits.checked_sub(3)?;
+    let last = (hold & 1) as ::core::ffi::c_int;
+    let kind = match (hold >> 1) & 3 {
+        0 => InflateBlockKind::Stored,
+        1 => InflateBlockKind::Fixed,
+        2 => InflateBlockKind::Dynamic,
+        _ => InflateBlockKind::Invalid,
+    };
+    Some(InflateBlockHeaderPlan {
+        last,
+        kind,
+        hold: hold >> 3,
+        bits,
+    })
+}
+
 /// Scalar result of parsing the 14-bit dynamic-Huffman table header. The
 /// ordinary decoder has already accumulated those bits; this keeps its
 /// compatibility cursor and diagnostics at the boundary while making the
@@ -2676,52 +2719,45 @@ pub fn inflate(
                                                                     8 as ::core::ffi::c_uint,
                                                                 );
                                                             }
-                                                            state_ref.last = (hold
-                                                                as ::core::ffi::c_uint
-                                                                & ((1 as ::core::ffi::c_uint)
-                                                                    << 1 as ::core::ffi::c_int)
-                                                                    .wrapping_sub(
-                                                                        1 as ::core::ffi::c_uint,
-                                                                    ))
-                                                                as ::core::ffi::c_int;
-                                                            hold >>= 1 as ::core::ffi::c_int;
-                                                            bits = bits.wrapping_sub(
-                                                                1 as ::core::ffi::c_int
-                                                                    as ::core::ffi::c_uint,
-                                                            );
-                                                            match hold as ::core::ffi::c_uint
-                                                                & ((1 as ::core::ffi::c_uint)
-                                                                    << 2 as ::core::ffi::c_int)
-                                                                    .wrapping_sub(
-                                                                        1 as ::core::ffi::c_uint,
-                                                                    ) {
-                                                                0 => {
+                                                            let Some(plan) =
+                                                                inflate_block_header_plan(
+                                                                    hold, bits,
+                                                                )
+                                                            else {
+                                                                strm_ref.msg = INFLATE_ERROR_MESSAGES
+                                                                    [13]
+                                                                .as_ptr()
+                                                                    as *const ::core::ffi::c_char
+                                                                    as *mut ::core::ffi::c_char;
+                                                                state_ref.mode =
+                                                                    crate::src::inflate::BAD;
+                                                                continue '_inf_leave;
+                                                            };
+                                                            state_ref.last = plan.last;
+                                                            hold = plan.hold;
+                                                            bits = plan.bits;
+                                                            match plan.kind {
+                                                                InflateBlockKind::Stored => {
                                                                     state_ref.mode =
                                                                         crate::src::inflate::STORED;
                                                                 }
-                                                                1 => {
+                                                                InflateBlockKind::Fixed => {
                                                                     crate::src::inftrees::inflate_fixed_state(
-                                                                    state_ref,
-                                                                );
+                                                                        state_ref,
+                                                                    );
                                                                     state_ref.mode =
                                                                         crate::src::inflate::LEN_;
                                                                     if flush
                                                                         == crate::zlib_h::Z_TREES
                                                                     {
-                                                                        hold >>=
-                                                                            2 as ::core::ffi::c_int;
-                                                                        bits = bits.wrapping_sub(
-                                                                        2 as ::core::ffi::c_int
-                                                                            as ::core::ffi::c_uint,
-                                                                    );
                                                                         break '_inf_leave;
                                                                     }
                                                                 }
-                                                                2 => {
+                                                                InflateBlockKind::Dynamic => {
                                                                     state_ref.mode =
                                                                         crate::src::inflate::TABLE;
                                                                 }
-                                                                _ => {
+                                                                InflateBlockKind::Invalid => {
                                                                     strm_ref.msg = INFLATE_ERROR_MESSAGES
                                                                     [13]
                                                                 .as_ptr()
@@ -2731,11 +2767,6 @@ pub fn inflate(
                                                                         crate::src::inflate::BAD;
                                                                 }
                                                             }
-                                                            hold >>= 2 as ::core::ffi::c_int;
-                                                            bits = bits.wrapping_sub(
-                                                                2 as ::core::ffi::c_int
-                                                                    as ::core::ffi::c_uint,
-                                                            );
                                                             continue '_inf_leave;
                                                         }
                                                     }
