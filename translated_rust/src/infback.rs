@@ -707,8 +707,6 @@ pub unsafe extern "C" fn inflateBack(
     mut out: crate::zlib_h::out_func,
     mut out_desc: *mut ::core::ffi::c_void,
 ) -> ::core::ffi::c_int {
-    let mut state: *mut crate::src::inflate::inflate_state =
-        ::core::ptr::null_mut::<crate::src::inflate::inflate_state>();
     let mut next: *mut ::core::ffi::c_uchar = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
     let mut put: *mut ::core::ffi::c_uchar = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
     let mut have: ::core::ffi::c_uint = 0;
@@ -732,7 +730,9 @@ pub unsafe extern "C" fn inflateBack(
     if strm.state.is_null() {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    state = (*strm).state as *mut crate::src::inflate::inflate_state;
+    // The stream owns this initialized allocation for the whole decode. Bind
+    // it once after the null check so decoder bookkeeping stays reference-based.
+    let state = (*strm).state as *mut crate::src::inflate::inflate_state;
     (*strm).msg = ::core::ptr::null_mut::<::core::ffi::c_char>();
     let state_ref = &mut *state;
     inflate_back_reset(state_ref);
@@ -747,12 +747,12 @@ pub unsafe extern "C" fn inflateBack(
     put = state_ref.window;
     left = state_ref.wsize;
     '_inf_leave: loop {
-        match (*state).mode as ::core::ffi::c_uint {
+        match state_ref.mode as ::core::ffi::c_uint {
             16191 => {
-                if (*state).last != 0 {
+                if state_ref.last != 0 {
                     let padding = bits & 7;
                     inflate_back_drop_bits(&mut hold, &mut bits, padding);
-                    inflate_back_finish_stream(&mut *state);
+                    inflate_back_finish_stream(state_ref);
                     continue;
                 } else {
                     while bits < 3 as ::core::ffi::c_int as ::core::ffi::c_uint {
@@ -771,13 +771,13 @@ pub unsafe extern "C" fn inflateBack(
                         bits = bits.wrapping_add(8 as ::core::ffi::c_uint);
                     }
                     let (last, block_type) = inflate_back_block_header(hold);
-                    (*state).last = last;
+                    state_ref.last = last;
                     inflate_back_drop_bits(&mut hold, &mut bits, 3);
-                    if inflate_back_start_block(&mut *state, block_type) {
+                    if inflate_back_start_block(state_ref, block_type) {
                         (*strm).msg = b"invalid block type\0".as_ptr()
                             as *const ::core::ffi::c_char
                             as *mut ::core::ffi::c_char;
-                        inflate_back_enter_bad(&mut *state);
+                        inflate_back_enter_bad(state_ref);
                     }
                     continue;
                 }
@@ -801,11 +801,11 @@ pub unsafe extern "C" fn inflateBack(
                     bits = bits.wrapping_add(8 as ::core::ffi::c_uint);
                 }
                 if let Some(length) = inflate_back_stored_length(hold) {
-                    inflate_back_start_stored_copy(&mut *state, length);
+                    inflate_back_start_stored_copy(state_ref, length);
                     hold = 0 as ::core::ffi::c_ulong;
                     bits = 0 as ::core::ffi::c_uint;
-                    while (*state).length != 0 as ::core::ffi::c_uint {
-                        copy = (*state).length;
+                    while state_ref.length != 0 as ::core::ffi::c_uint {
+                        copy = state_ref.length;
                         if have == 0 as ::core::ffi::c_uint {
                             have = in_0.expect("non-null function pointer")(in_desc, &raw mut next);
                             if have == 0 as ::core::ffi::c_uint {
@@ -815,9 +815,9 @@ pub unsafe extern "C" fn inflateBack(
                             }
                         }
                         if left == 0 as ::core::ffi::c_uint {
-                            put = (*state).window;
-                            left = (*state).wsize;
-                            inflate_back_reset_output_window(&mut *state);
+                            put = state_ref.window;
+                            left = state_ref.wsize;
+                            inflate_back_reset_output_window(state_ref);
                             if out.expect("non-null function pointer")(out_desc, put, left) != 0 {
                                 ret = crate::zlib_h::Z_BUF_ERROR;
                                 break '_inf_leave;
@@ -833,15 +833,15 @@ pub unsafe extern "C" fn inflateBack(
                         next = next.wrapping_add(copy as usize);
                         left = left.wrapping_sub(copy);
                         put = put.wrapping_add(copy as usize);
-                        (*state).length = (*state).length.wrapping_sub(copy);
+                        state_ref.length = state_ref.length.wrapping_sub(copy);
                     }
-                    inflate_back_finish_stored_block(&mut *state);
+                    inflate_back_finish_stored_block(state_ref);
                     continue;
                 } else {
                     (*strm).msg = b"invalid stored block lengths\0".as_ptr()
                         as *const ::core::ffi::c_char
                         as *mut ::core::ffi::c_char;
-                    inflate_back_enter_bad(&mut *state);
+                    inflate_back_enter_bad(state_ref);
                     continue;
                 }
             }
@@ -862,17 +862,17 @@ pub unsafe extern "C" fn inflateBack(
                     bits = bits.wrapping_add(8 as ::core::ffi::c_uint);
                 }
                 let header = inflate_back_dynamic_header(hold);
-                inflate_back_set_dynamic_header(&mut *state, header);
+                inflate_back_set_dynamic_header(state_ref, header);
                 inflate_back_drop_bits(&mut hold, &mut bits, 14);
                 if !inflate_back_dynamic_header_is_valid(header) {
                     (*strm).msg = b"too many length or distance symbols\0".as_ptr()
                         as *const ::core::ffi::c_char
                         as *mut ::core::ffi::c_char;
-                    inflate_back_enter_bad(&mut *state);
+                    inflate_back_enter_bad(state_ref);
                     continue;
                 } else {
-                    inflate_back_start_code_length_order(&mut *state);
-                    while (*state).have < (*state).ncode {
+                    inflate_back_start_code_length_order(state_ref);
+                    while state_ref.have < state_ref.ncode {
                         while bits < 3 as ::core::ffi::c_int as ::core::ffi::c_uint {
                             if have == 0 as ::core::ffi::c_uint {
                                 have = in_0.expect("non-null function pointer")(
@@ -893,44 +893,44 @@ pub unsafe extern "C" fn inflateBack(
                             bits = bits.wrapping_add(8 as ::core::ffi::c_uint);
                         }
                         inflate_back_set_code_length_order(
-                            &mut (*state).lens,
-                            &mut (*state).have,
+                            &mut state_ref.lens,
+                            &mut state_ref.have,
                             hold,
                         );
                         inflate_back_drop_bits(&mut hold, &mut bits, 3);
                     }
                     inflate_back_finish_code_length_order(
-                        &mut (*state).lens,
-                        &mut (*state).have,
+                        &mut state_ref.lens,
+                        &mut state_ref.have,
                     );
                     let code_length_table = inflate_back_code_length_table_spec();
                     inflate_back_prepare_dynamic_table(
-                        &mut *state,
+                        state_ref,
                         InflateBackDynamicTableTarget::CodeLengths,
                         &code_length_table,
                     );
                     ret = crate::src::inftrees::inflate_table(
                         code_length_table.table_type,
-                        &raw mut (*state).lens as *mut ::core::ffi::c_ushort,
+                        &raw mut state_ref.lens as *mut ::core::ffi::c_ushort,
                         code_length_table.code_count,
-                        &raw mut (*state).next as *mut _ as *mut *mut crate::src::inftrees::code,
-                        &raw mut (*state).lenbits,
-                        &raw mut (*state).work as *mut ::core::ffi::c_ushort,
+                        &raw mut state_ref.next as *mut _ as *mut *mut crate::src::inftrees::code,
+                        &raw mut state_ref.lenbits,
+                        &raw mut state_ref.work as *mut ::core::ffi::c_ushort,
                     );
                     if ret != 0 {
                         (*strm).msg = b"invalid code lengths set\0".as_ptr()
                             as *const ::core::ffi::c_char
                             as *mut ::core::ffi::c_char;
-                        inflate_back_enter_bad(&mut *state);
+                        inflate_back_enter_bad(state_ref);
                         continue;
                     } else {
-                        inflate_back_start_dynamic_code_lengths(&mut *state);
-                        while (*state).have < (*state).nlen.wrapping_add((*state).ndist) {
+                        inflate_back_start_dynamic_code_lengths(state_ref);
+                        while state_ref.have < state_ref.nlen.wrapping_add(state_ref.ndist) {
                             loop {
                                 here = inflate_back_code_table_entry(
-                                    &*state,
+                                    state_ref,
                                     InflateBackCodeTable::Length,
-                                    inflate_back_table_index(hold, (*state).lenbits) as usize,
+                                    inflate_back_table_index(hold, state_ref.lenbits) as usize,
                                 );
                                 if here.bits as ::core::ffi::c_uint <= bits {
                                     break;
@@ -960,8 +960,8 @@ pub unsafe extern "C" fn inflateBack(
                                     here.bits as ::core::ffi::c_uint,
                                 );
                                 inflate_back_push_code_length(
-                                    &mut (*state).lens,
-                                    &mut (*state).have,
+                                    &mut state_ref.lens,
+                                    &mut state_ref.have,
                                     here.val,
                                 );
                             } else {
@@ -993,14 +993,14 @@ pub unsafe extern "C" fn inflateBack(
                                     here.bits as ::core::ffi::c_uint,
                                 );
                                 let Some(repeated_length) = inflate_back_repeat_length(
-                                    &(*state).lens,
-                                    (*state).have,
+                                    &state_ref.lens,
+                                    state_ref.have,
                                     repeat_kind,
                                 ) else {
                                     (*strm).msg = b"invalid bit length repeat\0".as_ptr()
                                         as *const ::core::ffi::c_char
                                         as *mut ::core::ffi::c_char;
-                                    inflate_back_enter_bad(&mut *state);
+                                    inflate_back_enter_bad(state_ref);
                                     break;
                                 };
                                 len = repeated_length;
@@ -1010,88 +1010,88 @@ pub unsafe extern "C" fn inflateBack(
                                     repeat_bits,
                                 ));
                                 if !inflate_back_repeat_fits(
-                                    (*state).have,
+                                    state_ref.have,
                                     copy,
-                                    (*state).nlen,
-                                    (*state).ndist,
+                                    state_ref.nlen,
+                                    state_ref.ndist,
                                 ) {
                                     (*strm).msg = b"invalid bit length repeat\0".as_ptr()
                                         as *const ::core::ffi::c_char
                                         as *mut ::core::ffi::c_char;
-                                    inflate_back_enter_bad(&mut *state);
+                                    inflate_back_enter_bad(state_ref);
                                     break;
                                 } else {
                                     inflate_back_push_repeated_code_length(
-                                        &mut (*state).lens,
-                                        &mut (*state).have,
+                                        &mut state_ref.lens,
+                                        &mut state_ref.have,
                                         len,
                                         copy,
                                     );
                                 }
                             }
                         }
-                        if (*state).mode as ::core::ffi::c_uint
+                        if state_ref.mode as ::core::ffi::c_uint
                             == crate::src::inflate::BAD as ::core::ffi::c_int as ::core::ffi::c_uint
                         {
                             continue;
                         }
-                        if !inflate_back_has_end_code(&*state) {
+                        if !inflate_back_has_end_code(state_ref) {
                             (*strm).msg = b"invalid code -- missing end-of-block\0".as_ptr()
                                 as *const ::core::ffi::c_char
                                 as *mut ::core::ffi::c_char;
-                            inflate_back_enter_bad(&mut *state);
+                            inflate_back_enter_bad(state_ref);
                             continue;
                         } else {
                             let literal_length_table =
-                                inflate_back_literal_length_table_spec((*state).nlen);
+                                inflate_back_literal_length_table_spec(state_ref.nlen);
                             inflate_back_prepare_dynamic_table(
-                                &mut *state,
+                                state_ref,
                                 InflateBackDynamicTableTarget::LiteralLengths,
                                 &literal_length_table,
                             );
                             ret = crate::src::inftrees::inflate_table(
                                 literal_length_table.table_type,
-                                &raw mut (*state).lens as *mut ::core::ffi::c_ushort,
+                                &raw mut state_ref.lens as *mut ::core::ffi::c_ushort,
                                 literal_length_table.code_count,
-                                &raw mut (*state).next as *mut _
+                                &raw mut state_ref.next as *mut _
                                     as *mut *mut crate::src::inftrees::code,
-                                &raw mut (*state).lenbits,
-                                &raw mut (*state).work as *mut ::core::ffi::c_ushort,
+                                &raw mut state_ref.lenbits,
+                                &raw mut state_ref.work as *mut ::core::ffi::c_ushort,
                             );
                             if ret != 0 {
                                 (*strm).msg = b"invalid literal/lengths set\0".as_ptr()
                                     as *const ::core::ffi::c_char
                                     as *mut ::core::ffi::c_char;
-                                inflate_back_enter_bad(&mut *state);
+                                inflate_back_enter_bad(state_ref);
                                 continue;
                             } else {
                                 let distance_table = inflate_back_distance_table_spec(
-                                    (*state).nlen,
-                                    (*state).ndist,
+                                    state_ref.nlen,
+                                    state_ref.ndist,
                                 );
                                 inflate_back_prepare_dynamic_table(
-                                    &mut *state,
+                                    state_ref,
                                     InflateBackDynamicTableTarget::Distances,
                                     &distance_table,
                                 );
                                 ret = crate::src::inftrees::inflate_table(
                                     distance_table.table_type,
-                                    (&raw mut (*state).lens as *mut ::core::ffi::c_ushort)
+                                    (&raw mut state_ref.lens as *mut ::core::ffi::c_ushort)
                                         .wrapping_add(distance_table.lens_offset),
                                     distance_table.code_count,
-                                    &raw mut (*state).next as *mut _
+                                    &raw mut state_ref.next as *mut _
                                         as *mut *mut crate::src::inftrees::code,
-                                    &raw mut (*state).distbits,
-                                    &raw mut (*state).work as *mut ::core::ffi::c_ushort,
+                                    &raw mut state_ref.distbits,
+                                    &raw mut state_ref.work as *mut ::core::ffi::c_ushort,
                                 );
                                 if ret != 0 {
                                     (*strm).msg = b"invalid distances set\0".as_ptr()
                                         as *const ::core::ffi::c_char
                                         as *mut ::core::ffi::c_char;
-                                    inflate_back_enter_bad(&mut *state);
+                                    inflate_back_enter_bad(state_ref);
                                     continue;
                                 } else {
-                                    inflate_back_finish_dynamic_tables(&mut *state);
+                                    inflate_back_finish_dynamic_tables(state_ref);
                                 }
                             }
                         }
@@ -1117,24 +1117,24 @@ pub unsafe extern "C" fn inflateBack(
             (*strm).avail_out = left as crate::stdlib::uInt;
             (*strm).next_in = next as *mut crate::stdlib::Bytef;
             (*strm).avail_in = have as crate::stdlib::uInt;
-            (*state).hold = hold;
-            (*state).bits = bits;
+            state_ref.hold = hold;
+            state_ref.bits = bits;
             crate::src::inffast::inflate_fast(
                 strm as *mut crate::zlib_h::z_stream_s,
-                (*state).wsize,
+                state_ref.wsize,
             );
             put = (*strm).next_out as *mut ::core::ffi::c_uchar;
             left = (*strm).avail_out as ::core::ffi::c_uint;
             next = (*strm).next_in as *mut ::core::ffi::c_uchar;
             have = (*strm).avail_in as ::core::ffi::c_uint;
-            hold = (*state).hold;
-            bits = (*state).bits;
+            hold = state_ref.hold;
+            bits = state_ref.bits;
         } else {
             loop {
                 here = inflate_back_code_table_entry(
-                    &*state,
+                    state_ref,
                     InflateBackCodeTable::Length,
-                    inflate_back_table_index(hold, (*state).lenbits) as usize,
+                    inflate_back_table_index(hold, state_ref.lenbits) as usize,
                 );
                 if here.bits as ::core::ffi::c_uint <= bits {
                     break;
@@ -1157,7 +1157,7 @@ pub unsafe extern "C" fn inflateBack(
                 last = here;
                 loop {
                     here = inflate_back_code_table_entry(
-                        &*state,
+                        state_ref,
                         InflateBackCodeTable::Length,
                         inflate_back_subtable_index(hold, last) as usize,
                     );
@@ -1192,12 +1192,12 @@ pub unsafe extern "C" fn inflateBack(
                 &mut bits,
                 here.bits as ::core::ffi::c_uint,
             );
-            match inflate_back_start_length_code(&mut *state, here) {
+            match inflate_back_start_length_code(state_ref, here) {
                 InflateBackLengthCode::Literal => {
                 if left == 0 as ::core::ffi::c_uint {
-                    put = (*state).window;
-                    left = (*state).wsize;
-                    inflate_back_reset_output_window(&mut *state);
+                    put = state_ref.window;
+                    left = state_ref.wsize;
+                    inflate_back_reset_output_window(state_ref);
                     if out.expect("non-null function pointer")(out_desc, put, left) != 0 {
                         ret = crate::zlib_h::Z_BUF_ERROR;
                         break;
@@ -1205,22 +1205,22 @@ pub unsafe extern "C" fn inflateBack(
                 }
                 let c2rust_fresh15 = put;
                 put = put.wrapping_add(1);
-                *c2rust_fresh15 = (*state).length as ::core::ffi::c_uchar;
+                *c2rust_fresh15 = state_ref.length as ::core::ffi::c_uchar;
                 left = left.wrapping_sub(1);
-                inflate_back_finish_literal(&mut *state);
+                inflate_back_finish_literal(state_ref);
                 }
                 InflateBackLengthCode::End => {
-                inflate_back_finish_end_code(&mut *state);
+                inflate_back_finish_end_code(state_ref);
                 }
                 InflateBackLengthCode::Invalid => {
                 (*strm).msg = b"invalid literal/length code\0".as_ptr()
                     as *const ::core::ffi::c_char
                     as *mut ::core::ffi::c_char;
-                inflate_back_enter_bad(&mut *state);
+                inflate_back_enter_bad(state_ref);
                 }
                 InflateBackLengthCode::Match { .. } => {
-                if (*state).extra != 0 as ::core::ffi::c_uint {
-                    while bits < (*state).extra {
+                if state_ref.extra != 0 as ::core::ffi::c_uint {
+                    while bits < state_ref.extra {
                         if have == 0 as ::core::ffi::c_uint {
                             have = in_0.expect("non-null function pointer")(in_desc, &raw mut next);
                             if have == 0 as ::core::ffi::c_uint {
@@ -1235,14 +1235,14 @@ pub unsafe extern "C" fn inflateBack(
                         hold = hold.wrapping_add((*c2rust_fresh16 as ::core::ffi::c_ulong) << bits);
                         bits = bits.wrapping_add(8 as ::core::ffi::c_uint);
                     }
-                    let extra = inflate_back_take_bits(&mut hold, &mut bits, (*state).extra);
-                    inflate_back_add_length_extra(&mut *state, extra);
+                    let extra = inflate_back_take_bits(&mut hold, &mut bits, state_ref.extra);
+                    inflate_back_add_length_extra(state_ref, extra);
                 }
                 loop {
                     here = inflate_back_code_table_entry(
-                        &*state,
+                        state_ref,
                         InflateBackCodeTable::Distance,
-                        inflate_back_table_index(hold, (*state).distbits) as usize,
+                        inflate_back_table_index(hold, state_ref.distbits) as usize,
                     );
                     if here.bits as ::core::ffi::c_uint <= bits {
                         break;
@@ -1265,7 +1265,7 @@ pub unsafe extern "C" fn inflateBack(
                     last = here;
                     loop {
                         here = inflate_back_code_table_entry(
-                            &*state,
+                            state_ref,
                             InflateBackCodeTable::Distance,
                             inflate_back_subtable_index(hold, last) as usize,
                         );
@@ -1300,15 +1300,15 @@ pub unsafe extern "C" fn inflateBack(
                     &mut bits,
                     here.bits as ::core::ffi::c_uint,
                 );
-                match inflate_back_start_distance_code(&mut *state, here) {
+                match inflate_back_start_distance_code(state_ref, here) {
                     InflateBackDistanceCode::Invalid => {
                     (*strm).msg = b"invalid distance code\0".as_ptr() as *const ::core::ffi::c_char
                         as *mut ::core::ffi::c_char;
-                    inflate_back_enter_bad(&mut *state);
+                    inflate_back_enter_bad(state_ref);
                     }
                     InflateBackDistanceCode::Distance { .. } => {
-                    if (*state).extra != 0 as ::core::ffi::c_uint {
-                        while bits < (*state).extra {
+                    if state_ref.extra != 0 as ::core::ffi::c_uint {
+                        while bits < state_ref.extra {
                             if have == 0 as ::core::ffi::c_uint {
                                 have = in_0.expect("non-null function pointer")(
                                     in_desc,
@@ -1328,25 +1328,25 @@ pub unsafe extern "C" fn inflateBack(
                             bits = bits.wrapping_add(8 as ::core::ffi::c_uint);
                         }
                         let extra =
-                            inflate_back_take_bits(&mut hold, &mut bits, (*state).extra);
-                        inflate_back_add_distance_extra(&mut *state, extra);
+                            inflate_back_take_bits(&mut hold, &mut bits, state_ref.extra);
+                        inflate_back_add_distance_extra(state_ref, extra);
                     }
                     if !inflate_back_distance_fits(
-                        (*state).offset,
-                        (*state).wsize,
-                        (*state).whave,
+                        state_ref.offset,
+                        state_ref.wsize,
+                        state_ref.whave,
                         left,
                     ) {
                         (*strm).msg = b"invalid distance too far back\0".as_ptr()
                             as *const ::core::ffi::c_char
                             as *mut ::core::ffi::c_char;
-                        inflate_back_enter_bad(&mut *state);
+                        inflate_back_enter_bad(state_ref);
                     } else {
                         loop {
                             if left == 0 as ::core::ffi::c_uint {
-                                put = (*state).window;
-                                left = (*state).wsize;
-                                inflate_back_reset_output_window(&mut *state);
+                                put = state_ref.window;
+                                left = state_ref.wsize;
+                                inflate_back_reset_output_window(state_ref);
                                 if out.expect("non-null function pointer")(out_desc, put, left) != 0
                                 {
                                     ret = crate::zlib_h::Z_BUF_ERROR;
@@ -1354,14 +1354,14 @@ pub unsafe extern "C" fn inflateBack(
                                 }
                             }
                             let match_copy = inflate_back_match_copy(
-                                (*state).wsize,
-                                (*state).offset,
+                                state_ref.wsize,
+                                state_ref.offset,
                                 left,
-                                (*state).length,
+                                state_ref.length,
                             );
                             from = put.offset(match_copy.from_offset);
                             copy = match_copy.count;
-                            (*state).length = (*state).length.wrapping_sub(match_copy.count);
+                            state_ref.length = state_ref.length.wrapping_sub(match_copy.count);
                             left = left.wrapping_sub(match_copy.count);
                             loop {
                                 let c2rust_fresh20 = from;
@@ -1374,7 +1374,7 @@ pub unsafe extern "C" fn inflateBack(
                                     break;
                                 }
                             }
-                            if (*state).length == 0 as ::core::ffi::c_uint {
+                            if state_ref.length == 0 as ::core::ffi::c_uint {
                                 break;
                             }
                         }
@@ -1385,10 +1385,10 @@ pub unsafe extern "C" fn inflateBack(
             }
         }
     }
-    if let Some(pending) = inflate_back_pending_output((*state).wsize, left) {
+    if let Some(pending) = inflate_back_pending_output(state_ref.wsize, left) {
         if out.expect("non-null function pointer")(
             out_desc,
-            (*state).window,
+            state_ref.window,
             pending,
         ) != 0
             && ret == crate::zlib_h::Z_STREAM_END
