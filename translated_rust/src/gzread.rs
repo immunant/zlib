@@ -1051,13 +1051,12 @@ unsafe fn gz_read(
                 // `x.have` is nonzero here. Rebuild the buffered input with
                 // a checked range so a corrupt cursor cannot extend a raw
                 // slice beyond that allocation.
-                let Some((input, next)) = state.buffers.output.as_deref().and_then(|buffer| {
+                let Some(buffered) = state.buffers.output.as_deref().and_then(|buffer| {
                     crate::src::gzlib::GzBufferedCursor::from_owned_buffer(
                         buffer,
                         state.x.next.addr(),
                         state.x.have,
                     )
-                    .and_then(|cursor| cursor.consume(n as usize))
                 }) else {
                     return got;
                 };
@@ -1065,12 +1064,14 @@ unsafe fn gz_read(
                 else {
                     return got;
                 };
-                copy_buffered_input(input, destination);
+                let Some((next, have)) = buffered.copy_into(destination) else {
+                    return got;
+                };
                 let Some(buffer) = state.buffers.output.as_deref() else {
                     return got;
                 };
                 state.x.next = buffer.as_ptr().wrapping_add(next).cast_mut();
-                state.x.have = state.x.have.wrapping_sub(n);
+                state.x.have = have;
                 if state.err != crate::zlib_h::Z_OK {
                     err = -1 as ::core::ffi::c_int;
                 }

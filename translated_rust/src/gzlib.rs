@@ -193,6 +193,17 @@ impl<'a> GzBufferedCursor<'a> {
         Some((bytes, self.start.checked_add(len)?))
     }
 
+    // Copy a bounded prefix of the checked unread range and return the
+    // pointer-free cursor/count projection for the remaining bytes.  This
+    // keeps buffered gzip reads from doing their own slice and accounting
+    // work after the ABI cursor has been validated at the boundary.
+    pub(crate) fn copy_into(&self, output: &mut [u8]) -> Option<(usize, u32)> {
+        let (input, next) = self.consume(output.len())?;
+        output.copy_from_slice(input);
+        let have = self.have.checked_sub(output.len())?;
+        Some((next, u32::try_from(have).ok()?))
+    }
+
     // Return one buffered byte together with the next checked buffer index.
     // Keeping cursor advancement as an index lets read-side policy consume
     // buffered output without retaining the ABI cursor pointer.
