@@ -534,6 +534,46 @@ impl<'a> DeflateWorkingSet<'a> {
         self.window
     }
 
+    /// Search the established window and previous-chain views for the slow
+    /// strategy's next match.  Unlike the legacy adapter, this never has to
+    /// reconstruct callback-backed views from `internal_state`.
+    pub(crate) fn slow_longest_match(
+        &self,
+        state: &mut internal_state,
+        cur_match: crate::src::deflate::IPos,
+    ) -> crate::stdlib::uInt {
+        longest_match_with_views(state, self.window, self.prev, cur_match)
+    }
+
+    /// Read one bounded window byte for the slow strategy's delayed literal.
+    pub(crate) fn slow_literal_at(
+        &self,
+        position: crate::stdlib::uInt,
+    ) -> Option<crate::zutil_h::uch> {
+        self.window.get(position as usize).copied()
+    }
+
+    /// Split the shared pending/symbol storage from the bounded window for a
+    /// block flush.  The storage borrows remain tied to this one call's
+    /// working set, so tree encoding cannot recreate an alias-prone raw view.
+    pub(crate) fn pending_and_block_data(
+        &mut self,
+        block_start: ::core::ffi::c_long,
+        stored_len: crate::zutil_h::ulg,
+    ) -> Option<(&mut PendingStorageView<'a>, Option<&[crate::stdlib::Bytef]>)> {
+        let Self {
+            pending, window, ..
+        } = self;
+        let pending = pending.as_mut()?;
+        if block_start < 0 {
+            return Some((pending, None));
+        }
+        let start = usize::try_from(block_start).ok()?;
+        let len = usize::try_from(stored_len).ok()?;
+        let end = start.checked_add(len)?;
+        Some((pending, Some(window.get(start..end)?)))
+    }
+
     /// Insert the current three-byte sequence into the bounded hash chains.
     /// This is the slow strategy's first working-set operation; later
     /// dispatch changes can use it without recreating window/head/prev views.
@@ -1409,6 +1449,54 @@ fn deflate_fast_match_progress(
         strstart: strstart.wrapping_add(match_length),
         insert,
     }
+}
+
+/// Insert the current three-byte string into the fast strategy's hash chains.
+///
+/// This is deliberately the same bounded operation used by the slow
+/// strategy, but it is kept as a fast-specific core so the strategy can move
+/// to a call-scoped `DeflateWorkingSet` without retaining raw buffer access.
+/// Every source and destination is checked before changing the rolling hash
+/// or either chain.
+fn deflate_fast_insert_hash_core(
+    window: &[crate::stdlib::Bytef],
+    head: &mut [crate::src::deflate::Posf],
+    prev: &mut [crate::src::deflate::Posf],
+    strstart: crate::stdlib::uInt,
+    w_mask: crate::stdlib::uInt,
+    hash_shift: crate::stdlib::uInt,
+    hash_mask: crate::stdlib::uInt,
+    ins_h: &mut crate::stdlib::uInt,
+) -> Option<crate::src::deflate::IPos> {
+    deflate_slow_insert_hash_core(
+        window, head, prev, strstart, w_mask, hash_shift, hash_mask, ins_h,
+    )
+}
+
+/// Recreate the two-byte rolling-hash prefix after a fast match skips hash
+/// insertion.  The caller commits the returned hash only after both bytes
+/// have been validated.
+fn deflate_fast_initial_hash_core(
+    window: &[crate::stdlib::Bytef],
+    strstart: crate::stdlib::uInt,
+    hash_shift: crate::stdlib::uInt,
+    hash_mask: crate::stdlib::uInt,
+) -> Option<crate::stdlib::uInt> {
+    let first = *window.get(usize::try_from(strstart).ok()?)? as crate::stdlib::uInt;
+    let second =
+        *window.get(usize::try_from(strstart.wrapping_add(1)).ok()?)? as crate::stdlib::uInt;
+    Some((first << hash_shift ^ second) & hash_mask)
+}
+
+/// Read a literal through an established bounded window view.
+fn deflate_fast_literal_core(
+    window: &[crate::stdlib::Bytef],
+    strstart: crate::stdlib::uInt,
+) -> Option<crate::zutil_h::uch> {
+    window
+        .get(usize::try_from(strstart).ok()?)
+        .copied()
+        .map(|byte| byte as crate::zutil_h::uch)
 }
 
 /// Translate a match length offset to its dynamic literal/length tree slot.
@@ -5262,9 +5350,8 @@ unsafe extern "C" fn deflate_fast(
                     & (*s).hash_mask;
             }
         } else {
-            let mut cc: crate::zutil_h::uch =
-                *(*s).window.offset((*s).strstart as isize) as crate::zutil_h::uch;
             let state = &mut *s;
+            let cc = *state.window.offset(state.strstart as isize) as crate::zutil_h::uch;
             let layout =
                 pending_storage_layout_for_state(state).expect("validated pending storage layout");
             let pending = &mut *core::ptr::slice_from_raw_parts_mut(
@@ -5380,6 +5467,114 @@ fn deflate_slow_max_insert(
     strstart
         .wrapping_add(lookahead)
         .wrapping_sub(crate::zutil_h::MIN_MATCH as crate::stdlib::uInt)
+}
+
+/// Result of one slow-strategy iteration after its bounded storage work.
+///
+/// Refill, block encoding, and output draining are deliberately outside this
+/// core: those operations cross the caller-buffer boundary and will be owned
+/// by `deflate_ffi`.  Everything here operates only on the established
+/// callback-allocation working set.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum DeflateSlowStep {
+    NeedMore,
+    Continue { flush_block: bool },
+}
+
+/// Execute the hash, match-search, and symbol-tally portion of one slow
+/// strategy iteration using only checked working-set views.
+///
+/// This is the safe core that the exported deflate boundary will call once it
+/// owns a call-scoped `DeflateWorkingSet`.  It intentionally preserves the
+/// legacy ordering of lazy-match state transitions, including the rejected
+/// match fallback and the insertion loop after a delayed match.
+pub(crate) fn deflate_slow_step_core(
+    state: &mut internal_state,
+    working: &mut DeflateWorkingSet<'_>,
+) -> DeflateSlowStep {
+    let mut hash_head = NIL as crate::src::deflate::IPos;
+    if state.lookahead >= crate::zutil_h::MIN_MATCH as crate::stdlib::uInt {
+        if let Some(inserted) = working.slow_insert_hash(state) {
+            hash_head = inserted;
+        }
+    }
+
+    state.prev_length = state.match_length;
+    state.prev_match = state.match_start as crate::src::deflate::IPos;
+    state.match_length = (crate::zutil_h::MIN_MATCH - 1) as crate::stdlib::uInt;
+    if deflate_slow_can_search_match(
+        hash_head,
+        state.prev_length,
+        state.max_lazy_match,
+        state.strstart,
+        state.w_size,
+    ) {
+        state.match_length = working.slow_longest_match(state, hash_head);
+        if deflate_slow_should_discard_match(
+            state.match_length,
+            state.strategy,
+            state.strstart,
+            state.match_start,
+        ) {
+            state.match_length = (crate::zutil_h::MIN_MATCH - 1) as crate::stdlib::uInt;
+        }
+    }
+
+    if deflate_slow_should_emit_previous_match(state.prev_length, state.match_length) {
+        let max_insert = deflate_slow_max_insert(state.strstart, state.lookahead);
+        let previous_length = state.prev_length;
+        let previous_match = state.prev_match as crate::stdlib::uInt;
+        if !deflate_tally_match(
+            working.pending().expect("slow working set owns pending storage"),
+            state,
+            previous_length,
+            state.strstart.wrapping_sub(1),
+            previous_match,
+        ) {
+            return DeflateSlowStep::NeedMore;
+        }
+        let flush_block = symbol_buffer_is_full(state.sym_next, state.sym_end);
+        state.lookahead = state
+            .lookahead
+            .wrapping_sub(previous_length.wrapping_sub(1));
+        state.prev_length = previous_length.wrapping_sub(2);
+        loop {
+            state.strstart = state.strstart.wrapping_add(1);
+            if state.strstart <= max_insert {
+                let _ = working.slow_insert_hash(state);
+            }
+            state.prev_length = state.prev_length.wrapping_sub(1);
+            if state.prev_length == 0 {
+                break;
+            }
+        }
+        state.match_available = 0;
+        state.match_length = (crate::zutil_h::MIN_MATCH - 1) as crate::stdlib::uInt;
+        state.strstart = state.strstart.wrapping_add(1);
+        return DeflateSlowStep::Continue { flush_block };
+    }
+
+    if state.match_available != 0 {
+        let Some(literal) = working.slow_literal_at(state.strstart.wrapping_sub(1)) else {
+            return DeflateSlowStep::NeedMore;
+        };
+        if !deflate_tally_literal(
+            working.pending().expect("slow working set owns pending storage"),
+            state,
+            literal,
+        ) {
+            return DeflateSlowStep::NeedMore;
+        }
+        let flush_block = symbol_buffer_is_full(state.sym_next, state.sym_end);
+        state.strstart = state.strstart.wrapping_add(1);
+        state.lookahead = state.lookahead.wrapping_sub(1);
+        return DeflateSlowStep::Continue { flush_block };
+    }
+
+    state.match_available = 1;
+    state.strstart = state.strstart.wrapping_add(1);
+    state.lookahead = state.lookahead.wrapping_sub(1);
+    DeflateSlowStep::Continue { flush_block: false }
 }
 
 unsafe extern "C" fn deflate_slow(
@@ -6595,6 +6790,54 @@ mod tests {
     }
 
     #[test]
+    fn deflate_fast_hash_cores_use_checked_slice_views() {
+        let window = [10, 20, 42, 99];
+        let mut head = [3, 4, 77, 6, 7, 8, 9, 10];
+        let mut prev = [0; 4];
+        let mut ins_h = 1;
+
+        assert_eq!(
+            super::deflate_fast_insert_hash_core(
+                &window, &mut head, &mut prev, 0, 3, 5, 7, &mut ins_h,
+            ),
+            Some(77),
+        );
+        assert_eq!(ins_h, 2);
+        assert_eq!(prev[0], 77);
+        assert_eq!(head[2], 0);
+        assert_eq!(
+            super::deflate_fast_initial_hash_core(&window, 0, 5, 7),
+            Some(4)
+        );
+        assert_eq!(super::deflate_fast_literal_core(&window, 2), Some(42));
+    }
+
+    #[test]
+    fn deflate_fast_hash_cores_reject_short_views_without_mutation() {
+        let window = [10, 20];
+        let mut head = [3, 4, 77];
+        let mut prev = [8, 9];
+        let original_head = head;
+        let original_prev = prev;
+        let mut ins_h = 1;
+
+        assert_eq!(
+            super::deflate_fast_insert_hash_core(
+                &window, &mut head, &mut prev, 0, 1, 5, 7, &mut ins_h,
+            ),
+            None,
+        );
+        assert_eq!(head, original_head);
+        assert_eq!(prev, original_prev);
+        assert_eq!(ins_h, 1);
+        assert_eq!(
+            super::deflate_fast_initial_hash_core(&window, 1, 5, 7),
+            None
+        );
+        assert_eq!(super::deflate_fast_literal_core(&window, 2), None);
+    }
+
+    #[test]
     fn fill_window_has_insertable_match_preserves_minimum_and_wrapping_thresholds() {
         let min_match = crate::zutil_h::MIN_MATCH as crate::stdlib::uInt;
 
@@ -6947,6 +7190,43 @@ mod tests {
             super::deflate_slow_max_insert(0, 0),
             crate::stdlib::uInt::MAX - 2
         );
+    }
+
+    #[test]
+    fn deflate_slow_step_core_tallies_delayed_literals_through_the_working_set() {
+        let mut state = super::internal_state::newly_allocated();
+        let layout = pending_storage_layout(4);
+        state.lit_bufsize = 4;
+        state.pending_buf_size = layout.total_len as crate::zutil_h::ulg;
+        state.sym_buf_offset = layout.symbol_offset;
+        state.sym_end = layout.symbol_flush_threshold;
+        state.window_size = 8;
+        state.hash_size = 8;
+        state.w_size = 4;
+        state.w_mask = 3;
+        state.lookahead = 1;
+        state.strstart = 1;
+        state.match_available = 1;
+
+        let mut pending = [0; 16];
+        let mut window = [0; 8];
+        window[0] = b'Q';
+        let mut head = [0; 8];
+        let mut prev = [0; 4];
+        let mut working =
+            DeflateWorkingSet::new(&state, &mut pending, &mut window, &mut head, &mut prev)
+                .unwrap();
+
+        assert_eq!(
+            super::deflate_slow_step_core(&mut state, &mut working),
+            super::DeflateSlowStep::Continue { flush_block: false },
+        );
+        assert_eq!((state.strstart, state.lookahead, state.sym_next), (2, 0, 3));
+        assert_eq!(
+            &pending[layout.symbol_offset..layout.symbol_offset + 3],
+            &[0, 0, b'Q']
+        );
+        assert_eq!(state.dyn_ltree[b'Q' as usize].fc.value, 1);
     }
 
     #[test]
