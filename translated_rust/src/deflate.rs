@@ -3361,6 +3361,19 @@ pub fn deflateCopy(
     let Some(copy_layout) = DeflateCopyLayout::from_state(source_state) else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
+    // Default-pair streams already retain their four work buffers as owned
+    // vectors. Clone the same validated live ranges before allocating the
+    // opaque destination state, so this path never recreates callback-backed
+    // workspace just to immediately treat it as owned again. Custom and
+    // mixed allocator streams intentionally stay on the legacy path below:
+    // their allocation and free callbacks remain observable API behavior.
+    let owned_copy = match source_state.owned_storage.as_ref() {
+        Some(storage) => match storage.try_copy_for_state(source_state) {
+            Some(storage) => Some(storage),
+            None => return crate::zlib_h::Z_STREAM_ERROR,
+        },
+        None => None,
+    };
     crate::zlib_h::copy_z_stream(dest_stream, source_stream);
     ds = unsafe {
         Some(dest_stream.zalloc.expect("non-null function pointer"))
@@ -3382,11 +3395,26 @@ pub fn deflateCopy(
         &mut *ds.cast::<::core::mem::MaybeUninit<crate::src::deflate::deflate_state>>()
     };
     let dest_state = ds_slot.write(source_state.clone());
-    // A copied stream still uses the legacy callback allocation sequence.
-    // Do not retain a cloned default-pair workspace whose raw handles are
-    // about to be replaced below.
+    // Do not retain the derived clone's workspace. The default-pair branch
+    // installs the range-preserving copy prepared above; custom and mixed
+    // streams replace the raw handles through their original callbacks.
     dest_state.owned_storage = None;
     dest_state.strm = stream_identity(dest_stream);
+    if let Some(mut storage) = owned_copy {
+        if !storage.bind_state_buffers(dest_state) {
+            // The destination is still a fresh callback allocation. Clear
+            // copied source handles before teardown so a corrupt layout
+            // cannot make its failure path free source-owned storage.
+            dest_state.window = ::core::ptr::null_mut();
+            dest_state.prev = ::core::ptr::null_mut();
+            dest_state.head = ::core::ptr::null_mut();
+            dest_state.pending_buf = ::core::ptr::null_mut();
+            deflateEnd(dest_stream);
+            return crate::zlib_h::Z_MEM_ERROR;
+        }
+        dest_state.owned_storage = Some(storage);
+        return crate::zlib_h::Z_OK;
+    }
     let storage = DeflateStorageLayout::from_state(dest_state);
     dest_state.window = unsafe {
         Some(dest_stream.zalloc.expect("non-null function pointer"))
