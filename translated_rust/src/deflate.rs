@@ -5051,104 +5051,101 @@ fn deflate_slow(
                 state.lookahead = state.lookahead.wrapping_sub(1);
             }
         }
-        let match_available = {
+        // At end of input the deferred literal, final block, and ordinary
+        // symbol tail all share the same callback-owned window and pending
+        // allocation. Lend each once, derive `sym_buf` from its documented
+        // pending offset, and finish the tree work before `flush_pending()`
+        // can revisit the ABI output cursor.
+        let tail_last = {
             let state = &mut *s;
-            state.match_available != 0
-        };
-        if match_available {
-            let state = &mut *s;
-            let Ok(window_len) = usize::try_from(state.window_size) else {
-                return need_more;
-            };
-            let Ok(symbol_len) = usize::try_from(state.sym_end) else {
-                return need_more;
-            };
-            if (window_len != 0 && state.window.is_null())
-                || (symbol_len != 0 && state.sym_buf.is_null())
-            {
-                return need_more;
-            }
-            let window = if window_len == 0 {
-                &[]
-            } else {
-                ::core::slice::from_raw_parts(state.window, window_len)
-            };
-            let symbols = if symbol_len == 0 {
-                &mut []
-            } else {
-                ::core::slice::from_raw_parts_mut(state.sym_buf, symbol_len)
-            };
-            let Some(flush_now) = tally_previous_literal_state(state, window, symbols) else {
-                return need_more;
-            };
-            bflush = flush_now as ::core::ffi::c_int;
-            state.match_available = 0 as ::core::ffi::c_int;
-        }
-        {
-            let state = &mut *s;
-            state.insert = if state.strstart
-                < (crate::zutil_h::MIN_MATCH - 1 as ::core::ffi::c_int) as crate::stdlib::uInt
-            {
-                state.strstart
-            } else {
-                (crate::zutil_h::MIN_MATCH - 1 as ::core::ffi::c_int) as crate::stdlib::uInt
-            };
-        }
-        if flush == crate::zlib_h::Z_FINISH {
-            let (block_start, window, strstart) = {
-                let state = &mut *s;
-                (state.block_start, state.window, state.strstart)
-            };
-            crate::src::trees::_tr_flush_block(
-                s,
-                if block_start >= 0 as ::core::ffi::c_long {
-                    window.wrapping_add(block_start as ::core::ffi::c_uint as usize)
-                        as *mut crate::stdlib::charf
+            let match_available = state.match_available != 0;
+            let needs_flush = flush == crate::zlib_h::Z_FINISH || state.sym_next != 0;
+            if match_available || needs_flush {
+                let (Ok(window_len), Ok(pending_len)) = (
+                    usize::try_from(state.window_size),
+                    usize::try_from(state.pending_buf_size),
+                ) else {
+                    return need_more;
+                };
+                if (window_len != 0 && state.window.is_null())
+                    || (pending_len != 0 && state.pending_buf.is_null())
+                {
+                    return need_more;
+                }
+                let window = if window_len == 0 {
+                    &[]
                 } else {
-                    ::core::ptr::null_mut::<crate::stdlib::charf>()
-                },
-                block_flush_len_state(strstart, block_start),
-                1 as ::core::ffi::c_int,
-            );
+                    ::core::slice::from_raw_parts(state.window, window_len)
+                };
+                let pending_and_symbols = if pending_len == 0 {
+                    &mut []
+                } else {
+                    ::core::slice::from_raw_parts_mut(state.pending_buf, pending_len)
+                };
+                if match_available {
+                    let Ok(symbol_start) = usize::try_from(state.lit_bufsize) else {
+                        return need_more;
+                    };
+                    let Ok(symbol_len) = usize::try_from(state.sym_end) else {
+                        return need_more;
+                    };
+                    let Some(symbol_end) = symbol_start.checked_add(symbol_len) else {
+                        return need_more;
+                    };
+                    let Some(symbols) = pending_and_symbols.get_mut(symbol_start..symbol_end)
+                    else {
+                        return need_more;
+                    };
+                    let Some(flush_now) = tally_previous_literal_state(state, window, symbols)
+                    else {
+                        return need_more;
+                    };
+                    bflush = flush_now as ::core::ffi::c_int;
+                    state.match_available = 0 as ::core::ffi::c_int;
+                }
+                state.insert = if state.strstart
+                    < (crate::zutil_h::MIN_MATCH - 1 as ::core::ffi::c_int)
+                        as crate::stdlib::uInt
+                {
+                    state.strstart
+                } else {
+                    (crate::zutil_h::MIN_MATCH - 1 as ::core::ffi::c_int)
+                        as crate::stdlib::uInt
+                };
+                if flush == crate::zlib_h::Z_FINISH {
+                    flush_tree_window_block_state(state, pending_and_symbols, window, 1);
+                    Some(true)
+                } else if state.sym_next != 0 {
+                    flush_tree_window_block_state(state, pending_and_symbols, window, 0);
+                    Some(false)
+                } else {
+                    None
+                }
+            } else {
+                state.insert = if state.strstart
+                    < (crate::zutil_h::MIN_MATCH - 1 as ::core::ffi::c_int)
+                        as crate::stdlib::uInt
+                {
+                    state.strstart
+                } else {
+                    (crate::zutil_h::MIN_MATCH - 1 as ::core::ffi::c_int)
+                        as crate::stdlib::uInt
+                };
+                None
+            }
+        };
+        if let Some(last) = tail_last {
             let avail_out = {
                 let state = &mut *s;
-                state.block_start = strstart as ::core::ffi::c_long;
+                state.block_start = state.strstart as ::core::ffi::c_long;
                 let strm = state.strm;
                 flush_pending(strm)
             };
-            if let Some(result) = deflate_post_flush_result(avail_out, true) {
+            if let Some(result) = deflate_post_flush_result(avail_out, last) {
                 return result;
             }
-            return finish_done;
-        }
-        let has_symbols = {
-            let state = &mut *s;
-            state.sym_next != 0
-        };
-        if has_symbols {
-            let (block_start, window, strstart) = {
-                let state = &mut *s;
-                (state.block_start, state.window, state.strstart)
-            };
-            crate::src::trees::_tr_flush_block(
-                s,
-                if block_start >= 0 as ::core::ffi::c_long {
-                    window.wrapping_add(block_start as ::core::ffi::c_uint as usize)
-                        as *mut crate::stdlib::charf
-                } else {
-                    ::core::ptr::null_mut::<crate::stdlib::charf>()
-                },
-                block_flush_len_state(strstart, block_start),
-                0 as ::core::ffi::c_int,
-            );
-            let avail_out = {
-                let state = &mut *s;
-                state.block_start = strstart as ::core::ffi::c_long;
-                let strm = state.strm;
-                flush_pending(strm)
-            };
-            if let Some(result) = deflate_post_flush_result(avail_out, false) {
-                return result;
+            if last {
+                return finish_done;
             }
         }
         return block_done;
