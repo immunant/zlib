@@ -731,6 +731,16 @@ enum WindowDictionarySegments {
     },
 }
 
+/// A contiguous initialized portion of the history window that can supply a
+/// match.  A wrapped history may need two of these segments; keeping each
+/// segment bounded means the eventual match-copy core can move to slices
+/// without allowing a cursor to run past the end of the allocation.
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+struct WindowMatchSegment {
+    start: usize,
+    len: usize,
+}
+
 impl WindowHistory {
     fn new(
         size: ::core::ffi::c_uint,
@@ -840,6 +850,36 @@ impl WindowHistory {
             second_len: first_start,
         })
     }
+
+    fn match_segment(
+        &self,
+        index: ::core::ffi::c_uint,
+        requested: ::core::ffi::c_uint,
+    ) -> Option<WindowMatchSegment> {
+        let start = usize::try_from(index).ok()?;
+        let requested = usize::try_from(requested).ok()?;
+        let size = self.size as usize;
+        if start >= size {
+            return None;
+        }
+
+        // A partially initialized history occupies only its prefix.  Once it
+        // has wrapped every slot is initialized, but a caller must request a
+        // second segment after reaching the allocation boundary.
+        let initialized_end = if self.have < self.size {
+            self.have as usize
+        } else {
+            size
+        };
+        if start >= initialized_end {
+            return None;
+        }
+
+        Some(WindowMatchSegment {
+            start,
+            len: requested.min(initialized_end.checked_sub(start)?),
+        })
+    }
 }
 
 /// A validated read-only view of the initialized inflate history window.
@@ -869,6 +909,16 @@ impl<'a> WindowStorage<'a> {
 
     fn copy_dictionary_to(&self, dictionary: &mut [crate::stdlib::Bytef]) -> Option<()> {
         self.history.copy_dictionary_to(self.bytes, dictionary)
+    }
+
+    fn match_bytes(
+        &self,
+        index: ::core::ffi::c_uint,
+        requested: ::core::ffi::c_uint,
+    ) -> Option<&[crate::stdlib::Bytef]> {
+        let segment = self.history.match_segment(index, requested)?;
+        self.bytes
+            .get(segment.start..segment.start.checked_add(segment.len)?)
     }
 }
 
@@ -5812,6 +5862,25 @@ mod tests {
 
         assert_eq!(storage.copy_dictionary_to(&mut dictionary), Some(()));
         assert_eq!(dictionary, *b"defghabc");
+    }
+
+    #[test]
+    fn window_storage_match_bytes_stays_within_initialized_history() {
+        let partial_window = *b"abc_____";
+        let partial = super::WindowStorage::new(&partial_window, 3, 3).unwrap();
+
+        assert_eq!(partial.match_bytes(1, 8), Some(&b"bc"[..]));
+        assert_eq!(partial.match_bytes(3, 1), None);
+
+        let wrapped_window = *b"abcdefgh";
+        let wrapped = super::WindowStorage::new(&wrapped_window, 3, 8).unwrap();
+
+        // A caller that needs bytes after `h` must explicitly ask for the
+        // wrapped prefix; this view never turns a bounded slice into a
+        // cross-allocation cursor.
+        assert_eq!(wrapped.match_bytes(6, 5), Some(&b"gh"[..]));
+        assert_eq!(wrapped.match_bytes(8, 0), None);
+        assert_eq!(wrapped.match_bytes(3, 0), Some(&b""[..]));
     }
 
     #[test]
