@@ -67,7 +67,7 @@ pub type tree_desc = crate::src::deflate::tree_desc_s;
 pub struct tree_desc_s {
     pub dyn_tree: *mut crate::src::deflate::ct_data,
     pub max_code: ::core::ffi::c_int,
-    pub stat_desc: *const crate::src::deflate::static_tree_desc,
+    pub stat_desc: &'static crate::src::deflate::static_tree_desc,
 }
 
 pub type Pos = crate::zutil_h::ush;
