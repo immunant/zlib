@@ -284,8 +284,8 @@ unsafe extern "C" fn gz_write(
                 copy as crate::__stddef_size_t_h::size_t,
             );
             gz_note_buffered_input(&mut *state, copy);
-            buf =
-                (buf as *const ::core::ffi::c_char).offset(copy as isize) as crate::stdlib::voidpc;
+            buf = (buf as *const ::core::ffi::c_char).wrapping_add(copy as usize)
+                as crate::stdlib::voidpc;
             len = len.wrapping_sub(copy as crate::stdlib::z_size_t);
             if len == 0 as crate::stdlib::z_size_t {
                 break;

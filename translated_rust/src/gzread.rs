@@ -449,7 +449,8 @@ unsafe extern "C" fn gz_read(
         match c2rust_current_block_30 {
             2719512138335094285 => {
                 len = len.wrapping_sub(n as crate::stdlib::z_size_t);
-                buf = (buf as *mut ::core::ffi::c_char).offset(n as isize) as crate::stdlib::voidp;
+                buf = (buf as *mut ::core::ffi::c_char).wrapping_add(n as usize)
+                    as crate::stdlib::voidp;
                 got = got.wrapping_add(n as crate::stdlib::z_size_t);
                 (*state).x.pos += n as crate::stdlib::off64_t;
             }
@@ -665,9 +666,9 @@ pub unsafe extern "C" fn gzungetc_ffi(
         (*state).x.have = 1 as ::core::ffi::c_uint;
         (*state).x.next = (*state)
             .out
-            .offset(((*state).size << 1 as ::core::ffi::c_int) as isize)
-            .offset(-(1 as ::core::ffi::c_int as isize));
-        *(*state).x.next.offset(0 as ::core::ffi::c_int as isize) = c as ::core::ffi::c_uchar;
+            .wrapping_add(((*state).size << 1 as ::core::ffi::c_int) as usize)
+            .wrapping_sub(1);
+        *(*state).x.next = c as ::core::ffi::c_uchar;
         (*state).x.pos -= 1;
         (*state).past = 0 as ::core::ffi::c_int;
         return c;
@@ -686,11 +687,11 @@ pub unsafe extern "C" fn gzungetc_ffi(
             ((*state).size << 1 as ::core::ffi::c_int) as usize,
         );
         let next = gz_shift_pushback_buffer(out, (*state).x.have as usize);
-        (*state).x.next = (*state).out.offset(next as isize);
+        (*state).x.next = (*state).out.wrapping_add(next);
     }
     (*state).x.have = (*state).x.have.wrapping_add(1);
-    (*state).x.next = (*state).x.next.offset(-1);
-    *(*state).x.next.offset(0 as ::core::ffi::c_int as isize) = c as ::core::ffi::c_uchar;
+    (*state).x.next = (*state).x.next.wrapping_sub(1);
+    *(*state).x.next = c as ::core::ffi::c_uchar;
     (*state).x.pos -= 1;
     (*state).past = 0 as ::core::ffi::c_int;
     return c;
