@@ -290,17 +290,23 @@ fn gz_comp_skips_empty_flush(
     reset != 0 && avail_in == 0 && flush == crate::zlib_h::Z_NO_FLUSH
 }
 
+enum GzCompResetAction {
+    Skip,
+    Reset,
+    Continue,
+}
+
 fn gz_comp_reset_action(
     reset: ::core::ffi::c_int,
     avail_in: crate::stdlib::uInt,
     flush: ::core::ffi::c_int,
-) -> ::core::ffi::c_int {
+) -> GzCompResetAction {
     if gz_comp_skips_empty_flush(reset, avail_in, flush) {
-        -1
+        GzCompResetAction::Skip
     } else if reset != 0 {
-        1
+        GzCompResetAction::Reset
     } else {
-        0
+        GzCompResetAction::Continue
     }
 }
 
@@ -550,14 +556,14 @@ unsafe fn gz_comp(
         return 0 as ::core::ffi::c_int;
     }
     let mut reset = (*state).reset;
-    let reset_action = gz_comp_reset_action(reset, (*strm).avail_in, flush);
-    if reset_action < 0 {
-        return 0 as ::core::ffi::c_int;
-    }
-    if reset_action != 0 {
-        crate::src::deflate::deflateReset(strm as *mut crate::zlib_h::z_stream_s);
-        (*state).reset = 0 as ::core::ffi::c_int;
-        reset = 0 as ::core::ffi::c_int;
+    match gz_comp_reset_action(reset, (*strm).avail_in, flush) {
+        GzCompResetAction::Skip => return 0 as ::core::ffi::c_int,
+        GzCompResetAction::Reset => {
+            crate::src::deflate::deflateReset(strm as *mut crate::zlib_h::z_stream_s);
+            (*state).reset = 0 as ::core::ffi::c_int;
+            reset = 0 as ::core::ffi::c_int;
+        }
+        GzCompResetAction::Continue => {}
     }
     ret = crate::zlib_h::Z_OK;
     loop {
@@ -1049,7 +1055,7 @@ mod tests {
         gz_zero_needs_initialization, gzclose_mode_is_writable, gzclose_w_result,
         gzflush_mode_is_valid, gzfwrite_result, gzputc_result, gzputs_len_fits_int, gzputs_result,
         gzsetparams_settings_match, gzsetparams_state_is_usable, gzwrite_len_fits_int,
-        GzCompWriteFailure, GzZeroAction,
+        GzCompResetAction, GzCompWriteFailure, GzZeroAction,
     };
 
     #[test]
@@ -1302,10 +1308,22 @@ mod tests {
 
     #[test]
     fn gz_comp_reset_action_preserves_skip_and_reset_priority() {
-        assert_eq!(gz_comp_reset_action(1, 0, crate::zlib_h::Z_NO_FLUSH), -1);
-        assert_eq!(gz_comp_reset_action(0, 0, crate::zlib_h::Z_NO_FLUSH), 0);
-        assert_eq!(gz_comp_reset_action(1, 1, crate::zlib_h::Z_NO_FLUSH), 1);
-        assert_eq!(gz_comp_reset_action(1, 0, crate::zlib_h::Z_BLOCK), 1);
+        assert!(matches!(
+            gz_comp_reset_action(1, 0, crate::zlib_h::Z_NO_FLUSH),
+            GzCompResetAction::Skip
+        ));
+        assert!(matches!(
+            gz_comp_reset_action(0, 0, crate::zlib_h::Z_NO_FLUSH),
+            GzCompResetAction::Continue
+        ));
+        assert!(matches!(
+            gz_comp_reset_action(1, 1, crate::zlib_h::Z_NO_FLUSH),
+            GzCompResetAction::Reset
+        ));
+        assert!(matches!(
+            gz_comp_reset_action(1, 0, crate::zlib_h::Z_BLOCK),
+            GzCompResetAction::Reset
+        ));
     }
 
     #[test]

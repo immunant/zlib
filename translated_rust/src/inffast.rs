@@ -128,6 +128,13 @@ fn fast_output_available(output_remaining: crate::stdlib::uInt) -> bool {
     output_remaining > 257 as crate::stdlib::uInt
 }
 
+fn fast_path_available(
+    input_remaining: crate::stdlib::uInt,
+    output_remaining: crate::stdlib::uInt,
+) -> bool {
+    fast_input_available(input_remaining) && fast_output_available(output_remaining)
+}
+
 fn output_cursor_after_write(
     output_produced: crate::stdlib::uInt,
     output_remaining: crate::stdlib::uInt,
@@ -554,7 +561,7 @@ pub unsafe extern "C" fn inflate_fast(
             }
             _ => {}
         }
-        if !(fast_input_available(input_remaining) && fast_output_available(output_remaining)) {
+        if !fast_path_available(input_remaining, output_remaining) {
             break;
         }
     }
@@ -581,8 +588,8 @@ mod tests {
     use super::{
         add_and_consume_extra_bits, append_input_byte, bit_mask, code, consume_bits,
         fast_dist_action, fast_input_available, fast_litlen_action, fast_output_available,
-        input_remaining_after_read, low_bits, output_cursor_after_write, subtable_offset,
-        unread_input_state, window_match_start, FastDistAction, FastLitLenAction,
+        fast_path_available, input_remaining_after_read, low_bits, output_cursor_after_write,
+        subtable_offset, unread_input_state, window_match_start, FastDistAction, FastLitLenAction,
     };
 
     #[test]
@@ -729,6 +736,14 @@ mod tests {
             output_cursor_after_write(::core::ffi::c_uint::MAX, 0),
             (0, ::core::ffi::c_uint::MAX),
         );
+    }
+
+    #[test]
+    fn fast_path_requires_input_and_output_reserves() {
+        assert!(!fast_path_available(5, 257));
+        assert!(!fast_path_available(6, 257));
+        assert!(!fast_path_available(5, 258));
+        assert!(fast_path_available(6, 258));
     }
 
     #[test]

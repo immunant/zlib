@@ -2597,6 +2597,19 @@ fn stored_block_available_output(
     }
 }
 
+fn stored_block_should_wait(
+    len: ::core::ffi::c_uint,
+    min_block: ::core::ffi::c_uint,
+    left: ::core::ffi::c_uint,
+    avail_in: crate::stdlib::uInt,
+    flush: ::core::ffi::c_int,
+) -> bool {
+    len < min_block
+        && (len == 0 && flush != crate::zlib_h::Z_FINISH
+            || flush == crate::zlib_h::Z_NO_FLUSH
+            || len != (left as crate::stdlib::uInt).wrapping_add(avail_in))
+}
+
 fn stored_insert_after_input(
     insert: crate::stdlib::uInt,
     window_size: crate::stdlib::uInt,
@@ -2639,11 +2652,7 @@ unsafe extern "C" fn deflate_stored(
         if len > have {
             len = have;
         }
-        if len < min_block
-            && (len == 0 as ::core::ffi::c_uint && flush != crate::zlib_h::Z_FINISH
-                || flush == crate::zlib_h::Z_NO_FLUSH
-                || len != (left as crate::stdlib::uInt).wrapping_add((*(*s).strm).avail_in))
-        {
+        if stored_block_should_wait(len, min_block, left, (*(*s).strm).avail_in, flush) {
             break;
         }
         last = if flush == crate::zlib_h::Z_FINISH
@@ -3720,7 +3729,7 @@ mod tests {
         gzip_header_crc_pending_range, normalize_deflate_params, pending_output_len,
         pending_short_cursors, read_buf_len, read_buf_total_in_after_copy, short_msb_bytes,
         slide_hash_entry, stored_block_available_output, stored_block_min_size,
-        stored_insert_after_input, symbol_triplet_cursors, zlib_header,
+        stored_block_should_wait, stored_insert_after_input, symbol_triplet_cursors, zlib_header,
     };
 
     #[test]
@@ -4020,6 +4029,52 @@ mod tests {
         assert_eq!(stored_block_available_output(7, 5), None);
         assert_eq!(stored_block_available_output(7, 9), Some(3));
         assert_eq!(stored_block_available_output(-1, 5), Some(0));
+    }
+
+    #[test]
+    fn stored_block_should_wait_preserves_small_block_flush_rules() {
+        assert!(!stored_block_should_wait(
+            8,
+            8,
+            8,
+            0,
+            crate::zlib_h::Z_NO_FLUSH,
+        ));
+        assert!(stored_block_should_wait(
+            4,
+            8,
+            2,
+            2,
+            crate::zlib_h::Z_NO_FLUSH,
+        ));
+        assert!(stored_block_should_wait(
+            4,
+            8,
+            2,
+            3,
+            crate::zlib_h::Z_FINISH,
+        ));
+        assert!(!stored_block_should_wait(
+            4,
+            8,
+            2,
+            2,
+            crate::zlib_h::Z_FINISH,
+        ));
+        assert!(stored_block_should_wait(
+            0,
+            8,
+            0,
+            0,
+            crate::zlib_h::Z_FULL_FLUSH,
+        ));
+        assert!(!stored_block_should_wait(
+            0,
+            8,
+            0,
+            0,
+            crate::zlib_h::Z_FINISH,
+        ));
     }
 
     #[test]
