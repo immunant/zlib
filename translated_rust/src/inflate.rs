@@ -672,6 +672,19 @@ fn inflate_gzip_time_plan(
     }
 }
 
+/// Commit the pointer-free portion of gzip's modification-time transition.
+/// The retained header itself is caller-owned ABI storage, so its write stays
+/// at the decoder boundary immediately before this state commit.
+fn inflate_gzip_time_commit(
+    state: &mut crate::src::inflate::inflate_state,
+    plan: InflateGzipTimePlan,
+) {
+    if let Some(crc_bytes) = plan.crc_bytes {
+        state.check = inflate_header_crc_update(state.check, &crc_bytes);
+    }
+    state.mode = crate::src::inflate::OS;
+}
+
 /// Scalar commit for gzip's XFL and OS bytes.  The cursor and retained ABI
 /// header remain at the decoder boundary; this plan keeps byte extraction and
 /// optional little-endian header-CRC input pointer-free.
@@ -691,6 +704,19 @@ fn inflate_gzip_os_plan(
         os: (hold >> 8) as ::core::ffi::c_int,
         crc_bytes: (flags & 0x200 != 0 && wrap & 4 != 0).then_some([hold as u8, (hold >> 8) as u8]),
     }
+}
+
+/// Commit the pointer-free portion of gzip's XFL/OS transition.  As with the
+/// TIME field, the caller-owned retained header is updated at the raw codec
+/// boundary before this safe state transition runs.
+fn inflate_gzip_os_commit(
+    state: &mut crate::src::inflate::inflate_state,
+    plan: InflateGzipOsPlan,
+) {
+    if let Some(crc_bytes) = plan.crc_bytes {
+        state.check = inflate_header_crc_update(state.check, &crc_bytes);
+    }
+    state.mode = crate::src::inflate::EXLEN;
 }
 
 /// Preserve zlib's final no-progress/finish result mapping independently of
@@ -2509,19 +2535,12 @@ pub fn inflate(
                                                                                         .head)
                                                                                         .time = time_plan.time;
                                                                                     }
-                                                                                    if let Some(
-                                                                                        crc_bytes,
-                                                                                    ) = time_plan
-                                                                                        .crc_bytes
-                                                                                    {
-                                                                                        state_ref.check = inflate_header_crc_update(
-                                                                                        state_ref.check,
-                                                                                        &crc_bytes,
+                                                                                    inflate_gzip_time_commit(
+                                                                                        state_ref,
+                                                                                        time_plan,
                                                                                     );
-                                                                                    }
                                                                                     hold = 0 as ::core::ffi::c_ulong;
                                                                                     bits = 0 as ::core::ffi::c_uint;
-                                                                                    state_ref.mode = crate::src::inflate::OS;
                                                                                     break 's_519;
                                                                                 }
                                                                                 state_ref.mode = crate::src::inflate::COPY_1;
@@ -2840,20 +2859,13 @@ pub fn inflate(
                                                                             os_plan.xflags;
                                                                         head.os = os_plan.os;
                                                                     }
-                                                                    if let Some(crc_bytes) =
-                                                                        os_plan.crc_bytes
-                                                                    {
-                                                                        state_ref.check =
-                                                                        inflate_header_crc_update(
-                                                                            state_ref.check,
-                                                                            &crc_bytes,
-                                                                        );
-                                                                    }
+                                                                    inflate_gzip_os_commit(
+                                                                        state_ref,
+                                                                        os_plan,
+                                                                    );
                                                                     hold =
                                                                         0 as ::core::ffi::c_ulong;
                                                                     bits = 0 as ::core::ffi::c_uint;
-                                                                    state_ref.mode =
-                                                                        crate::src::inflate::EXLEN;
                                                                     break 'c_2317;
                                                                 }
                                                                 if flush == crate::zlib_h::Z_BLOCK
