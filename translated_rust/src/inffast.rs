@@ -215,6 +215,7 @@ pub(crate) fn decode_table_entry_or_invalid(
 
 pub fn inflate_fast(
     strm: &mut crate::zlib_h::z_stream,
+    state: &mut crate::src::inflate::inflate_state,
     mut start: ::core::ffi::c_uint,
     history_may_alias_output: bool,
 ) {
@@ -234,10 +235,9 @@ pub fn inflate_fast(
     let mut op: ::core::ffi::c_uint = 0;
     let mut len: ::core::ffi::c_uint = 0;
     let mut dist: ::core::ffi::c_uint = 0;
-    // The existing engine boundary validates this initialized stream before
-    // entering the fast path. Keep the one raw handle conversion here, then
-    // use the resulting borrow for all state access below.
-    let state = unsafe { &mut *(strm.state as *mut crate::src::inflate::inflate_state) };
+    // Callers establish the stream/state association before entering the fast
+    // path. Keeping that typed state borrow in the caller prevents this core
+    // from following the ABI state handle itself.
     // The fast-loop entry condition leaves at least five input bytes.  Keep
     // that existing boundary here and use an indexed view for bit-buffer
     // reads, rather than repeatedly dereferencing the raw input cursor.
@@ -561,5 +561,6 @@ pub unsafe extern "C" fn inflate_fast_ffi(
     let Some(strm) = strm.as_mut() else {
         return;
     };
-    inflate_fast(strm, start, false)
+    let state = unsafe { &mut *(strm.state as *mut crate::src::inflate::inflate_state) };
+    inflate_fast(strm, state, start, false)
 }

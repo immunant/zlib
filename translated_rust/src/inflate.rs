@@ -1933,6 +1933,7 @@ pub fn inflate(
                                                 (*state).bits = bits;
                                                 crate::src::inffast::inflate_fast(
                                                     &mut *strm,
+                                                    &mut *state,
                                                     out,
                                                     false,
                                                 );
