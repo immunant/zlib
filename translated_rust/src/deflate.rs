@@ -375,34 +375,34 @@ fn read_buf(
     return len;
 }
 
-fn fill_window(s: *mut crate::src::deflate::deflate_state) {
+fn fill_window(state: &mut crate::src::deflate::deflate_state) {
     unsafe {
         let mut n: ::core::ffi::c_uint = 0;
         let mut more: ::core::ffi::c_uint = 0;
-        let wsize: crate::stdlib::uInt = (*s).w_size;
+        let wsize: crate::stdlib::uInt = state.w_size;
         loop {
-            more = (*s)
+            more = state
                 .window_size
-                .wrapping_sub((*s).lookahead as crate::zutil_h::ulg)
-                .wrapping_sub((*s).strstart as crate::zutil_h::ulg)
+                .wrapping_sub(state.lookahead as crate::zutil_h::ulg)
+                .wrapping_sub(state.strstart as crate::zutil_h::ulg)
                 as ::core::ffi::c_uint;
             if ::core::mem::size_of::<::core::ffi::c_int>() as usize <= 2 as usize {
                 if more == 0 as ::core::ffi::c_uint
-                    && (*s).strstart == 0 as crate::stdlib::uInt
-                    && (*s).lookahead == 0 as crate::stdlib::uInt
+                    && state.strstart == 0 as crate::stdlib::uInt
+                    && state.lookahead == 0 as crate::stdlib::uInt
                 {
                     more = wsize as ::core::ffi::c_uint;
                 } else if more == -1 as ::core::ffi::c_int as ::core::ffi::c_uint {
                     more = more.wrapping_sub(1);
                 }
             }
-            if (*s).strstart
+            if state.strstart
                 >= wsize.wrapping_add(
-                    (*s).w_size
+                    state
+                        .w_size
                         .wrapping_sub(crate::src::deflate::MIN_LOOKAHEAD as crate::stdlib::uInt),
                 )
             {
-                let state = &mut *s;
                 {
                     let window =
                         ::core::slice::from_raw_parts_mut(state.window, state.window_size as usize);
@@ -418,10 +418,9 @@ fn fill_window(s: *mut crate::src::deflate::deflate_state) {
                 slide_hash(state);
                 more = more.wrapping_add(wsize as ::core::ffi::c_uint);
             }
-            if (*(*s).strm).avail_in == 0 as crate::stdlib::uInt {
+            if (*state.strm).avail_in == 0 as crate::stdlib::uInt {
                 break;
             }
-            let state = &mut *s;
             let strm = &mut *state.strm;
             let out = ::core::slice::from_raw_parts_mut(
                 state
@@ -431,51 +430,50 @@ fn fill_window(s: *mut crate::src::deflate::deflate_state) {
                 more as usize,
             );
             n = read_buf(strm, state.wrap, out);
-            (*s).lookahead = (*s).lookahead.wrapping_add(n);
-            if (*s).lookahead.wrapping_add((*s).insert)
+            state.lookahead = state.lookahead.wrapping_add(n);
+            if state.lookahead.wrapping_add(state.insert)
                 >= crate::zutil_h::MIN_MATCH as crate::stdlib::uInt
             {
-                let mut str: crate::stdlib::uInt = (*s).strstart.wrapping_sub((*s).insert);
-                (*s).ins_h = *(*s).window.wrapping_add(str as usize) as crate::stdlib::uInt;
-                (*s).ins_h = deflate_hash_update(
-                    (*s).ins_h,
-                    (*s).hash_shift,
-                    (*s).hash_mask,
-                    *(*s)
+                let mut str: crate::stdlib::uInt = state.strstart.wrapping_sub(state.insert);
+                state.ins_h = *state.window.wrapping_add(str as usize) as crate::stdlib::uInt;
+                state.ins_h = deflate_hash_update(
+                    state.ins_h,
+                    state.hash_shift,
+                    state.hash_mask,
+                    *state
                         .window
                         .wrapping_add(str.wrapping_add(1 as crate::stdlib::uInt) as usize),
                 );
-                while (*s).insert != 0 {
-                    (*s).ins_h = deflate_hash_update(
-                        (*s).ins_h,
-                        (*s).hash_shift,
-                        (*s).hash_mask,
-                        *(*s).window.wrapping_add(
+                while state.insert != 0 {
+                    state.ins_h = deflate_hash_update(
+                        state.ins_h,
+                        state.hash_shift,
+                        state.hash_mask,
+                        *state.window.wrapping_add(
                             str.wrapping_add(3 as crate::stdlib::uInt)
                                 .wrapping_sub(1 as crate::stdlib::uInt)
                                 as usize,
                         ),
                     );
-                    *(*s).prev.wrapping_add((str & (*s).w_mask) as usize) =
-                        *(*s).head.wrapping_add((*s).ins_h as usize);
-                    *(*s).head.wrapping_add((*s).ins_h as usize) =
+                    *state.prev.wrapping_add((str & state.w_mask) as usize) =
+                        *state.head.wrapping_add(state.ins_h as usize);
+                    *state.head.wrapping_add(state.ins_h as usize) =
                         str as crate::src::deflate::Pos as crate::src::deflate::Posf;
                     str = str.wrapping_add(1);
-                    (*s).insert = (*s).insert.wrapping_sub(1);
-                    if (*s).lookahead.wrapping_add((*s).insert)
+                    state.insert = state.insert.wrapping_sub(1);
+                    if state.lookahead.wrapping_add(state.insert)
                         < crate::zutil_h::MIN_MATCH as crate::stdlib::uInt
                     {
                         break;
                     }
                 }
             }
-            if !((*s).lookahead < crate::src::deflate::MIN_LOOKAHEAD as crate::stdlib::uInt
-                && (*(*s).strm).avail_in != 0 as crate::stdlib::uInt)
+            if !(state.lookahead < crate::src::deflate::MIN_LOOKAHEAD as crate::stdlib::uInt
+                && (*state.strm).avail_in != 0 as crate::stdlib::uInt)
             {
                 break;
             }
         }
-        let state = &mut *s;
         if state.high_water < state.window_size {
             let curr: crate::zutil_h::ulg = (state.strstart as crate::zutil_h::ulg)
                 .wrapping_add(state.lookahead as crate::zutil_h::ulg);
@@ -843,7 +841,7 @@ pub unsafe extern "C" fn deflateSetDictionary_ffi(
     let next = strm_ref.next_in as *mut ::core::ffi::c_uchar;
     strm_ref.avail_in = dictLength;
     strm_ref.next_in = dictionary as *mut crate::stdlib::Bytef;
-    fill_window(s);
+    fill_window(&mut *s);
     while {
         let state_ref = &*s;
         state_ref.lookahead >= crate::zutil_h::MIN_MATCH as crate::stdlib::uInt
@@ -884,7 +882,7 @@ pub unsafe extern "C" fn deflateSetDictionary_ffi(
             state_ref.lookahead =
                 (crate::zutil_h::MIN_MATCH - 1 as ::core::ffi::c_int) as crate::stdlib::uInt;
         }
-        fill_window(s);
+        fill_window(&mut *s);
     }
     let state_ref = &mut *s;
     state_ref.strstart = state_ref.strstart.wrapping_add(state_ref.lookahead);
@@ -2914,13 +2912,14 @@ fn deflate_fast(
     s: &mut crate::src::deflate::deflate_state,
     mut flush: ::core::ffi::c_int,
 ) -> block_state {
-    let s = s as *mut crate::src::deflate::deflate_state;
+    let state = s;
+    let s = state as *mut crate::src::deflate::deflate_state;
     unsafe {
         let mut hash_head: crate::src::deflate::IPos = 0;
         let mut bflush: ::core::ffi::c_int = 0;
         loop {
             if (*s).lookahead < crate::src::deflate::MIN_LOOKAHEAD as crate::stdlib::uInt {
-                fill_window(s);
+                fill_window(state);
                 if (*s).lookahead < crate::src::deflate::MIN_LOOKAHEAD as crate::stdlib::uInt
                     && flush == crate::zlib_h::Z_NO_FLUSH
                 {
@@ -3108,13 +3107,14 @@ fn deflate_slow(
     s: &mut crate::src::deflate::deflate_state,
     mut flush: ::core::ffi::c_int,
 ) -> block_state {
-    let s = s as *mut crate::src::deflate::deflate_state;
+    let state = s;
+    let s = state as *mut crate::src::deflate::deflate_state;
     unsafe {
         let mut hash_head: crate::src::deflate::IPos = 0;
         let mut bflush: ::core::ffi::c_int = 0;
         loop {
             if (*s).lookahead < crate::src::deflate::MIN_LOOKAHEAD as crate::stdlib::uInt {
-                fill_window(s);
+                fill_window(state);
                 if (*s).lookahead < crate::src::deflate::MIN_LOOKAHEAD as crate::stdlib::uInt
                     && flush == crate::zlib_h::Z_NO_FLUSH
                 {
@@ -3354,7 +3354,8 @@ fn deflate_rle(
     s: &mut crate::src::deflate::deflate_state,
     mut flush: ::core::ffi::c_int,
 ) -> block_state {
-    let s = s as *mut crate::src::deflate::deflate_state;
+    let state = s;
+    let s = state as *mut crate::src::deflate::deflate_state;
     unsafe {
         let mut bflush: ::core::ffi::c_int = 0;
         let mut prev: crate::stdlib::uInt = 0;
@@ -3365,7 +3366,7 @@ fn deflate_rle(
                 let state = &mut *s;
                 state.lookahead <= crate::zutil_h::MAX_MATCH as crate::stdlib::uInt
             } {
-                fill_window(s);
+                fill_window(state);
                 {
                     let state = &mut *s;
                     if state.lookahead <= crate::zutil_h::MAX_MATCH as crate::stdlib::uInt
@@ -3607,12 +3608,13 @@ fn deflate_huff(
     s: &mut crate::src::deflate::deflate_state,
     mut flush: ::core::ffi::c_int,
 ) -> block_state {
-    let s = s as *mut crate::src::deflate::deflate_state;
+    let state = s;
+    let s = state as *mut crate::src::deflate::deflate_state;
     unsafe {
         let mut bflush: ::core::ffi::c_int = 0;
         loop {
             if (*s).lookahead == 0 as crate::stdlib::uInt {
-                fill_window(s);
+                fill_window(state);
                 if (*s).lookahead == 0 as crate::stdlib::uInt {
                     if flush == crate::zlib_h::Z_NO_FLUSH {
                         return need_more;
