@@ -2465,8 +2465,37 @@ pub(crate) enum BitOutputAction {
     Align,
 }
 
+// This is the pointer-free portion of the deflate bit-output state.  The ABI
+// state owns the backing allocation; its callers construct this bounded view
+// at the projection boundary before dispatching the byte-only operation.
+pub(crate) struct BitOutputState<'a> {
+    pub(crate) pending_buf: &'a mut [crate::stdlib::Bytef],
+    pub(crate) pending: &'a mut crate::zutil_h::ulg,
+    pub(crate) bi_buf: &'a mut crate::zutil_h::ush,
+    pub(crate) bi_valid: &'a mut ::core::ffi::c_int,
+    pub(crate) bi_used: &'a mut ::core::ffi::c_int,
+}
+
+pub(crate) fn bit_output(state: BitOutputState<'_>, action: BitOutputAction) {
+    let BitOutputState {
+        pending_buf,
+        pending,
+        bi_buf,
+        bi_valid,
+        bi_used,
+    } = state;
+    match action {
+        BitOutputAction::Flush => bi_flush_bytes(pending_buf, pending, bi_buf, bi_valid),
+        BitOutputAction::Windup => bi_windup_bytes(pending_buf, pending, bi_buf, bi_valid, bi_used),
+        BitOutputAction::Align => tr_align_bytes(pending_buf, pending, bi_buf, bi_valid),
+    }
+}
+
+// Keep the raw ABI-state projection out of export-attributed wrappers.  The
+// implementation operation itself receives only the bounded, pointer-free
+// view above.
 pub(crate) unsafe fn bi_flush_or_windup(
-    mut s: *mut crate::src::deflate::deflate_state,
+    s: *mut crate::src::deflate::deflate_state,
     action: BitOutputAction,
 ) {
     let state = &mut *s;
@@ -2477,27 +2506,16 @@ pub(crate) unsafe fn bi_flush_or_windup(
             .as_ptr(),
         state.pending_buf_size as usize,
     );
-    match action {
-        BitOutputAction::Flush => bi_flush_bytes(
+    bit_output(
+        BitOutputState {
             pending_buf,
-            &mut state.pending,
-            &mut state.bi_buf,
-            &mut state.bi_valid,
-        ),
-        BitOutputAction::Windup => bi_windup_bytes(
-            pending_buf,
-            &mut state.pending,
-            &mut state.bi_buf,
-            &mut state.bi_valid,
-            &mut state.bi_used,
-        ),
-        BitOutputAction::Align => tr_align_bytes(
-            pending_buf,
-            &mut state.pending,
-            &mut state.bi_buf,
-            &mut state.bi_valid,
-        ),
-    }
+            pending: &mut state.pending,
+            bi_buf: &mut state.bi_buf,
+            bi_valid: &mut state.bi_valid,
+            bi_used: &mut state.bi_used,
+        },
+        action,
+    );
 }
 
 fn tr_align_bytes(
