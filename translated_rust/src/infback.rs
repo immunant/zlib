@@ -78,32 +78,34 @@ fn initialize_inflate_back_state(
     state.whave = 0 as ::core::ffi::c_uint;
     state.sane = 1 as ::core::ffi::c_int;
 }
-pub unsafe extern "C" fn inflateBackInit_(
-    mut strm: crate::zlib_h::z_streamp,
+pub unsafe fn inflateBackInit_(
+    strm: Option<&mut crate::zlib_h::z_stream>,
     mut windowBits: ::core::ffi::c_int,
-    mut window: *mut ::core::ffi::c_uchar,
-    mut version: *const ::core::ffi::c_char,
+    window: Option<&mut [::core::ffi::c_uchar]>,
+    version: Option<&::core::ffi::c_char>,
     mut stream_size: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
     let mut state: *mut crate::src::inflate::inflate_state =
         ::core::ptr::null_mut::<crate::src::inflate::inflate_state>();
-    if version.is_null()
-        || *version as ::core::ffi::c_int
+    if version.is_none()
+        || *version.expect("checked non-null version") as ::core::ffi::c_int
             != crate::zlib_h::ZLIB_VERSION[0 as ::core::ffi::c_int as usize] as ::core::ffi::c_int
         || stream_size != ::core::mem::size_of::<crate::zlib_h::z_stream>() as ::core::ffi::c_int
     {
         return crate::zlib_h::Z_VERSION_ERROR;
     }
-    if strm.is_null()
-        || window.is_null()
+    if strm.is_none()
+        || window.is_none()
         || windowBits < 8 as ::core::ffi::c_int
         || windowBits > 15 as ::core::ffi::c_int
     {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    (*strm).msg = ::core::ptr::null_mut::<::core::ffi::c_char>();
-    if (*strm).zalloc.is_none() {
-        (*strm).zalloc = Some(
+    let strm = strm.expect("checked non-null stream");
+    let window = window.expect("checked non-null window");
+    strm.msg = ::core::ptr::null_mut::<::core::ffi::c_char>();
+    if strm.zalloc.is_none() {
+        strm.zalloc = Some(
             crate::src::zutil::zcalloc
                 as unsafe extern "C" fn(
                     crate::stdlib::voidpf,
@@ -111,27 +113,27 @@ pub unsafe extern "C" fn inflateBackInit_(
                     ::core::ffi::c_uint,
                 ) -> crate::stdlib::voidpf,
         ) as crate::zlib_h::alloc_func;
-        (*strm).opaque = ::core::ptr::null_mut::<::core::ffi::c_void>();
+        strm.opaque = ::core::ptr::null_mut::<::core::ffi::c_void>();
     }
-    if (*strm).zfree.is_none() {
-        (*strm).zfree = Some(
+    if strm.zfree.is_none() {
+        strm.zfree = Some(
             crate::src::zutil::zcfree
                 as unsafe extern "C" fn(crate::stdlib::voidpf, crate::stdlib::voidpf) -> (),
         ) as crate::zlib_h::free_func;
     }
-    state = Some((*strm).zalloc.expect("non-null function pointer"))
+    state = Some(strm.zalloc.expect("non-null function pointer"))
         .expect("non-null function pointer")(
-        (*strm).opaque,
+        strm.opaque,
         1 as crate::stdlib::uInt,
         ::core::mem::size_of::<crate::src::inflate::inflate_state>() as crate::stdlib::uInt,
     ) as *mut crate::src::inflate::inflate_state;
     if state.is_null() {
         return crate::zlib_h::Z_MEM_ERROR;
     }
-    (*strm).state = state as *mut crate::src::deflate::internal_state;
+    strm.state = state as *mut crate::src::deflate::internal_state;
     let state = &mut *state;
     initialize_inflate_back_state(state, windowBits);
-    state.window = window;
+    state.window = window.as_mut_ptr();
     return crate::zlib_h::Z_OK;
 }
 #[export_name = "inflateBackInit_"]
@@ -143,6 +145,19 @@ pub unsafe extern "C" fn inflateBackInit__ffi(
     mut version: *const ::core::ffi::c_char,
     mut stream_size: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
+    let version = version.as_ref();
+    let strm = strm.as_mut();
+    let window = if windowBits >= 8 as ::core::ffi::c_int
+        && windowBits <= 15 as ::core::ffi::c_int
+        && !window.is_null()
+    {
+        Some(::core::slice::from_raw_parts_mut(
+            window,
+            (1usize) << windowBits,
+        ))
+    } else {
+        None
+    };
     inflateBackInit_(strm, windowBits, window, version, stream_size)
 }
 pub unsafe extern "C" fn inflateBack(
