@@ -4032,13 +4032,15 @@ unsafe fn build_tree(
     (*s).heap_max = crate::src::deflate::HEAP_SIZE;
     n = 0 as ::core::ffi::c_int;
     while n < elems {
-        if (*tree.offset(n as isize)).fc.value as ::core::ffi::c_int != 0 as ::core::ffi::c_int {
+        if (*tree.wrapping_add(n as usize)).fc.value as ::core::ffi::c_int
+            != 0 as ::core::ffi::c_int
+        {
             max_code = n;
             (*s).heap_len += 1;
             (*s).heap[(*s).heap_len as usize] = max_code;
             (*s).depth[n as usize] = 0 as crate::zutil_h::uch;
         } else {
-            (*tree.offset(n as isize)).dl.len = 0 as crate::zutil_h::ush;
+            (*tree.wrapping_add(n as usize)).dl.len = 0 as crate::zutil_h::ush;
         }
         n += 1;
     }
@@ -4046,13 +4048,13 @@ unsafe fn build_tree(
         (*s).heap_len += 1;
         (*s).heap[(*s).heap_len as usize] = supplemental_tree_node(&mut max_code);
         node = (*s).heap[(*s).heap_len as usize];
-        (*tree.offset(node as isize)).fc.value = 1 as crate::zutil_h::ush;
+        (*tree.wrapping_add(node as usize)).fc.value = 1 as crate::zutil_h::ush;
         (*s).depth[node as usize] = 0 as crate::zutil_h::uch;
         (*s).opt_len = (*s).opt_len.wrapping_sub(1);
         if !stree.is_null() {
             (*s).static_len = (*s)
                 .static_len
-                .wrapping_sub((*stree.offset(node as isize)).dl.len as crate::zutil_h::ulg);
+                .wrapping_sub((*stree.wrapping_add(node as usize)).dl.len as crate::zutil_h::ulg);
         }
     }
     (*desc).max_code = max_code;
@@ -4073,9 +4075,9 @@ unsafe fn build_tree(
         (*s).heap[(*s).heap_max as usize] = n;
         (*s).heap_max -= 1;
         (*s).heap[(*s).heap_max as usize] = m;
-        (*tree.offset(node as isize)).fc.value = combined_tree_frequency(
-            (*tree.offset(n as isize)).fc.value,
-            (*tree.offset(m as isize)).fc.value,
+        (*tree.wrapping_add(node as usize)).fc.value = combined_tree_frequency(
+            (*tree.wrapping_add(n as usize)).fc.value,
+            (*tree.wrapping_add(m as usize)).fc.value,
         );
         (*s).depth[node as usize] = ((if (*s).depth[n as usize] as ::core::ffi::c_int
             >= (*s).depth[m as usize] as ::core::ffi::c_int
@@ -4084,9 +4086,9 @@ unsafe fn build_tree(
         } else {
             (*s).depth[m as usize] as ::core::ffi::c_int
         }) + 1 as ::core::ffi::c_int) as crate::zutil_h::uch;
-        let ref mut c2rust_fresh56 = (*tree.offset(m as isize)).dl.dad;
+        let ref mut c2rust_fresh56 = (*tree.wrapping_add(m as usize)).dl.dad;
         *c2rust_fresh56 = node as crate::zutil_h::ush;
-        (*tree.offset(n as isize)).dl.dad = *c2rust_fresh56;
+        (*tree.wrapping_add(n as usize)).dl.dad = *c2rust_fresh56;
         let c2rust_fresh57 = node;
         node = node + 1;
         (*s).heap[SMALLEST as usize] = c2rust_fresh57;
