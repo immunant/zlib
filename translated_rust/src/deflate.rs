@@ -929,32 +929,6 @@ fn read_buf_impl(
     strm.total_in = strm.total_in.wrapping_add(len as crate::stdlib::uLong);
 }
 
-/// Append bytes to the caller's current output range and commit the stream
-/// cursor.  The pointer-to-slice conversion is centralized here, after the
-/// caller has checked the requested length against `avail_out`.
-fn write_stream_bytes(
-    strm: &mut crate::zlib_h::z_stream_s,
-    bytes: &[crate::stdlib::Bytef],
-) -> bool {
-    if bytes.len() > strm.avail_out as usize || (bytes.len() != 0 && strm.next_out.is_null()) {
-        return false;
-    }
-    if !bytes.is_empty() {
-        // `avail_out` describes a writable range established by the ABI
-        // caller.  The length above is bounded by that range.
-        let output = unsafe { core::slice::from_raw_parts_mut(strm.next_out, bytes.len()) };
-        output.copy_from_slice(bytes);
-        strm.next_out = strm.next_out.wrapping_add(bytes.len());
-        strm.avail_out = strm
-            .avail_out
-            .wrapping_sub(bytes.len() as crate::stdlib::uInt);
-        strm.total_out = strm
-            .total_out
-            .wrapping_add(bytes.len() as crate::stdlib::uLong);
-    }
-    true
-}
-
 /// Refill the LZ window from a bounded view of the stream's current input.
 ///
 /// `input` starts at the stream cursor on entry.  The stream's decreasing
@@ -2275,9 +2249,8 @@ fn put_short_msb(s: &mut crate::src::deflate::deflate_state, b: crate::stdlib::u
 
 /// Move pending compressed bytes into the caller's bounded output range.
 ///
-/// The pending bytes are owned by `s`; `write_stream_bytes()` is the sole
-/// stream-output boundary and validates the ABI cursor before creating its
-/// short-lived output slice.
+/// The pending bytes are owned by `s`; the caller supplies the bounded output
+/// slice, so this helper never needs to access the ABI cursor directly.
 fn flush_pending_impl(
     s: &mut crate::src::deflate::deflate_state,
     strm: &mut crate::zlib_h::z_stream_s,
