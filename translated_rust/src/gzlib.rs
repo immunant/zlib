@@ -765,8 +765,8 @@ pub unsafe extern "C" fn gzerror_ffi(
         return ::core::ptr::null::<::core::ffi::c_char>();
     }
     let (err, message) = gzerror(state);
-    if !errnum.is_null() {
-        *errnum = err;
+    if let Some(errnum_ref) = errnum.as_mut() {
+        *errnum_ref = err;
     }
     match message {
         GzErrorMessage::OutOfMemory => b"out of memory\0".as_ptr() as *const ::core::ffi::c_char,

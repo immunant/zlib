@@ -1957,12 +1957,11 @@ pub unsafe extern "C" fn deflate_ffi(
                     .copy_from_slice(&extra[gzindex..gzindex + copy_len]);
                 (*s).pending = (*s).pending_buf_size;
                 if (*(*s).gzhead).hcrc != 0 && (*s).pending > beg {
-                    let hcrc_bytes = ::core::slice::from_raw_parts(
-                        (*s).pending_buf.offset(beg as isize),
-                        ((*s).pending as crate::stdlib::z_size_t)
-                            .wrapping_sub(beg as crate::stdlib::z_size_t)
-                            as usize,
+                    let pending_buf = ::core::slice::from_raw_parts(
+                        (*s).pending_buf,
+                        (*s).pending_buf_size as usize,
                     );
+                    let hcrc_bytes = &pending_buf[beg as usize..(*s).pending as usize];
                     (*strm).adler = crate::src::crc32::crc32_update((*strm).adler, hcrc_bytes);
                 }
                 (*s).gzindex = (*s).gzindex.wrapping_add(copy);
@@ -1983,11 +1982,9 @@ pub unsafe extern "C" fn deflate_ffi(
                 .copy_from_slice(&extra[gzindex..gzindex + left_len]);
             (*s).pending = (*s).pending.wrapping_add(left);
             if (*(*s).gzhead).hcrc != 0 && (*s).pending > beg {
-                let hcrc_bytes = ::core::slice::from_raw_parts(
-                    (*s).pending_buf.offset(beg as isize),
-                    ((*s).pending as crate::stdlib::z_size_t)
-                        .wrapping_sub(beg as crate::stdlib::z_size_t) as usize,
-                );
+                let pending_buf =
+                    ::core::slice::from_raw_parts((*s).pending_buf, (*s).pending_buf_size as usize);
+                let hcrc_bytes = &pending_buf[beg as usize..(*s).pending as usize];
                 (*strm).adler = crate::src::crc32::crc32_update((*strm).adler, hcrc_bytes);
             }
             (*s).gzindex = 0 as crate::zutil_h::ulg;
@@ -2001,12 +1998,11 @@ pub unsafe extern "C" fn deflate_ffi(
             loop {
                 if (*s).pending == (*s).pending_buf_size {
                     if (*(*s).gzhead).hcrc != 0 && (*s).pending > beg_0 {
-                        let hcrc_bytes = ::core::slice::from_raw_parts(
-                            (*s).pending_buf.offset(beg_0 as isize),
-                            ((*s).pending as crate::stdlib::z_size_t)
-                                .wrapping_sub(beg_0 as crate::stdlib::z_size_t)
-                                as usize,
+                        let pending_buf = ::core::slice::from_raw_parts(
+                            (*s).pending_buf,
+                            (*s).pending_buf_size as usize,
                         );
+                        let hcrc_bytes = &pending_buf[beg_0 as usize..(*s).pending as usize];
                         (*strm).adler = crate::src::crc32::crc32_update((*strm).adler, hcrc_bytes);
                     }
                     flush_pending(&mut *s);
@@ -2033,12 +2029,9 @@ pub unsafe extern "C" fn deflate_ffi(
                 }
             }
             if (*(*s).gzhead).hcrc != 0 && (*s).pending > beg_0 {
-                let hcrc_bytes = ::core::slice::from_raw_parts(
-                    (*s).pending_buf.offset(beg_0 as isize),
-                    ((*s).pending as crate::stdlib::z_size_t)
-                        .wrapping_sub(beg_0 as crate::stdlib::z_size_t)
-                        as usize,
-                );
+                let pending_buf =
+                    ::core::slice::from_raw_parts((*s).pending_buf, (*s).pending_buf_size as usize);
+                let hcrc_bytes = &pending_buf[beg_0 as usize..(*s).pending as usize];
                 (*strm).adler = crate::src::crc32::crc32_update((*strm).adler, hcrc_bytes);
             }
             (*s).gzindex = 0 as crate::zutil_h::ulg;
@@ -2052,12 +2045,11 @@ pub unsafe extern "C" fn deflate_ffi(
             loop {
                 if (*s).pending == (*s).pending_buf_size {
                     if (*(*s).gzhead).hcrc != 0 && (*s).pending > beg_1 {
-                        let hcrc_bytes = ::core::slice::from_raw_parts(
-                            (*s).pending_buf.offset(beg_1 as isize),
-                            ((*s).pending as crate::stdlib::z_size_t)
-                                .wrapping_sub(beg_1 as crate::stdlib::z_size_t)
-                                as usize,
+                        let pending_buf = ::core::slice::from_raw_parts(
+                            (*s).pending_buf,
+                            (*s).pending_buf_size as usize,
                         );
+                        let hcrc_bytes = &pending_buf[beg_1 as usize..(*s).pending as usize];
                         (*strm).adler = crate::src::crc32::crc32_update((*strm).adler, hcrc_bytes);
                     }
                     flush_pending(&mut *s);
@@ -2085,12 +2077,9 @@ pub unsafe extern "C" fn deflate_ffi(
                 }
             }
             if (*(*s).gzhead).hcrc != 0 && (*s).pending > beg_1 {
-                let hcrc_bytes = ::core::slice::from_raw_parts(
-                    (*s).pending_buf.offset(beg_1 as isize),
-                    ((*s).pending as crate::stdlib::z_size_t)
-                        .wrapping_sub(beg_1 as crate::stdlib::z_size_t)
-                        as usize,
-                );
+                let pending_buf =
+                    ::core::slice::from_raw_parts((*s).pending_buf, (*s).pending_buf_size as usize);
+                let hcrc_bytes = &pending_buf[beg_1 as usize..(*s).pending as usize];
                 (*strm).adler = crate::src::crc32::crc32_update((*strm).adler, hcrc_bytes);
             }
         }
