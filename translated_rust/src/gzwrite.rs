@@ -354,6 +354,19 @@ fn gzsetparams_needs_update(
     level != current_level || strategy != current_strategy
 }
 
+/// Apply the descriptor-close outcome to the write-side close result.  The
+/// compressor, descriptor, and owned buffers remain at the raw boundary.
+fn gzclose_write_result(
+    close_result: ::core::ffi::c_int,
+    result_before_close: ::core::ffi::c_int,
+) -> ::core::ffi::c_int {
+    if close_result == -1 {
+        crate::zlib_h::Z_ERRNO
+    } else {
+        result_before_close
+    }
+}
+
 unsafe extern "C" fn gz_zero(mut state: crate::gzguts_h::gz_statep) -> ::core::ffi::c_int {
     let mut first: ::core::ffi::c_int = 0;
     let mut ret: ::core::ffi::c_int = 0;
@@ -772,11 +785,9 @@ pub unsafe extern "C" fn gzclose_w(mut file: crate::zlib_h::gzFile) -> ::core::f
         ::core::ptr::null::<::core::ffi::c_char>(),
     );
     crate::stdlib::free((*state).path as *mut ::core::ffi::c_void);
-    if crate::stdlib::close((*state).fd) == -1 as ::core::ffi::c_int {
-        ret = crate::zlib_h::Z_ERRNO;
-    }
+    let close_result = crate::stdlib::close((*state).fd);
     crate::stdlib::free(state as *mut ::core::ffi::c_void);
-    return ret;
+    gzclose_write_result(close_result, ret)
 }
 #[export_name = "gzclose_w"]
 

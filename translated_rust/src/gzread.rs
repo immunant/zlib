@@ -1008,6 +1008,22 @@ pub unsafe extern "C" fn gzgets_ffi(
 fn gzdirect_state(direct: ::core::ffi::c_int) -> ::core::ffi::c_int {
     (direct == 1) as ::core::ffi::c_int
 }
+
+/// Map the read-side saved stream status and descriptor-close result to the
+/// public close status.  Resource release remains at the raw boundary.
+fn gzclose_read_result(
+    state_err: ::core::ffi::c_int,
+    close_result: ::core::ffi::c_int,
+) -> ::core::ffi::c_int {
+    if close_result != 0 {
+        crate::zlib_h::Z_ERRNO
+    } else if state_err == crate::zlib_h::Z_BUF_ERROR {
+        crate::zlib_h::Z_BUF_ERROR
+    } else {
+        crate::zlib_h::Z_OK
+    }
+}
+
 #[export_name = "gzdirect"]
 
 pub unsafe extern "C" fn gzdirect_ffi(mut file: crate::zlib_h::gzFile) -> ::core::ffi::c_int {
@@ -1024,8 +1040,6 @@ pub unsafe extern "C" fn gzdirect_ffi(mut file: crate::zlib_h::gzFile) -> ::core
     gzdirect_state(state.direct)
 }
 pub unsafe extern "C" fn gzclose_r(mut file: crate::zlib_h::gzFile) -> ::core::ffi::c_int {
-    let mut ret: ::core::ffi::c_int = 0;
-    let mut err: ::core::ffi::c_int = 0;
     let mut state: crate::gzguts_h::gz_statep =
         ::core::ptr::null_mut::<crate::gzguts_h::gz_state>();
     if file.is_null() {
@@ -1042,24 +1056,16 @@ pub unsafe extern "C" fn gzclose_r(mut file: crate::zlib_h::gzFile) -> ::core::f
         crate::stdlib::free((*state).out as *mut ::core::ffi::c_void);
         crate::stdlib::free((*state).in_0 as *mut ::core::ffi::c_void);
     }
-    err = if (*state).err == crate::zlib_h::Z_BUF_ERROR {
-        crate::zlib_h::Z_BUF_ERROR
-    } else {
-        crate::zlib_h::Z_OK
-    };
+    let state_err = (*state).err;
     crate::src::gzlib::gz_error(
         state as *mut crate::gzguts_h::gz_state,
         crate::zlib_h::Z_OK,
         ::core::ptr::null::<::core::ffi::c_char>(),
     );
     crate::stdlib::free((*state).path as *mut ::core::ffi::c_void);
-    ret = crate::stdlib::close((*state).fd);
+    let close_result = crate::stdlib::close((*state).fd);
     crate::stdlib::free(state as *mut ::core::ffi::c_void);
-    return if ret != 0 {
-        crate::zlib_h::Z_ERRNO
-    } else {
-        err
-    };
+    gzclose_read_result(state_err, close_result)
 }
 #[export_name = "gzclose_r"]
 
