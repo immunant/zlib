@@ -895,6 +895,10 @@ fn gz_decomp_output_rewind_len(have: ::core::ffi::c_uint) -> usize {
     have as usize
 }
 
+fn gz_decomp_should_continue(ret: ::core::ffi::c_int, avail_out: crate::stdlib::uInt) -> bool {
+    avail_out != 0 && ret != crate::zlib_h::Z_STREAM_END
+}
+
 enum GzDecompResult {
     RestartLook,
     Error,
@@ -927,7 +931,7 @@ fn gz_decomp_decision(
         GzDecompAction::TrailingJunk
     } else if ret == crate::zlib_h::Z_DATA_ERROR {
         GzDecompAction::DataError
-    } else if avail_out != 0 && ret != crate::zlib_h::Z_STREAM_END {
+    } else if gz_decomp_should_continue(ret, avail_out) {
         GzDecompAction::Continue
     } else {
         GzDecompAction::Stop
@@ -1477,6 +1481,30 @@ mod tests {
             gz_decomp_output_rewind_len(::core::ffi::c_uint::MAX),
             ::core::ffi::c_uint::MAX as usize,
         );
+    }
+
+    #[test]
+    fn gz_decomp_should_continue_requires_remaining_output_space() {
+        assert!(!gz_decomp_should_continue(crate::zlib_h::Z_OK, 0));
+        assert!(!gz_decomp_should_continue(crate::zlib_h::Z_BUF_ERROR, 0));
+    }
+
+    #[test]
+    fn gz_decomp_should_continue_stops_at_stream_end() {
+        assert!(!gz_decomp_should_continue(crate::zlib_h::Z_STREAM_END, 1));
+        assert!(!gz_decomp_should_continue(
+            crate::zlib_h::Z_STREAM_END,
+            crate::stdlib::uInt::MAX,
+        ));
+    }
+
+    #[test]
+    fn gz_decomp_should_continue_for_nonterminal_results_with_space() {
+        assert!(gz_decomp_should_continue(crate::zlib_h::Z_OK, 1));
+        assert!(gz_decomp_should_continue(
+            crate::zlib_h::Z_BUF_ERROR,
+            crate::stdlib::uInt::MAX,
+        ));
     }
 
     #[test]

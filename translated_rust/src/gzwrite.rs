@@ -248,6 +248,20 @@ fn gz_has_pending_input(avail_in: crate::stdlib::uInt) -> bool {
     avail_in != 0
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum GzWriteBufferedInputAction {
+    ResetBuffer,
+    KeepPending,
+}
+
+fn gz_write_buffered_input_action(avail_in: crate::stdlib::uInt) -> GzWriteBufferedInputAction {
+    if gz_has_pending_input(avail_in) {
+        GzWriteBufferedInputAction::KeepPending
+    } else {
+        GzWriteBufferedInputAction::ResetBuffer
+    }
+}
+
 fn gz_has_pending_skip(skip: crate::stdlib::off64_t) -> bool {
     skip != 0
 }
@@ -905,9 +919,12 @@ unsafe fn gz_write(
     }
     if gz_write_uses_buffered_path(len, state.size) {
         loop {
-            if !gz_has_pending_input(state.strm.avail_in) {
-                state.strm.next_in = state.in_0;
-                state.x.have = 0;
+            match gz_write_buffered_input_action(state.strm.avail_in) {
+                GzWriteBufferedInputAction::ResetBuffer => {
+                    state.strm.next_in = state.in_0;
+                    state.x.have = 0;
+                }
+                GzWriteBufferedInputAction::KeepPending => {}
             }
             let have = state.x.have;
             let progress =
@@ -1316,8 +1333,9 @@ mod tests {
         gz_comp_write_chunk_len, gz_comp_write_failed, gz_comp_write_failure, gz_comp_write_result,
         gz_has_pending_input, gz_has_pending_skip, gz_init_stream_defaults, gz_write_advanced_pos,
         gz_write_apply_chunk_progress, gz_write_apply_direct_progress, gz_write_buffered_copy_len,
-        gz_write_buffered_progress, gz_write_chunk_len, gz_write_consumed, gz_write_direct_action,
-        gz_write_errno_is_retryable, gz_write_error_result, gz_write_is_empty, gz_write_progress,
+        gz_write_buffered_input_action, gz_write_buffered_progress, gz_write_chunk_len,
+        gz_write_consumed, gz_write_direct_action, gz_write_errno_is_retryable,
+        gz_write_error_result, gz_write_is_empty, gz_write_progress,
         gz_write_remaining_after_consumption, gz_write_state_is_usable,
         gz_write_uses_buffered_path, gz_zero_action, gz_zero_apply_progress, gz_zero_chunk_len,
         gz_zero_chunk_step, gz_zero_initial_step, gz_zero_needs_initialization,
@@ -1327,8 +1345,28 @@ mod tests {
         gzsetparams_settings_match, gzsetparams_state_is_usable, gzwrite_request,
         GzCloseBufferAction, GzCompOutputBufferAction, GzCompResetAction, GzCompWriteFailure,
         GzCompWriteResult, GzFlushAction, GzPutcWriteAction, GzSetParamsBufferAction,
-        GzWriteDirectAction, GzZeroAction, GzZeroStep,
+        GzWriteBufferedInputAction, GzWriteDirectAction, GzZeroAction, GzZeroStep,
     };
+
+    #[test]
+    fn gz_write_buffered_input_action_resets_when_no_pending_input() {
+        assert_eq!(
+            gz_write_buffered_input_action(0),
+            GzWriteBufferedInputAction::ResetBuffer
+        );
+    }
+
+    #[test]
+    fn gz_write_buffered_input_action_keeps_pending_input() {
+        assert_eq!(
+            gz_write_buffered_input_action(1),
+            GzWriteBufferedInputAction::KeepPending
+        );
+        assert_eq!(
+            gz_write_buffered_input_action(crate::stdlib::uInt::MAX),
+            GzWriteBufferedInputAction::KeepPending
+        );
+    }
 
     #[test]
     fn gzflush_action_returns_state_error_only_for_zero_fill_failure() {

@@ -947,6 +947,16 @@ fn deflate_reset_status_and_adler(
     }
 }
 
+fn deflate_set_dictionary_allowed(
+    wrap: ::core::ffi::c_int,
+    status: ::core::ffi::c_int,
+    lookahead: crate::stdlib::uInt,
+) -> bool {
+    wrap != 2 as ::core::ffi::c_int
+        && (wrap != 1 as ::core::ffi::c_int || status == crate::src::deflate::INIT_STATE)
+        && lookahead == 0
+}
+
 fn dictionary_tail_offset(
     dict_length: crate::stdlib::uInt,
     window_size: crate::stdlib::uInt,
@@ -983,10 +993,7 @@ pub unsafe extern "C" fn deflateSetDictionary(
     }
     s = (*strm).state as *mut crate::src::deflate::deflate_state;
     wrap = (*s).wrap;
-    if wrap == 2 as ::core::ffi::c_int
-        || wrap == 1 as ::core::ffi::c_int && (*s).status != crate::src::deflate::INIT_STATE
-        || (*s).lookahead != 0
-    {
+    if !deflate_set_dictionary_allowed(wrap, (*s).status, (*s).lookahead) {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
     if wrap == 1 as ::core::ffi::c_int {
@@ -3890,18 +3897,18 @@ mod tests {
         deflate_pending_value, deflate_preflight, deflate_prime_bits_valid,
         deflate_request_is_invalid, deflate_reset_status_and_adler, deflate_rle_can_scan_match,
         deflate_rle_clamp_match_length, deflate_rle_match_state_after_emit,
-        deflate_should_return_buf_error, deflate_state_check_impl, deflate_state_check_result,
-        deflate_state_is_usable, deflate_state_status_valid, deflate_version_matches,
-        dictionary_tail_offset, fill_window_available_space, fill_window_cursor,
-        fill_window_insert_after_slide, fill_window_should_refill, fill_window_should_slide,
-        fill_window_zero_range, flush_pending_accounting, gzip_default_xfl, gzip_header_crc,
-        gzip_header_crc_pending, gzip_header_crc_pending_range, lm_match_parameters,
-        longest_match_limit, longest_match_search_parameters, normalize_deflate_params,
-        pending_buffer_needs_flush, pending_output_len, pending_short_cursors, read_buf_len,
-        read_buf_total_in_after_copy, short_msb_bytes, slide_hash_entry,
-        stored_block_available_output, stored_block_can_emit, stored_block_is_last,
-        stored_block_min_size, stored_block_should_wait, stored_insert_after_input,
-        symbol_triplet_cursors, zlib_header, DeflatePreflight,
+        deflate_set_dictionary_allowed, deflate_should_return_buf_error, deflate_state_check_impl,
+        deflate_state_check_result, deflate_state_is_usable, deflate_state_status_valid,
+        deflate_version_matches, dictionary_tail_offset, fill_window_available_space,
+        fill_window_cursor, fill_window_insert_after_slide, fill_window_should_refill,
+        fill_window_should_slide, fill_window_zero_range, flush_pending_accounting,
+        gzip_default_xfl, gzip_header_crc, gzip_header_crc_pending, gzip_header_crc_pending_range,
+        lm_match_parameters, longest_match_limit, longest_match_search_parameters,
+        normalize_deflate_params, pending_buffer_needs_flush, pending_output_len,
+        pending_short_cursors, read_buf_len, read_buf_total_in_after_copy, short_msb_bytes,
+        slide_hash_entry, stored_block_available_output, stored_block_can_emit,
+        stored_block_is_last, stored_block_min_size, stored_block_should_wait,
+        stored_insert_after_input, symbol_triplet_cursors, zlib_header, DeflatePreflight,
     };
 
     #[test]
@@ -4753,5 +4760,34 @@ mod tests {
             deflate_reset_status_and_adler(0),
             (crate::src::deflate::INIT_STATE, 1),
         );
+    }
+
+    #[test]
+    fn deflate_set_dictionary_allowed_requires_matching_wrapper_state() {
+        assert!(deflate_set_dictionary_allowed(
+            0,
+            crate::src::deflate::BUSY_STATE,
+            0
+        ));
+        assert!(deflate_set_dictionary_allowed(
+            1,
+            crate::src::deflate::INIT_STATE,
+            0,
+        ));
+        assert!(!deflate_set_dictionary_allowed(
+            2,
+            crate::src::deflate::INIT_STATE,
+            0,
+        ));
+        assert!(!deflate_set_dictionary_allowed(
+            1,
+            crate::src::deflate::BUSY_STATE,
+            0,
+        ));
+        assert!(!deflate_set_dictionary_allowed(
+            0,
+            crate::src::deflate::INIT_STATE,
+            1,
+        ));
     }
 }
