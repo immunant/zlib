@@ -1044,25 +1044,10 @@ pub unsafe extern "C" fn deflateSetHeader_ffi(
 ) -> ::core::ffi::c_int {
     deflateSetHeader(strm, head)
 }
-pub unsafe extern "C" fn deflatePending(
-    mut strm: crate::zlib_h::z_streamp,
-    mut pending: *mut ::core::ffi::c_uint,
-    mut bits: *mut ::core::ffi::c_int,
-) -> ::core::ffi::c_int {
-    if deflateStateCheck(strm) != 0 {
-        return crate::zlib_h::Z_STREAM_ERROR;
-    }
-    if !bits.is_null() {
-        *bits = (*(*strm).state).bi_valid;
-    }
-    if !pending.is_null() {
-        *pending = (*(*strm).state).pending as ::core::ffi::c_uint;
-        if *pending as crate::zutil_h::ulg != (*(*strm).state).pending {
-            *pending = -1 as ::core::ffi::c_int as ::core::ffi::c_uint;
-            return crate::zlib_h::Z_BUF_ERROR;
-        }
-    }
-    return crate::zlib_h::Z_OK;
+pub fn deflatePending(
+    state: &crate::src::deflate::deflate_state,
+) -> (crate::zutil_h::ulg, ::core::ffi::c_int) {
+    return (state.pending, state.bi_valid);
 }
 #[export_name = "deflatePending"]
 
@@ -1071,19 +1056,25 @@ pub unsafe extern "C" fn deflatePending_ffi(
     mut pending: *mut ::core::ffi::c_uint,
     mut bits: *mut ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
-    deflatePending(strm, pending, bits)
-}
-pub unsafe extern "C" fn deflateUsed(
-    mut strm: crate::zlib_h::z_streamp,
-    mut bits: *mut ::core::ffi::c_int,
-) -> ::core::ffi::c_int {
     if deflateStateCheck(strm) != 0 {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
+    let state = &*(*strm).state;
+    let (pending_value, bits_value) = deflatePending(state);
     if !bits.is_null() {
-        *bits = (*(*strm).state).bi_used;
+        *bits = bits_value;
+    }
+    if !pending.is_null() {
+        *pending = pending_value as ::core::ffi::c_uint;
+        if *pending as crate::zutil_h::ulg != pending_value {
+            *pending = -1 as ::core::ffi::c_int as ::core::ffi::c_uint;
+            return crate::zlib_h::Z_BUF_ERROR;
+        }
     }
     return crate::zlib_h::Z_OK;
+}
+pub fn deflateUsed(state: &crate::src::deflate::deflate_state) -> ::core::ffi::c_int {
+    return state.bi_used;
 }
 #[export_name = "deflateUsed"]
 
@@ -1091,7 +1082,14 @@ pub unsafe extern "C" fn deflateUsed_ffi(
     mut strm: crate::zlib_h::z_streamp,
     mut bits: *mut ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
-    deflateUsed(strm, bits)
+    if deflateStateCheck(strm) != 0 {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    }
+    let state = &*(*strm).state;
+    if !bits.is_null() {
+        *bits = deflateUsed(state);
+    }
+    return crate::zlib_h::Z_OK;
 }
 pub unsafe extern "C" fn deflatePrime(
     mut strm: crate::zlib_h::z_streamp,

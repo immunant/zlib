@@ -2256,25 +2256,21 @@ pub unsafe extern "C" fn inflateSync(mut strm: crate::zlib_h::z_streamp) -> ::co
 pub unsafe extern "C" fn inflateSync_ffi(mut strm: crate::zlib_h::z_streamp) -> ::core::ffi::c_int {
     inflateSync(strm)
 }
-pub unsafe extern "C" fn inflateSyncPoint(
-    mut strm: crate::zlib_h::z_streamp,
-) -> ::core::ffi::c_int {
-    let mut state: *mut crate::src::inflate::inflate_state =
-        ::core::ptr::null_mut::<crate::src::inflate::inflate_state>();
-    if inflateStateCheck(strm) != 0 {
-        return crate::zlib_h::Z_STREAM_ERROR;
-    }
-    state = (*strm).state as *mut crate::src::inflate::inflate_state;
-    return ((*state).mode as ::core::ffi::c_uint
+pub fn inflateSyncPoint(state: &crate::src::inflate::inflate_state) -> ::core::ffi::c_int {
+    return (state.mode as ::core::ffi::c_uint
         == crate::src::inflate::STORED as ::core::ffi::c_int as ::core::ffi::c_uint
-        && (*state).bits == 0 as ::core::ffi::c_uint) as ::core::ffi::c_int;
+        && state.bits == 0 as ::core::ffi::c_uint) as ::core::ffi::c_int;
 }
 #[export_name = "inflateSyncPoint"]
 
 pub unsafe extern "C" fn inflateSyncPoint_ffi(
     mut strm: crate::zlib_h::z_streamp,
 ) -> ::core::ffi::c_int {
-    inflateSyncPoint(strm)
+    if inflateStateCheck(strm) != 0 {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    }
+    let state = &*((*strm).state as *mut crate::src::inflate::inflate_state);
+    inflateSyncPoint(state)
 }
 pub unsafe extern "C" fn inflateCopy(
     mut dest: crate::zlib_h::z_streamp,
@@ -2380,17 +2376,11 @@ pub unsafe extern "C" fn inflateCopy_ffi(
 ) -> ::core::ffi::c_int {
     inflateCopy(dest, source)
 }
-pub unsafe extern "C" fn inflateUndermine(
-    mut strm: crate::zlib_h::z_streamp,
-    mut _subvert: ::core::ffi::c_int,
+pub fn inflateUndermine(
+    state: &mut crate::src::inflate::inflate_state,
+    _subvert: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
-    let mut state: *mut crate::src::inflate::inflate_state =
-        ::core::ptr::null_mut::<crate::src::inflate::inflate_state>();
-    if inflateStateCheck(strm) != 0 {
-        return crate::zlib_h::Z_STREAM_ERROR;
-    }
-    state = (*strm).state as *mut crate::src::inflate::inflate_state;
-    (*state).sane = 1 as ::core::ffi::c_int;
+    state.sane = 1 as ::core::ffi::c_int;
     return crate::zlib_h::Z_DATA_ERROR;
 }
 #[export_name = "inflateUndermine"]
@@ -2399,22 +2389,20 @@ pub unsafe extern "C" fn inflateUndermine_ffi(
     mut strm: crate::zlib_h::z_streamp,
     mut subvert: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
-    inflateUndermine(strm, subvert)
-}
-pub unsafe extern "C" fn inflateValidate(
-    mut strm: crate::zlib_h::z_streamp,
-    mut check: ::core::ffi::c_int,
-) -> ::core::ffi::c_int {
-    let mut state: *mut crate::src::inflate::inflate_state =
-        ::core::ptr::null_mut::<crate::src::inflate::inflate_state>();
     if inflateStateCheck(strm) != 0 {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    state = (*strm).state as *mut crate::src::inflate::inflate_state;
-    if check != 0 && (*state).wrap != 0 {
-        (*state).wrap |= 4 as ::core::ffi::c_int;
+    let state = &mut *((*strm).state as *mut crate::src::inflate::inflate_state);
+    inflateUndermine(state, subvert)
+}
+pub fn inflateValidate(
+    state: &mut crate::src::inflate::inflate_state,
+    check: ::core::ffi::c_int,
+) -> ::core::ffi::c_int {
+    if check != 0 && state.wrap != 0 {
+        state.wrap |= 4 as ::core::ffi::c_int;
     } else {
-        (*state).wrap &= !(4 as ::core::ffi::c_int);
+        state.wrap &= !(4 as ::core::ffi::c_int);
     }
     return crate::zlib_h::Z_OK;
 }
@@ -2424,26 +2412,24 @@ pub unsafe extern "C" fn inflateValidate_ffi(
     mut strm: crate::zlib_h::z_streamp,
     mut check: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
-    inflateValidate(strm, check)
-}
-pub unsafe extern "C" fn inflateMark(mut strm: crate::zlib_h::z_streamp) -> ::core::ffi::c_long {
-    let mut state: *mut crate::src::inflate::inflate_state =
-        ::core::ptr::null_mut::<crate::src::inflate::inflate_state>();
     if inflateStateCheck(strm) != 0 {
-        return -((1 as ::core::ffi::c_long) << 16 as ::core::ffi::c_int);
+        return crate::zlib_h::Z_STREAM_ERROR;
     }
-    state = (*strm).state as *mut crate::src::inflate::inflate_state;
-    return (((*state).back as ::core::ffi::c_long as ::core::ffi::c_ulong)
+    let state = &mut *((*strm).state as *mut crate::src::inflate::inflate_state);
+    inflateValidate(state, check)
+}
+pub fn inflateMark(state: &crate::src::inflate::inflate_state) -> ::core::ffi::c_long {
+    return ((state.back as ::core::ffi::c_long as ::core::ffi::c_ulong)
         << 16 as ::core::ffi::c_int) as ::core::ffi::c_long
-        + (if (*state).mode as ::core::ffi::c_uint
+        + (if state.mode as ::core::ffi::c_uint
             == crate::src::inflate::COPY_1 as ::core::ffi::c_int as ::core::ffi::c_uint
         {
-            (*state).length
+            state.length
         } else {
-            if (*state).mode as ::core::ffi::c_uint
+            if state.mode as ::core::ffi::c_uint
                 == crate::src::inflate::MATCH as ::core::ffi::c_int as ::core::ffi::c_uint
             {
-                (*state).was.wrapping_sub((*state).length)
+                state.was.wrapping_sub(state.length)
             } else {
                 0 as ::core::ffi::c_uint
             }
@@ -2454,7 +2440,11 @@ pub unsafe extern "C" fn inflateMark(mut strm: crate::zlib_h::z_streamp) -> ::co
 pub unsafe extern "C" fn inflateMark_ffi(
     mut strm: crate::zlib_h::z_streamp,
 ) -> ::core::ffi::c_long {
-    inflateMark(strm)
+    if inflateStateCheck(strm) != 0 {
+        return -((1 as ::core::ffi::c_long) << 16 as ::core::ffi::c_int);
+    }
+    let state = &*((*strm).state as *mut crate::src::inflate::inflate_state);
+    inflateMark(state)
 }
 pub unsafe extern "C" fn inflateCodesUsed(
     mut strm: crate::zlib_h::z_streamp,
