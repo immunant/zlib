@@ -1546,8 +1546,10 @@ pub unsafe extern "C" fn inflate(
                                                                         );
                                                                         have =
                                                                             have.wrapping_sub(copy);
-                                                                        next = next
-                                                                            .offset(copy as isize);
+                                                                        // `copy` is bounded by the input slice above.
+                                                                        // Advancing this cursor therefore need not use
+                                                                        // `offset`'s in-bounds raw-pointer operation.
+                                                                        next = next.wrapping_add(copy as usize);
                                                                         left =
                                                                             left.wrapping_sub(copy);
                                                                         put = output[copy as usize..].as_mut_ptr();
