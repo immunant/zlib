@@ -723,6 +723,17 @@ struct InflateInput<'a> {
     index: usize,
 }
 
+/// Selects the bounded source for the ordinary decoder's match-copy loop.
+///
+/// A match may refer either to the history window or to bytes already emitted
+/// in the current output buffer.  Keeping the source as an index preserves
+/// the byte-at-a-time, overlapping-copy behavior without rebuilding an
+/// interior raw pointer into either owner.
+enum InflateCopySource {
+    Window(usize),
+    Output(usize),
+}
+
 impl<'a> InflateInput<'a> {
     fn new(bytes: &'a [crate::stdlib::Bytef]) -> Self {
         Self { bytes, index: 0 }
@@ -779,7 +790,6 @@ pub unsafe fn inflate(
     let mut in_0: ::core::ffi::c_uint = 0;
     let mut out: ::core::ffi::c_uint = 0;
     let mut copy: ::core::ffi::c_uint = 0;
-    let mut from: *mut ::core::ffi::c_uchar = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
     let mut here: crate::src::inftrees::code = crate::src::inftrees::code {
         op: 0,
         bits: 0,
@@ -2353,7 +2363,7 @@ pub unsafe fn inflate(
             break;
         }
         copy = out.wrapping_sub(left);
-        if (*state).offset > copy {
+        let source = if (*state).offset > copy {
             copy = (*state).offset.wrapping_sub(copy);
             if copy > (*state).whave {
                 if (*state).sane != 0 {
@@ -2366,46 +2376,39 @@ pub unsafe fn inflate(
                     continue;
                 }
             }
-            if copy > (*state).wnext {
+            let start = if copy > (*state).wnext {
                 copy = copy.wrapping_sub((*state).wnext);
-                from = (*state)
-                    .window
-                    .as_deref_mut()
-                    .expect("inflate window")
-                    .as_mut_ptr()
-                    .wrapping_offset((*state).wsize.wrapping_sub(copy) as isize);
+                (*state).wsize.wrapping_sub(copy) as usize
             } else {
-                from = (*state)
-                    .window
-                    .as_deref_mut()
-                    .expect("inflate window")
-                    .as_mut_ptr()
-                    .wrapping_offset((*state).wnext.wrapping_sub(copy) as isize);
-            }
+                (*state).wnext.wrapping_sub(copy) as usize
+            };
             if copy > (*state).length {
                 copy = (*state).length;
             }
+            InflateCopySource::Window(start)
         } else {
-            from = output
-                .as_mut_ptr()
-                .wrapping_add(put - (*state).offset as usize);
             copy = (*state).length;
-        }
+            InflateCopySource::Output(put - (*state).offset as usize)
+        };
         if copy > left {
             copy = left;
         }
         left = left.wrapping_sub(copy);
         (*state).length = (*state).length.wrapping_sub(copy);
-        loop {
-            let c2rust_fresh30 = from;
-            from = from.wrapping_offset(1);
-            output[put] = *c2rust_fresh30;
-            put += 1;
-            copy = copy.wrapping_sub(1);
-            if copy == 0 {
-                break;
-            }
+        let copy_len = copy as usize;
+        for copied in 0..copy_len {
+            let byte = match source {
+                InflateCopySource::Window(start) => (*state)
+                    .window
+                    .as_deref()
+                    .and_then(|window| window.get(start + copied))
+                    .copied()
+                    .expect("inflate window source"),
+                InflateCopySource::Output(start) => output[start + copied],
+            };
+            output[put + copied] = byte;
         }
+        put += copy_len;
         if (*state).length == 0 as ::core::ffi::c_uint {
             (*state).mode = crate::src::inflate::LEN;
         }
