@@ -25,6 +25,18 @@ pub use crate::zlib_h::Z_NULL;
 pub use crate::zlib_h::Z_OK;
 pub use crate::zlib_h::Z_STREAM_END;
 pub use crate::zlib_h::Z_STREAM_ERROR;
+
+fn uncompress_chunk(remaining: &mut crate::stdlib::z_size_t) -> crate::stdlib::uInt {
+    let max = crate::stdlib::uInt::MAX as crate::stdlib::z_size_t;
+    let chunk = if *remaining > max {
+        crate::stdlib::uInt::MAX
+    } else {
+        *remaining as crate::stdlib::uInt
+    };
+    *remaining = (*remaining).wrapping_sub(chunk as crate::stdlib::z_size_t);
+    chunk
+}
+
 #[export_name = "uncompress2_z"]
 pub unsafe extern "C" fn uncompress2_z_ffi(
     mut dest: *mut crate::stdlib::Bytef,
@@ -49,7 +61,6 @@ pub unsafe extern "C" fn uncompress2_z_ffi(
         reserved: 0,
     };
     let mut err: ::core::ffi::c_int = 0;
-    let max: crate::stdlib::uInt = -1 as ::core::ffi::c_int as crate::stdlib::uInt;
     let mut len: crate::stdlib::z_size_t = 0;
     let mut left: crate::stdlib::z_size_t = 0;
     if sourceLen.is_null()
@@ -81,20 +92,10 @@ pub unsafe extern "C" fn uncompress2_z_ffi(
     stream.avail_out = 0 as crate::stdlib::uInt;
     loop {
         if stream.avail_out == 0 as crate::stdlib::uInt {
-            stream.avail_out = if left > max as crate::stdlib::z_size_t {
-                max
-            } else {
-                left as crate::stdlib::uInt
-            };
-            left = left.wrapping_sub(stream.avail_out as crate::stdlib::z_size_t);
+            stream.avail_out = uncompress_chunk(&mut left);
         }
         if stream.avail_in == 0 as crate::stdlib::uInt {
-            stream.avail_in = if len > max as crate::stdlib::z_size_t {
-                max
-            } else {
-                len as crate::stdlib::uInt
-            };
-            len = len.wrapping_sub(stream.avail_in as crate::stdlib::z_size_t);
+            stream.avail_in = uncompress_chunk(&mut len);
         }
         err = crate::src::inflate::inflate(
             &raw mut stream as *mut _ as *mut crate::zlib_h::z_stream_s,

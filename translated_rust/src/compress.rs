@@ -23,6 +23,18 @@ pub use crate::zlib_h::Z_NO_FLUSH;
 pub use crate::zlib_h::Z_OK;
 pub use crate::zlib_h::Z_STREAM_END;
 pub use crate::zlib_h::Z_STREAM_ERROR;
+
+fn compress_chunk(remaining: &mut crate::stdlib::z_size_t) -> crate::stdlib::uInt {
+    let max = crate::stdlib::uInt::MAX as crate::stdlib::z_size_t;
+    let chunk = if *remaining > max {
+        crate::stdlib::uInt::MAX
+    } else {
+        *remaining as crate::stdlib::uInt
+    };
+    *remaining = (*remaining).wrapping_sub(chunk as crate::stdlib::z_size_t);
+    chunk
+}
+
 #[export_name = "compress2_z"]
 pub unsafe extern "C" fn compress2_z_ffi(
     mut dest: *mut crate::stdlib::Bytef,
@@ -48,7 +60,6 @@ pub unsafe extern "C" fn compress2_z_ffi(
         reserved: 0,
     };
     let mut err: ::core::ffi::c_int = 0;
-    let max: crate::stdlib::uInt = -1 as ::core::ffi::c_int as crate::stdlib::uInt;
     let mut left: crate::stdlib::z_size_t = 0;
     if sourceLen > 0 as crate::stdlib::z_size_t && source.is_null()
         || destLen.is_null()
@@ -76,20 +87,10 @@ pub unsafe extern "C" fn compress2_z_ffi(
     stream.avail_in = 0 as crate::stdlib::uInt;
     loop {
         if stream.avail_out == 0 as crate::stdlib::uInt {
-            stream.avail_out = if left > max as crate::stdlib::z_size_t {
-                max
-            } else {
-                left as crate::stdlib::uInt
-            };
-            left = left.wrapping_sub(stream.avail_out as crate::stdlib::z_size_t);
+            stream.avail_out = compress_chunk(&mut left);
         }
         if stream.avail_in == 0 as crate::stdlib::uInt {
-            stream.avail_in = if sourceLen > max as crate::stdlib::z_size_t {
-                max
-            } else {
-                sourceLen as crate::stdlib::uInt
-            };
-            sourceLen = sourceLen.wrapping_sub(stream.avail_in as crate::stdlib::z_size_t);
+            stream.avail_in = compress_chunk(&mut sourceLen);
         }
         err = crate::src::deflate::deflate(
             &raw mut stream as *mut _ as *mut crate::zlib_h::z_stream_s,
