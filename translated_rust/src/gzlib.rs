@@ -61,27 +61,23 @@ pub use crate::zlib_h::Z_MEM_ERROR;
 pub use crate::zlib_h::Z_OK;
 pub use crate::zlib_h::Z_RLE;
 
-// A write handle's paired allocations are owned by `GzBuffers`, but the
-// compressed-write setup needs only these bounded byte views and the checked
-// buffer size.  Keep that hand-off pointer-free so the embedded-deflate owner
-// can eventually take this view instead of reaching into `gz_state`.
-pub(crate) struct GzWriteBufferView<'a> {
+// A write handle's paired allocations are owned by `GzBuffers`, but embedded
+// deflate setup needs only the bounded compressed-output allocation and its
+// checked size.  Keeping that hand-off separate from the input allocation
+// lets `gz_comp()` later retain an independent bounded input borrow while it
+// constructs the complete request owner.
+pub(crate) struct GzWriteOutputView<'a> {
     size: crate::stdlib::uInt,
-    input: &'a mut [u8],
-    output: Option<&'a mut [u8]>,
+    output: &'a mut [u8],
 }
 
-impl<'a> GzWriteBufferView<'a> {
+impl<'a> GzWriteOutputView<'a> {
     pub(crate) fn size(&self) -> crate::stdlib::uInt {
         self.size
     }
 
-    pub(crate) fn input_mut(&mut self) -> &mut [u8] {
-        self.input
-    }
-
-    pub(crate) fn output_mut(&mut self) -> Option<&mut [u8]> {
-        self.output.as_deref_mut()
+    pub(crate) fn output_mut(&mut self) -> &mut [u8] {
+        self.output
     }
 }
 
@@ -125,19 +121,16 @@ impl crate::gzguts_h::GzBuffers {
         })
     }
 
-    // Construct the write-side byte view only after both owned allocations
+    // Construct the compressed-output view only after both write allocations
     // have been installed.  Direct handles intentionally have no output
     // allocation, whereas compressed handles must obtain one before an ABI
-    // deflate cursor is published.
-    pub(crate) fn write_buffer_view(&mut self) -> Option<GzWriteBufferView<'_>> {
+    // deflate cursor is published.  Do not include the input allocation: the
+    // next facade step needs to borrow it separately as the bounded request.
+    pub(crate) fn write_output_view(&mut self) -> Option<GzWriteOutputView<'_>> {
         let size = self.size;
-        let input = self.input.as_deref_mut()?;
-        let output = self.output.as_deref_mut();
-        Some(GzWriteBufferView {
-            size,
-            input,
-            output,
-        })
+        self.input.as_deref()?;
+        let output = self.output.as_deref_mut()?;
+        Some(GzWriteOutputView { size, output })
     }
 
     // Reset the complete allocation transaction after codec initialization
@@ -599,9 +592,9 @@ impl<'a> GzEmbeddedDeflateSetup<'a> {
     // The paired write allocation established by `GzBuffers` is the only
     // source of this output view.  Direct handles have no compressed-output
     // allocation and therefore cannot construct an embedded-deflate setup.
-    pub(crate) fn from_write_buffers(buffers: &'a mut GzWriteBufferView<'a>) -> Option<Self> {
+    pub(crate) fn from_write_buffers(buffers: &'a mut GzWriteOutputView<'a>) -> Option<Self> {
         let available = usize::try_from(buffers.size()).ok()?;
-        let output = buffers.output_mut()?;
+        let output = buffers.output_mut();
         Some(Self {
             output: GzCodecOutputView::prefix(output, available)?,
         })

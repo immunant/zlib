@@ -204,7 +204,7 @@ unsafe fn gz_init(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
         // output buffer before its address is published to the ABI stream.
         // Keep the view separate from `gz_state` so an embedded-deflate owner
         // can replace this one cursor projection without changing setup.
-        let Some(mut buffers) = state.buffers.write_buffer_view() else {
+        let Some(mut buffers) = state.buffers.write_output_view() else {
             state.buffers.clear();
             crate::src::gzlib::GzErrorState {
                 message: &mut state.msg,
