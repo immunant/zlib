@@ -108,6 +108,60 @@ fn gz_open_defaults(state: &mut crate::gzguts_h::gz_state) {
     state.direct = 0;
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct GzOpenOptions {
+    mode: ::core::ffi::c_int,
+    level: ::core::ffi::c_int,
+    strategy: ::core::ffi::c_int,
+    direct: ::core::ffi::c_int,
+    oflag: ::core::ffi::c_int,
+    exclusive: ::core::ffi::c_int,
+}
+
+fn gz_parse_open_mode(mode: &[u8]) -> Option<GzOpenOptions> {
+    let mut options = GzOpenOptions {
+        mode: crate::gzguts_h::GZ_NONE,
+        level: crate::zlib_h::Z_DEFAULT_COMPRESSION,
+        strategy: crate::zlib_h::Z_DEFAULT_STRATEGY,
+        direct: 0,
+        oflag: 0,
+        exclusive: 0,
+    };
+
+    for &option in mode {
+        if option.is_ascii_digit() {
+            options.level = (option - b'0') as ::core::ffi::c_int;
+            continue;
+        }
+
+        match option {
+            b'r' => options.mode = crate::gzguts_h::GZ_READ,
+            b'w' => options.mode = crate::gzguts_h::GZ_WRITE,
+            b'a' => options.mode = crate::gzguts_h::GZ_APPEND,
+            b'+' => return None,
+            b'e' => options.oflag |= crate::stdlib::O_CLOEXEC,
+            b'x' => options.exclusive = 1,
+            b'f' => options.strategy = crate::zlib_h::Z_FILTERED,
+            b'h' => options.strategy = crate::zlib_h::Z_HUFFMAN_ONLY,
+            b'R' => options.strategy = crate::zlib_h::Z_RLE,
+            b'F' => options.strategy = crate::zlib_h::Z_FIXED,
+            b'G' => options.direct = -1,
+            b'N' => options.oflag |= crate::stdlib::O_NONBLOCK,
+            b'T' => options.direct = 1,
+            b'b' | _ => {}
+        }
+    }
+
+    Some(options)
+}
+
+fn gz_apply_open_options(state: &mut crate::gzguts_h::gz_state, options: GzOpenOptions) {
+    state.mode = options.mode;
+    state.level = options.level;
+    state.strategy = options.strategy;
+    state.direct = options.direct;
+}
+
 unsafe extern "C" fn gz_open(
     mut path: *const ::core::ffi::c_void,
     mut fd: ::core::ffi::c_int,
@@ -116,8 +170,8 @@ unsafe extern "C" fn gz_open(
     let mut state: crate::gzguts_h::gz_statep =
         ::core::ptr::null_mut::<crate::gzguts_h::gz_state>();
     let mut len: crate::stdlib::z_size_t = 0;
-    let mut oflag: ::core::ffi::c_int = 0 as ::core::ffi::c_int;
-    let mut exclusive: ::core::ffi::c_int = 0 as ::core::ffi::c_int;
+    let mut oflag: ::core::ffi::c_int;
+    let mut exclusive: ::core::ffi::c_int;
     if path.is_null() || mode.is_null() {
         return ::core::ptr::null_mut::<crate::zlib_h::gzFile_s>();
     }
@@ -128,56 +182,16 @@ unsafe extern "C" fn gz_open(
         return ::core::ptr::null_mut::<crate::zlib_h::gzFile_s>();
     }
     gz_open_defaults(&mut *state);
-    while *mode != 0 {
-        if *mode as ::core::ffi::c_int >= '0' as i32 && *mode as ::core::ffi::c_int <= '9' as i32 {
-            (*state).level = *mode as ::core::ffi::c_int - '0' as i32;
-        } else {
-            match *mode as ::core::ffi::c_int {
-                114 => {
-                    (*state).mode = crate::gzguts_h::GZ_READ;
-                }
-                119 => {
-                    (*state).mode = crate::gzguts_h::GZ_WRITE;
-                }
-                97 => {
-                    (*state).mode = crate::gzguts_h::GZ_APPEND;
-                }
-                43 => {
-                    crate::stdlib::free(state as *mut ::core::ffi::c_void);
-                    return ::core::ptr::null_mut::<crate::zlib_h::gzFile_s>();
-                }
-                101 => {
-                    oflag |= crate::stdlib::O_CLOEXEC;
-                }
-                120 => {
-                    exclusive = 1 as ::core::ffi::c_int;
-                }
-                102 => {
-                    (*state).strategy = crate::zlib_h::Z_FILTERED;
-                }
-                104 => {
-                    (*state).strategy = crate::zlib_h::Z_HUFFMAN_ONLY;
-                }
-                82 => {
-                    (*state).strategy = crate::zlib_h::Z_RLE;
-                }
-                70 => {
-                    (*state).strategy = crate::zlib_h::Z_FIXED;
-                }
-                71 => {
-                    (*state).direct = -1 as ::core::ffi::c_int;
-                }
-                78 => {
-                    oflag |= crate::stdlib::O_NONBLOCK;
-                }
-                84 => {
-                    (*state).direct = 1 as ::core::ffi::c_int;
-                }
-                98 | _ => {}
-            }
+    let options = match gz_parse_open_mode(::core::ffi::CStr::from_ptr(mode).to_bytes()) {
+        Some(options) => options,
+        None => {
+            crate::stdlib::free(state as *mut ::core::ffi::c_void);
+            return ::core::ptr::null_mut::<crate::zlib_h::gzFile_s>();
         }
-        mode = mode.offset(1);
-    }
+    };
+    gz_apply_open_options(&mut *state, options);
+    oflag = options.oflag;
+    exclusive = options.exclusive;
     if (*state).mode == crate::gzguts_h::GZ_NONE {
         crate::stdlib::free(state as *mut ::core::ffi::c_void);
         return ::core::ptr::null_mut::<crate::zlib_h::gzFile_s>();
@@ -766,7 +780,9 @@ pub unsafe extern "C" fn gz_intmax_ffi() -> ::core::ffi::c_uint {
 
 #[cfg(test)]
 mod tests {
-    use super::{gz_clear_read_flags, gzerror_core, gztell64_core, GzErrorMessage};
+    use super::{
+        gz_clear_read_flags, gz_parse_open_mode, gzerror_core, gztell64_core, GzErrorMessage,
+    };
 
     #[test]
     fn clearing_read_flags_resets_both_values() {
@@ -809,5 +825,35 @@ mod tests {
     #[test]
     fn gztell64_core_ignores_skip_after_eof() {
         assert_eq!(gztell64_core(42, 1, 7), 42);
+    }
+
+    #[test]
+    fn parsing_open_mode_collects_mode_flags_and_compression_options() {
+        let options = gz_parse_open_mode(b"w9exfNT").unwrap();
+
+        assert_eq!(options.mode, crate::gzguts_h::GZ_WRITE);
+        assert_eq!(options.level, 9);
+        assert_eq!(options.strategy, crate::zlib_h::Z_FILTERED);
+        assert_eq!(options.direct, 1);
+        assert_eq!(
+            options.oflag,
+            crate::stdlib::O_CLOEXEC | crate::stdlib::O_NONBLOCK
+        );
+        assert_eq!(options.exclusive, 1);
+    }
+
+    #[test]
+    fn parsing_open_mode_rejects_update_mode() {
+        assert_eq!(gz_parse_open_mode(b"rb+"), None);
+    }
+
+    #[test]
+    fn parsing_open_mode_uses_the_last_conflicting_option() {
+        let options = gz_parse_open_mode(b"rawhRFGT2").unwrap();
+
+        assert_eq!(options.mode, crate::gzguts_h::GZ_WRITE);
+        assert_eq!(options.level, 2);
+        assert_eq!(options.strategy, crate::zlib_h::Z_FIXED);
+        assert_eq!(options.direct, 1);
     }
 }

@@ -2878,8 +2878,10 @@ pub fn inflate_table_safe(
             bits: 1,
             val: 0,
         };
-        table[*table_cursor] = here;
-        table[*table_cursor + 1] = here;
+        let Some(entries) = table.get_mut(*table_cursor..end) else {
+            return 1;
+        };
+        entries.copy_from_slice(&[here; 2]);
         *table_cursor = end;
         *bits = 1;
         return 0;
@@ -2912,7 +2914,10 @@ pub fn inflate_table_safe(
     for (symbol, &length) in lens.iter().enumerate() {
         if length != 0 {
             let offset = offs[length as usize] as usize;
-            work[offset] = symbol as u16;
+            let Some(entry) = work.get_mut(offset) else {
+                return 1;
+            };
+            *entry = symbol as u16;
             offs[length as usize] = offs[length as usize].wrapping_add(1);
         }
     }
@@ -2937,12 +2942,15 @@ pub fn inflate_table_safe(
     }
 
     loop {
-        let work_symbol = work[symbol] as usize;
+        let Some(&work_code) = work.get(symbol) else {
+            return 1;
+        };
+        let work_symbol = work_code as usize;
         let here = if (work_symbol as u32) + 1 < match_symbol as u32 {
             crate::src::inftrees::code {
                 op: 0,
                 bits: (length - drop_bits) as u8,
-                val: work[symbol],
+                val: work_code,
             }
         } else if work_symbol >= match_symbol as usize {
             let index = work_symbol - match_symbol as usize;
@@ -2994,7 +3002,13 @@ pub fn inflate_table_safe(
             if length == max {
                 break;
             }
-            length = lens[work[symbol] as usize] as u32;
+            let Some(&next_symbol) = work.get(symbol) else {
+                return 1;
+            };
+            let Some(&next_length) = lens.get(next_symbol as usize) else {
+                return -1;
+            };
+            length = next_length as u32;
         }
 
         if length > root && huff & mask != low {
@@ -3149,6 +3163,32 @@ mod tests {
             inflate_table_safe(CODES, &lens, &mut table, &mut cursor, &mut bits, &mut work),
             1
         );
+    }
+
+    #[test]
+    fn safe_table_rejects_insufficient_workspace_before_writing_output() {
+        let lens = [1u16, 1];
+        let original_entry = code {
+            op: 7,
+            bits: 8,
+            val: 9,
+        };
+        let mut table = [original_entry; 2];
+        let mut cursor = 0;
+        let mut bits = 7;
+        let mut work = [0u16; 1];
+
+        assert_eq!(
+            inflate_table_safe(CODES, &lens, &mut table, &mut cursor, &mut bits, &mut work),
+            1
+        );
+        for entry in table {
+            assert_eq!(entry.op, original_entry.op);
+            assert_eq!(entry.bits, original_entry.bits);
+            assert_eq!(entry.val, original_entry.val);
+        }
+        assert_eq!(cursor, 0);
+        assert_eq!(bits, 7);
     }
 
     #[test]

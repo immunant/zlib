@@ -31,6 +31,36 @@ fn chunk_len(remaining: usize) -> usize {
     remaining.min(MAX_CHUNK)
 }
 
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+struct CompressProgress {
+    total: usize,
+    used: usize,
+}
+
+impl CompressProgress {
+    fn new(total: usize) -> Self {
+        Self { total, used: 0 }
+    }
+
+    fn remaining(self) -> usize {
+        self.total.saturating_sub(self.used)
+    }
+
+    fn next_chunk_len(self) -> usize {
+        chunk_len(self.remaining())
+    }
+
+    fn is_final_chunk(self, scheduled: usize) -> bool {
+        scheduled == self.remaining()
+    }
+
+    fn record_available(&mut self, scheduled: usize, available: crate::stdlib::uInt) {
+        self.used = self
+            .used
+            .wrapping_add(scheduled.wrapping_sub(available as usize));
+    }
+}
+
 fn compress_bound_z_impl(source_len: crate::stdlib::z_size_t) -> crate::stdlib::z_size_t {
     let bound = source_len
         .wrapping_add(source_len >> 12)
@@ -110,13 +140,13 @@ pub unsafe extern "C" fn compress2_z_ffi(
         return init_status;
     }
 
-    let mut source_used = 0usize;
-    let mut written = 0usize;
+    let mut source_progress = CompressProgress::new(source_slice.len());
+    let mut dest_progress = CompressProgress::new(dest_slice.len());
     let status = loop {
-        let input_len = chunk_len(source_slice.len().saturating_sub(source_used));
-        let output_len = chunk_len(dest_slice.len().saturating_sub(written));
-        let input = &source_slice[source_used..source_used + input_len];
-        let output = &mut dest_slice[written..written + output_len];
+        let input_len = source_progress.next_chunk_len();
+        let output_len = dest_progress.next_chunk_len();
+        let input = &source_slice[source_progress.used..source_progress.used + input_len];
+        let output = &mut dest_slice[dest_progress.used..dest_progress.used + output_len];
 
         stream.next_in = if input.is_empty() {
             source as *mut crate::stdlib::Bytef
@@ -133,21 +163,21 @@ pub unsafe extern "C" fn compress2_z_ffi(
 
         let status = crate::src::deflate::deflate(
             &mut stream,
-            if source_used + input_len == source_slice.len() {
+            if source_progress.is_final_chunk(input_len) {
                 crate::zlib_h::Z_FINISH
             } else {
                 crate::zlib_h::Z_NO_FLUSH
             },
         );
-        source_used += input_len - stream.avail_in as usize;
-        written += output_len - stream.avail_out as usize;
+        source_progress.record_available(input_len, stream.avail_in);
+        dest_progress.record_available(output_len, stream.avail_out);
 
         if status != crate::zlib_h::Z_OK {
             break status;
         }
     };
 
-    *destLen = written;
+    *destLen = dest_progress.used;
     crate::src::deflate::deflateEnd(&mut stream);
     if status == crate::zlib_h::Z_STREAM_END {
         crate::zlib_h::Z_OK
@@ -228,7 +258,24 @@ pub unsafe extern "C" fn compressBound_ffi(
 
 #[cfg(test)]
 mod tests {
-    use super::{compress_bound, compress_bound_z_impl};
+    use super::{compress_bound, compress_bound_z_impl, CompressProgress, MAX_CHUNK};
+
+    #[test]
+    fn progress_schedules_uint_sized_chunks_and_tracks_consumption() {
+        let Some(total) = MAX_CHUNK.checked_add(3) else {
+            return;
+        };
+        let mut progress = CompressProgress::new(total);
+        assert_eq!(progress.next_chunk_len(), MAX_CHUNK);
+        assert!(!progress.is_final_chunk(MAX_CHUNK));
+        progress.record_available(MAX_CHUNK, 2);
+        assert_eq!(progress.used, MAX_CHUNK - 2);
+        assert_eq!(progress.next_chunk_len(), 5);
+        assert!(progress.is_final_chunk(5));
+        progress.record_available(5, 0);
+        assert_eq!(progress.used, total);
+        assert_eq!(progress.remaining(), 0);
+    }
 
     #[test]
     fn compress_bound_matches_the_z_size_formula() {
