@@ -4368,7 +4368,7 @@ mod tests {
     }
 }
 
-unsafe fn gz_read(
+fn gz_read(
     state: &mut crate::gzguts_h::gz_state,
     mut buf: crate::stdlib::voidp,
     mut len: crate::stdlib::z_size_t,
@@ -4404,11 +4404,17 @@ unsafe fn gz_read(
                 let have = state.x.have;
                 let state_err = state.err;
                 let plan = gz_read_drain_plan(have, state_err, n);
-                crate::stdlib::memcpy(
-                    buf as *mut ::core::ffi::c_void,
-                    next as *const ::core::ffi::c_void,
-                    n as crate::__stddef_size_t_h::size_t,
-                );
+                // `gz_read`'s callers establish the destination range at the
+                // FFI boundary.  Keep this C copy at that remaining external
+                // buffer boundary while the surrounding read state machine is
+                // safe Rust.
+                unsafe {
+                    crate::stdlib::memcpy(
+                        buf as *mut ::core::ffi::c_void,
+                        next as *const ::core::ffi::c_void,
+                        n as crate::__stddef_size_t_h::size_t,
+                    );
+                }
                 state.x.next = state.x.next.wrapping_add(plan.next_advance);
                 gz_read_apply_drain_plan(&mut state.x.have, &mut err, &plan);
             }
