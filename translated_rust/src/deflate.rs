@@ -3367,17 +3367,19 @@ pub unsafe extern "C" fn deflate_ffi(
     };
     deflate(strm, flush)
 }
-pub fn deflateEnd(stream: &mut crate::zlib_h::z_stream_s) -> ::core::ffi::c_int {
+/// Tear down an already-borrowed deflate state.
+///
+/// Keep allocator validation and the callback free order in this typed core.
+/// `deflateEnd` is the compatibility bridge for legacy callers that still
+/// retain the state only in the ABI stream handle; an eventual stream owner
+/// can call this directly without recreating that handle as a Rust reference.
+fn deflate_end(
+    stream: &mut crate::zlib_h::z_stream_s,
+    state: &mut crate::src::deflate::deflate_state,
+) -> ::core::ffi::c_int {
     if stream.zalloc.is_none() || stream.zfree.is_none() {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    // The allocator pair above and stream-state validation below make this
-    // ABI handle conversion local to the teardown boundary.
-    let Some(state) =
-        (unsafe { (stream.state as *mut crate::src::deflate::deflate_state).as_mut() })
-    else {
-        return crate::zlib_h::Z_STREAM_ERROR;
-    };
     if !deflate_stream_state_valid(Some(stream), Some(state)) {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
@@ -3414,6 +3416,23 @@ pub fn deflateEnd(stream: &mut crate::zlib_h::z_stream_s) -> ::core::ffi::c_int 
     } else {
         crate::zlib_h::Z_OK
     };
+}
+
+/// Tear down a legacy ABI-backed deflate stream.
+///
+/// Keep the sole opaque-state conversion here while the public stream still
+/// stores the callback-allocated state as an ABI pointer.  All teardown
+/// policy is in `deflate_end`, which accepts only typed references.
+pub fn deflateEnd(stream: &mut crate::zlib_h::z_stream_s) -> ::core::ffi::c_int {
+    if stream.zalloc.is_none() || stream.zfree.is_none() {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    }
+    let Some(state) =
+        (unsafe { (stream.state as *mut crate::src::deflate::deflate_state).as_mut() })
+    else {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    };
+    deflate_end(stream, state)
 }
 #[export_name = "deflateEnd"]
 
