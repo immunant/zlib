@@ -95,8 +95,12 @@ fn allocation_byte_count(items: ::core::ffi::c_uint, size: ::core::ffi::c_uint) 
     items.wrapping_mul(size) as size_t
 }
 
+fn allocation_uses_malloc(uint_size: usize) -> bool {
+    uint_size > 2
+}
+
 fn allocation_request(items: ::core::ffi::c_uint, size: ::core::ffi::c_uint) -> AllocationRequest {
-    if ::core::mem::size_of::<crate::stdlib::uInt>() > 2 {
+    if allocation_uses_malloc(::core::mem::size_of::<crate::stdlib::uInt>()) {
         AllocationRequest::Malloc(allocation_byte_count(items, size))
     } else {
         AllocationRequest::Calloc {
@@ -128,9 +132,9 @@ pub unsafe extern "C" fn zcfree_ffi(opaque: crate::stdlib::voidpf, ptr: crate::s
 #[cfg(test)]
 mod tests {
     use super::{
-        allocation_byte_count, allocation_request, compile_flags_for_sizes, error_message_index,
-        has_error_message_index, size_class, size_flag, size_t, zlib_compile_flags, zlib_version,
-        AllocationRequest,
+        allocation_byte_count, allocation_request, allocation_uses_malloc, compile_flags_for_sizes,
+        error_message_index, has_error_message_index, size_class, size_flag, size_t,
+        zlib_compile_flags, zlib_version, AllocationRequest,
     };
 
     #[test]
@@ -196,6 +200,14 @@ mod tests {
             allocation_byte_count(::core::ffi::c_uint::MAX, 2),
             ::core::ffi::c_uint::MAX.wrapping_mul(2) as size_t
         );
+    }
+
+    #[test]
+    fn allocation_uses_malloc_only_for_uint_sizes_above_two_bytes() {
+        assert!(!allocation_uses_malloc(1));
+        assert!(!allocation_uses_malloc(2));
+        assert!(allocation_uses_malloc(3));
+        assert!(allocation_uses_malloc(4));
     }
 
     #[test]

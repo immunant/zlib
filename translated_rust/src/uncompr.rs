@@ -91,6 +91,10 @@ fn has_missing_uncompress_lengths(dest_len_is_null: bool, source_len_is_null: bo
     dest_len_is_null || source_len_is_null
 }
 
+fn needs_dummy_uncompress_output(dest_is_null: bool, dest_len: crate::stdlib::z_size_t) -> bool {
+    dest_len == 0 && dest_is_null
+}
+
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 struct UncompressOutcome {
     status: ::core::ffi::c_int,
@@ -172,7 +176,7 @@ pub unsafe extern "C" fn uncompress2_z_ffi(
         reserved: 0,
     };
     let mut dummy = 0 as crate::stdlib::Bytef;
-    if dest_len == 0 && dest.is_null() {
+    if needs_dummy_uncompress_output(dest.is_null(), dest_len) {
         dest = &raw mut dummy;
     }
 
@@ -260,8 +264,8 @@ pub unsafe extern "C" fn uncompress_ffi(
 mod tests {
     use super::{
         has_invalid_uncompress_buffers, has_missing_uncompress_lengths,
-        normalize_uncompress_status, replenish_scalar, uncompress_outcome, ChunkedProgress,
-        LegacyUncompressLengths,
+        needs_dummy_uncompress_output, normalize_uncompress_status, replenish_scalar,
+        uncompress_outcome, ChunkedProgress, LegacyUncompressLengths,
     };
 
     #[test]
@@ -285,6 +289,13 @@ mod tests {
         assert!(has_missing_uncompress_lengths(true, false));
         assert!(has_missing_uncompress_lengths(false, true));
         assert!(!has_missing_uncompress_lengths(false, false));
+    }
+
+    #[test]
+    fn dummy_output_is_used_only_for_a_null_empty_destination() {
+        assert!(needs_dummy_uncompress_output(true, 0));
+        assert!(!needs_dummy_uncompress_output(false, 0));
+        assert!(!needs_dummy_uncompress_output(true, 1));
     }
 
     #[test]

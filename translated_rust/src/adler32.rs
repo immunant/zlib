@@ -68,6 +68,23 @@ fn adler32_ffi_input(adler: uLong, input: Option<&[Bytef]>) -> uLong {
     input.map_or(1, |input| adler32_z(adler, input))
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum FfiInputKind {
+    Null,
+    Empty,
+    NonEmpty,
+}
+
+fn classify_ffi_input(buf_is_null: bool, len: usize) -> FfiInputKind {
+    if buf_is_null {
+        FfiInputKind::Null
+    } else if len == 0 {
+        FfiInputKind::Empty
+    } else {
+        FfiInputKind::NonEmpty
+    }
+}
+
 fn adler32_combine_(adler1: uLong, adler2: uLong, len2: off64_t) -> uLong {
     if len2 < 0 {
         return 0xffff_ffff;
@@ -95,12 +112,10 @@ pub fn adler32_combine64(adler1: uLong, adler2: uLong, len2: off64_t) -> uLong {
 
 #[export_name = "adler32_z"]
 pub unsafe extern "C" fn adler32_z_ffi(adler: uLong, buf: *const Bytef, len: z_size_t) -> uLong {
-    let input: Option<&[Bytef]> = if buf.is_null() {
-        None
-    } else if len == 0 {
-        Some(&[])
-    } else {
-        Some(unsafe { core::slice::from_raw_parts(buf, len) })
+    let input: Option<&[Bytef]> = match classify_ffi_input(buf.is_null(), len) {
+        FfiInputKind::Null => None,
+        FfiInputKind::Empty => Some(&[]),
+        FfiInputKind::NonEmpty => Some(unsafe { core::slice::from_raw_parts(buf, len) }),
     };
 
     adler32_ffi_input(adler, input)
@@ -108,12 +123,11 @@ pub unsafe extern "C" fn adler32_z_ffi(adler: uLong, buf: *const Bytef, len: z_s
 
 #[export_name = "adler32"]
 pub unsafe extern "C" fn adler32_ffi(adler: uLong, buf: *const Bytef, len: uInt) -> uLong {
-    let input: Option<&[Bytef]> = if buf.is_null() {
-        None
-    } else if len == 0 {
-        Some(&[])
-    } else {
-        Some(unsafe { core::slice::from_raw_parts(buf, len as usize) })
+    let len = len as usize;
+    let input: Option<&[Bytef]> = match classify_ffi_input(buf.is_null(), len) {
+        FfiInputKind::Null => None,
+        FfiInputKind::Empty => Some(&[]),
+        FfiInputKind::NonEmpty => Some(unsafe { core::slice::from_raw_parts(buf, len) }),
     };
 
     adler32_ffi_input(adler, input)
@@ -170,6 +184,14 @@ mod tests {
 
         assert_eq!(adler32_ffi_input(seed, None), 1);
         assert_eq!(adler32_ffi_input(seed, Some(input)), adler32_z(seed, input));
+    }
+
+    #[test]
+    fn classifies_ffi_input_before_creating_a_raw_slice() {
+        assert_eq!(classify_ffi_input(true, 0), FfiInputKind::Null);
+        assert_eq!(classify_ffi_input(true, 1), FfiInputKind::Null);
+        assert_eq!(classify_ffi_input(false, 0), FfiInputKind::Empty);
+        assert_eq!(classify_ffi_input(false, 1), FfiInputKind::NonEmpty);
     }
 
     #[test]
