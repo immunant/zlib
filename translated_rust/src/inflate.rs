@@ -1065,46 +1065,6 @@ fn inflate_exit_progress(
     }
 }
 
-unsafe fn updatewindow<'a>(
-    strm: &mut crate::zlib_h::z_stream,
-    state: &'a mut crate::src::inflate::inflate_state,
-    copy: ::core::ffi::c_uint,
-) -> Option<&'a mut [crate::stdlib::Bytef]> {
-    // The legacy decoder already validated and adopted these records at its
-    // boundary. This helper retains only the caller allocator and the
-    // ABI-owned window lend. The completed-output view is made only after
-    // this function has invoked any allocator callback.
-    let Some(plan) =
-        inflate_window_boundary_plan(state.window.is_null(), state.wbits, state.wsize, copy)
-    else {
-        return None;
-    };
-    if plan.allocate {
-        let Ok(requested_wsize) = ::core::ffi::c_uint::try_from(plan.window_len) else {
-            return None;
-        };
-        // `inflate()` normally reaches this boundary only after init has
-        // installed zalloc.  Treat a malformed compatibility stream as the
-        // same allocation failure that a null allocator result represents,
-        // rather than panicking across the C ABI.
-        let Some(zalloc) = strm.zalloc else {
-            return None;
-        };
-        state.window = zalloc(
-            strm.opaque,
-            requested_wsize,
-            ::core::mem::size_of::<::core::ffi::c_uchar>() as crate::stdlib::uInt,
-        ) as *mut ::core::ffi::c_uchar;
-        if state.window.is_null() {
-            return None;
-        }
-    }
-    Some(::core::slice::from_raw_parts_mut(
-        state.window,
-        plan.window_len,
-    ))
-}
-
 pub unsafe fn inflate(
     mut strm: crate::zlib_h::z_streamp,
     mut flush: ::core::ffi::c_int,
@@ -2768,19 +2728,31 @@ pub unsafe fn inflate(
                             // destination.  Keep its scalar state updates on one adopted
                             // decoder-state borrow.
                             let state_ref = &mut *state;
-                            if state_ref.flags & 0x800 as ::core::ffi::c_int != 0 {
-                                if have == 0 as ::core::ffi::c_uint {
-                                    break '_inf_leave;
-                                }
-                                copy = 0 as ::core::ffi::c_uint;
-                                loop {
-                                    let c2rust_fresh5 = copy;
-                                    copy = copy.wrapping_add(1);
-                                    len = *next.wrapping_add(c2rust_fresh5 as usize)
-                                        as ::core::ffi::c_uint;
-                                    if !state_ref.head.is_null()
-                                        && !(*state_ref.head).name.is_null()
-                                        && state_ref.length < (*state_ref.head).name_max
+                                if state_ref.flags & 0x800 as ::core::ffi::c_int != 0 {
+                                    if have == 0 as ::core::ffi::c_uint {
+                                        break '_inf_leave;
+                                    }
+                                    let header_crc = state_ref.flags & 0x200 as ::core::ffi::c_int
+                                        != 0
+                                        && state_ref.wrap & 4 as ::core::ffi::c_int != 0;
+                                    copy = 0 as ::core::ffi::c_uint;
+                                    loop {
+                                        let c2rust_fresh5 = copy;
+                                        copy = copy.wrapping_add(1);
+                                        len = *next.wrapping_add(c2rust_fresh5 as usize)
+                                            as ::core::ffi::c_uint;
+                                        if header_crc {
+                                            // Feed the byte while it is already available as a
+                                            // scalar, avoiding a second raw input lend solely for
+                                            // the header checksum after the name scan.
+                                            state_ref.check = inflate_header_crc_update(
+                                                state_ref.check,
+                                                &[len as crate::stdlib::Bytef],
+                                            );
+                                        }
+                                        if !state_ref.head.is_null()
+                                            && !(*state_ref.head).name.is_null()
+                                            && state_ref.length < (*state_ref.head).name_max
                                     {
                                         let c2rust_fresh6 = state_ref.length;
                                         state_ref.length = state_ref.length.wrapping_add(1);
@@ -2793,15 +2765,7 @@ pub unsafe fn inflate(
                                         break;
                                     }
                                 }
-                                if state_ref.flags & 0x200 as ::core::ffi::c_int != 0
-                                    && state_ref.wrap & 4 as ::core::ffi::c_int != 0
-                                {
-                                    state_ref.check = inflate_header_crc_update(
-                                        state_ref.check,
-                                        core::slice::from_raw_parts(next, copy as usize),
-                                    );
-                                }
-                                have = have.wrapping_sub(copy);
+                                    have = have.wrapping_sub(copy);
                                 next = next.wrapping_add(copy as usize);
                                 if len != 0 {
                                     break '_inf_leave;
@@ -3107,7 +3071,43 @@ pub unsafe fn inflate(
                 state_ref.wrap,
             );
             let window = if exit.update_window {
-                updatewindow(strm_ref, state_ref, exit.output_used)
+                // The decoder boundary owns callback invocation and the one
+                // temporary ABI-window lend.  The plan and the subsequent
+                // history update remain slice/scalar-only, so no private
+                // unsafe window adapter is needed.
+                let Some(plan) = inflate_window_boundary_plan(
+                    state_ref.window.is_null(),
+                    state_ref.wbits,
+                    state_ref.wsize,
+                    exit.output_used,
+                ) else {
+                    break 'window (true, &[]);
+                };
+                if plan.allocate {
+                    let Ok(requested_wsize) = ::core::ffi::c_uint::try_from(plan.window_len)
+                    else {
+                        break 'window (true, &[]);
+                    };
+                    // `inflate()` normally reaches this boundary only after
+                    // init has installed zalloc. Treat malformed callback
+                    // state as allocation failure instead of panicking.
+                    let Some(zalloc) = strm_ref.zalloc else {
+                        break 'window (true, &[]);
+                    };
+                    state_ref.window = zalloc(
+                        strm_ref.opaque,
+                        requested_wsize,
+                        ::core::mem::size_of::<::core::ffi::c_uchar>()
+                            as crate::stdlib::uInt,
+                    ) as *mut ::core::ffi::c_uchar;
+                    if state_ref.window.is_null() {
+                        break 'window (true, &[]);
+                    }
+                }
+                Some(::core::slice::from_raw_parts_mut(
+                    state_ref.window,
+                    plan.window_len,
+                ))
             } else {
                 None
             };
