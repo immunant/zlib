@@ -3168,16 +3168,15 @@ pub unsafe extern "C" fn inflate(
         if left == 0 as ::core::ffi::c_uint {
             break;
         }
-        let match_plan = inflate_match_copy_plan(
-            (*state).offset,
-            inflate_cursor_progress(out, left),
-            (*state).whave,
-            (*state).wnext,
-            (*state).wsize,
-            (*state).length,
-            left,
-            (*state).sane != 0,
-        );
+        // Keep the match-planning state behind a short-lived safe borrow.
+        // The actual byte copy remains below at the raw cursor boundary:
+        // the caller's output may alias foreign window storage, so making
+        // both ranges Rust slices here would strengthen zlib's aliasing
+        // contract.
+        let match_plan = {
+            let state = &*state;
+            inflate_match_plan_from_state(state, inflate_cursor_progress(out, left), left)
+        };
         let InflateMatchPlan::Copy {
             source,
             count,
@@ -3187,7 +3186,7 @@ pub unsafe extern "C" fn inflate(
         else {
             (*strm).msg = b"invalid distance too far back\0".as_ptr() as *const ::core::ffi::c_char
                 as *mut ::core::ffi::c_char;
-            (*state).mode = crate::src::inflate::BAD;
+            (&mut *state).mode = crate::src::inflate::BAD;
             continue;
         };
         let mut from = match source {
@@ -3208,9 +3207,7 @@ pub unsafe extern "C" fn inflate(
                 break;
             }
         }
-        if inflate_match_is_complete((*state).length) {
-            (*state).mode = crate::src::inflate::LEN;
-        }
+        inflate_apply_match_progress(&mut *state, remaining_length);
     }
     (*strm).next_out = put as *mut crate::stdlib::Bytef;
     (*strm).avail_out = left as crate::stdlib::uInt;
@@ -3713,6 +3710,40 @@ fn inflate_match_copy_plan(
     }
 }
 
+/// Derive one match-copy step from the scalar inflater state.
+///
+/// This deliberately does not expose the callback- or caller-backed window
+/// pointer.  The unsafe cursor boundary chooses the raw source only after
+/// this safe planning step, which avoids inventing a Rust non-aliasing
+/// guarantee for C-provided output and window ranges.
+fn inflate_match_plan_from_state(
+    state: &inflate_state,
+    output_written: ::core::ffi::c_uint,
+    left: ::core::ffi::c_uint,
+) -> InflateMatchPlan {
+    inflate_match_copy_plan(
+        state.offset,
+        output_written,
+        state.whave,
+        state.wnext,
+        state.wsize,
+        state.length,
+        left,
+        state.sane != 0,
+    )
+}
+
+/// Commit the portion of a match consumed by the raw cursor boundary.
+fn inflate_apply_match_progress(
+    state: &mut inflate_state,
+    remaining_length: ::core::ffi::c_uint,
+) {
+    state.length = remaining_length;
+    if inflate_match_is_complete(state.length) {
+        state.mode = crate::src::inflate::LEN;
+    }
+}
+
 fn inflate_copy_match_from_output(
     output: &mut [::core::ffi::c_uchar],
     output_written: usize,
@@ -4128,7 +4159,8 @@ mod tests {
         inflate_gzip_length_check_required, inflate_gzip_text_field_should_continue,
         inflate_gzip_window_bits, inflate_head_skip_mode, inflate_header_crc_enabled,
         inflate_header_wrap_allows_capture, inflate_is_gzip_header, inflate_mark_progress,
-        inflate_mark_value, inflate_match_copy_plan, inflate_match_is_complete,
+        inflate_apply_match_progress, inflate_mark_value, inflate_match_copy_plan,
+        inflate_match_is_complete, inflate_match_plan_from_state,
         inflate_mode_data_type_flags, inflate_mode_is_valid, inflate_mode_on_entry,
         inflate_needs_buffer_error, inflate_output_checksum, inflate_prime_update,
         inflate_reset2_discards_window, inflate_reset2_params, inflate_reset_keep_adler,
@@ -4152,7 +4184,7 @@ mod tests {
         InflateGzipHeaderCompletion, InflateMatchPlan, InflateMatchSource, InflateOutputChecksum,
         InflatePrimeUpdate, InflateSyncSearch, InflateZlibHeaderError, InflateZlibHeaderTransition,
         InflateZlibWindowParams, WindowAllocationPlan, WindowClonePlan, BAD, CHECK, CODE_LENGTH_ORDER, COPY_,
-        COPY_1, DICT, DICTID, HEAD, LEN_, MATCH, STORED, SYNC, TYPE, TYPEDO, WindowOwnership,
+        COPY_1, DICT, DICTID, HEAD, LEN, LEN_, MATCH, STORED, SYNC, TYPE, TYPEDO, WindowOwnership,
     };
 
     #[test]
@@ -4549,6 +4581,36 @@ mod tests {
         assert!(inflate_match_is_complete(0));
         assert!(!inflate_match_is_complete(1));
         assert!(!inflate_match_is_complete(::core::ffi::c_uint::MAX));
+    }
+
+    #[test]
+    fn inflate_match_state_helpers_keep_planning_and_completion_together() {
+        let mut state = super::inflate_state::newly_allocated();
+        state.offset = 9;
+        state.whave = 8;
+        state.wnext = 6;
+        state.wsize = 8;
+        state.length = 3;
+        state.sane = 1;
+        state.mode = MATCH;
+
+        assert_eq!(
+            inflate_match_plan_from_state(&state, 2, 5),
+            InflateMatchPlan::Copy {
+                source: InflateMatchSource::Window { index: 7 },
+                count: 1,
+                remaining_output: 4,
+                remaining_length: 2,
+            }
+        );
+
+        inflate_apply_match_progress(&mut state, 2);
+        assert_eq!(state.length, 2);
+        assert_eq!(state.mode, MATCH);
+
+        inflate_apply_match_progress(&mut state, 0);
+        assert_eq!(state.length, 0);
+        assert_eq!(state.mode, LEN);
     }
 
     #[test]
