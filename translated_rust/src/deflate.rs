@@ -190,10 +190,13 @@ struct DeflateStorageLayout {
     pending_items: crate::stdlib::uInt,
 }
 
-/// The eventual safe owner for deflate's four work buffers.  The legacy
-/// callback allocator still owns the live buffers today, but keeping their
-/// checked Rust representation here lets the allocator facade switch storage
-/// ownership without changing strategy code or recreating its geometry.
+/// The safe owner for deflate's four work buffers.
+///
+/// Callback allocators still receive the four ABI allocation/free calls, but
+/// their returned allocations are retained only as lifetime tokens in the
+/// compatibility fields. The compressor itself always operates on these
+/// typed vectors, so no implementation path needs to reinterpret callback
+/// storage as Rust slices.
 #[derive(Clone)]
 struct DeflateOwnedStorage {
     window: Vec<crate::stdlib::Bytef>,
@@ -390,44 +393,13 @@ impl Clone for CallbackDeflateStoragePlan {
 }
 
 impl CallbackDeflateStoragePlan {
-    /// Check that the state still describes precisely the workspace that this
-    /// plan allocated.  The callback handles themselves remain opaque, but a
-    /// later paired owner can rely on this scalar attestation before replacing
-    /// the raw borrowing boundary.
-    fn matches_state(&self, state: &crate::src::deflate::deflate_state) -> bool {
-        let Some(window_bytes) = usize::try_from(self.window.items)
-            .ok()
-            .and_then(|items| items.checked_mul(self.window.item_size as usize))
-        else {
-            return false;
-        };
-        let Some(pending_bytes) = usize::try_from(self.pending.items)
-            .ok()
-            .and_then(|items| items.checked_mul(self.pending.item_size as usize))
-        else {
-            return false;
-        };
-        self.window.item_size
-            == 2 * ::core::mem::size_of::<crate::stdlib::Byte>() as crate::stdlib::uInt
-            && self.prev.item_size
-                == ::core::mem::size_of::<crate::src::deflate::Pos>() as crate::stdlib::uInt
-            && self.head.item_size
-                == ::core::mem::size_of::<crate::src::deflate::Pos>() as crate::stdlib::uInt
-            && self.pending.item_size == 4
-            && state.w_size == self.window.items
-            && state.hash_size == self.head.items
-            && state.lit_bufsize == self.pending.items
-            && state.window_size == window_bytes as crate::zutil_h::ulg
-            && state.pending_buf_size == pending_bytes as crate::zutil_h::ulg
-    }
-
-    /// Allocate one complete callback-owned workspace into its established
-    /// typed state handles.
+    /// Allocate the four callback lifetime tokens into the compatibility
+    /// handles.
     ///
     /// The plan is deliberately the sole source of these four requests: both
     /// initialization and `deflateCopy` must make the same calls, in the same
-    /// order, before the existing storage boundary may borrow the results.
-    /// A later callback-paired owner can replace this handoff as one unit.
+    /// order. The compression workspace itself is retained separately as
+    /// ordinary owned vectors.
     fn allocate_into(
         &self,
         strm: &mut crate::zlib_h::z_stream,
@@ -452,17 +424,6 @@ impl CallbackDeflateStoragePlan {
         ) as *mut crate::zutil_h::uchf
             as *mut crate::stdlib::Bytef);
     }
-}
-
-/// The complete pointer-free plan for copying a callback-owned workspace.
-///
-/// `deflateCopy` must preserve four independent callback allocations and the
-/// initialized portions of each.  Keep both facts together before entering
-/// the existing raw copy boundary: a custom-storage owner can consume this
-/// plan without deriving sizes or cursor offsets from raw handles again.
-struct DeflateCallbackCopyPlan {
-    layout: DeflateCopyLayout,
-    storage: CallbackDeflateStoragePlan,
 }
 
 impl DeflateCopyLayout {
@@ -512,27 +473,6 @@ impl DeflateCopyLayout {
             pending_bytes,
             sym_offset,
             sym_bytes,
-        })
-    }
-
-    /// Return the smallest pending-buffer span containing both live pending
-    /// output and the live symbol staging bytes.  These areas share one
-    /// allocation, so the callback-copy boundary can duplicate their enclosing
-    /// byte representation with one non-overlapping transfer instead of two.
-    fn pending_copy_span(&self) -> Option<::core::ops::Range<usize>> {
-        let pending_end = self.pending_offset.checked_add(self.pending_bytes)?;
-        let sym_end = self.sym_offset.checked_add(self.sym_bytes)?;
-        Some(self.pending_offset.min(self.sym_offset)..pending_end.max(sym_end))
-    }
-}
-
-impl DeflateCallbackCopyPlan {
-    fn from_state(state: &crate::src::deflate::deflate_state) -> Option<Self> {
-        let layout = DeflateCopyLayout::from_state(state)?;
-        let storage = DeflateStorageLayout::from_state(state);
-        Some(Self {
-            layout,
-            storage: storage.callback_storage_plan(),
         })
     }
 }
@@ -853,9 +793,9 @@ fn clear_full_flush_hash(
     true
 }
 
-/// Clear the full-flush hash table through the default allocator's owned
-/// storage.  The owner is temporarily removed so the state can still be
-/// passed to the established safe reset helper without aliasing it.
+/// Clear the full-flush hash table through the state-owned workspace.  The
+/// owner is temporarily removed so the state can still be passed to the
+/// established safe reset helper without aliasing it.
 fn clear_owned_full_flush_hash(state: &mut crate::src::deflate::deflate_state) -> bool {
     let Some(mut owned) = state.owned_storage.take() else {
         return false;
@@ -863,122 +803,6 @@ fn clear_owned_full_flush_hash(state: &mut crate::src::deflate::deflate_state) -
     let result = owned.matches_state(state) && clear_full_flush_hash(state, &mut owned.head);
     state.owned_storage = Some(owned);
     result
-}
-
-/// The callback storage needed for a synchronous deflate operation.
-///
-/// Reset needs only the hash table, while strategy updates need all three
-/// work areas. Keeping that distinction here avoids making reset borrow
-/// unrelated callback allocations.
-enum CallbackDeflateStorageNeed {
-    HeadOnly,
-    PendingOnly,
-    Workspace,
-    WorkspaceAndPending,
-}
-
-/// One typed, pointer-free view of callback-owned deflate storage.
-///
-/// The legacy allocator handles are converted only by
-/// `with_callback_deflate_storage`.  Keeping the resulting borrows together
-/// gives reset, streaming, and copy one safe storage shape, which is also the
-/// shape a later callback-paired owner can construct without changing those
-/// callers.
-struct CallbackDeflateStorage<'a> {
-    window: Option<&'a mut [crate::stdlib::Bytef]>,
-    head: Option<&'a mut [crate::src::deflate::Posf]>,
-    prev: Option<&'a mut [crate::src::deflate::Posf]>,
-    pending_buf: Option<&'a mut [crate::stdlib::Bytef]>,
-}
-
-/// Borrow callback-owned deflate storage for exactly one typed operation.
-///
-/// The ABI allocator owns these buffers, so their raw handles remain at this
-/// boundary. Both reset and update reuse it: a head-only request never forms
-/// views of the window or previous-chain allocation.
-fn with_callback_deflate_storage<R>(
-    state: &mut crate::src::deflate::deflate_state,
-    need: CallbackDeflateStorageNeed,
-    action: impl FnOnce(&mut crate::src::deflate::deflate_state, CallbackDeflateStorage<'_>) -> R,
-) -> Option<R> {
-    // Do not derive a callback allocation's extent from mutable stream state
-    // alone.  The plan is installed beside the four callback requests, so it
-    // proves that these scalar lengths still describe those exact requests
-    // before this boundary creates any borrowed view.
-    if state.owned_storage.is_none()
-        && !state
-            .callback_storage_plan
-            .as_ref()
-            .is_some_and(|plan| plan.matches_state(state))
-    {
-        return None;
-    }
-    // Preserve the legacy workspace boundary's validation order: an update
-    // with no window must fail before it tries to view either hash table.
-    if matches!(
-        need,
-        CallbackDeflateStorageNeed::Workspace | CallbackDeflateStorageNeed::WorkspaceAndPending
-    ) && state.window.is_none()
-    {
-        return None;
-    }
-    let head = if matches!(need, CallbackDeflateStorageNeed::PendingOnly) {
-        None
-    } else if let Some(head) = state.head {
-        let mut head = ::core::ptr::NonNull::slice_from_raw_parts(head, state.hash_size as usize);
-        // The callback allocation was validated for this exact table size
-        // before this type-specific borrowing boundary.
-        Some(unsafe { head.as_mut() })
-    } else {
-        None
-    };
-    let (window, prev) = match need {
-        CallbackDeflateStorageNeed::HeadOnly | CallbackDeflateStorageNeed::PendingOnly => {
-            (None, None)
-        }
-        CallbackDeflateStorageNeed::Workspace | CallbackDeflateStorageNeed::WorkspaceAndPending => {
-            let window = unsafe {
-                ::core::slice::from_raw_parts_mut(
-                    state.window.expect("checked callback window").as_ptr(),
-                    state.window_size as usize,
-                )
-            };
-            let prev = if let Some(prev) = state.prev {
-                Some(unsafe {
-                    ::core::slice::from_raw_parts_mut(prev.as_ptr(), state.w_size as usize)
-                })
-            } else {
-                None
-            };
-            (Some(window), prev)
-        }
-    };
-    let pending = if matches!(
-        need,
-        CallbackDeflateStorageNeed::PendingOnly | CallbackDeflateStorageNeed::WorkspaceAndPending
-    ) {
-        if let Some(pending_buf) = state.pending_buf {
-            Some(unsafe {
-                ::core::slice::from_raw_parts_mut(
-                    pending_buf.as_ptr(),
-                    state.pending_buf_size as usize,
-                )
-            })
-        } else {
-            None
-        }
-    } else {
-        None
-    };
-    Some(action(
-        state,
-        CallbackDeflateStorage {
-            window,
-            head,
-            prev,
-            pending_buf: pending,
-        },
-    ))
 }
 
 fn read_buf(
@@ -1350,17 +1174,6 @@ fn empty_deflate_state() -> crate::src::deflate::deflate_state {
 }
 
 /// The safe portion of configuring a freshly initialized deflate state.
-///
-/// Custom and mixed allocator workspaces remain behind
-/// `deflate_reset_state`, its single existing raw hash-table view.
-/// Fully default-allocated workspaces can reset directly through their owned
-/// hash vector. Keeping that distinction here avoids rebuilding the same raw
-/// view during initialization.
-enum DeflateInitializationOutcome {
-    ReadyForLegacyReset,
-    Complete(::core::ffi::c_int),
-}
-
 fn configure_allocated_deflate_state(
     state: &mut crate::src::deflate::deflate_state,
     strm: &mut crate::zlib_h::z_stream,
@@ -1370,7 +1183,7 @@ fn configure_allocated_deflate_state(
     mem_level: ::core::ffi::c_int,
     strategy: ::core::ffi::c_int,
     allocator_provenance: crate::src::zutil::AllocatorProvenance,
-) -> Result<DeflateInitializationOutcome, ::core::ffi::c_int> {
+) -> Result<::core::ffi::c_int, ::core::ffi::c_int> {
     initialize_deflate_state_base(
         state,
         strm,
@@ -1401,6 +1214,10 @@ fn configure_allocated_deflate_state(
         let callback_storage = storage.callback_storage_plan();
         callback_storage.allocate_into(strm, state);
         state.callback_storage_plan = Some(callback_storage);
+        let Some(owned) = storage.try_owned() else {
+            return Err(crate::zlib_h::Z_MEM_ERROR);
+        };
+        state.owned_storage = Some(owned);
     }
     if state.window.is_none()
         || state.prev.is_none()
@@ -1412,9 +1229,6 @@ fn configure_allocated_deflate_state(
     state.level = config.level;
     state.strategy = strategy;
     state.method = method as crate::stdlib::Byte;
-    if state.owned_storage.is_none() {
-        return Ok(DeflateInitializationOutcome::ReadyForLegacyReset);
-    }
     let Some(result) = with_owned_deflate_storage(state, |state, owned| {
         if owned.matches_state(state) {
             deflate_reset(strm, state, &mut owned.head)
@@ -1424,7 +1238,7 @@ fn configure_allocated_deflate_state(
     }) else {
         return Err(crate::zlib_h::Z_STREAM_ERROR);
     };
-    Ok(DeflateInitializationOutcome::Complete(result))
+    Ok(result)
 }
 
 /// Allocate, initialize, and install the opaque deflate state through one
@@ -1454,10 +1268,7 @@ fn initialize_allocated_deflate_state(
             allocator_provenance,
         );
         match outcome {
-            Ok(DeflateInitializationOutcome::ReadyForLegacyReset) => {
-                deflate_reset_state(strm, Some(state))
-            }
-            Ok(DeflateInitializationOutcome::Complete(result)) => result,
+            Ok(result) => result,
             Err(error) => {
                 state.status = crate::src::deflate::FINISH_STATE;
                 strm.msg = crate::src::zutil::zError(-4 as ::core::ffi::c_int)
@@ -1737,40 +1548,22 @@ fn deflate_set_dictionary(
     }
 }
 
-/// Dispatch dictionary storage through the state-owned workspace when it is
-/// available, and otherwise through the one callback borrowing boundary.
-/// Keeping this choice out of the ABI wrapper is the seam a callback-paired
-/// owner needs before it can replace callback handles with safe buffers.
+/// Dispatch dictionary storage through the state-owned workspace.
 fn deflate_set_dictionary_with_storage(
     strm: &mut crate::zlib_h::z_stream,
     state: &mut crate::src::deflate::deflate_state,
     dictionary: &[crate::stdlib::Bytef],
 ) -> ::core::ffi::c_int {
-    if state.owned_storage.is_some() {
-        return with_owned_deflate_storage(state, |state, owned| {
-            deflate_set_dictionary(
-                strm,
-                state,
-                dictionary,
-                &mut owned.window,
-                &mut owned.head,
-                &mut owned.prev,
-            )
-        })
-        .unwrap_or(crate::zlib_h::Z_STREAM_ERROR);
-    }
-    with_callback_deflate_storage(
-        state,
-        CallbackDeflateStorageNeed::Workspace,
-        |state, storage| {
-            let (Some(window), Some(head), Some(prev)) =
-                (storage.window, storage.head, storage.prev)
-            else {
-                return crate::zlib_h::Z_STREAM_ERROR;
-            };
-            deflate_set_dictionary(strm, state, dictionary, window, head, prev)
-        },
-    )
+    with_owned_deflate_storage(state, |state, owned| {
+        deflate_set_dictionary(
+            strm,
+            state,
+            dictionary,
+            &mut owned.window,
+            &mut owned.head,
+            &mut owned.prev,
+        )
+    })
     .unwrap_or(crate::zlib_h::Z_STREAM_ERROR)
 }
 
@@ -2038,31 +1831,15 @@ pub(crate) fn deflate_reset_state(
     if !deflate_stream_state_valid(Some(stream), Some(state)) || state.head.is_none() {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    // Fully default-allocated streams retain their hash table in an owned
-    // vector.  Borrow that vector directly for reset instead of recreating a
-    // raw slice from the compatibility handle.  Take/reinstall the owner so
-    // the state and the vector can be borrowed independently; the handle
-    // stays stable for the legacy engine between calls.
-    if state.owned_storage.is_some() {
-        return with_owned_deflate_storage(state, |state, owned| {
-            if owned.matches_state(state) {
-                deflate_reset(stream, state, &mut owned.head)
-            } else {
-                crate::zlib_h::Z_STREAM_ERROR
-            }
-        })
-        .unwrap_or(crate::zlib_h::Z_STREAM_ERROR);
-    }
-    // Custom and mixed allocator streams retain callback-owned storage. Keep
-    // their one raw borrowing boundary in the named adapter until the
-    // allocator facade can represent that ownership without changing callback
-    // observations.
-    with_callback_deflate_storage(
-        state,
-        CallbackDeflateStorageNeed::HeadOnly,
-        |state, storage| storage.head.map(|head| deflate_reset(stream, state, head)),
-    )
-    .flatten()
+    // The compressor's workspace is owned even when the ABI allocator has
+    // supplied compatibility lifetime tokens.
+    with_owned_deflate_storage(state, |state, owned| {
+        if owned.matches_state(state) {
+            deflate_reset(stream, state, &mut owned.head)
+        } else {
+            crate::zlib_h::Z_STREAM_ERROR
+        }
+    })
     .unwrap_or(crate::zlib_h::Z_STREAM_ERROR)
 }
 
@@ -2347,29 +2124,22 @@ fn deflate_prime(
     return crate::zlib_h::Z_OK;
 }
 
-/// Select pending storage for `deflatePrime` without making its ABI wrapper
-/// borrow an implementation workspace.  Default-pair streams use their
-/// retained vector; callback-backed streams use the existing narrow pending
-/// boundary.
+/// Select the state-owned pending storage for `deflatePrime`.
 fn deflate_prime_with_storage(
     strm: &crate::zlib_h::z_stream_s,
     state: &mut crate::src::deflate::deflate_state,
     bits: ::core::ffi::c_int,
     value: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
-    if state.owned_storage.is_some() {
-        return with_owned_deflate_storage(state, |state, owned| {
-            deflate_prime(Some(strm), Some(state), Some(&mut owned.pending_buf), bits, value)
-        })
-        .unwrap_or(crate::zlib_h::Z_STREAM_ERROR);
-    }
-    with_callback_deflate_storage(
-        state,
-        CallbackDeflateStorageNeed::PendingOnly,
-        |state, storage| {
-            deflate_prime(Some(strm), Some(state), storage.pending_buf, bits, value)
-        },
-    )
+    with_owned_deflate_storage(state, |state, owned| {
+        deflate_prime(
+            Some(strm),
+            Some(state),
+            Some(&mut owned.pending_buf),
+            bits,
+            value,
+        )
+    })
     .unwrap_or(crate::zlib_h::Z_STREAM_ERROR)
 }
 
@@ -2490,18 +2260,16 @@ pub(crate) fn deflateParams(
     level: ::core::ffi::c_int,
     strategy: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
-    let (level, strategy) = match deflate_params_prepare(strm, state, input, output, level, strategy)
-    {
-        Ok(values) => values,
-        Err(error) => return error,
-    };
+    let (level, strategy) =
+        match deflate_params_prepare(strm, state, input, output, level, strategy) {
+            Ok(values) => values,
+            Err(error) => return error,
+        };
     deflate_params_finish(state, hash_tables, level, strategy)
 }
 
 /// Select hash-chain storage after `deflateParams` has completed any required
-/// streaming transition.  This keeps callback/owned workspace dispatch out
-/// of ABI wrappers and is intentionally after the transition, since `deflate`
-/// itself needs to observe an installed owned workspace.
+/// streaming transition.
 pub(crate) fn deflate_params_with_storage(
     strm: &mut crate::zlib_h::z_stream,
     state: &mut crate::src::deflate::deflate_state,
@@ -2510,43 +2278,23 @@ pub(crate) fn deflate_params_with_storage(
     level: ::core::ffi::c_int,
     strategy: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
-    let (level, strategy) = match deflate_params_prepare(strm, state, input, output, level, strategy)
-    {
-        Ok(values) => values,
-        Err(error) => return error,
-    };
-    let needs_hash_tables = state.level != level
-        && state.level == 0
-        && state.matches != 0;
+    let (level, strategy) =
+        match deflate_params_prepare(strm, state, input, output, level, strategy) {
+            Ok(values) => values,
+            Err(error) => return error,
+        };
+    let needs_hash_tables = state.level != level && state.level == 0 && state.matches != 0;
     if !needs_hash_tables {
         return deflate_params_finish(state, None, level, strategy);
     }
-    if state.owned_storage.is_some() {
-        return with_owned_deflate_storage(state, |state, owned| {
-            deflate_params_finish(
-                state,
-                Some((&mut owned.head, &mut owned.prev)),
-                level,
-                strategy,
-            )
-        })
-        .unwrap_or(crate::zlib_h::Z_STREAM_ERROR);
-    }
-    with_callback_deflate_storage(
-        state,
-        CallbackDeflateStorageNeed::Workspace,
-        |state, storage| {
-            deflate_params_finish(
-                state,
-                match (storage.head, storage.prev) {
-                    (Some(head), Some(prev)) => Some((head, prev)),
-                    _ => None,
-                },
-                level,
-                strategy,
-            )
-        },
-    )
+    with_owned_deflate_storage(state, |state, owned| {
+        deflate_params_finish(
+            state,
+            Some((&mut owned.head, &mut owned.prev)),
+            level,
+            strategy,
+        )
+    })
     .unwrap_or(crate::zlib_h::Z_STREAM_ERROR)
 }
 
@@ -3322,136 +3070,9 @@ fn deflate_update(
     }
 }
 
-/// Construct one typed view of a callback-owned deflate workspace.
-///
-/// Default-pair streams use `DeflateOwnedStorage` and never enter this
-/// bridge.  The legacy streaming engine converts callback-owned allocation
-/// handles to these typed views; this constructor and the strategy dispatcher
-/// only operate on already-borrowed storage.  A future callback-storage owner
-/// can replace that boundary without changing the dispatcher or strategies.
-fn callback_deflate_workspace<'a>(
-    window: &'a mut [crate::stdlib::Bytef],
-    head: Option<&'a mut [crate::src::deflate::Posf]>,
-    prev: Option<&'a mut [crate::src::deflate::Posf]>,
-    input: &'a [crate::stdlib::Bytef],
-    output: &'a mut [crate::stdlib::Bytef],
-    pending_buf: &'a mut [crate::stdlib::Bytef],
-) -> DeflateWorkspace<'a> {
-    DeflateWorkspace {
-        window,
-        head,
-        prev,
-        pending_buf,
-        input,
-        output,
-    }
-}
-
-/// Run one update against the typed buffers supplied by a custom allocator.
-///
-/// The legacy streaming engine performs the raw callback-storage conversion;
-/// this dispatcher retains only the existing typed update behavior.
-fn update_callback_deflate_workspace(
-    state: &mut crate::src::deflate::deflate_state,
-    strm: &mut crate::zlib_h::z_stream,
-    workspace: &mut DeflateWorkspace<'_>,
-    flush: ::core::ffi::c_int,
-) -> Option<DeflateUpdateResult> {
-    let bstate = deflate_update(state, strm, workspace, flush)?;
-    let block_handled =
-        bstate as ::core::ffi::c_uint == block_done as ::core::ffi::c_int as ::core::ffi::c_uint;
-    if block_handled
-        && !finish_callback_deflate_block(
-            state,
-            workspace.pending_buf,
-            workspace.head.as_deref_mut(),
-            flush,
-        )
-    {
-        return None;
-    }
-    Some(DeflateUpdateResult {
-        bstate,
-        block_handled,
-    })
-}
-
-/// Complete a callback-owned update while its checked workspace is still
-/// borrowed.  In particular, a full flush clears the same hash-table view
-/// that the strategy update used, so the legacy engine does not need to
-/// recreate a separate raw head-table slice afterward.
-fn finish_callback_deflate_block(
-    state: &mut crate::src::deflate::deflate_state,
-    pending_buf: &mut [crate::stdlib::Bytef],
-    head: Option<&mut [crate::src::deflate::Posf]>,
-    flush: ::core::ffi::c_int,
-) -> bool {
-    if flush == crate::zlib_h::Z_PARTIAL_FLUSH {
-        crate::src::trees::_tr_align(state, pending_buf);
-    } else if flush != crate::zlib_h::Z_BLOCK {
-        crate::src::trees::tr_stored_block(
-            state,
-            pending_buf,
-            None,
-            0 as crate::zutil_h::ulg,
-            0 as ::core::ffi::c_int,
-        );
-        if flush == crate::zlib_h::Z_FULL_FLUSH {
-            let Some(head) = head else {
-                return false;
-            };
-            if !clear_full_flush_hash(state, head) {
-                return false;
-            }
-        }
-    }
-    true
-}
-
 struct DeflateUpdateResult {
     bstate: block_state,
     block_handled: bool,
-}
-
-/// Borrow a callback-owned workspace for exactly one deflate update.
-///
-/// Default-allocator streams keep their buffers in `DeflateOwnedStorage` and
-/// never enter this boundary.  Custom and mixed allocator buffers retain ABI
-/// handles, so form all of their typed views together here after `deflate`
-/// has validated the stream and pending buffer.  This leaves the streaming
-/// engine with a named, pointer-free update operation and gives a future
-/// callback-storage owner one replacement point.
-fn with_callback_deflate_workspace<R>(
-    state: &mut crate::src::deflate::deflate_state,
-    strm: &mut crate::zlib_h::z_stream,
-    input: &[crate::stdlib::Bytef],
-    output: &mut [crate::stdlib::Bytef],
-    pending_buf: &mut [crate::stdlib::Bytef],
-    flush: ::core::ffi::c_int,
-    action: impl FnOnce(
-        &mut crate::src::deflate::deflate_state,
-        &mut crate::zlib_h::z_stream,
-        &mut DeflateWorkspace<'_>,
-        ::core::ffi::c_int,
-    ) -> Option<R>,
-) -> Option<R> {
-    with_callback_deflate_storage(
-        state,
-        CallbackDeflateStorageNeed::Workspace,
-        |state, storage| {
-            let window = storage.window?;
-            let mut workspace = callback_deflate_workspace(
-                window,
-                storage.head,
-                storage.prev,
-                input,
-                output,
-                pending_buf,
-            );
-            action(state, strm, &mut workspace, flush)
-        },
-    )
-    .flatten()
 }
 
 /// Emit and drain the initial zlib wrapper through already-borrowed buffers.
@@ -3536,16 +3157,9 @@ fn deflate_validated(
             .load(::core::sync::atomic::Ordering::Relaxed);
         return -5 as ::core::ffi::c_int;
     }
-    with_callback_deflate_storage(
-        state,
-        CallbackDeflateStorageNeed::PendingOnly,
-        |state, storage| {
-            storage.pending_buf.map(|pending_buffer| {
-                deflate_with_pending_buffer(strm, state, flush, input, output, pending_buffer)
-            })
-        },
-    )
-    .flatten()
+    with_owned_deflate_storage(state, |state, owned| {
+        deflate_with_pending_buffer(strm, state, flush, input, output, owned)
+    })
     .unwrap_or(crate::zlib_h::Z_STREAM_ERROR)
 }
 
@@ -3557,8 +3171,9 @@ fn deflate_with_pending_buffer(
     flush: ::core::ffi::c_int,
     input: Option<&[crate::stdlib::Bytef]>,
     output: Option<&mut [crate::stdlib::Bytef]>,
-    mut pending_buffer: &mut [crate::stdlib::Bytef],
+    storage: &mut DeflateOwnedStorage,
 ) -> ::core::ffi::c_int {
+    let mut pending_buffer = &mut storage.pending_buf;
     let mut old_flush: ::core::ffi::c_int = 0;
     let mut output_buffer = output.expect("validated deflate output");
     old_flush = state.last_flush;
@@ -3856,48 +3471,21 @@ fn deflate_with_pending_buffer(
         || state.lookahead != 0 as crate::stdlib::uInt
         || flush != crate::zlib_h::Z_NO_FLUSH && state.status != crate::src::deflate::FINISH_STATE
     {
-        // The caller input remains an ABI borrow, but the default allocator's
-        // window and hash chains are owned vectors. Form the input span once,
-        // then let that branch dispatch through the vectors directly instead
-        // of recreating raw slices for all three work areas.
+        // The caller input remains an ABI borrow, while all state workspace
+        // is held in typed vectors.
         let input = input.unwrap_or(&[]);
-        let using_owned_workspace = state.owned_storage.is_some();
-        // This is the last raw stream/storage bridge for custom and mixed
-        // allocator workspaces. The named safe update below owns level and
-        // strategy selection for both allocation modes.
-        let update = if using_owned_workspace {
-            let Some(output) = output_tail(strm, &mut output_buffer) else {
-                return crate::zlib_h::Z_STREAM_ERROR;
-            };
-            let Some(bstate) =
-                with_owned_deflate_workspace(state, input, output, |state, workspace| {
-                    deflate_update(state, strm, workspace, flush)
-                })
-            else {
-                return crate::zlib_h::Z_STREAM_ERROR;
-            };
-            DeflateUpdateResult {
-                bstate,
-                block_handled: false,
-            }
-        } else {
-            let Some(output) = output_tail(strm, &mut output_buffer) else {
-                return crate::zlib_h::Z_STREAM_ERROR;
-            };
-            let Some(bstate) = with_callback_deflate_workspace(
-                state,
-                strm,
-                input,
-                output,
-                &mut pending_buffer,
-                flush,
-                update_callback_deflate_workspace,
-            ) else {
-                return crate::zlib_h::Z_STREAM_ERROR;
-            };
-            bstate
+        let _ = pending_buffer;
+        let Some(output) = output_tail(strm, &mut output_buffer) else {
+            return crate::zlib_h::Z_STREAM_ERROR;
         };
-        let bstate = update.bstate;
+        let Some(mut workspace) = storage.workspace(state, input, output) else {
+            return crate::zlib_h::Z_STREAM_ERROR;
+        };
+        let Some(bstate) = deflate_update(state, strm, &mut workspace, flush) else {
+            return crate::zlib_h::Z_STREAM_ERROR;
+        };
+        drop(workspace);
+        let mut pending_buffer = &mut storage.pending_buf;
         if bstate as ::core::ffi::c_uint
             == finish_started as ::core::ffi::c_int as ::core::ffi::c_uint
             || bstate as ::core::ffi::c_uint
@@ -3914,9 +3502,7 @@ fn deflate_with_pending_buffer(
             }
             return crate::zlib_h::Z_OK;
         }
-        if !update.block_handled
-            && bstate as ::core::ffi::c_uint
-                == block_done as ::core::ffi::c_int as ::core::ffi::c_uint
+        if bstate as ::core::ffi::c_uint == block_done as ::core::ffi::c_int as ::core::ffi::c_uint
         {
             if flush == crate::zlib_h::Z_PARTIAL_FLUSH {
                 crate::src::trees::_tr_align(state, &mut pending_buffer);
@@ -3929,19 +3515,7 @@ fn deflate_with_pending_buffer(
                     0 as ::core::ffi::c_int,
                 );
                 if flush == crate::zlib_h::Z_FULL_FLUSH {
-                    let cleared = if using_owned_workspace {
-                        clear_owned_full_flush_hash(state)
-                    } else {
-                        with_callback_deflate_storage(
-                            state,
-                            CallbackDeflateStorageNeed::HeadOnly,
-                            |state, storage| {
-                                storage.head.map(|head| clear_full_flush_hash(state, head))
-                            },
-                        )
-                        .flatten()
-                        .unwrap_or(false)
-                    };
+                    let cleared = clear_full_flush_hash(state, &mut storage.head);
                     if !cleared {
                         return crate::zlib_h::Z_STREAM_ERROR;
                     }
@@ -3966,6 +3540,7 @@ fn deflate_with_pending_buffer(
     if state.wrap <= 0 {
         return crate::zlib_h::Z_STREAM_END;
     }
+    let mut pending_buffer = &mut storage.pending_buf;
     if state.pending_out > pending_buffer.len() || strm.avail_out != 0 && strm.next_out.is_null() {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
@@ -4018,10 +3593,11 @@ fn deflate_end(
         return crate::zlib_h::Z_STREAM_ERROR;
     }
     let status = state.status;
-    // Default-pair workspaces are ordinary owned vectors. Drop them before
-    // releasing the still callback-allocated opaque state; custom and mixed
-    // streams retain zlib's exact pending/head/prev/window/state free order.
-    let allocations = if state.owned_storage.take().is_some() {
+    // Drop the safe workspace before releasing callback lifetime tokens. Only
+    // callback streams have token handles to free; default-pair streams keep
+    // compatibility handles into their owned vectors.
+    state.owned_storage.take();
+    let allocations = if state.callback_storage_plan.take().is_none() {
         [
             ::core::ptr::null_mut(),
             ::core::ptr::null_mut(),
@@ -4121,116 +3697,6 @@ fn deflate_copy_source_stream(
     (source.zalloc.is_some() && source.zfree.is_some()).then_some(source)
 }
 
-/// Copy the callback-owned work areas through already-validated typed views.
-///
-/// `deflateCopy` has to preserve custom allocator allocation and free calls,
-/// but the source and destination allocations are distinct.  The existing
-/// callback-storage boundaries establish that distinction as slices, letting
-/// this core retain the C copy spans without another raw conversion.
-fn copy_callback_deflate_storage(
-    destination_window: &mut [crate::stdlib::Bytef],
-    destination_prev: &mut [crate::src::deflate::Posf],
-    destination_head: &mut [crate::src::deflate::Posf],
-    destination_pending: &mut [crate::stdlib::Bytef],
-    source_window: &[crate::stdlib::Bytef],
-    source_prev: &[crate::src::deflate::Posf],
-    source_head: &[crate::src::deflate::Posf],
-    source_pending: &[crate::stdlib::Bytef],
-    layout: &DeflateCopyLayout,
-    pending_copy_span: &::core::ops::Range<usize>,
-) -> bool {
-    let Some(destination_window) = destination_window.get_mut(..layout.window_bytes) else {
-        return false;
-    };
-    let Some(source_window) = source_window.get(..layout.window_bytes) else {
-        return false;
-    };
-    let Some(destination_prev) = destination_prev.get_mut(..layout.prev_items) else {
-        return false;
-    };
-    let Some(source_prev) = source_prev.get(..layout.prev_items) else {
-        return false;
-    };
-    let Some(destination_head) = destination_head.get_mut(..layout.head_items) else {
-        return false;
-    };
-    let Some(source_head) = source_head.get(..layout.head_items) else {
-        return false;
-    };
-    let Some(destination_pending) = destination_pending.get_mut(pending_copy_span.clone()) else {
-        return false;
-    };
-    let Some(source_pending) = source_pending.get(pending_copy_span.clone()) else {
-        return false;
-    };
-    destination_window.copy_from_slice(source_window);
-    destination_prev.copy_from_slice(source_prev);
-    destination_head.copy_from_slice(source_head);
-    destination_pending.copy_from_slice(source_pending);
-    true
-}
-
-/// Copy callback-owned storage after allocation without widening its unsafe
-/// boundary.  Both states retain ABI callback allocations here, so the
-/// established workspace and pending-buffer adapters supply all views.
-fn copy_callback_deflate_storage_from_states(
-    destination_state: &mut crate::src::deflate::deflate_state,
-    source_state: &mut crate::src::deflate::deflate_state,
-    layout: &DeflateCopyLayout,
-    pending_copy_span: &::core::ops::Range<usize>,
-) -> bool {
-    with_callback_deflate_storage(
-        destination_state,
-        CallbackDeflateStorageNeed::WorkspaceAndPending,
-        |_, destination_storage| {
-            let Some(destination_window) = destination_storage.window else {
-                return false;
-            };
-            let Some(destination_head) = destination_storage.head else {
-                return false;
-            };
-            let Some(destination_prev) = destination_storage.prev else {
-                return false;
-            };
-            let Some(destination_pending) = destination_storage.pending_buf else {
-                return false;
-            };
-            with_callback_deflate_storage(
-                source_state,
-                CallbackDeflateStorageNeed::WorkspaceAndPending,
-                |_, source_storage| {
-                    let Some(source_window) = source_storage.window else {
-                        return false;
-                    };
-                    let Some(source_head) = source_storage.head else {
-                        return false;
-                    };
-                    let Some(source_prev) = source_storage.prev else {
-                        return false;
-                    };
-                    let Some(source_pending) = source_storage.pending_buf else {
-                        return false;
-                    };
-                    copy_callback_deflate_storage(
-                        destination_window,
-                        destination_prev,
-                        destination_head,
-                        destination_pending,
-                        source_window,
-                        source_prev,
-                        source_head,
-                        source_pending,
-                        layout,
-                        pending_copy_span,
-                    )
-                },
-            )
-            .unwrap_or(false)
-        },
-    )
-    .unwrap_or(false)
-}
-
 pub fn deflateCopy(
     dest: Option<&mut crate::zlib_h::z_stream>,
     source: Option<&crate::zlib_h::z_stream>,
@@ -4248,18 +3714,12 @@ pub fn deflateCopy(
     if !deflate_stream_state_valid(Some(source_stream), Some(source_state)) {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    let Some(callback_copy_plan) = DeflateCallbackCopyPlan::from_state(source_state) else {
+    if DeflateCopyLayout::from_state(source_state).is_none() {
         return crate::zlib_h::Z_STREAM_ERROR;
-    };
-    let Some(pending_copy_span) = callback_copy_plan.layout.pending_copy_span() else {
-        return crate::zlib_h::Z_STREAM_ERROR;
-    };
-    // Default-pair streams already retain their four work buffers as owned
-    // vectors. Clone the same validated live ranges before allocating the
-    // opaque destination state, so this path never recreates callback-backed
-    // workspace just to immediately treat it as owned again. Custom and
-    // mixed allocator streams intentionally stay on the legacy path below:
-    // their allocation and free callbacks remain observable API behavior.
+    }
+    // Clone the validated live ranges before allocating the opaque
+    // destination state. Callback streams still receive their distinct four
+    // allocation requests, while compression stays in owned typed vectors.
     let owned_copy = match source_state.owned_storage.as_ref() {
         Some(storage) => match storage.try_copy_for_state(source_state) {
             Some(storage) => Some(storage),
@@ -4274,13 +3734,22 @@ pub fn deflateCopy(
         |dest_stream, dest_state| {
             dest_stream.state =
                 ::core::ptr::from_mut(dest_state).cast::<crate::src::deflate::internal_state>();
-            // Do not retain the derived clone's workspace. The default-pair branch
-            // installs the range-preserving copy prepared above; custom and mixed
-            // streams replace the raw handles through their original callbacks.
+            // Do not retain the derived clone's workspace. Install the
+            // range-preserving safe copy prepared above instead.
             dest_state.owned_storage = None;
             dest_state.strm = stream_identity(dest_stream);
             if let Some(mut storage) = owned_copy {
-                if !storage.bind_state_buffers(dest_state) {
+                if let Some(callback_storage) = dest_state.callback_storage_plan.clone() {
+                    callback_storage.allocate_into(dest_stream, dest_state);
+                    if dest_state.window.is_none()
+                        || dest_state.prev.is_none()
+                        || dest_state.head.is_none()
+                        || dest_state.pending_buf.is_none()
+                    {
+                        deflateEnd(dest_stream);
+                        return crate::zlib_h::Z_MEM_ERROR;
+                    }
+                } else if !storage.bind_state_buffers(dest_state) {
                     // The destination is still a fresh callback allocation. Clear
                     // copied source handles before teardown so a corrupt layout
                     // cannot make its failure path free source-owned storage.
@@ -4294,30 +3763,7 @@ pub fn deflateCopy(
                 dest_state.owned_storage = Some(storage);
                 return crate::zlib_h::Z_OK;
             }
-            let copy_layout = &callback_copy_plan.layout;
-            callback_copy_plan
-                .storage
-                .allocate_into(dest_stream, dest_state);
-            if dest_state.window.is_none()
-                || dest_state.prev.is_none()
-                || dest_state.head.is_none()
-                || dest_state.pending_buf.is_none()
-            {
-                deflateEnd(dest_stream);
-                return crate::zlib_h::Z_MEM_ERROR;
-            }
-            if !copy_callback_deflate_storage_from_states(
-                dest_state,
-                source_state,
-                copy_layout,
-                &pending_copy_span,
-            ) {
-                deflateEnd(dest_stream);
-                return crate::zlib_h::Z_MEM_ERROR;
-            }
-            dest_state.pending_out = copy_layout.pending_offset;
-            dest_state.sym_buf = dest_state.lit_bufsize as usize;
-            crate::zlib_h::Z_OK
+            crate::zlib_h::Z_MEM_ERROR
         },
     )
     .unwrap_or(crate::zlib_h::Z_MEM_ERROR)
