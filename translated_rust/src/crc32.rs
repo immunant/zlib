@@ -4792,7 +4792,10 @@ fn crc_word_big(mut data: z_word_t) -> z_word_t {
     return data;
 }
 
-fn crc32_slice(mut crc: crate::stdlib::uLong, buf: &[crate::stdlib::Byte]) -> crate::stdlib::uLong {
+pub(crate) fn crc32_slice(
+    mut crc: crate::stdlib::uLong,
+    buf: &[crate::stdlib::Byte],
+) -> crate::stdlib::uLong {
     crc = !crc & 0xffffffff as crate::stdlib::uLong;
     for &byte in buf {
         crc = crc >> 8
