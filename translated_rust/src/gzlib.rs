@@ -103,6 +103,7 @@ impl crate::gzguts_h::GzBuffers {
             input: None,
             output: None,
             input_cursor: None,
+            inflate_state: None,
             deflate_state: None,
             output_cursor: None,
         }
@@ -127,6 +128,7 @@ impl crate::gzguts_h::GzBuffers {
             input: Some(input),
             output,
             input_cursor: None,
+            inflate_state: None,
             deflate_state: None,
             output_cursor: None,
         })
@@ -144,6 +146,7 @@ impl crate::gzguts_h::GzBuffers {
             input: Some(input),
             output: Some(output),
             input_cursor: Some(GzCodecInput::empty()),
+            inflate_state: None,
             deflate_state: None,
             output_cursor: None,
         })
@@ -168,6 +171,7 @@ impl crate::gzguts_h::GzBuffers {
         self.input = None;
         self.output = None;
         self.input_cursor = None;
+        self.inflate_state = None;
         self.deflate_state = None;
         self.output_cursor = None;
         self.size = 0;
@@ -1161,11 +1165,46 @@ struct GzReadResetFields {
 // those safe transitions.  Carry both availability counters here: reset
 // clears only pending input, while output capacity remains owned by the
 // active codec operation.
+#[derive(Clone, Copy)]
 pub(crate) struct GzCodecCounters {
     available_input: crate::stdlib::uInt,
     available_output: crate::stdlib::uInt,
     total_in: crate::stdlib::uLong,
     total_out: crate::stdlib::uLong,
+}
+
+// A read handle keeps the scalar lifecycle of its embedded inflater with the
+// buffers it operates on. The transient ABI `z_stream` still performs the
+// actual call, but refill and result handling no longer need to treat that
+// stream as the persistent source of codec progress.
+pub(crate) struct GzEmbeddedInflateState {
+    counters: GzCodecCounters,
+}
+
+impl GzEmbeddedInflateState {
+    pub(crate) fn from_stream_fields(
+        available_input: crate::stdlib::uInt,
+        available_output: crate::stdlib::uInt,
+        total_in: crate::stdlib::uLong,
+        total_out: crate::stdlib::uLong,
+    ) -> Self {
+        Self {
+            counters: GzCodecCounters::from_stream_fields(
+                available_input,
+                available_output,
+                total_in,
+                total_out,
+            ),
+        }
+    }
+
+    pub(crate) fn counters(&self) -> GzCodecCounters {
+        self.counters
+    }
+
+    pub(crate) fn update(&mut self, counters: GzCodecCounters) {
+        self.counters = counters;
+    }
 }
 
 impl GzCodecCounters {
@@ -2075,6 +2114,7 @@ unsafe fn gz_open(path: GzOpenPath<'_>, mode: &[u8]) -> Option<Box<crate::gzguts
                 input: None,
                 output: None,
                 input_cursor: None,
+                inflate_state: None,
                 deflate_state: None,
                 output_cursor: None,
             },

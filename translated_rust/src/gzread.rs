@@ -735,6 +735,14 @@ unsafe fn gz_look(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
             .set(crate::zlib_h::Z_MEM_ERROR, Some(b"out of memory"));
             return -1 as ::core::ffi::c_int;
         }
+        state.buffers.inflate_state = Some(
+            crate::src::gzlib::GzEmbeddedInflateState::from_stream_fields(
+                state.strm.avail_in,
+                state.strm.avail_out,
+                state.strm.total_in,
+                state.strm.total_out,
+            ),
+        );
     }
     // This reset is intentionally before refill: opening a normal gzip read
     // starts with `junk == 0`, and the original ordering resets the embedded
@@ -800,6 +808,14 @@ unsafe fn gz_look(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
     match action {
         Ok(GzLookAction::ResetGzip) => {
             crate::src::inflate::inflateReset(&mut state.strm);
+            if let Some(inflate) = state.buffers.inflate_state.as_mut() {
+                inflate.update(crate::src::gzlib::GzCodecCounters::from_stream_fields(
+                    state.strm.avail_in,
+                    state.strm.avail_out,
+                    state.strm.total_in,
+                    state.strm.total_out,
+                ));
+            }
             0
         }
         Ok(GzLookAction::NeedInput) => 0,
@@ -840,12 +856,19 @@ unsafe fn gz_decomp(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int
     let Some(mut decomp) = crate::src::gzlib::GzDecompState::new(
         output_len,
         input,
-        crate::src::gzlib::GzCodecCounters::from_stream_fields(
-            state.strm.avail_in,
-            state.strm.avail_out,
-            state.strm.total_in,
-            state.strm.total_out,
-        ),
+        state
+            .buffers
+            .inflate_state
+            .as_ref()
+            .map(crate::src::gzlib::GzEmbeddedInflateState::counters)
+            .unwrap_or_else(|| {
+                crate::src::gzlib::GzCodecCounters::from_stream_fields(
+                    state.strm.avail_in,
+                    state.strm.avail_out,
+                    state.strm.total_in,
+                    state.strm.total_out,
+                )
+            }),
         state.junk,
         state.eof,
         state.how,
@@ -922,6 +945,9 @@ unsafe fn gz_decomp(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int
     state.strm.avail_out = finish.codec.available_output();
     state.strm.total_in = finish.codec.total_in();
     state.strm.total_out = finish.codec.total_out();
+    if let Some(inflate) = state.buffers.inflate_state.as_mut() {
+        inflate.update(finish.codec);
+    }
     state.junk = finish.junk;
     state.eof = finish.eof;
     state.how = finish.how;
