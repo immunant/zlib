@@ -2459,13 +2459,13 @@ pub fn tr_init(s: &mut crate::src::deflate::deflate_state) {
     init_block_impl(s);
 }
 
-pub unsafe extern "C" fn _tr_init(s: *mut crate::src::deflate::deflate_state) {
-    tr_init(&mut *s);
-}
 #[export_name = "_tr_init"]
 
 pub unsafe extern "C" fn _tr_init_ffi(mut s: *mut crate::src::deflate::deflate_state) {
-    _tr_init(s)
+    let Some(s) = s.as_mut() else {
+        return;
+    };
+    tr_init(s);
 }
 pub const SMALLEST: ::core::ffi::c_int = 1 as ::core::ffi::c_int;
 

@@ -596,7 +596,6 @@ pub use crate::src::trees::_length_code;
 pub use crate::src::trees::_tr_align;
 pub use crate::src::trees::_tr_flush_bits;
 pub use crate::src::trees::tr_flush_block_from_raw as _tr_flush_block;
-pub use crate::src::trees::_tr_init;
 pub use crate::src::trees::_tr_stored_block_ffi as _tr_stored_block;
 pub use crate::src::zutil::z_errmsg;
 pub use crate::src::zutil::zcalloc;
@@ -1571,7 +1570,7 @@ pub unsafe extern "C" fn deflateResetKeep(
         )
     };
     (*s).last_flush = -2 as ::core::ffi::c_int;
-    crate::src::trees::_tr_init(s as *mut crate::src::deflate::internal_state);
+    crate::src::trees::tr_init(&mut *s);
     return crate::zlib_h::Z_OK;
 }
 #[export_name = "deflateResetKeep"]
