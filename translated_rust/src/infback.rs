@@ -89,6 +89,12 @@ struct InflateBackDynamicHeader {
     ncode: ::core::ffi::c_uint,
 }
 
+#[derive(Copy, Clone)]
+enum InflateBackCodeLengthRepeat {
+    Previous,
+    Zero,
+}
+
 fn inflate_back_state_config(window_bits: ::core::ffi::c_int) -> InflateBackStateConfig {
     InflateBackStateConfig {
         dmax: 32768 as ::core::ffi::c_uint,
@@ -125,6 +131,24 @@ fn inflate_back_dynamic_header(hold: ::core::ffi::c_ulong) -> InflateBackDynamic
         ndist: ((hold >> 5) as ::core::ffi::c_uint & 31).wrapping_add(1),
         ncode: ((hold >> 10) as ::core::ffi::c_uint & 15).wrapping_add(4),
     }
+}
+
+fn inflate_back_code_length_repeat(
+    code: ::core::ffi::c_ushort,
+) -> (InflateBackCodeLengthRepeat, ::core::ffi::c_uint, ::core::ffi::c_uint) {
+    match code {
+        16 => (InflateBackCodeLengthRepeat::Previous, 3, 2),
+        17 => (InflateBackCodeLengthRepeat::Zero, 3, 3),
+        _ => (InflateBackCodeLengthRepeat::Zero, 11, 7),
+    }
+}
+
+fn inflate_back_low_bits(
+    hold: ::core::ffi::c_ulong,
+    bits: ::core::ffi::c_uint,
+) -> ::core::ffi::c_uint {
+    hold as ::core::ffi::c_uint
+        & ((1 as ::core::ffi::c_uint) << bits).wrapping_sub(1 as ::core::ffi::c_uint)
 }
 
 pub unsafe fn inflateBackInit_(
@@ -507,137 +531,52 @@ pub unsafe extern "C" fn inflateBack(
                                 (*state).have = (*state).have.wrapping_add(1);
                                 (*state).lens[c2rust_fresh7 as usize] = here.val;
                             } else {
-                                if here.val as ::core::ffi::c_int == 16 as ::core::ffi::c_int {
-                                    while bits
-                                        < (here.bits as ::core::ffi::c_int
-                                            + 2 as ::core::ffi::c_int)
-                                            as ::core::ffi::c_uint
-                                    {
-                                        if have == 0 as ::core::ffi::c_uint {
-                                            have = in_0.expect("non-null function pointer")(
-                                                in_desc,
-                                                &raw mut next,
-                                            );
-                                            if have == 0 as ::core::ffi::c_uint {
-                                                next =
-                                                    ::core::ptr::null_mut::<::core::ffi::c_uchar>();
-                                                ret = crate::zlib_h::Z_BUF_ERROR;
-                                                break '_inf_leave;
-                                            }
-                                        }
-                                        have = have.wrapping_sub(1);
-                                        let c2rust_fresh8 = next;
-                                        next = next.offset(1);
-                                        hold = hold.wrapping_add(
-                                            (*c2rust_fresh8 as ::core::ffi::c_ulong) << bits,
+                                let (repeat_kind, repeat_base, repeat_bits) =
+                                    inflate_back_code_length_repeat(here.val);
+                                while bits < here.bits as ::core::ffi::c_uint + repeat_bits {
+                                    if have == 0 as ::core::ffi::c_uint {
+                                        have = in_0.expect("non-null function pointer")(
+                                            in_desc,
+                                            &raw mut next,
                                         );
-                                        bits = bits.wrapping_add(8 as ::core::ffi::c_uint);
+                                        if have == 0 as ::core::ffi::c_uint {
+                                            next = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
+                                            ret = crate::zlib_h::Z_BUF_ERROR;
+                                            break '_inf_leave;
+                                        }
                                     }
-                                    hold >>= here.bits as ::core::ffi::c_int;
-                                    bits = bits.wrapping_sub(here.bits as ::core::ffi::c_uint);
-                                    if (*state).have == 0 as ::core::ffi::c_uint {
-                                        (*strm).msg = b"invalid bit length repeat\0".as_ptr()
-                                            as *const ::core::ffi::c_char
-                                            as *mut ::core::ffi::c_char;
-                                        (*state).mode = crate::src::inflate::BAD;
-                                        break;
-                                    } else {
+                                    have = have.wrapping_sub(1);
+                                    let c2rust_fresh8 = next;
+                                    next = next.offset(1);
+                                    hold = hold.wrapping_add(
+                                        (*c2rust_fresh8 as ::core::ffi::c_ulong) << bits,
+                                    );
+                                    bits = bits.wrapping_add(8 as ::core::ffi::c_uint);
+                                }
+                                hold >>= here.bits as ::core::ffi::c_int;
+                                bits = bits.wrapping_sub(here.bits as ::core::ffi::c_uint);
+                                match repeat_kind {
+                                    InflateBackCodeLengthRepeat::Previous => {
+                                        if (*state).have == 0 as ::core::ffi::c_uint {
+                                            (*strm).msg = b"invalid bit length repeat\0".as_ptr()
+                                                as *const ::core::ffi::c_char
+                                                as *mut ::core::ffi::c_char;
+                                            (*state).mode = crate::src::inflate::BAD;
+                                            break;
+                                        }
                                         len = (*state).lens[(*state)
                                             .have
                                             .wrapping_sub(1 as ::core::ffi::c_uint)
                                             as usize]
                                             as ::core::ffi::c_uint;
-                                        copy = (3 as ::core::ffi::c_uint).wrapping_add(
-                                            hold as ::core::ffi::c_uint
-                                                & ((1 as ::core::ffi::c_uint)
-                                                    << 2 as ::core::ffi::c_int)
-                                                    .wrapping_sub(1 as ::core::ffi::c_uint),
-                                        );
-                                        hold >>= 2 as ::core::ffi::c_int;
-                                        bits = bits.wrapping_sub(
-                                            2 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                                        );
                                     }
-                                } else if here.val as ::core::ffi::c_int == 17 as ::core::ffi::c_int
-                                {
-                                    while bits
-                                        < (here.bits as ::core::ffi::c_int
-                                            + 3 as ::core::ffi::c_int)
-                                            as ::core::ffi::c_uint
-                                    {
-                                        if have == 0 as ::core::ffi::c_uint {
-                                            have = in_0.expect("non-null function pointer")(
-                                                in_desc,
-                                                &raw mut next,
-                                            );
-                                            if have == 0 as ::core::ffi::c_uint {
-                                                next =
-                                                    ::core::ptr::null_mut::<::core::ffi::c_uchar>();
-                                                ret = crate::zlib_h::Z_BUF_ERROR;
-                                                break '_inf_leave;
-                                            }
-                                        }
-                                        have = have.wrapping_sub(1);
-                                        let c2rust_fresh9 = next;
-                                        next = next.offset(1);
-                                        hold = hold.wrapping_add(
-                                            (*c2rust_fresh9 as ::core::ffi::c_ulong) << bits,
-                                        );
-                                        bits = bits.wrapping_add(8 as ::core::ffi::c_uint);
+                                    InflateBackCodeLengthRepeat::Zero => {
+                                        len = 0 as ::core::ffi::c_uint;
                                     }
-                                    hold >>= here.bits as ::core::ffi::c_int;
-                                    bits = bits.wrapping_sub(here.bits as ::core::ffi::c_uint);
-                                    len = 0 as ::core::ffi::c_uint;
-                                    copy = (3 as ::core::ffi::c_uint).wrapping_add(
-                                        hold as ::core::ffi::c_uint
-                                            & ((1 as ::core::ffi::c_uint)
-                                                << 3 as ::core::ffi::c_int)
-                                                .wrapping_sub(1 as ::core::ffi::c_uint),
-                                    );
-                                    hold >>= 3 as ::core::ffi::c_int;
-                                    bits = bits.wrapping_sub(
-                                        3 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                                    );
-                                } else {
-                                    while bits
-                                        < (here.bits as ::core::ffi::c_int
-                                            + 7 as ::core::ffi::c_int)
-                                            as ::core::ffi::c_uint
-                                    {
-                                        if have == 0 as ::core::ffi::c_uint {
-                                            have = in_0.expect("non-null function pointer")(
-                                                in_desc,
-                                                &raw mut next,
-                                            );
-                                            if have == 0 as ::core::ffi::c_uint {
-                                                next =
-                                                    ::core::ptr::null_mut::<::core::ffi::c_uchar>();
-                                                ret = crate::zlib_h::Z_BUF_ERROR;
-                                                break '_inf_leave;
-                                            }
-                                        }
-                                        have = have.wrapping_sub(1);
-                                        let c2rust_fresh10 = next;
-                                        next = next.offset(1);
-                                        hold = hold.wrapping_add(
-                                            (*c2rust_fresh10 as ::core::ffi::c_ulong) << bits,
-                                        );
-                                        bits = bits.wrapping_add(8 as ::core::ffi::c_uint);
-                                    }
-                                    hold >>= here.bits as ::core::ffi::c_int;
-                                    bits = bits.wrapping_sub(here.bits as ::core::ffi::c_uint);
-                                    len = 0 as ::core::ffi::c_uint;
-                                    copy = (11 as ::core::ffi::c_uint).wrapping_add(
-                                        hold as ::core::ffi::c_uint
-                                            & ((1 as ::core::ffi::c_uint)
-                                                << 7 as ::core::ffi::c_int)
-                                                .wrapping_sub(1 as ::core::ffi::c_uint),
-                                    );
-                                    hold >>= 7 as ::core::ffi::c_int;
-                                    bits = bits.wrapping_sub(
-                                        7 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                                    );
                                 }
+                                copy = repeat_base.wrapping_add(inflate_back_low_bits(hold, repeat_bits));
+                                hold >>= repeat_bits;
+                                bits = bits.wrapping_sub(repeat_bits);
                                 if (*state).have.wrapping_add(copy)
                                     > (*state).nlen.wrapping_add((*state).ndist)
                                 {
