@@ -674,11 +674,11 @@ pub unsafe extern "C" fn inflate_fast_ffi(
         return;
     };
     let state = unsafe { &mut *(strm.state as *mut crate::src::inflate::inflate_state) };
-    let history = if state.window.is_null() || state.wsize == 0 {
+    let history = if state.window.is_none() || state.wsize == 0 {
         None
     } else {
         Some(::core::slice::from_raw_parts(
-            state.window,
+            state.window.expect("checked non-null window").as_ptr(),
             state.wsize as usize,
         ))
     };

@@ -132,7 +132,10 @@ pub struct inflate_state {
     pub wsize: ::core::ffi::c_uint,
     pub whave: ::core::ffi::c_uint,
     pub wnext: ::core::ffi::c_uint,
-    pub window: *mut ::core::ffi::c_uchar,
+    // The opaque state exposes a pointer-sized nullable handle, while Rust
+    // implementation code keeps the raw allocation access at explicit
+    // borrowing boundaries.
+    pub window: Option<::core::ptr::NonNull<::core::ffi::c_uchar>>,
     pub hold: ::core::ffi::c_ulong,
     pub bits: ::core::ffi::c_uint,
     pub length: ::core::ffi::c_uint,
@@ -304,7 +307,7 @@ pub(crate) fn empty_inflate_state() -> inflate_state {
         wsize: 0,
         whave: 0,
         wnext: 0,
-        window: ::core::ptr::null_mut(),
+        window: None,
         hold: 0,
         bits: 0,
         length: 0,
@@ -556,17 +559,17 @@ pub fn inflateReset2(
     {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    if !state.window.is_null() && state.wbits != windowBits as ::core::ffi::c_uint {
+    if state.window.is_some() && state.wbits != windowBits as ::core::ffi::c_uint {
         // The validated stream owns this existing window allocation. The
         // callback remains the ABI boundary for custom allocators.
         unsafe {
             Some(strm.zfree.expect("non-null function pointer"))
                 .expect("non-null function pointer")(
                 strm.opaque,
-                state.window as crate::stdlib::voidpf,
+                state.window.expect("checked non-null window").as_ptr().cast(),
             );
         }
-        state.window = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
+        state.window = None;
     }
     state.wrap = wrap;
     state.wbits = windowBits as ::core::ffi::c_uint;
@@ -597,7 +600,7 @@ fn initialize_inflate_state_base(
 ) {
     state.strm = stream_identity(strm);
     state.allocator_provenance = allocator_provenance;
-    state.window = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
+    state.window = None;
     state.mode = crate::src::inflate::HEAD;
 }
 
@@ -836,18 +839,18 @@ fn updatewindow(
     if !inflate_window_layout_valid(state) {
         return 1 as ::core::ffi::c_int;
     }
-    if state.window.is_null() {
+    if state.window.is_none() {
         let Some(zalloc) = strm.zalloc else {
             return 1 as ::core::ffi::c_int;
         };
-        state.window = unsafe {
+        state.window = ::core::ptr::NonNull::new(unsafe {
             zalloc(
                 strm.opaque,
                 layout.allocation_items,
                 ::core::mem::size_of::<::core::ffi::c_uchar>() as crate::stdlib::uInt,
             ) as *mut ::core::ffi::c_uchar
-        };
-        if state.window.is_null() {
+        });
+        if state.window.is_none() {
             return 1 as ::core::ffi::c_int;
         }
     }
@@ -860,10 +863,26 @@ fn updatewindow(
         return 1 as ::core::ffi::c_int;
     }
     // Allocation above establishes the window's `wsize` bytes for this
-    // initialized stream state.  Keep the ABI allocation handle confined to
-    // this bridge; callers use only references and slices.
-    let window = unsafe { ::core::slice::from_raw_parts_mut(state.window, layout.len) };
-    InflateWindow::borrowed(window).update(state, input).is_err() as ::core::ffi::c_int
+    // initialized stream state. Keep the raw allocator handle behind this
+    // named unsafe borrowing boundary; callers use only references and
+    // slices.
+    update_callback_owned_inflate_window(state, layout.len, input).is_err()
+        as ::core::ffi::c_int
+}
+
+/// Update exactly the validated callback-owned inflate window.
+///
+/// Callers must establish the allocation layout first. This keeps allocator-
+/// derived slice formation out of the safe update algorithm and gives an
+/// eventual owned-storage facade one interchange point.
+fn update_callback_owned_inflate_window(
+    state: &mut crate::src::inflate::inflate_state,
+    len: usize,
+    input: &[crate::stdlib::Bytef],
+) -> Result<(), ()> {
+    let window = state.window.expect("validated inflate window");
+    let window = unsafe { ::core::slice::from_raw_parts_mut(window.as_ptr(), len) };
+    InflateWindow::borrowed(window).update(state, input)
 }
 
 fn copy_literal_block(input: &[crate::stdlib::Bytef], output: &mut [crate::stdlib::Bytef]) {
@@ -2170,13 +2189,15 @@ pub fn inflate(
                                                 strm.avail_in = have as crate::stdlib::uInt;
                                                 state.hold = hold;
                                                 state.bits = bits;
-                                                let history = if state.window.is_null()
+                                                let history = if state.window.is_none()
                                                     || state.wsize == 0
                                                 {
                                                     None
                                                 } else {
                                                     Some(::core::slice::from_raw_parts(
-                                                        state.window,
+                                                        state.window
+                                                            .expect("checked non-null window")
+                                                            .as_ptr(),
                                                         state.wsize as usize,
                                                     ))
                                                 };
@@ -2661,14 +2682,20 @@ pub fn inflate(
                         continue;
                     }
                 }
+                let Some(window) = state.window else {
+                    strm.msg = INFLATE_MESSAGES[17].as_ptr() as *const ::core::ffi::c_char
+                        as *mut ::core::ffi::c_char;
+                    state.mode = crate::src::inflate::BAD;
+                    continue;
+                };
                 if copy > state.wnext {
                     copy = copy.wrapping_sub(state.wnext);
-                    from = state
-                        .window
+                    from = window
+                        .as_ptr()
                         .wrapping_add(state.wsize.wrapping_sub(copy) as usize);
                 } else {
-                    from = state
-                        .window
+                    from = window
+                        .as_ptr()
                         .wrapping_add(state.wnext.wrapping_sub(copy) as usize);
                 }
                 if copy > state.length {
@@ -2799,10 +2826,11 @@ fn release_inflate_allocations(
     strm: &mut crate::zlib_h::z_stream_s,
     state: &mut crate::src::inflate::inflate_state,
 ) {
-    let allocations = [
-        state.window as crate::stdlib::voidpf,
-        strm.state as crate::stdlib::voidpf,
-    ];
+    let window = match state.window {
+        Some(window) => window.as_ptr().cast(),
+        None => ::core::ptr::null_mut(),
+    };
+    let allocations = [window, strm.state as crate::stdlib::voidpf];
     for allocation in allocations {
         if !allocation.is_null() {
             unsafe {
@@ -2898,11 +2926,11 @@ pub unsafe extern "C" fn inflateGetDictionary_ffi(
     let Some(state) = (strm.state as *const crate::src::inflate::inflate_state).as_ref() else {
         return inflate_get_dictionary(Some(strm), None, None, None, dictLength.as_mut());
     };
-    let window = if state.window.is_null() {
+    let window = if state.window.is_none() {
         None
     } else {
         Some(::core::slice::from_raw_parts(
-            state.window,
+            state.window.expect("checked non-null window").as_ptr(),
             state.wsize as usize,
         ))
     };
@@ -3189,7 +3217,7 @@ fn initialize_inflate_copy(
         return crate::zlib_h::Z_MEM_ERROR;
     }
     let mut window = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
-    if !source_state.window.is_null() {
+    if source_state.window.is_some() {
         let layout = InflateWindowLayout::from_state(source_state)
             .expect("inflateCopy validated the source window layout");
         window = unsafe {
@@ -3215,13 +3243,13 @@ fn initialize_inflate_copy(
     if !window.is_null() {
         unsafe {
             ::core::ptr::copy_nonoverlapping(
-                source_state.window,
+                source_state.window.expect("checked non-null window").as_ptr(),
                 window,
                 source_state.whave as usize,
             );
         }
     }
-    copy_ref.window = window;
+    copy_ref.window = ::core::ptr::NonNull::new(window);
     dest.state = copy.cast::<crate::src::deflate::internal_state>();
     crate::zlib_h::Z_OK
 }

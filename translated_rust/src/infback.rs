@@ -88,7 +88,7 @@ fn inflate_back_window(
     length: usize,
 ) -> Option<&mut [u8]> {
     let window_bits = usize::try_from(state.wbits).ok()?;
-    if !(8..=15).contains(&window_bits) || state.window.is_null() {
+    if !(8..=15).contains(&window_bits) || state.window.is_none() {
         return None;
     }
     let window_len = 1usize.checked_shl(window_bits as u32)?;
@@ -102,7 +102,10 @@ fn inflate_back_window(
     // `inflateBackInit__ffi` creates exactly this validated span from the
     // caller's window, and no inflateBack path changes its allocation or size.
     Some(unsafe {
-        ::core::slice::from_raw_parts_mut(state.window, window_len)
+        ::core::slice::from_raw_parts_mut(
+            state.window.expect("checked non-null window").as_ptr(),
+            window_len,
+        )
     })
 }
 
@@ -165,7 +168,7 @@ fn initialize_allocated_inflate_back_state(
         *state = crate::src::inflate::empty_inflate_state();
         state.allocator_provenance = allocator_provenance;
         initialize_inflate_back_state(state, window_bits);
-        state.window = window.as_mut_ptr();
+        state.window = ::core::ptr::NonNull::new(window.as_mut_ptr());
     }
     strm.state = state.cast::<crate::src::deflate::internal_state>();
     crate::zlib_h::Z_OK
@@ -285,7 +288,7 @@ pub fn inflateBack(
     }) as ::core::ffi::c_uint;
     hold = 0 as ::core::ffi::c_ulong;
     bits = 0 as ::core::ffi::c_uint;
-    put = state.window;
+    put = state.window.expect("inflateBack installs its caller window").as_ptr();
     left = state.wsize;
     '_inf_leave: loop {
         match state.mode as ::core::ffi::c_uint {
@@ -384,7 +387,7 @@ pub fn inflateBack(
                             }
                         }
                         if left == 0 as ::core::ffi::c_uint {
-                            put = state.window;
+                            put = state.window.expect("inflateBack installs its caller window").as_ptr();
                             left = state.wsize;
                             state.whave = left;
                             if out.expect("non-null function pointer")(out_desc, put, left) != 0 {
@@ -889,7 +892,7 @@ pub fn inflateBack(
             state.length = here.val as ::core::ffi::c_uint;
             if here.op as ::core::ffi::c_int == 0 as ::core::ffi::c_int {
                 if left == 0 as ::core::ffi::c_uint {
-                    put = state.window;
+                    put = state.window.expect("inflateBack installs its caller window").as_ptr();
                     left = state.wsize;
                     state.whave = left;
                     if out.expect("non-null function pointer")(out_desc, put, left) != 0 {
@@ -1079,7 +1082,7 @@ pub fn inflateBack(
                     } else {
                         loop {
                             if left == 0 as ::core::ffi::c_uint {
-                                put = state.window;
+                                put = state.window.expect("inflateBack installs its caller window").as_ptr();
                                 left = state.wsize;
                                 state.whave = left;
                                 if out.expect("non-null function pointer")(out_desc, put, left) != 0
@@ -1125,7 +1128,11 @@ pub fn inflateBack(
                             }
                             state.length = state.length.wrapping_sub(copy);
                             left = left.wrapping_sub(copy);
-                            put = state.window.wrapping_add(put_index + copy_len);
+                            put = state
+                                .window
+                                .expect("inflateBack installs its caller window")
+                                .as_ptr()
+                                .wrapping_add(put_index + copy_len);
                             if state.length == 0 as ::core::ffi::c_uint {
                                 break;
                             }
@@ -1138,7 +1145,7 @@ pub fn inflateBack(
     if left < state.wsize {
         if out.expect("non-null function pointer")(
             out_desc,
-            state.window,
+            state.window.expect("inflateBack installs its caller window").as_ptr(),
             state.wsize.wrapping_sub(left),
         ) != 0
             && ret == crate::zlib_h::Z_STREAM_END
