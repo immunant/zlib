@@ -87,23 +87,25 @@ fn gz_load_read_result(
     }
 }
 
-unsafe fn gz_load(
+fn gz_load(
     state: &mut crate::gzguts_h::gz_state,
-    mut buf: *mut ::core::ffi::c_uchar,
-    mut len: ::core::ffi::c_uint,
+    buf: &mut [crate::stdlib::Bytef],
     have: &mut ::core::ffi::c_uint,
 ) -> ::core::ffi::c_int {
     let mut ret: ::core::ffi::c_int = 0;
     let mut get: ::core::ffi::c_uint = 0;
+    let len = buf.len() as ::core::ffi::c_uint;
     state.again = 0 as ::core::ffi::c_int;
     *have = 0 as ::core::ffi::c_uint;
     loop {
         get = gz_io_chunk_len(len.wrapping_sub(*have));
-        ret = crate::stdlib::read(
-            state.fd,
-            buf.wrapping_add(*have as usize) as *mut ::core::ffi::c_void,
-            get as crate::__stddef_size_t_h::size_t,
-        ) as ::core::ffi::c_int;
+        ret = unsafe {
+            crate::stdlib::read(
+                state.fd,
+                buf[*have as usize..].as_mut_ptr() as *mut ::core::ffi::c_void,
+                get as crate::__stddef_size_t_h::size_t,
+            )
+        } as ::core::ffi::c_int;
         if ret <= 0 as ::core::ffi::c_int {
             break;
         }
@@ -127,11 +129,8 @@ unsafe fn gz_load(
             if retryable {
                 state.again = 1 as ::core::ffi::c_int;
             }
-            crate::src::gzlib::gz_error(
-                &mut *state,
-                crate::zlib_h::Z_ERRNO,
-                crate::stdlib::strerror(errno),
-            );
+            let msg = unsafe { crate::stdlib::strerror(errno) };
+            crate::src::gzlib::gz_error(&mut *state, crate::zlib_h::Z_ERRNO, msg);
             return -1 as ::core::ffi::c_int;
         }
         GzLoadReadResult::Eof => {
@@ -169,24 +168,21 @@ fn gz_avail(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
         return -1 as ::core::ffi::c_int;
     }
     if state.eof == 0 as ::core::ffi::c_int {
+        let input = unsafe {
+            ::core::slice::from_raw_parts_mut(
+                state.in_0 as *mut crate::stdlib::Bytef,
+                state.size as usize,
+            )
+        };
         if let Some(next_offset) = gz_buffered_input_next_offset(
             state.strm.next_in as usize,
             state.in_0 as usize,
             state.strm.avail_in as usize,
         ) {
-            let input = unsafe {
-                ::core::slice::from_raw_parts_mut(
-                    state.in_0 as *mut crate::stdlib::Bytef,
-                    state.size as usize,
-                )
-            };
             gz_compact_input_buffer(input, next_offset, state.strm.avail_in as usize);
         }
-        let load_buf = state.in_0.wrapping_add(state.strm.avail_in as usize);
-        let load_len = state
-            .size
-            .wrapping_sub(state.strm.avail_in as ::core::ffi::c_uint);
-        if unsafe { gz_load(state, load_buf, load_len, &mut got) } == -1 as ::core::ffi::c_int {
+        let load_start = state.strm.avail_in as usize;
+        if gz_load(state, &mut input[load_start..], &mut got) == -1 as ::core::ffi::c_int {
             return -1 as ::core::ffi::c_int;
         }
         state.strm.avail_in = state.strm.avail_in.wrapping_add(got);
@@ -396,9 +392,14 @@ fn gz_fetch(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
             }
             crate::gzguts_h::COPY => {
                 let mut loaded = 0 as ::core::ffi::c_uint;
-                let out = state.out;
                 let len = state.size << 1 as ::core::ffi::c_int;
-                let ret = unsafe { gz_load(state, out, len, &mut loaded) };
+                let ret = unsafe {
+                    let out = ::core::slice::from_raw_parts_mut(
+                        state.out as *mut crate::stdlib::Bytef,
+                        len as usize,
+                    );
+                    gz_load(state, out, &mut loaded)
+                };
                 state.x.have = loaded;
                 if ret == -1 as ::core::ffi::c_int {
                     return -1 as ::core::ffi::c_int;
@@ -497,7 +498,11 @@ unsafe fn gz_read(
                 step = GzReadStep::NeedMoreInput;
             } else {
                 if state.how == crate::gzguts_h::COPY {
-                    err = gz_load(state, output[output_pos..].as_mut_ptr(), n, &mut n);
+                    err = gz_load(
+                        state,
+                        &mut output[output_pos..output_pos + n as usize],
+                        &mut n,
+                    );
                 } else {
                     state.strm.avail_out = n as crate::stdlib::uInt;
                     state.strm.next_out = output[output_pos..].as_mut_ptr();
@@ -667,6 +672,45 @@ fn gzungetc_pushback_plan(
             shift_to_end: next_at_out,
         }
     }
+}
+
+fn gzungetc_impl(
+    state: &mut crate::gzguts_h::gz_state,
+    out: &mut [crate::stdlib::Bytef],
+    mut next_index: usize,
+    c: ::core::ffi::c_int,
+) -> ::core::ffi::c_int {
+    match gzungetc_pushback_plan(state.x.have, state.size, next_index == 0) {
+        GzUngetcPlan::Empty { write_index } => {
+            state.x.have = 1 as ::core::ffi::c_uint;
+            state.x.next = out.as_mut_ptr().wrapping_add(write_index);
+            out[write_index] = c as ::core::ffi::c_uchar;
+            state.x.pos -= 1;
+            state.past = 0 as ::core::ffi::c_int;
+            return c;
+        }
+        GzUngetcPlan::Full => {
+            crate::src::gzlib::gz_error(
+                state,
+                crate::zlib_h::Z_DATA_ERROR,
+                b"out of room to push characters\0".as_ptr() as *const ::core::ffi::c_char,
+            );
+            return -1 as ::core::ffi::c_int;
+        }
+        GzUngetcPlan::Existing { shift_to_end } => {
+            if shift_to_end {
+                next_index = gz_shift_pushback_buffer(out, state.x.have as usize);
+                state.x.next = out.as_mut_ptr().wrapping_add(next_index);
+            }
+        }
+    }
+    state.x.have = state.x.have.wrapping_add(1);
+    next_index = next_index.wrapping_sub(1);
+    state.x.next = out.as_mut_ptr().wrapping_add(next_index);
+    out[next_index] = c as ::core::ffi::c_uchar;
+    state.x.pos -= 1;
+    state.past = 0 as ::core::ffi::c_int;
+    c
 }
 
 fn gzgets_copy_len(
@@ -877,44 +921,17 @@ pub unsafe extern "C" fn gzungetc_ffi(
     if c < 0 as ::core::ffi::c_int {
         return -1 as ::core::ffi::c_int;
     }
-    match gzungetc_pushback_plan(
-        (*state).x.have,
-        (*state).size,
-        (*state).x.next == (*state).out,
-    ) {
-        GzUngetcPlan::Empty { write_index } => {
-            (*state).x.have = 1 as ::core::ffi::c_uint;
-            (*state).x.next = (*state).out.wrapping_add(write_index);
-            *(*state).x.next = c as ::core::ffi::c_uchar;
-            (*state).x.pos -= 1;
-            (*state).past = 0 as ::core::ffi::c_int;
-            return c;
-        }
-        GzUngetcPlan::Full => {
-            crate::src::gzlib::gz_error(
-                &mut *state,
-                crate::zlib_h::Z_DATA_ERROR,
-                b"out of room to push characters\0".as_ptr() as *const ::core::ffi::c_char,
-            );
-            return -1 as ::core::ffi::c_int;
-        }
-        GzUngetcPlan::Existing { shift_to_end } => {
-            if shift_to_end {
-                let out = ::core::slice::from_raw_parts_mut(
-                    (*state).out as *mut crate::stdlib::Bytef,
-                    ((*state).size << 1 as ::core::ffi::c_int) as usize,
-                );
-                let next = gz_shift_pushback_buffer(out, (*state).x.have as usize);
-                (*state).x.next = (*state).out.wrapping_add(next);
-            }
-        }
-    }
-    (*state).x.have = (*state).x.have.wrapping_add(1);
-    (*state).x.next = (*state).x.next.wrapping_sub(1);
-    *(*state).x.next = c as ::core::ffi::c_uchar;
-    (*state).x.pos -= 1;
-    (*state).past = 0 as ::core::ffi::c_int;
-    return c;
+    let state_ref = &mut *state;
+    let next_index = if state_ref.x.have == 0 {
+        0
+    } else {
+        state_ref.x.next.offset_from(state_ref.out) as usize
+    };
+    let out = ::core::slice::from_raw_parts_mut(
+        state_ref.out as *mut crate::stdlib::Bytef,
+        (state_ref.size << 1 as ::core::ffi::c_int) as usize,
+    );
+    gzungetc_impl(state_ref, out, next_index, c)
 }
 #[export_name = "gzgets"]
 pub unsafe extern "C" fn gzgets_ffi(
