@@ -189,6 +189,13 @@ fn output_cursor_after_write(
     )
 }
 
+fn output_produced_at_fast_path_start(
+    start: crate::stdlib::uInt,
+    output_remaining: crate::stdlib::uInt,
+) -> crate::stdlib::uInt {
+    start.wrapping_sub(output_remaining)
+}
+
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 enum FastLitLenAction {
     Literal,
@@ -502,7 +509,8 @@ pub unsafe extern "C" fn inflate_fast(
     in_0 = (*strm).next_in as *mut ::core::ffi::c_uchar;
     input_remaining = (*strm).avail_in;
     out = (*strm).next_out as *mut ::core::ffi::c_uchar;
-    output_produced = (start as crate::stdlib::uInt).wrapping_sub((*strm).avail_out);
+    output_produced =
+        output_produced_at_fast_path_start(start as crate::stdlib::uInt, (*strm).avail_out);
     output_remaining = (*strm).avail_out;
     wsize = state.wsize;
     whave = state.whave;
@@ -811,11 +819,12 @@ mod tests {
         fast_length_extra_bits_need_input, fast_litlen_action, fast_match_copy_layout,
         fast_match_uses_window, fast_window_copy_plan, fast_window_distance_is_invalid,
         finish_fast_distance, input_bytes_needed, input_remaining_after_read, low_bits,
-        output_cursor_after_write, refill_input_byte, subtable_index, table_index,
-        trailing_match_copy_byte_count, trailing_match_copy_needs_second_byte, unread_input_state,
-        validate_fast_window_distance, FastCodeEntry, FastDecodeError, FastDecodeFailure,
-        FastDistAction, FastDistance, FastDistanceSource, FastLitLenAction, FastMatchCopyLayout,
-        FastWindowContinuationSource, FastWindowCopyPlan, FastWindowDistance,
+        output_cursor_after_write, output_produced_at_fast_path_start, refill_input_byte,
+        subtable_index, table_index, trailing_match_copy_byte_count,
+        trailing_match_copy_needs_second_byte, unread_input_state, validate_fast_window_distance,
+        FastCodeEntry, FastDecodeError, FastDecodeFailure, FastDistAction, FastDistance,
+        FastDistanceSource, FastLitLenAction, FastMatchCopyLayout, FastWindowContinuationSource,
+        FastWindowCopyPlan, FastWindowDistance,
     };
 
     #[test]
@@ -1157,6 +1166,15 @@ mod tests {
         assert_eq!(
             output_cursor_after_write(::core::ffi::c_uint::MAX, 0),
             (0, ::core::ffi::c_uint::MAX),
+        );
+    }
+
+    #[test]
+    fn fast_path_start_output_count_preserves_wrapping_subtraction() {
+        assert_eq!(output_produced_at_fast_path_start(10, 4), 6);
+        assert_eq!(
+            output_produced_at_fast_path_start(0, 1),
+            ::core::ffi::c_uint::MAX
         );
     }
 

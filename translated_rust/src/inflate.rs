@@ -1050,6 +1050,15 @@ fn inflate_trailer_checksum_from_hold(
     }
 }
 
+fn inflate_trailer_checksum_is_valid(
+    wrap: ::core::ffi::c_int,
+    flags: ::core::ffi::c_int,
+    hold: crate::stdlib::uLong,
+    calculated_checksum: crate::stdlib::uLong,
+) -> bool {
+    wrap & 4 == 0 || inflate_trailer_checksum_from_hold(flags, hold) == calculated_checksum
+}
+
 fn inflate_gzip_length_check_required(wrap: ::core::ffi::c_int, flags: ::core::ffi::c_int) -> bool {
     wrap != 0 && flags != 0
 }
@@ -1516,10 +1525,12 @@ pub unsafe extern "C" fn inflate(
                     }
                     checksum_start = put as *const crate::stdlib::Bytef;
                     out = left;
-                    if (*state).wrap & 4 as ::core::ffi::c_int != 0
-                        && inflate_trailer_checksum_from_hold((*state).flags, hold)
-                            != (*state).check
-                    {
+                    if !inflate_trailer_checksum_is_valid(
+                        (*state).wrap,
+                        (*state).flags,
+                        hold,
+                        (*state).check,
+                    ) {
                         (*strm).msg = b"incorrect data check\0".as_ptr()
                             as *const ::core::ffi::c_char
                             as *mut ::core::ffi::c_char;
@@ -3225,18 +3236,19 @@ mod tests {
         inflate_stream_has_allocator_callbacks, inflate_sync_input_progress,
         inflate_sync_normalized_wrap, inflate_sync_point, inflate_sync_point_value,
         inflate_sync_remaining_input, inflate_sync_search_core, inflate_trailer_checksum_from_hold,
-        inflate_undermine_core, inflate_validate_core, inflate_validate_wrap,
-        inflate_zlib_header_error, inflate_zlib_header_transition, inflate_zlib_window_params,
-        initial_window_metadata, reset_window_history, stored_block_length, syncsearch_safe,
-        update_window_buffer_len, update_window_core, update_window_history,
-        update_window_slice_plan, window_allocation_failed, window_allocation_plan,
-        window_allocation_request, window_allocation_request_for_plan, window_metadata_update_plan,
-        window_needs_allocation, window_update_plan, DynamicCodeLengthRepeat, InflateBlockKind,
-        InflateCallProgress, InflateCopyProgress, InflateGzipExtraProgress, InflateGzipFlags,
-        InflateGzipFlagsError, InflateMatchPlan, InflateMatchSource, InflateOutputChecksum,
-        InflatePrimeUpdate, InflateSyncSearch, InflateZlibHeaderError, InflateZlibHeaderTransition,
-        InflateZlibWindowParams, WindowAllocationPlan, BAD, CHECK, CODE_LENGTH_ORDER, COPY_,
-        COPY_1, DICT, DICTID, HEAD, LEN_, MATCH, STORED, SYNC, TYPE, TYPEDO,
+        inflate_trailer_checksum_is_valid, inflate_undermine_core, inflate_validate_core,
+        inflate_validate_wrap, inflate_zlib_header_error, inflate_zlib_header_transition,
+        inflate_zlib_window_params, initial_window_metadata, reset_window_history,
+        stored_block_length, syncsearch_safe, update_window_buffer_len, update_window_core,
+        update_window_history, update_window_slice_plan, window_allocation_failed,
+        window_allocation_plan, window_allocation_request, window_allocation_request_for_plan,
+        window_metadata_update_plan, window_needs_allocation, window_update_plan,
+        DynamicCodeLengthRepeat, InflateBlockKind, InflateCallProgress, InflateCopyProgress,
+        InflateGzipExtraProgress, InflateGzipFlags, InflateGzipFlagsError, InflateMatchPlan,
+        InflateMatchSource, InflateOutputChecksum, InflatePrimeUpdate, InflateSyncSearch,
+        InflateZlibHeaderError, InflateZlibHeaderTransition, InflateZlibWindowParams,
+        WindowAllocationPlan, BAD, CHECK, CODE_LENGTH_ORDER, COPY_, COPY_1, DICT, DICTID, HEAD,
+        LEN_, MATCH, STORED, SYNC, TYPE, TYPEDO,
     };
 
     #[test]
@@ -4712,6 +4724,29 @@ mod tests {
         assert_eq!(inflate_trailer_checksum_from_hold(1, hold), hold);
         assert_eq!(inflate_trailer_checksum_from_hold(-1, hold), hold);
         assert_eq!(inflate_trailer_checksum_from_hold(0, hold), 0x1234_5678);
+    }
+
+    #[test]
+    fn trailer_checksum_validation_respects_wrapping_and_byte_order() {
+        assert!(inflate_trailer_checksum_is_valid(0, 0, 0, 0xbeef));
+        assert!(inflate_trailer_checksum_is_valid(
+            4,
+            0,
+            0x7856_3412,
+            0x1234_5678
+        ));
+        assert!(inflate_trailer_checksum_is_valid(
+            4,
+            1,
+            0x7856_3412,
+            0x7856_3412
+        ));
+        assert!(!inflate_trailer_checksum_is_valid(
+            4,
+            0,
+            0x7856_3412,
+            0x7856_3412
+        ));
     }
 
     #[test]
