@@ -151,6 +151,20 @@ fn gz_zero_initialize_chunk_buffer(
     *first = 0;
 }
 
+struct GzWriteInputStorage<'a> {
+    bytes: &'a mut [crate::stdlib::Byte],
+}
+
+impl<'a> GzWriteInputStorage<'a> {
+    fn new(bytes: &'a mut [crate::stdlib::Byte]) -> Self {
+        Self { bytes }
+    }
+
+    fn zero_prefix_and_mark(&mut self, first: &mut ::core::ffi::c_int, len: usize) {
+        gz_zero_initialize_chunk_buffer(first, &mut self.bytes[..len]);
+    }
+}
+
 #[derive(Debug, Eq, PartialEq)]
 struct GzZeroChunkLimits {
     int_and_off64_are_same_size: bool,
@@ -1281,12 +1295,12 @@ fn gz_zero_prepare_chunk(
 
 fn gz_zero_prepare_and_initialize_chunk(
     state: &mut crate::gzguts_h::gz_state,
-    buffer: &mut [crate::stdlib::Byte],
+    input: &mut GzWriteInputStorage<'_>,
     first: &mut ::core::ffi::c_int,
 ) -> GzZeroPreparedChunk {
     let chunk = gz_zero_prepare_chunk(state, *first);
     if chunk.initialize_buffer {
-        gz_zero_initialize_chunk_buffer(first, &mut buffer[..chunk.len as usize]);
+        input.zero_prefix_and_mark(first, chunk.len as usize);
     }
     chunk
 }
@@ -1297,6 +1311,7 @@ unsafe fn gz_zero(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
     } else {
         ::core::slice::from_raw_parts_mut(state.in_0, state.size as usize)
     };
+    let mut input = GzWriteInputStorage::new(buffer);
     let mut first: ::core::ffi::c_int = 0;
     let limits = gz_zero_chunk_limits();
     match gz_zero_initial_step(
@@ -1316,7 +1331,7 @@ unsafe fn gz_zero(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
     }
     first = 1 as ::core::ffi::c_int;
     loop {
-        let chunk = gz_zero_prepare_and_initialize_chunk(state, buffer, &mut first);
+        let chunk = gz_zero_prepare_and_initialize_chunk(state, &mut input, &mut first);
         let ret = gz_comp(state, crate::zlib_h::Z_NO_FLUSH);
         match gz_zero_apply_comp_progress(
             &mut state.x.pos,
@@ -1821,8 +1836,8 @@ mod tests {
         GzCompOutputWriteProgress, GzCompOutputWriteResult, GzCompResetAction, GzCompWriteFailure,
         GzCompWriteResult, GzFlushAction, GzInitAllocationPlan, GzInitMode, GzPutcWriteAction,
         GzSetParamsAction, GzSetParamsBufferAction, GzSetParamsZeroAction, GzWriteBufferedCopyPlan,
-        GzWriteBufferedInputAction, GzWriteDirectAction, GzWritePreparation, GzZeroAction,
-        GzZeroChunkLimits, GzZeroPreparedChunk, GzZeroStep,
+        GzWriteBufferedInputAction, GzWriteDirectAction, GzWriteInputStorage, GzWritePreparation,
+        GzZeroAction, GzZeroChunkLimits, GzZeroPreparedChunk, GzZeroStep,
     };
 
     #[test]
@@ -1984,6 +1999,18 @@ mod tests {
         gz_zero_initialize_chunk_buffer(&mut first, &mut buffer);
 
         assert_eq!(first, 0);
+    }
+
+    #[test]
+    fn gz_write_input_storage_zeroes_only_the_requested_prefix() {
+        let mut bytes = [0xff, 0xff, 0xa5];
+        let mut first = 1;
+        let mut input = GzWriteInputStorage::new(&mut bytes);
+
+        input.zero_prefix_and_mark(&mut first, 2);
+
+        assert_eq!(first, 0);
+        assert_eq!(bytes, [0, 0, 0xa5]);
     }
 
     #[test]
@@ -3463,7 +3490,10 @@ mod tests {
         };
         let mut first = 1;
 
-        let initial = gz_zero_prepare_and_initialize_chunk(&mut state, &mut buffer, &mut first);
+        let initial = {
+            let mut input = GzWriteInputStorage::new(&mut buffer);
+            gz_zero_prepare_and_initialize_chunk(&mut state, &mut input, &mut first)
+        };
         assert_eq!(initial.len, 4);
         assert!(initial.initialize_buffer);
         assert_eq!(buffer, [0; 4]);
@@ -3472,7 +3502,10 @@ mod tests {
         assert_eq!(state.strm.next_in, state.in_0);
 
         state.skip = 2;
-        let final_chunk = gz_zero_prepare_and_initialize_chunk(&mut state, &mut buffer, &mut first);
+        let final_chunk = {
+            let mut input = GzWriteInputStorage::new(&mut buffer);
+            gz_zero_prepare_and_initialize_chunk(&mut state, &mut input, &mut first)
+        };
         assert_eq!(final_chunk.len, 2);
         assert!(!final_chunk.initialize_buffer);
         assert_eq!(buffer, [0; 4]);

@@ -370,20 +370,39 @@ struct GzAvailInputRefill<'a> {
     prior_avail_in: crate::stdlib::uInt,
 }
 
-fn gz_avail_input_refill(
-    input: &mut [crate::stdlib::Byte],
-    size: ::core::ffi::c_uint,
+struct GzInputStorage<'a> {
+    input: &'a mut [crate::stdlib::Byte],
+    next_in: usize,
     avail_in: crate::stdlib::uInt,
-    compact_input: bool,
-    input_offset: usize,
-) -> Option<GzAvailInputRefill<'_>> {
-    let plan = gz_avail_prepare_refill(input, size, avail_in, compact_input, input_offset)?;
-    let refill_end = plan.input_offset.checked_add(plan.read_len as usize)?;
-    let buffer = input.get_mut(plan.input_offset..refill_end)?;
-    Some(GzAvailInputRefill {
-        buffer,
-        prior_avail_in: plan.prior_avail_in,
-    })
+}
+
+impl<'a> GzInputStorage<'a> {
+    fn new(
+        input: &'a mut [crate::stdlib::Byte],
+        next_in: usize,
+        avail_in: crate::stdlib::uInt,
+    ) -> Self {
+        Self {
+            input,
+            next_in,
+            avail_in,
+        }
+    }
+
+    fn prepare_refill(
+        &mut self,
+        size: ::core::ffi::c_uint,
+        compact_input: bool,
+    ) -> Option<GzAvailInputRefill<'_>> {
+        let plan =
+            gz_avail_prepare_refill(self.input, size, self.avail_in, compact_input, self.next_in)?;
+        let refill_end = plan.input_offset.checked_add(plan.read_len as usize)?;
+        let buffer = self.input.get_mut(plan.input_offset..refill_end)?;
+        Some(GzAvailInputRefill {
+            buffer,
+            prior_avail_in: plan.prior_avail_in,
+        })
+    }
 }
 
 fn gzread_request(len: ::core::ffi::c_uint) -> Option<crate::stdlib::z_size_t> {
@@ -950,13 +969,8 @@ unsafe fn gz_avail(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int 
                 }
                 let input = core::slice::from_raw_parts_mut(p, state.size as usize);
                 let input_offset = (q as usize).wrapping_sub(p as usize);
-                let refill = match gz_avail_input_refill(
-                    input,
-                    state.size,
-                    state.strm.avail_in,
-                    compact_input,
-                    input_offset,
-                ) {
+                let mut input = GzInputStorage::new(input, input_offset, state.strm.avail_in);
+                let refill = match input.prepare_refill(state.size, compact_input) {
                     Some(plan) => plan,
                     None => return -1 as ::core::ffi::c_int,
                 };
@@ -2113,16 +2127,25 @@ mod tests {
     }
 
     #[test]
-    fn gz_avail_input_refill_returns_only_the_validated_read_region() {
+    fn gz_input_storage_returns_only_the_validated_read_region() {
         let mut input = *b"abcdefgh";
-        let refill = gz_avail_input_refill(&mut input, 8, 6, true, 2).unwrap();
+        let mut storage = GzInputStorage::new(&mut input, 2, 6);
+        let refill = storage.prepare_refill(8, true).unwrap();
 
         assert_eq!(refill.prior_avail_in, 6);
         assert_eq!(refill.buffer, b"gh");
         refill.buffer.copy_from_slice(b"12");
+        drop(refill);
+        drop(storage);
         assert_eq!(input, *b"cdefgh12");
+    }
 
-        assert!(gz_avail_input_refill(&mut input, 8, 6, true, 3).is_none());
+    #[test]
+    fn gz_input_storage_rejects_a_cursor_outside_its_owned_buffer() {
+        let mut input = *b"abcdefgh";
+        let mut storage = GzInputStorage::new(&mut input, 3, 6);
+
+        assert!(storage.prepare_refill(8, true).is_none());
     }
 
     #[test]

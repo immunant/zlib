@@ -4808,6 +4808,16 @@ struct PendingBitWriter<'a> {
 }
 
 impl PendingBitWriter<'_> {
+    fn symbol_triplet(&self, first: usize) -> Option<[crate::zutil_h::uch; 3]> {
+        let second = first.checked_add(1)?;
+        let third = first.checked_add(2)?;
+        Some([
+            *self.pending_buffer.get(first)?,
+            *self.pending_buffer.get(second)?,
+            *self.pending_buffer.get(third)?,
+        ])
+    }
+
     fn write_bits(&mut self, value: ::core::ffi::c_int, bit_count: ::core::ffi::c_int) -> bool {
         if bit_buffer_would_overflow(*self.bi_valid, bit_count) {
             let Some(first) = usize::try_from(*self.pending).ok() else {
@@ -5164,7 +5174,7 @@ pub unsafe extern "C" fn _tr_align_ffi(mut s: *mut crate::src::deflate::deflate_
 }
 
 fn compress_block(
-    symbol_buffer: &[crate::zutil_h::uch],
+    symbol_start: usize,
     symbol_count: crate::stdlib::uInt,
     ltree: &[crate::src::deflate::ct_data],
     dtree: &[crate::src::deflate::ct_data],
@@ -5175,11 +5185,13 @@ fn compress_block(
         loop {
             let (cursors, next_sx) = symbol_triplet_cursors(sx);
             sx = next_sx;
-            let (mut dist, mut lc) = decode_symbol_triplet(
-                symbol_buffer[cursors[0] as usize],
-                symbol_buffer[cursors[1] as usize],
-                symbol_buffer[cursors[2] as usize],
-            );
+            let Some(first) = symbol_start.checked_add(cursors[0] as usize) else {
+                break;
+            };
+            let Some(symbol) = writer.symbol_triplet(first) else {
+                break;
+            };
+            let (mut dist, mut lc) = decode_symbol_triplet(symbol[0], symbol[1], symbol[2]);
             match compress_block_symbol(lc as ::core::ffi::c_uint, dist) {
                 CompressedBlockSymbol::Literal => {
                     let tree_code = &ltree[lc as usize];
@@ -5315,7 +5327,7 @@ pub unsafe extern "C" fn _tr_flush_block(
             );
         }
         drop(writer);
-        let symbol_buffer = core::slice::from_raw_parts(state.sym_buf, state.sym_next as usize);
+        let symbol_start = state.sym_buf.offset_from(state.pending_buf) as usize;
         let mut writer = PendingBitWriter {
             pending_buffer,
             pending: &mut state.pending,
@@ -5324,7 +5336,7 @@ pub unsafe extern "C" fn _tr_flush_block(
         };
         if encoding == BlockEncoding::Static {
             compress_block(
-                symbol_buffer,
+                symbol_start,
                 state.sym_next,
                 &static_ltree,
                 &static_dtree,
@@ -5332,7 +5344,7 @@ pub unsafe extern "C" fn _tr_flush_block(
             );
         } else {
             compress_block(
-                symbol_buffer,
+                symbol_start,
                 state.sym_next,
                 &state.dyn_ltree,
                 &state.dyn_dtree,
