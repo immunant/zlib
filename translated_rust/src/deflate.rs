@@ -356,27 +356,31 @@ pub(crate) unsafe extern "C" fn slide_hash(mut s: *mut crate::src::deflate::defl
     if s.is_null() {
         return;
     }
-    let Ok(head_len) = usize::try_from((*s).hash_size) else {
+    // This legacy adapter still has to lend the callback-allocated hash
+    // buffers, but adopt the validated state record once so the remainder of
+    // the state transition uses ordinary field access.
+    let s = &mut *s;
+    let Ok(head_len) = usize::try_from(s.hash_size) else {
         return;
     };
-    let Ok(prev_len) = usize::try_from((*s).w_size) else {
+    let Ok(prev_len) = usize::try_from(s.w_size) else {
         return;
     };
-    if (head_len != 0 && (*s).head.is_null()) || (prev_len != 0 && (*s).prev.is_null()) {
+    if (head_len != 0 && s.head.is_null()) || (prev_len != 0 && s.prev.is_null()) {
         return;
     }
     let head = if head_len == 0 {
         &mut []
     } else {
-        ::core::slice::from_raw_parts_mut((*s).head, head_len)
+        ::core::slice::from_raw_parts_mut(s.head, head_len)
     };
     let prev = if prev_len == 0 {
         &mut []
     } else {
-        ::core::slice::from_raw_parts_mut((*s).prev, prev_len)
+        ::core::slice::from_raw_parts_mut(s.prev, prev_len)
     };
-    slide_hash_state(head, prev, (*s).w_size);
-    (*s).slid = 1;
+    slide_hash_state(head, prev, s.w_size);
+    s.slid = 1;
 }
 
 fn read_buf_state(
