@@ -320,10 +320,16 @@ pub unsafe extern "C" fn inflateReset2(
         Err(error) => return error,
     };
     if inflate_reset2_releases_window(state, window_bits) {
-        Some(strm.zfree.expect("non-null function pointer")).expect("non-null function pointer")(
+        // Snapshot the user callback and its arguments before releasing the
+        // old window.  The stream and state are already bound above, so use
+        // those same bindings after the callback instead of revisiting the
+        // raw stream pointer.
+        let (zfree, opaque, window) = (
+            strm.zfree.expect("non-null function pointer"),
             strm.opaque,
-            state.window as crate::stdlib::voidpf,
+            state.window,
         );
+        Some(zfree).expect("non-null function pointer")(opaque, window as crate::stdlib::voidpf);
         state.window = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
     }
     inflate_reset_with_window_bits(strm, state, wrap, window_bits)
