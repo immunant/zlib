@@ -2475,7 +2475,25 @@ pub unsafe fn deflate(
     {
         let mut bstate: block_state = need_more;
         bstate = (if (*s).level == 0 as ::core::ffi::c_int {
-            deflate_stored(s, flush) as ::core::ffi::c_uint
+            let state = &mut *s;
+            let strm = &mut *state.strm;
+            let window = ::core::slice::from_raw_parts_mut(state.window, state.window_size as usize);
+            let input = if strm.avail_in == 0 {
+                &[]
+            } else {
+                ::core::slice::from_raw_parts(strm.next_in, strm.avail_in as usize)
+            };
+            let pending_buf = ::core::slice::from_raw_parts_mut(
+                state.pending_buf,
+                state.pending_buf_size as usize,
+            );
+            let output = if strm.avail_out == 0 {
+                &mut []
+            } else {
+                ::core::slice::from_raw_parts_mut(strm.next_out, strm.avail_out as usize)
+            };
+            deflate_stored(state, strm, window, input, pending_buf, output, flush)
+                as ::core::ffi::c_uint
         } else if (*s).strategy == crate::zlib_h::Z_HUFFMAN_ONLY {
             let state = &mut *s;
             let strm = &mut *state.strm;
@@ -2513,7 +2531,29 @@ pub unsafe fn deflate(
                 return crate::zlib_h::Z_STREAM_ERROR;
             };
             (match kind {
-                CompressorKind::Stored => deflate_stored(s, flush),
+                CompressorKind::Stored => {
+                    let state = &mut *s;
+                    let strm = &mut *state.strm;
+                    let window = ::core::slice::from_raw_parts_mut(
+                        state.window,
+                        state.window_size as usize,
+                    );
+                    let input = if strm.avail_in == 0 {
+                        &[]
+                    } else {
+                        ::core::slice::from_raw_parts(strm.next_in, strm.avail_in as usize)
+                    };
+                    let pending_buf = ::core::slice::from_raw_parts_mut(
+                        state.pending_buf,
+                        state.pending_buf_size as usize,
+                    );
+                    let output = if strm.avail_out == 0 {
+                        &mut []
+                    } else {
+                        ::core::slice::from_raw_parts_mut(strm.next_out, strm.avail_out as usize)
+                    };
+                    deflate_stored(state, strm, window, input, pending_buf, output, flush)
+                }
                 CompressorKind::Fast => deflate_fast(s, flush),
                 CompressorKind::Slow => deflate_slow(s, flush),
             }) as ::core::ffi::c_uint
@@ -3076,15 +3116,33 @@ fn slide_stored_window(
     Some(state.w_size)
 }
 
-unsafe extern "C" fn deflate_stored(
-    mut s: *mut crate::src::deflate::deflate_state,
-    mut flush: ::core::ffi::c_int,
+fn stored_input_remaining<'a>(
+    strm: &crate::zlib_h::z_stream,
+    input: &'a [crate::stdlib::Bytef],
+) -> Option<&'a [crate::stdlib::Bytef]> {
+    let available = usize::try_from(strm.avail_in).ok()?;
+    let start = input.len().checked_sub(available)?;
+    input.get(start..)
+}
+
+fn stored_output_remaining<'a>(
+    strm: &crate::zlib_h::z_stream,
+    output: &'a mut [crate::stdlib::Bytef],
+) -> Option<&'a mut [crate::stdlib::Bytef]> {
+    let available = usize::try_from(strm.avail_out).ok()?;
+    let start = output.len().checked_sub(available)?;
+    output.get_mut(start..)
+}
+
+fn deflate_stored(
+    state: &mut crate::src::deflate::deflate_state,
+    strm: &mut crate::zlib_h::z_stream,
+    window: &mut [crate::stdlib::Bytef],
+    input: &[crate::stdlib::Bytef],
+    pending_buf: &mut [crate::stdlib::Bytef],
+    output: &mut [crate::stdlib::Bytef],
+    flush: ::core::ffi::c_int,
 ) -> block_state {
-    // The strategy is still called through the translated raw dispatcher.
-    // Convert that state and its stream once at this boundary; the block
-    // bookkeeping below can then use the checked slice helpers directly.
-    let state = &mut *s;
-    let strm = &mut *state.strm;
     let mut min_block: ::core::ffi::c_uint =
         (if state.pending_buf_size.wrapping_sub(5 as crate::zutil_h::ulg)
             > state.w_size as crate::zutil_h::ulg
@@ -3131,10 +3189,6 @@ unsafe extern "C" fn deflate_stored(
         } else {
             0 as ::core::ffi::c_int
         };
-        let pending_buf = ::core::slice::from_raw_parts_mut(
-            state.pending_buf,
-            state.pending_buf_size as usize,
-        );
         crate::src::trees::tr_stored_block(
             state,
             pending_buf,
@@ -3145,24 +3199,34 @@ unsafe extern "C" fn deflate_stored(
         if !write_stored_block_length(state, pending_buf, len) {
             return need_more;
         }
-        flush_pending(state.strm);
+        if !flush_strategy_pending(state, strm, pending_buf, output) {
+            return need_more;
+        }
         if left != 0 {
             if left > len {
                 left = len;
             }
-            let window = ::core::slice::from_raw_parts(
-                state.window,
-                state.window_size as usize,
-            );
-            let output = ::core::slice::from_raw_parts_mut(strm.next_out, left as usize);
+            let Some(output) = stored_output_remaining(strm, output) else {
+                return need_more;
+            };
+            let Some(output) = output.get_mut(..left as usize) else {
+                return need_more;
+            };
             if !copy_stored_history(state, strm, window, output, left) {
                 return need_more;
             }
             len = len.wrapping_sub(left);
         }
         if len != 0 {
-            let input = ::core::slice::from_raw_parts(strm.next_in, strm.avail_in as usize);
-            let output = ::core::slice::from_raw_parts_mut(strm.next_out, len as usize);
+            let Some(input) = stored_input_remaining(strm, input) else {
+                return need_more;
+            };
+            let Some(output) = stored_output_remaining(strm, output) else {
+                return need_more;
+            };
+            let Some(output) = output.get_mut(..len as usize) else {
+                return need_more;
+            };
             if !copy_stored_input(strm, state.wrap, input, output) {
                 return need_more;
             }
@@ -3173,14 +3237,9 @@ unsafe extern "C" fn deflate_stored(
     }
     used = used.wrapping_sub(strm.avail_in as ::core::ffi::c_uint);
     if used != 0 {
-        let input_tail = ::core::slice::from_raw_parts(
-            strm.next_in.offset(-(used as isize)),
-            used as usize,
-        );
-        let window = ::core::slice::from_raw_parts_mut(
-            state.window,
-            state.window_size as usize,
-        );
+        let Some(input_tail) = input.get(..used as usize) else {
+            return need_more;
+        };
         if !update_stored_history(state, window, input_tail) {
             return need_more;
         }
@@ -3203,10 +3262,6 @@ unsafe extern "C" fn deflate_stored(
         .window_size
         .wrapping_sub(state.strstart as crate::zutil_h::ulg) as ::core::ffi::c_uint;
     if strm.avail_in > have && state.block_start >= state.w_size as ::core::ffi::c_long {
-        let window = ::core::slice::from_raw_parts_mut(
-            state.window,
-            state.window_size as usize,
-        );
         let Some(slid) = slide_stored_window(state, window) else {
             return need_more;
         };
@@ -3216,11 +3271,18 @@ unsafe extern "C" fn deflate_stored(
         have = strm.avail_in as ::core::ffi::c_uint;
     }
     if have != 0 {
-        let input = ::core::slice::from_raw_parts(strm.next_in, strm.avail_in as usize);
-        let output = ::core::slice::from_raw_parts_mut(
-            state.window.offset(state.strstart as isize),
-            have as usize,
-        );
+        let Some(input) = stored_input_remaining(strm, input) else {
+            return need_more;
+        };
+        let Ok(start) = usize::try_from(state.strstart) else {
+            return need_more;
+        };
+        let Some(end) = start.checked_add(have as usize) else {
+            return need_more;
+        };
+        let Some(output) = window.get_mut(start..end) else {
+            return need_more;
+        };
         read_buf(strm, state.wrap, input, output);
         state.strstart = state.strstart.wrapping_add(have);
         state.insert = state
@@ -3268,14 +3330,15 @@ unsafe extern "C" fn deflate_stored(
         } else {
             0 as ::core::ffi::c_int
         };
-        let source = ::core::slice::from_raw_parts(
-            state.window.offset(state.block_start as isize),
-            len as usize,
-        );
-        let pending_buf = ::core::slice::from_raw_parts_mut(
-            state.pending_buf,
-            state.pending_buf_size as usize,
-        );
+        let Ok(start) = usize::try_from(state.block_start) else {
+            return need_more;
+        };
+        let Some(end) = start.checked_add(len as usize) else {
+            return need_more;
+        };
+        let Some(source) = window.get(start..end) else {
+            return need_more;
+        };
         crate::src::trees::tr_stored_block(
             state,
             pending_buf,
@@ -3284,7 +3347,9 @@ unsafe extern "C" fn deflate_stored(
             last,
         );
         state.block_start += len as ::core::ffi::c_long;
-        flush_pending(state.strm);
+        if !flush_strategy_pending(state, strm, pending_buf, output) {
+            return need_more;
+        }
     }
     if last != 0 {
         state.bi_used = 8 as ::core::ffi::c_int;
@@ -3939,7 +4004,7 @@ fn flush_huff_block(
     true
 }
 
-fn flush_huff_pending(
+fn flush_strategy_pending(
     state: &mut crate::src::deflate::deflate_state,
     strm: &mut crate::zlib_h::z_stream,
     pending_buf: &mut [crate::stdlib::Bytef],
@@ -4037,7 +4102,7 @@ fn deflate_huff_impl(
             if !flush_huff_block(state, strm, window, pending_buf, 0 as ::core::ffi::c_int) {
                 return need_more;
             }
-            if !flush_huff_pending(state, strm, pending_buf, output) {
+            if !flush_strategy_pending(state, strm, pending_buf, output) {
                 return need_more;
             }
             if strm.avail_out == 0 as crate::stdlib::uInt {
@@ -4054,7 +4119,7 @@ fn deflate_huff_impl(
         if !flush_huff_block(state, strm, window, pending_buf, 1 as ::core::ffi::c_int) {
             return need_more;
         }
-        if !flush_huff_pending(state, strm, pending_buf, output) {
+        if !flush_strategy_pending(state, strm, pending_buf, output) {
             return need_more;
         }
         if strm.avail_out == 0 as crate::stdlib::uInt {
@@ -4070,7 +4135,7 @@ fn deflate_huff_impl(
         if !flush_huff_block(state, strm, window, pending_buf, 0 as ::core::ffi::c_int) {
             return need_more;
         }
-        if !flush_huff_pending(state, strm, pending_buf, output) {
+        if !flush_strategy_pending(state, strm, pending_buf, output) {
             return need_more;
         }
         if strm.avail_out == 0 as crate::stdlib::uInt {
