@@ -1018,19 +1018,19 @@ fn gz_decomp_should_continue(ret: ::core::ffi::c_int, avail_out: crate::stdlib::
     avail_out != 0 && ret != crate::zlib_h::Z_STREAM_END
 }
 
-enum GzDecompResult {
-    RestartLook,
-    Error,
-    Ok,
-}
-
-fn gz_decomp_result(ret: ::core::ffi::c_int) -> GzDecompResult {
+fn gz_decomp_apply_result(
+    how: &mut ::core::ffi::c_int,
+    junk: &mut ::core::ffi::c_int,
+    ret: ::core::ffi::c_int,
+) -> ::core::ffi::c_int {
     if ret == crate::zlib_h::Z_STREAM_END {
-        GzDecompResult::RestartLook
+        *junk = 0;
+        *how = crate::gzguts_h::LOOK;
+        0
     } else if ret != crate::zlib_h::Z_OK {
-        GzDecompResult::Error
+        -1
     } else {
-        GzDecompResult::Ok
+        0
     }
 }
 
@@ -1170,15 +1170,8 @@ unsafe fn gz_decomp(mut state: crate::gzguts_h::gz_statep) -> ::core::ffi::c_int
         state_ref.x.have = progress.have;
         state_ref.x.next = next_out.wrapping_sub(progress.rewind_len);
     }
-    match gz_decomp_result(ret) {
-        GzDecompResult::RestartLook => {
-            (*state).junk = 0 as ::core::ffi::c_int;
-            (*state).how = crate::gzguts_h::LOOK;
-            0 as ::core::ffi::c_int
-        }
-        GzDecompResult::Error => -1 as ::core::ffi::c_int,
-        GzDecompResult::Ok => 0 as ::core::ffi::c_int,
-    }
+    let state_ref = &mut *state;
+    gz_decomp_apply_result(&mut state_ref.how, &mut state_ref.junk, ret)
 }
 
 unsafe fn gz_fetch(mut state: crate::gzguts_h::gz_statep) -> ::core::ffi::c_int {
@@ -1819,19 +1812,33 @@ mod tests {
     }
 
     #[test]
-    fn gz_decomp_result_restores_look_only_at_stream_end() {
-        assert!(matches!(
-            gz_decomp_result(crate::zlib_h::Z_STREAM_END),
-            GzDecompResult::RestartLook
-        ));
-        assert!(matches!(
-            gz_decomp_result(crate::zlib_h::Z_DATA_ERROR),
-            GzDecompResult::Error
-        ));
-        assert!(matches!(
-            gz_decomp_result(crate::zlib_h::Z_OK),
-            GzDecompResult::Ok
-        ));
+    fn gz_decomp_apply_result_restores_look_only_at_stream_end() {
+        let mut how = crate::gzguts_h::GZIP;
+        let mut junk = 1;
+        assert_eq!(
+            gz_decomp_apply_result(&mut how, &mut junk, crate::zlib_h::Z_STREAM_END),
+            0
+        );
+        assert_eq!(how, crate::gzguts_h::LOOK);
+        assert_eq!(junk, 0);
+    }
+
+    #[test]
+    fn gz_decomp_apply_result_preserves_state_for_ok_and_errors() {
+        for ret in [
+            crate::zlib_h::Z_OK,
+            crate::zlib_h::Z_DATA_ERROR,
+            crate::zlib_h::Z_STREAM_ERROR,
+        ] {
+            let mut how = crate::gzguts_h::GZIP;
+            let mut junk = 1;
+            assert_eq!(
+                gz_decomp_apply_result(&mut how, &mut junk, ret),
+                if ret == crate::zlib_h::Z_OK { 0 } else { -1 }
+            );
+            assert_eq!(how, crate::gzguts_h::GZIP);
+            assert_eq!(junk, 1);
+        }
     }
 
     #[test]

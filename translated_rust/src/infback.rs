@@ -176,6 +176,28 @@ enum InflateBackMatchSource {
     Behind(usize),
 }
 
+#[derive(Debug, Eq, PartialEq)]
+enum InflateBackLitLenAction {
+    Literal,
+    End,
+    Invalid,
+    Length { extra_bits: ::core::ffi::c_uchar },
+}
+
+fn inflate_back_litlen_action(op: ::core::ffi::c_uchar) -> InflateBackLitLenAction {
+    if op == 0 {
+        InflateBackLitLenAction::Literal
+    } else if op & 32 != 0 {
+        InflateBackLitLenAction::End
+    } else if op & 64 != 0 {
+        InflateBackLitLenAction::Invalid
+    } else {
+        InflateBackLitLenAction::Length {
+            extra_bits: op & 15,
+        }
+    }
+}
+
 #[derive(Debug, PartialEq, Eq)]
 enum InflateBackCodeLengthRepeat {
     Previous {
@@ -846,122 +868,34 @@ pub unsafe extern "C" fn inflateBack(
             hold >>= here.bits as ::core::ffi::c_int;
             bits = bits.wrapping_sub(here.bits as ::core::ffi::c_uint);
             (*state).length = here.val as ::core::ffi::c_uint;
-            if here.op as ::core::ffi::c_int == 0 as ::core::ffi::c_int {
-                if left == 0 as ::core::ffi::c_uint {
-                    put = (*state).window;
-                    left = (*state).wsize;
-                    (*state).whave = left;
-                    if out.expect("non-null function pointer")(out_desc, put, left) != 0 {
-                        ret = crate::zlib_h::Z_BUF_ERROR;
-                        break;
-                    }
-                }
-                let c2rust_fresh15 = put;
-                put = put.wrapping_add(1);
-                *c2rust_fresh15 = (*state).length as ::core::ffi::c_uchar;
-                left = left.wrapping_sub(1);
-                (*state).mode = crate::src::inflate::LEN;
-            } else if here.op as ::core::ffi::c_int & 32 as ::core::ffi::c_int != 0 {
-                (*state).mode = crate::src::inflate::TYPE;
-            } else if here.op as ::core::ffi::c_int & 64 as ::core::ffi::c_int != 0 {
-                (*strm).msg = b"invalid literal/length code\0".as_ptr()
-                    as *const ::core::ffi::c_char
-                    as *mut ::core::ffi::c_char;
-                (*state).mode = crate::src::inflate::BAD;
-            } else {
-                (*state).extra = here.op as ::core::ffi::c_uint & 15 as ::core::ffi::c_uint;
-                if (*state).extra != 0 as ::core::ffi::c_uint {
-                    while bits < (*state).extra {
-                        if have == 0 as ::core::ffi::c_uint {
-                            have = in_0.expect("non-null function pointer")(in_desc, &raw mut next);
-                            if have == 0 as ::core::ffi::c_uint {
-                                next = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
-                                ret = crate::zlib_h::Z_BUF_ERROR;
-                                break 's_69;
-                            }
-                        }
-                        let input_byte = *next;
-                        next = next.wrapping_add(1);
-                        (have, hold, bits) =
-                            inflate_back_consume_input_byte(have, hold, bits, input_byte);
-                    }
-                    (*state).length = (*state).length.wrapping_add(
-                        hold as ::core::ffi::c_uint
-                            & ((1 as ::core::ffi::c_uint) << (*state).extra)
-                                .wrapping_sub(1 as ::core::ffi::c_uint),
-                    );
-                    hold >>= (*state).extra;
-                    bits = bits.wrapping_sub((*state).extra);
-                }
-                loop {
-                    here = *(*state).distcode.wrapping_add(
-                        (hold as ::core::ffi::c_uint
-                            & ((1 as ::core::ffi::c_uint) << (*state).distbits)
-                                .wrapping_sub(1 as ::core::ffi::c_uint))
-                            as usize,
-                    );
-                    if here.bits as ::core::ffi::c_uint <= bits {
-                        break;
-                    }
-                    if have == 0 as ::core::ffi::c_uint {
-                        have = in_0.expect("non-null function pointer")(in_desc, &raw mut next);
-                        if have == 0 as ::core::ffi::c_uint {
-                            next = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
+            match inflate_back_litlen_action(here.op) {
+                InflateBackLitLenAction::Literal => {
+                    if left == 0 as ::core::ffi::c_uint {
+                        put = (*state).window;
+                        left = (*state).wsize;
+                        (*state).whave = left;
+                        if out.expect("non-null function pointer")(out_desc, put, left) != 0 {
                             ret = crate::zlib_h::Z_BUF_ERROR;
-                            break 's_69;
-                        }
-                    }
-                    let input_byte = *next;
-                    next = next.wrapping_add(1);
-                    (have, hold, bits) =
-                        inflate_back_consume_input_byte(have, hold, bits, input_byte);
-                }
-                if here.op as ::core::ffi::c_int & 0xf0 as ::core::ffi::c_int
-                    == 0 as ::core::ffi::c_int
-                {
-                    last = here;
-                    loop {
-                        here = *(*state).distcode.wrapping_add(
-                            (last.val as ::core::ffi::c_uint).wrapping_add(
-                                (hold as ::core::ffi::c_uint
-                                    & ((1 as ::core::ffi::c_uint)
-                                        << last.bits as ::core::ffi::c_int
-                                            + last.op as ::core::ffi::c_int)
-                                        .wrapping_sub(1 as ::core::ffi::c_uint))
-                                    >> last.bits as ::core::ffi::c_int,
-                            ) as usize,
-                        );
-                        if (last.bits as ::core::ffi::c_int + here.bits as ::core::ffi::c_int)
-                            as ::core::ffi::c_uint
-                            <= bits
-                        {
                             break;
                         }
-                        if have == 0 as ::core::ffi::c_uint {
-                            have = in_0.expect("non-null function pointer")(in_desc, &raw mut next);
-                            if have == 0 as ::core::ffi::c_uint {
-                                next = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
-                                ret = crate::zlib_h::Z_BUF_ERROR;
-                                break 's_69;
-                            }
-                        }
-                        let input_byte = *next;
-                        next = next.wrapping_add(1);
-                        (have, hold, bits) =
-                            inflate_back_consume_input_byte(have, hold, bits, input_byte);
                     }
-                    hold >>= last.bits as ::core::ffi::c_int;
-                    bits = bits.wrapping_sub(last.bits as ::core::ffi::c_uint);
+                    let c2rust_fresh15 = put;
+                    put = put.wrapping_add(1);
+                    *c2rust_fresh15 = (*state).length as ::core::ffi::c_uchar;
+                    left = left.wrapping_sub(1);
+                    (*state).mode = crate::src::inflate::LEN;
                 }
-                hold >>= here.bits as ::core::ffi::c_int;
-                bits = bits.wrapping_sub(here.bits as ::core::ffi::c_uint);
-                if here.op as ::core::ffi::c_int & 64 as ::core::ffi::c_int != 0 {
-                    (*strm).msg = b"invalid distance code\0".as_ptr() as *const ::core::ffi::c_char
+                InflateBackLitLenAction::End => {
+                    (*state).mode = crate::src::inflate::TYPE;
+                }
+                InflateBackLitLenAction::Invalid => {
+                    (*strm).msg = b"invalid literal/length code\0".as_ptr()
+                        as *const ::core::ffi::c_char
                         as *mut ::core::ffi::c_char;
                     (*state).mode = crate::src::inflate::BAD;
-                } else {
-                    (*state).offset = here.val as ::core::ffi::c_uint;
-                    (*state).extra = here.op as ::core::ffi::c_uint & 15 as ::core::ffi::c_uint;
+                }
+                InflateBackLitLenAction::Length { extra_bits } => {
+                    (*state).extra = extra_bits as ::core::ffi::c_uint;
                     if (*state).extra != 0 as ::core::ffi::c_uint {
                         while bits < (*state).extra {
                             if have == 0 as ::core::ffi::c_uint {
@@ -980,7 +914,7 @@ pub unsafe extern "C" fn inflateBack(
                             (have, hold, bits) =
                                 inflate_back_consume_input_byte(have, hold, bits, input_byte);
                         }
-                        (*state).offset = (*state).offset.wrapping_add(
+                        (*state).length = (*state).length.wrapping_add(
                             hold as ::core::ffi::c_uint
                                 & ((1 as ::core::ffi::c_uint) << (*state).extra)
                                     .wrapping_sub(1 as ::core::ffi::c_uint),
@@ -988,58 +922,159 @@ pub unsafe extern "C" fn inflateBack(
                         hold >>= (*state).extra;
                         bits = bits.wrapping_sub((*state).extra);
                     }
-                    if inflate_back_distance_exceeds_window(
-                        (*state).offset,
-                        (*state).wsize,
-                        (*state).whave,
-                        left,
-                    ) {
-                        (*strm).msg = b"invalid distance too far back\0".as_ptr()
-                            as *const ::core::ffi::c_char
-                            as *mut ::core::ffi::c_char;
-                        (*state).mode = crate::src::inflate::BAD;
-                    } else {
+                    loop {
+                        here = *(*state).distcode.wrapping_add(
+                            (hold as ::core::ffi::c_uint
+                                & ((1 as ::core::ffi::c_uint) << (*state).distbits)
+                                    .wrapping_sub(1 as ::core::ffi::c_uint))
+                                as usize,
+                        );
+                        if here.bits as ::core::ffi::c_uint <= bits {
+                            break;
+                        }
+                        if have == 0 as ::core::ffi::c_uint {
+                            have = in_0.expect("non-null function pointer")(in_desc, &raw mut next);
+                            if have == 0 as ::core::ffi::c_uint {
+                                next = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
+                                ret = crate::zlib_h::Z_BUF_ERROR;
+                                break 's_69;
+                            }
+                        }
+                        let input_byte = *next;
+                        next = next.wrapping_add(1);
+                        (have, hold, bits) =
+                            inflate_back_consume_input_byte(have, hold, bits, input_byte);
+                    }
+                    if here.op as ::core::ffi::c_int & 0xf0 as ::core::ffi::c_int
+                        == 0 as ::core::ffi::c_int
+                    {
+                        last = here;
                         loop {
-                            if left == 0 as ::core::ffi::c_uint {
-                                put = (*state).window;
-                                left = (*state).wsize;
-                                (*state).whave = left;
-                                if out.expect("non-null function pointer")(out_desc, put, left) != 0
-                                {
+                            here = *(*state).distcode.wrapping_add(
+                                (last.val as ::core::ffi::c_uint).wrapping_add(
+                                    (hold as ::core::ffi::c_uint
+                                        & ((1 as ::core::ffi::c_uint)
+                                            << last.bits as ::core::ffi::c_int
+                                                + last.op as ::core::ffi::c_int)
+                                            .wrapping_sub(1 as ::core::ffi::c_uint))
+                                        >> last.bits as ::core::ffi::c_int,
+                                ) as usize,
+                            );
+                            if (last.bits as ::core::ffi::c_int + here.bits as ::core::ffi::c_int)
+                                as ::core::ffi::c_uint
+                                <= bits
+                            {
+                                break;
+                            }
+                            if have == 0 as ::core::ffi::c_uint {
+                                have = in_0.expect("non-null function pointer")(
+                                    in_desc,
+                                    &raw mut next,
+                                );
+                                if have == 0 as ::core::ffi::c_uint {
+                                    next = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
                                     ret = crate::zlib_h::Z_BUF_ERROR;
                                     break 's_69;
                                 }
                             }
-                            let (source, planned_copy) = inflate_back_match_copy_plan(
-                                (*state).wsize,
-                                (*state).offset,
-                                left,
-                                (*state).length,
+                            let input_byte = *next;
+                            next = next.wrapping_add(1);
+                            (have, hold, bits) =
+                                inflate_back_consume_input_byte(have, hold, bits, input_byte);
+                        }
+                        hold >>= last.bits as ::core::ffi::c_int;
+                        bits = bits.wrapping_sub(last.bits as ::core::ffi::c_uint);
+                    }
+                    hold >>= here.bits as ::core::ffi::c_int;
+                    bits = bits.wrapping_sub(here.bits as ::core::ffi::c_uint);
+                    if here.op as ::core::ffi::c_int & 64 as ::core::ffi::c_int != 0 {
+                        (*strm).msg = b"invalid distance code\0".as_ptr()
+                            as *const ::core::ffi::c_char
+                            as *mut ::core::ffi::c_char;
+                        (*state).mode = crate::src::inflate::BAD;
+                    } else {
+                        (*state).offset = here.val as ::core::ffi::c_uint;
+                        (*state).extra = here.op as ::core::ffi::c_uint & 15 as ::core::ffi::c_uint;
+                        if (*state).extra != 0 as ::core::ffi::c_uint {
+                            while bits < (*state).extra {
+                                if have == 0 as ::core::ffi::c_uint {
+                                    have = in_0.expect("non-null function pointer")(
+                                        in_desc,
+                                        &raw mut next,
+                                    );
+                                    if have == 0 as ::core::ffi::c_uint {
+                                        next = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
+                                        ret = crate::zlib_h::Z_BUF_ERROR;
+                                        break 's_69;
+                                    }
+                                }
+                                let input_byte = *next;
+                                next = next.wrapping_add(1);
+                                (have, hold, bits) =
+                                    inflate_back_consume_input_byte(have, hold, bits, input_byte);
+                            }
+                            (*state).offset = (*state).offset.wrapping_add(
+                                hold as ::core::ffi::c_uint
+                                    & ((1 as ::core::ffi::c_uint) << (*state).extra)
+                                        .wrapping_sub(1 as ::core::ffi::c_uint),
                             );
-                            from = match source {
-                                InflateBackMatchSource::Ahead(distance) => {
-                                    put.wrapping_add(distance)
-                                }
-                                InflateBackMatchSource::Behind(distance) => {
-                                    put.wrapping_sub(distance)
-                                }
-                            };
-                            copy = planned_copy;
-                            (*state).length = (*state).length.wrapping_sub(copy);
-                            left = left.wrapping_sub(copy);
+                            hold >>= (*state).extra;
+                            bits = bits.wrapping_sub((*state).extra);
+                        }
+                        if inflate_back_distance_exceeds_window(
+                            (*state).offset,
+                            (*state).wsize,
+                            (*state).whave,
+                            left,
+                        ) {
+                            (*strm).msg = b"invalid distance too far back\0".as_ptr()
+                                as *const ::core::ffi::c_char
+                                as *mut ::core::ffi::c_char;
+                            (*state).mode = crate::src::inflate::BAD;
+                        } else {
                             loop {
-                                let c2rust_fresh20 = from;
-                                from = from.wrapping_add(1);
-                                let c2rust_fresh21 = put;
-                                put = put.wrapping_add(1);
-                                *c2rust_fresh21 = *c2rust_fresh20;
-                                copy = copy.wrapping_sub(1);
-                                if !(copy != 0) {
+                                if left == 0 as ::core::ffi::c_uint {
+                                    put = (*state).window;
+                                    left = (*state).wsize;
+                                    (*state).whave = left;
+                                    if out.expect("non-null function pointer")(out_desc, put, left)
+                                        != 0
+                                    {
+                                        ret = crate::zlib_h::Z_BUF_ERROR;
+                                        break 's_69;
+                                    }
+                                }
+                                let (source, planned_copy) = inflate_back_match_copy_plan(
+                                    (*state).wsize,
+                                    (*state).offset,
+                                    left,
+                                    (*state).length,
+                                );
+                                from = match source {
+                                    InflateBackMatchSource::Ahead(distance) => {
+                                        put.wrapping_add(distance)
+                                    }
+                                    InflateBackMatchSource::Behind(distance) => {
+                                        put.wrapping_sub(distance)
+                                    }
+                                };
+                                copy = planned_copy;
+                                (*state).length = (*state).length.wrapping_sub(copy);
+                                left = left.wrapping_sub(copy);
+                                loop {
+                                    let c2rust_fresh20 = from;
+                                    from = from.wrapping_add(1);
+                                    let c2rust_fresh21 = put;
+                                    put = put.wrapping_add(1);
+                                    *c2rust_fresh21 = *c2rust_fresh20;
+                                    copy = copy.wrapping_sub(1);
+                                    if !(copy != 0) {
+                                        break;
+                                    }
+                                }
+                                if !((*state).length != 0 as ::core::ffi::c_uint) {
                                     break;
                                 }
-                            }
-                            if !((*state).length != 0 as ::core::ffi::c_uint) {
-                                break;
                             }
                         }
                     }
@@ -1092,11 +1127,39 @@ mod tests {
         inflate_back_align_to_byte_boundary, inflate_back_block_header,
         inflate_back_code_length_repeat, inflate_back_consume_input_byte, inflate_back_copy_count,
         inflate_back_distance_exceeds_window, inflate_back_finish_flush_status,
-        inflate_back_init_metadata_is_valid, inflate_back_match_copy_plan,
-        inflate_back_stored_block_length, inflate_back_window_bits_are_valid,
-        inflate_back_window_size, InflateBackBlockKind, InflateBackCodeLengthRepeat,
-        InflateBackMatchSource,
+        inflate_back_init_metadata_is_valid, inflate_back_litlen_action,
+        inflate_back_match_copy_plan, inflate_back_stored_block_length,
+        inflate_back_window_bits_are_valid, inflate_back_window_size, InflateBackBlockKind,
+        InflateBackCodeLengthRepeat, InflateBackLitLenAction, InflateBackMatchSource,
     };
+
+    #[test]
+    fn inflate_back_litlen_action_preserves_opcode_precedence() {
+        assert_eq!(
+            inflate_back_litlen_action(0),
+            InflateBackLitLenAction::Literal
+        );
+        assert_eq!(
+            inflate_back_litlen_action(0x10),
+            InflateBackLitLenAction::Length { extra_bits: 0 }
+        );
+        assert_eq!(
+            inflate_back_litlen_action(0x1f),
+            InflateBackLitLenAction::Length { extra_bits: 15 }
+        );
+        assert_eq!(
+            inflate_back_litlen_action(0x20),
+            InflateBackLitLenAction::End
+        );
+        assert_eq!(
+            inflate_back_litlen_action(0x40),
+            InflateBackLitLenAction::Invalid
+        );
+        assert_eq!(
+            inflate_back_litlen_action(0x60),
+            InflateBackLitLenAction::End
+        );
+    }
 
     #[test]
     fn inflate_back_consume_input_byte_updates_bit_buffer_and_availability() {
