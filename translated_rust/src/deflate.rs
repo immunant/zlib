@@ -3764,6 +3764,121 @@ struct DeflateDispatch<'input, 'output, 'state> {
     state: DeflateDispatchState<'state>,
 }
 
+// A completed dispatch must be detached from all bounded caller and
+// callback-storage views before the ABI stream or opaque state is updated.
+// Keep that completion as scalars: the stream adapter is then the sole place
+// that publishes cursors, and a future callback-paired storage owner can
+// consume this result without inheriting any of those temporary borrows.
+struct DeflateDispatchStreamUpdate {
+    next_in: usize,
+    next_out: usize,
+    avail_in: crate::stdlib::uInt,
+    avail_out: crate::stdlib::uInt,
+    total_in: crate::stdlib::uLong,
+    total_out: crate::stdlib::uLong,
+    adler: crate::stdlib::uLong,
+    data_type: ::core::ffi::c_int,
+    message: Option<::core::ffi::c_int>,
+}
+
+struct DeflateDispatchStateUpdate {
+    status: ::core::ffi::c_int,
+    pending_out: usize,
+    pending: crate::zutil_h::ulg,
+    wrap: ::core::ffi::c_int,
+    gzindex: usize,
+    last_flush: ::core::ffi::c_int,
+    block_start: ::core::ffi::c_long,
+    match_length: crate::stdlib::uInt,
+    prev_match: crate::src::deflate::IPos,
+    match_available: ::core::ffi::c_int,
+    strstart: crate::stdlib::uInt,
+    match_start: crate::stdlib::uInt,
+    lookahead: crate::stdlib::uInt,
+    prev_length: crate::stdlib::uInt,
+    max_chain_length: crate::stdlib::uInt,
+    max_lazy_match: crate::stdlib::uInt,
+    level: ::core::ffi::c_int,
+    strategy: ::core::ffi::c_int,
+    good_match: crate::stdlib::uInt,
+    nice_match: ::core::ffi::c_int,
+    heap_len: ::core::ffi::c_int,
+    heap_max: ::core::ffi::c_int,
+    sym_next: crate::stdlib::uInt,
+    sym_end: crate::stdlib::uInt,
+    opt_len: crate::zutil_h::ulg,
+    static_len: crate::zutil_h::ulg,
+    matches: crate::stdlib::uInt,
+    insert: crate::stdlib::uInt,
+    ins_h: crate::stdlib::uInt,
+    bi_buf: crate::zutil_h::ush,
+    bi_valid: ::core::ffi::c_int,
+    bi_used: ::core::ffi::c_int,
+    high_water: crate::zutil_h::ulg,
+    slid: ::core::ffi::c_int,
+}
+
+struct DeflateDispatchCompletion {
+    result: ::core::ffi::c_int,
+    stream: DeflateDispatchStreamUpdate,
+    state: DeflateDispatchStateUpdate,
+}
+
+impl DeflateDispatch<'_, '_, '_> {
+    fn complete(self, result: ::core::ffi::c_int) -> DeflateDispatchCompletion {
+        DeflateDispatchCompletion {
+            result,
+            stream: DeflateDispatchStreamUpdate {
+                next_in: self.stream.next_in,
+                next_out: self.stream.next_out,
+                avail_in: self.stream.avail_in,
+                avail_out: self.stream.avail_out,
+                total_in: self.stream.total_in,
+                total_out: self.stream.total_out,
+                adler: self.stream.adler,
+                data_type: self.stream.data_type,
+                message: self.stream.message,
+            },
+            state: DeflateDispatchStateUpdate {
+                status: self.state.status,
+                pending_out: self.state.pending_out,
+                pending: self.state.pending,
+                wrap: self.state.wrap,
+                gzindex: self.state.gzindex,
+                last_flush: self.state.last_flush,
+                block_start: self.state.block_start,
+                match_length: self.state.match_length,
+                prev_match: self.state.prev_match,
+                match_available: self.state.match_available,
+                strstart: self.state.strstart,
+                match_start: self.state.match_start,
+                lookahead: self.state.lookahead,
+                prev_length: self.state.prev_length,
+                max_chain_length: self.state.max_chain_length,
+                max_lazy_match: self.state.max_lazy_match,
+                level: self.state.level,
+                strategy: self.state.strategy,
+                good_match: self.state.good_match,
+                nice_match: self.state.nice_match,
+                heap_len: self.state.heap_len,
+                heap_max: self.state.heap_max,
+                sym_next: self.state.sym_next,
+                sym_end: self.state.sym_end,
+                opt_len: self.state.opt_len,
+                static_len: self.state.static_len,
+                matches: self.state.matches,
+                insert: self.state.insert,
+                ins_h: self.state.ins_h,
+                bi_buf: self.state.bi_buf,
+                bi_valid: self.state.bi_valid,
+                bi_used: self.state.bi_used,
+                high_water: self.state.high_water,
+                slid: self.state.slid,
+            },
+        }
+    }
+}
+
 // The complete deflate state machine operates on the bounded dispatch owner.
 // In particular, it never observes ABI pointers or callback allocation
 // handles; the stream adapter below is the sole projection/publication site.
@@ -4517,56 +4632,58 @@ pub unsafe fn deflate_from_stream(
         },
     };
     let result = deflate(&mut dispatch);
-    let stream_update = (
-        dispatch.stream.next_in,
-        dispatch.stream.next_out,
-        dispatch.stream.avail_in,
-        dispatch.stream.avail_out,
-        dispatch.stream.total_in,
-        dispatch.stream.total_out,
-        dispatch.stream.adler,
-        dispatch.stream.data_type,
-        dispatch.stream.message,
-    );
-    let state_update = (
-        dispatch.state.status,
-        dispatch.state.pending_out,
-        dispatch.state.pending,
-        dispatch.state.wrap,
-        dispatch.state.gzindex,
-        dispatch.state.last_flush,
-        dispatch.state.block_start,
-        dispatch.state.match_length,
-        dispatch.state.prev_match,
-        dispatch.state.match_available,
-        dispatch.state.strstart,
-        dispatch.state.match_start,
-        dispatch.state.lookahead,
-        dispatch.state.prev_length,
-        dispatch.state.max_chain_length,
-        dispatch.state.max_lazy_match,
-        dispatch.state.level,
-        dispatch.state.strategy,
-        dispatch.state.good_match,
-        dispatch.state.nice_match,
-        dispatch.state.heap_len,
-        dispatch.state.heap_max,
-        dispatch.state.sym_next,
-        dispatch.state.sym_end,
-        dispatch.state.opt_len,
-        dispatch.state.static_len,
-        dispatch.state.matches,
-        dispatch.state.insert,
-        dispatch.state.ins_h,
-        dispatch.state.bi_buf,
-        dispatch.state.bi_valid,
-        dispatch.state.bi_used,
-        dispatch.state.high_water,
-        dispatch.state.slid,
-    );
-    drop(dispatch);
-    let (next_in, next_out, avail_in, avail_out, total_in, total_out, adler, data_type, message) =
-        stream_update;
+    let DeflateDispatchCompletion {
+        result,
+        stream:
+            DeflateDispatchStreamUpdate {
+                next_in,
+                next_out,
+                avail_in,
+                avail_out,
+                total_in,
+                total_out,
+                adler,
+                data_type,
+                message,
+            },
+        state:
+            DeflateDispatchStateUpdate {
+                status,
+                pending_out,
+                pending,
+                wrap,
+                gzindex,
+                last_flush,
+                block_start,
+                match_length,
+                prev_match,
+                match_available,
+                strstart,
+                match_start,
+                lookahead,
+                prev_length,
+                max_chain_length,
+                max_lazy_match,
+                level,
+                strategy,
+                good_match,
+                nice_match,
+                heap_len,
+                heap_max,
+                sym_next,
+                sym_end,
+                opt_len,
+                static_len,
+                matches,
+                insert,
+                ins_h,
+                bi_buf,
+                bi_valid,
+                bi_used,
+                high_water,
+                slid,
+            },
+    } = dispatch.complete(result);
     strm.next_in = strm.next_in.wrapping_add(next_in);
     strm.next_out = strm.next_out.wrapping_add(next_out);
     strm.avail_in = avail_in;
@@ -4581,42 +4698,6 @@ pub unsafe fn deflate_from_stream(
             .cast_mut()
             .cast();
     }
-    let (
-        status,
-        pending_out,
-        pending,
-        wrap,
-        gzindex,
-        last_flush,
-        block_start,
-        match_length,
-        prev_match,
-        match_available,
-        strstart,
-        match_start,
-        lookahead,
-        prev_length,
-        max_chain_length,
-        max_lazy_match,
-        level,
-        strategy,
-        good_match,
-        nice_match,
-        heap_len,
-        heap_max,
-        sym_next,
-        sym_end,
-        opt_len,
-        static_len,
-        matches,
-        insert,
-        ins_h,
-        bi_buf,
-        bi_valid,
-        bi_used,
-        high_water,
-        slid,
-    ) = state_update;
     state.status = status;
     state.pending_out = pending_out;
     state.pending = pending;
