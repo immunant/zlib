@@ -733,6 +733,7 @@ unsafe fn read_buf(
     mut strm: crate::zlib_h::z_streamp,
     mut buf: *mut crate::stdlib::Bytef,
     mut size: ::core::ffi::c_uint,
+    wrap: ::core::ffi::c_int,
 ) -> ::core::ffi::c_uint {
     if strm.is_null() {
         return 0 as ::core::ffi::c_uint;
@@ -742,7 +743,7 @@ unsafe fn read_buf(
     if len == 0 {
         return 0;
     }
-    if strm.next_in.is_null() || buf.is_null() || strm.state.is_null() {
+    if strm.next_in.is_null() || buf.is_null() {
         return 0;
     }
     let input = ::core::slice::from_raw_parts(strm.next_in, len as usize);
@@ -750,7 +751,7 @@ unsafe fn read_buf(
     let (len, adler, avail_in, total_in) = read_buf_progress_state(
         input,
         output,
-        (*(strm.state as *const crate::src::deflate::deflate_state)).wrap,
+        wrap,
         strm.adler,
         strm.avail_in,
         strm.total_in,
@@ -840,6 +841,7 @@ unsafe fn fill_window(mut s: *mut crate::src::deflate::deflate_state) {
                 .wrapping_add(state.strstart as usize)
                 .wrapping_add(state.lookahead as usize),
             more,
+            state.wrap,
         );
         state.lookahead = state.lookahead.wrapping_add(n);
         if state.lookahead.wrapping_add(state.insert)
@@ -3726,7 +3728,7 @@ unsafe fn deflate_stored(
             let state = &mut *s;
             let stream = state.strm;
             let strm = &mut *stream;
-            read_buf(stream, strm.next_out, len);
+            read_buf(stream, strm.next_out, len, state.wrap);
             // `read_buf()` consumed at most the requested `len` bytes, so
             // this is a cursor update only; no pointer dereference is needed.
             strm.next_out = strm.next_out.wrapping_add(len as usize);
@@ -3796,7 +3798,7 @@ unsafe fn deflate_stored(
         }
         if have != 0 {
             let output = state.window.wrapping_add(state.strstart as usize);
-            read_buf(stream, output, have);
+            read_buf(stream, output, have, state.wrap);
             record_stored_input_state(state, have);
         }
     }
