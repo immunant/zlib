@@ -399,11 +399,13 @@ pub unsafe extern "C" fn gzbuffer_ffi(
         size,
     )
 }
-pub unsafe extern "C" fn gzrewind(mut file: crate::zlib_h::gzFile) -> ::core::ffi::c_int {
-    if file.is_null() {
+unsafe fn gzrewind(
+    mut state: Option<::core::ptr::NonNull<crate::gzguts_h::gz_state>>,
+) -> ::core::ffi::c_int {
+    let Some(mut state) = state else {
         return -1 as ::core::ffi::c_int;
-    }
-    let state = &mut *(file as crate::gzguts_h::gz_statep);
+    };
+    let state = state.as_mut();
     if state.mode != crate::gzguts_h::GZ_READ
         || state.err != crate::zlib_h::Z_OK && state.err != crate::zlib_h::Z_BUF_ERROR
     {
@@ -423,7 +425,7 @@ pub unsafe extern "C" fn gzrewind(mut file: crate::zlib_h::gzFile) -> ::core::ff
 #[export_name = "gzrewind"]
 
 pub unsafe extern "C" fn gzrewind_ffi(mut file: crate::zlib_h::gzFile) -> ::core::ffi::c_int {
-    gzrewind(file)
+    gzrewind(::core::ptr::NonNull::new(file as crate::gzguts_h::gz_statep))
 }
 pub unsafe extern "C" fn gzseek64(
     mut file: crate::zlib_h::gzFile,
@@ -493,7 +495,10 @@ pub unsafe extern "C" fn gzseek64(
             false
         }
     };
-    if rewind && gzrewind(file) == -1 as ::core::ffi::c_int {
+    if rewind
+        && gzrewind(::core::ptr::NonNull::new(file as crate::gzguts_h::gz_statep))
+            == -1 as ::core::ffi::c_int
+    {
         return -1 as crate::stdlib::off64_t;
     }
     let state = &mut *(file as crate::gzguts_h::gz_statep);
@@ -681,11 +686,11 @@ pub unsafe extern "C" fn gzerror_ffi(
         Some(GzErrorMessage::State) => state.msg.cast_const(),
     }
 }
-pub unsafe extern "C" fn gzclearerr(mut file: crate::zlib_h::gzFile) {
-    if file.is_null() {
+unsafe fn gzclearerr(mut state: Option<::core::ptr::NonNull<crate::gzguts_h::gz_state>>) {
+    let Some(mut state) = state else {
         return;
-    }
-    let state = &mut *(file as crate::gzguts_h::gz_statep);
+    };
+    let state = state.as_mut();
     if state.mode != crate::gzguts_h::GZ_READ && state.mode != crate::gzguts_h::GZ_WRITE {
         return;
     }
@@ -702,7 +707,7 @@ pub unsafe extern "C" fn gzclearerr(mut file: crate::zlib_h::gzFile) {
 #[export_name = "gzclearerr"]
 
 pub unsafe extern "C" fn gzclearerr_ffi(mut file: crate::zlib_h::gzFile) {
-    gzclearerr(file)
+    gzclearerr(::core::ptr::NonNull::new(file as crate::gzguts_h::gz_statep))
 }
 pub unsafe extern "C" fn gz_error(
     mut state: crate::gzguts_h::gz_statep,
