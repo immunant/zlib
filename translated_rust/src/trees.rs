@@ -2633,12 +2633,6 @@ unsafe fn gen_bitlen(s: &mut crate::src::deflate::deflate_state, tree_kind: u8) 
     }
 }
 
-unsafe fn build_tree(mut s: &mut crate::src::deflate::deflate_state, tree_kind: u8) {
-    // Tree selection is part of the deflate state, not a caller-owned raw
-    // descriptor. Keep its tree arrays selected by kind in the implementation.
-    unsafe { build_tree_impl(s, tree_kind) }
-}
-
 fn selected_tree(
     s: &mut crate::src::deflate::deflate_state,
     tree_kind: u8,
@@ -2916,7 +2910,7 @@ unsafe fn build_bl_tree(s: &mut crate::src::deflate::deflate_state) -> ::core::f
     scan_tree(&mut s.bl_tree, &mut s.dyn_ltree, l_max_code);
     let d_max_code = s.d_desc.max_code;
     scan_tree(&mut s.bl_tree, &mut s.dyn_dtree, d_max_code);
-    build_tree(s, crate::src::deflate::STATIC_TREE_BIT_LENGTH);
+    build_tree_impl(s, crate::src::deflate::STATIC_TREE_BIT_LENGTH);
     max_blindex = crate::src::deflate::BL_CODES - 1 as ::core::ffi::c_int;
     while max_blindex >= 3 as ::core::ffi::c_int {
         if s.bl_tree[bl_order[max_blindex as usize] as usize].len() as ::core::ffi::c_int
@@ -3450,8 +3444,8 @@ pub(crate) unsafe fn tr_flush_block_impl(
                 strm.data_type = data_type;
             }
         }
-        unsafe { build_tree(s, crate::src::deflate::STATIC_TREE_LITERAL) };
-        unsafe { build_tree(s, crate::src::deflate::STATIC_TREE_DISTANCE) };
+        build_tree_impl(s, crate::src::deflate::STATIC_TREE_LITERAL);
+        build_tree_impl(s, crate::src::deflate::STATIC_TREE_DISTANCE);
         max_blindex = unsafe { build_bl_tree(s) };
         opt_lenb = s
             .opt_len
