@@ -107,7 +107,10 @@ pub struct internal_state {
     pub w_size: crate::stdlib::uInt,
     pub w_bits: crate::stdlib::uInt,
     pub w_mask: crate::stdlib::uInt,
-    pub window: *mut crate::stdlib::Bytef,
+    /// The callback-owned history allocation is absent until init succeeds.
+    /// This opaque state never exposes its layout through the ABI, so model
+    /// that nullable C handle as an optional non-null pointer internally.
+    pub window: Option<::core::ptr::NonNull<crate::stdlib::Bytef>>,
     pub window_size: crate::zutil_h::ulg,
     pub prev: *mut crate::src::deflate::Posf,
     pub head: *mut crate::src::deflate::Posf,
@@ -189,7 +192,7 @@ fn deflate_initial_state() -> deflate_state {
         w_size: 0,
         w_bits: 0,
         w_mask: 0,
-        window: ::core::ptr::null_mut(),
+        window: None,
         window_size: 0,
         prev: ::core::ptr::null_mut(),
         head: ::core::ptr::null_mut(),
@@ -871,7 +874,7 @@ macro_rules! deflate_window_hash_buffers_at_boundary {
             usize::try_from(state.w_size),
         ) {
             (Ok(window_len), Ok(head_len), Ok(prev_len))
-                if window_len == 0 || !state.window.is_null() =>
+                if window_len == 0 || state.window.is_some() =>
             {
                 // Missing hash tables remain empty lends so
                 // `fill_window_state()` rejects them at the legacy
@@ -879,7 +882,8 @@ macro_rules! deflate_window_hash_buffers_at_boundary {
                 let window = if window_len == 0 {
                     &mut []
                 } else {
-                    ::core::slice::from_raw_parts_mut(state.window, window_len)
+                    let window = state.window.expect("validated deflate window");
+                    ::core::slice::from_raw_parts_mut(window.as_ptr(), window_len)
                 };
                 let head = if state.head.is_null() {
                     &mut []
@@ -1168,7 +1172,7 @@ pub fn deflateInit2_(
             (2 as usize).wrapping_mul(::core::mem::size_of::<crate::stdlib::Byte>())
                 as crate::stdlib::uInt,
         ) as *mut crate::stdlib::Bytef;
-        (&mut *s).window = window;
+        (&mut *s).window = ::core::ptr::NonNull::new(window);
         let Some(zalloc) = strm_ref.zalloc else {
             let _ = deflateEnd(strm_ref);
             return crate::zlib_h::Z_STREAM_ERROR;
@@ -1465,7 +1469,7 @@ pub unsafe extern "C" fn deflateSetDictionary_ffi(
             let Ok(prev_len) = usize::try_from(state_ref.w_size) else {
                 return crate::zlib_h::Z_STREAM_ERROR;
             };
-            if (window_len != 0 && state_ref.window.is_null())
+            if (window_len != 0 && state_ref.window.is_none())
                 || (head_len != 0 && state_ref.head.is_null())
                 || (prev_len != 0 && state_ref.prev.is_null())
             {
@@ -1474,7 +1478,10 @@ pub unsafe extern "C" fn deflateSetDictionary_ffi(
             let window = if window_len == 0 {
                 &[]
             } else {
-                ::core::slice::from_raw_parts(state_ref.window, window_len)
+                ::core::slice::from_raw_parts(
+                    state_ref.window.expect("validated deflate window").as_ptr(),
+                    window_len,
+                )
             };
             let head = if head_len == 0 {
                 &mut []
@@ -1581,14 +1588,17 @@ pub unsafe extern "C" fn deflateGetDictionary_ffi(
         let Ok(window_len) = usize::try_from(state.window_size) else {
             return crate::zlib_h::Z_STREAM_ERROR;
         };
-        if state.window.is_null() {
+        if state.window.is_none() {
             return crate::zlib_h::Z_STREAM_ERROR;
         }
-        if !deflate_spans_are_disjoint(state.window as usize, window_len, dictionary as usize, len)
-        {
+        let window_address = state.window.expect("validated deflate window").as_ptr() as usize;
+        if !deflate_spans_are_disjoint(window_address, window_len, dictionary as usize, len) {
             return crate::zlib_h::Z_STREAM_ERROR;
         }
-        let window = ::core::slice::from_raw_parts(state.window, window_len);
+        let window = ::core::slice::from_raw_parts(
+            state.window.expect("validated deflate window").as_ptr(),
+            window_len,
+        );
         let output = ::core::slice::from_raw_parts_mut(dictionary, len);
         if deflate_get_dictionary_state(state, window, output).is_none() {
             return crate::zlib_h::Z_STREAM_ERROR;
@@ -3834,8 +3844,8 @@ pub fn deflateEnd(strm: &mut crate::zlib_h::z_stream) -> ::core::ffi::c_int {
         if !prev.is_null() {
             zfree(opaque, prev as crate::stdlib::voidpf);
         }
-        if !window.is_null() {
-            zfree(opaque, window as crate::stdlib::voidpf);
+        if let Some(window) = window {
+            zfree(opaque, window.as_ptr() as crate::stdlib::voidpf);
         }
         zfree(opaque, state_ptr as crate::stdlib::voidpf);
         strm.state = ::core::ptr::null_mut::<crate::src::deflate::internal_state>();
@@ -3878,12 +3888,12 @@ pub unsafe extern "C" fn deflateCopy_ffi(
     let dest_state = &mut *ds;
     *dest_state = *source_state;
     dest_state.strm = dest as usize;
-    dest_state.window = zalloc(
+    dest_state.window = ::core::ptr::NonNull::new(zalloc(
         opaque,
         dest_state.w_size,
         (2 as usize).wrapping_mul(::core::mem::size_of::<crate::stdlib::Byte>())
             as crate::stdlib::uInt,
-    ) as *mut crate::stdlib::Bytef;
+    ) as *mut crate::stdlib::Bytef);
     dest_state.prev = zalloc(
         opaque,
         dest_state.w_size,
@@ -3896,7 +3906,7 @@ pub unsafe extern "C" fn deflateCopy_ffi(
     ) as *mut crate::src::deflate::Posf;
     dest_state.pending_buf = zalloc(opaque, dest_state.lit_bufsize, 4 as crate::stdlib::uInt)
         as *mut crate::zutil_h::uchf as *mut crate::stdlib::Bytef;
-    if dest_state.window.is_null()
+    if dest_state.window.is_none()
         || dest_state.prev.is_null()
         || dest_state.head.is_null()
         || dest_state.pending_buf.is_null()
@@ -3920,7 +3930,7 @@ pub unsafe extern "C" fn deflateCopy_ffi(
         deflateEnd(&mut *dest);
         return crate::zlib_h::Z_STREAM_ERROR;
     };
-    if (window_len != 0 && source_state.window.is_null())
+    if (window_len != 0 && source_state.window.is_none())
         || (prev_capacity != 0 && source_state.prev.is_null())
         || (head_len != 0 && source_state.head.is_null())
         || (pending_capacity != 0 && source_state.pending_buf.is_null())
@@ -3987,12 +3997,24 @@ pub unsafe extern "C" fn deflateCopy_ffi(
     let src_window = if window_len == 0 {
         &[]
     } else {
-        ::core::slice::from_raw_parts(source_state.window, window_len)
+        ::core::slice::from_raw_parts(
+            source_state
+                .window
+                .expect("validated source deflate window")
+                .as_ptr(),
+            window_len,
+        )
     };
     let dst_window = if window_len == 0 {
         &mut []
     } else {
-        ::core::slice::from_raw_parts_mut(dest_state.window, window_len)
+        ::core::slice::from_raw_parts_mut(
+            dest_state
+                .window
+                .expect("validated destination deflate window")
+                .as_ptr(),
+            window_len,
+        )
     };
     let src_prev = if prev_capacity == 0 {
         &[]
@@ -4613,7 +4635,7 @@ fn deflate_stored(
                 let Ok(window_len) = usize::try_from(s.window_size) else {
                     return need_more;
                 };
-                if window_hash.window.len() != window_len || window_len != 0 && s.window.is_null() {
+                if window_hash.window.len() != window_len || window_len != 0 && s.window.is_none() {
                     return need_more;
                 }
                 let window = &*window_hash.window;
@@ -4676,7 +4698,7 @@ fn deflate_stored(
         let Ok(used_len) = usize::try_from(used) else {
             return need_more;
         };
-        if s.window.is_null() || window_hash.window.len() != window_len {
+        if s.window.is_none() || window_hash.window.len() != window_len {
             return need_more;
         }
         let window = &mut *window_hash.window;
@@ -4701,7 +4723,7 @@ fn deflate_stored(
         let Ok(window_len) = usize::try_from(s.window_size) else {
             return need_more;
         };
-        if window_hash.window.len() != window_len || window_len != 0 && s.window.is_null() {
+        if window_hash.window.len() != window_len || window_len != 0 && s.window.is_none() {
             return need_more;
         }
         let window = &mut *window_hash.window;
@@ -4812,7 +4834,7 @@ fn deflate_fast(
         ) else {
             return need_more;
         };
-        if (window_len != 0 && state.window.is_null())
+        if (window_len != 0 && state.window.is_none())
             || window_hash.window.len() != window_len
             || pending_buf.len() != pending_len
         {
@@ -4998,7 +5020,7 @@ fn deflate_fast(
             ) else {
                 return need_more;
             };
-            if (window_len != 0 && state.window.is_null())
+            if (window_len != 0 && state.window.is_none())
                 || window_hash.window.len() != window_len
                 || pending_buf.len() != pending_len
             {
@@ -5081,7 +5103,7 @@ fn deflate_slow(
             ) else {
                 return need_more;
             };
-            if (window_len != 0 && state.window.is_null())
+            if (window_len != 0 && state.window.is_none())
                 || window_hash.window.len() != window_len
                 || pending_buf.len() != pending_len
             {
@@ -5271,7 +5293,7 @@ fn deflate_slow(
             ) else {
                 return need_more;
             };
-            if (window_len != 0 && state.window.is_null())
+            if (window_len != 0 && state.window.is_none())
                 || window_hash.window.len() != window_len
                 || pending_buf.len() != pending_len
             {
@@ -5687,7 +5709,7 @@ fn deflate_rle(
         let Ok(window_len) = usize::try_from(state.window_size) else {
             return need_more;
         };
-        if (window_len != 0 && state.window.is_null()) || window_hash.window.len() != window_len {
+        if (window_len != 0 && state.window.is_none()) || window_hash.window.len() != window_len {
             return need_more;
         }
         let window = &*window_hash.window;
@@ -5783,7 +5805,7 @@ fn deflate_huff(
         let Ok(window_len) = usize::try_from(state.window_size) else {
             return need_more;
         };
-        if window_len != 0 && state.window.is_null() {
+        if window_len != 0 && state.window.is_none() {
             return need_more;
         }
         if window_hash.window.len() != window_len {
