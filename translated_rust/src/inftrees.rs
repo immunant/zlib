@@ -2809,14 +2809,16 @@ pub const MAXBITS: ::core::ffi::c_int = 15 as ::core::ffi::c_int;
 
 pub static inflate_copyright: [::core::ffi::c_char; 49] =
     crate::internal::c_char_array(b" inflate 1.3.2.1 Copyright 1995-2026 Mark Adler \0");
-pub unsafe extern "C" fn inflate_table(
-    mut type_0: crate::src::inftrees::codetype,
-    mut lens: *mut ::core::ffi::c_ushort,
-    mut codes: ::core::ffi::c_uint,
-    mut table: *mut *mut crate::src::inftrees::code,
-    mut bits: *mut ::core::ffi::c_uint,
-    mut work: *mut ::core::ffi::c_ushort,
-) -> ::core::ffi::c_int {
+/// Build a decode table from code lengths.  The return value is the number of
+/// table entries used, or the zlib error value returned by the C routine.
+pub fn inflate_table(
+    type_0: crate::src::inftrees::codetype,
+    lens: &[::core::ffi::c_ushort],
+    codes: ::core::ffi::c_uint,
+    table: &mut [crate::src::inftrees::code],
+    bits: &mut ::core::ffi::c_uint,
+    work: &mut [::core::ffi::c_ushort],
+) -> Result<usize, ::core::ffi::c_int> {
     let mut len: ::core::ffi::c_uint = 0;
     let mut sym: ::core::ffi::c_uint = 0;
     let mut min: ::core::ffi::c_uint = 0;
@@ -2836,14 +2838,13 @@ pub unsafe extern "C" fn inflate_table(
         bits: 0,
         val: 0,
     };
-    let mut next: *mut crate::src::inftrees::code =
-        ::core::ptr::null_mut::<crate::src::inftrees::code>();
-    let mut base: *const ::core::ffi::c_ushort = ::core::ptr::null::<::core::ffi::c_ushort>();
-    let mut extra: *const ::core::ffi::c_ushort = ::core::ptr::null::<::core::ffi::c_ushort>();
+    let mut next: usize = 0;
+    let mut base: &[::core::ffi::c_ushort] = &[];
+    let mut extra: &[::core::ffi::c_ushort] = &[];
     let mut match_0: ::core::ffi::c_uint = 0 as ::core::ffi::c_uint;
     let mut count: [::core::ffi::c_ushort; 16] = [0; 16];
     let mut offs: [::core::ffi::c_ushort; 16] = [0; 16];
-    static mut lbase: [::core::ffi::c_ushort; 31] = [
+    const LBASE: [::core::ffi::c_ushort; 31] = [
         3 as ::core::ffi::c_ushort,
         4 as ::core::ffi::c_ushort,
         5 as ::core::ffi::c_ushort,
@@ -2876,7 +2877,7 @@ pub unsafe extern "C" fn inflate_table(
         0 as ::core::ffi::c_ushort,
         0 as ::core::ffi::c_ushort,
     ];
-    static mut lext: [::core::ffi::c_ushort; 31] = [
+    const LEXT: [::core::ffi::c_ushort; 31] = [
         16 as ::core::ffi::c_ushort,
         16 as ::core::ffi::c_ushort,
         16 as ::core::ffi::c_ushort,
@@ -2909,7 +2910,7 @@ pub unsafe extern "C" fn inflate_table(
         68 as ::core::ffi::c_ushort,
         193 as ::core::ffi::c_ushort,
     ];
-    static mut dbase: [::core::ffi::c_ushort; 32] = [
+    const DBASE: [::core::ffi::c_ushort; 32] = [
         1 as ::core::ffi::c_ushort,
         2 as ::core::ffi::c_ushort,
         3 as ::core::ffi::c_ushort,
@@ -2943,7 +2944,7 @@ pub unsafe extern "C" fn inflate_table(
         0 as ::core::ffi::c_ushort,
         0 as ::core::ffi::c_ushort,
     ];
-    static mut dext: [::core::ffi::c_ushort; 32] = [
+    const DEXT: [::core::ffi::c_ushort; 32] = [
         16 as ::core::ffi::c_ushort,
         16 as ::core::ffi::c_ushort,
         16 as ::core::ffi::c_ushort,
@@ -2977,15 +2978,22 @@ pub unsafe extern "C" fn inflate_table(
         64 as ::core::ffi::c_ushort,
         64 as ::core::ffi::c_ushort,
     ];
+    let codes = codes as usize;
+    if lens.len() < codes || work.len() < codes {
+        return Err(-1);
+    }
     len = 0 as ::core::ffi::c_uint;
     while len <= MAXBITS as ::core::ffi::c_uint {
         count[len as usize] = 0 as ::core::ffi::c_ushort;
         len = len.wrapping_add(1);
     }
     sym = 0 as ::core::ffi::c_uint;
-    while sym < codes {
-        count[*lens.offset(sym as isize) as usize] =
-            count[*lens.offset(sym as isize) as usize].wrapping_add(1);
+    while (sym as usize) < codes {
+        let length = lens[sym as usize] as usize;
+        if length > MAXBITS as usize {
+            return Err(-1);
+        }
+        count[length] = count[length].wrapping_add(1);
         sym = sym.wrapping_add(1);
     }
     root = *bits;
@@ -3003,14 +3011,13 @@ pub unsafe extern "C" fn inflate_table(
         here.op = 64 as ::core::ffi::c_int as ::core::ffi::c_uchar;
         here.bits = 1 as ::core::ffi::c_int as ::core::ffi::c_uchar;
         here.val = 0 as ::core::ffi::c_int as ::core::ffi::c_ushort;
-        let c2rust_fresh0 = *table;
-        *table = (*table).offset(1);
-        *c2rust_fresh0 = here;
-        let c2rust_fresh1 = *table;
-        *table = (*table).offset(1);
-        *c2rust_fresh1 = here;
+        if table.len() < 2 {
+            return Err(1);
+        }
+        table[0] = here;
+        table[1] = here;
         *bits = 1 as ::core::ffi::c_uint;
-        return 0 as ::core::ffi::c_int;
+        return Ok(2);
     }
     min = 1 as ::core::ffi::c_uint;
     while min < max {
@@ -3028,7 +3035,7 @@ pub unsafe extern "C" fn inflate_table(
         left <<= 1 as ::core::ffi::c_int;
         left -= count[len as usize] as ::core::ffi::c_int;
         if left < 0 as ::core::ffi::c_int {
-            return -1 as ::core::ffi::c_int;
+            return Err(-1);
         }
         len = len.wrapping_add(1);
     }
@@ -3037,7 +3044,7 @@ pub unsafe extern "C" fn inflate_table(
             == crate::src::inftrees::CODES as ::core::ffi::c_int as ::core::ffi::c_uint
             || max != 1 as ::core::ffi::c_uint)
     {
-        return -1 as ::core::ffi::c_int;
+        return Err(-1);
     }
     offs[1 as usize] = 0 as ::core::ffi::c_ushort;
     len = 1 as ::core::ffi::c_uint;
@@ -3048,12 +3055,12 @@ pub unsafe extern "C" fn inflate_table(
         len = len.wrapping_add(1);
     }
     sym = 0 as ::core::ffi::c_uint;
-    while sym < codes {
-        if *lens.offset(sym as isize) as ::core::ffi::c_int != 0 as ::core::ffi::c_int {
-            let c2rust_fresh2 = offs[*lens.offset(sym as isize) as usize];
-            offs[*lens.offset(sym as isize) as usize] =
-                offs[*lens.offset(sym as isize) as usize].wrapping_add(1);
-            *work.offset(c2rust_fresh2 as isize) = sym as ::core::ffi::c_ushort;
+    while (sym as usize) < codes {
+        let length = lens[sym as usize] as usize;
+        if length != 0 {
+            let work_index = offs[length] as usize;
+            offs[length] = offs[length].wrapping_add(1);
+            work[work_index] = sym as ::core::ffi::c_ushort;
         }
         sym = sym.wrapping_add(1);
     }
@@ -3062,20 +3069,20 @@ pub unsafe extern "C" fn inflate_table(
             match_0 = 20 as ::core::ffi::c_uint;
         }
         1 => {
-            base = &raw const lbase as *const ::core::ffi::c_ushort;
-            extra = &raw const lext as *const ::core::ffi::c_ushort;
+            base = &LBASE;
+            extra = &LEXT;
             match_0 = 257 as ::core::ffi::c_uint;
         }
         2 => {
-            base = &raw const dbase as *const ::core::ffi::c_ushort;
-            extra = &raw const dext as *const ::core::ffi::c_ushort;
+            base = &DBASE;
+            extra = &DEXT;
         }
         _ => {}
     }
     huff = 0 as ::core::ffi::c_uint;
     sym = 0 as ::core::ffi::c_uint;
     len = min;
-    next = *table;
+    next = 0;
     curr = root;
     drop_0 = 0 as ::core::ffi::c_uint;
     low = -1 as ::core::ffi::c_int as ::core::ffi::c_uint;
@@ -3088,23 +3095,21 @@ pub unsafe extern "C" fn inflate_table(
             == crate::src::inftrees::DISTS as ::core::ffi::c_int as ::core::ffi::c_uint
             && used > crate::src::inftrees::ENOUGH_DISTS as ::core::ffi::c_uint
     {
-        return 1 as ::core::ffi::c_int;
+        return Err(1);
     }
     loop {
         here.bits = len.wrapping_sub(drop_0) as ::core::ffi::c_uchar;
-        if (*work.offset(sym as isize) as ::core::ffi::c_uint)
+        let symbol = work[sym as usize] as ::core::ffi::c_uint;
+        if symbol
             .wrapping_add(1 as ::core::ffi::c_uint)
             < match_0
         {
             here.op = 0 as ::core::ffi::c_int as ::core::ffi::c_uchar;
-            here.val = *work.offset(sym as isize);
-        } else if *work.offset(sym as isize) as ::core::ffi::c_uint >= match_0 {
-            here.op = *extra.offset(
-                (*work.offset(sym as isize) as ::core::ffi::c_uint).wrapping_sub(match_0) as isize,
-            ) as ::core::ffi::c_uchar;
-            here.val = *base.offset(
-                (*work.offset(sym as isize) as ::core::ffi::c_uint).wrapping_sub(match_0) as isize,
-            );
+            here.val = symbol as ::core::ffi::c_ushort;
+        } else if symbol >= match_0 {
+            let offset = symbol.wrapping_sub(match_0) as usize;
+            here.op = extra[offset] as ::core::ffi::c_uchar;
+            here.val = base[offset];
         } else {
             here.op = (32 as ::core::ffi::c_int + 64 as ::core::ffi::c_int) as ::core::ffi::c_uchar;
             here.val = 0 as ::core::ffi::c_ushort;
@@ -3114,7 +3119,11 @@ pub unsafe extern "C" fn inflate_table(
         min = fill;
         loop {
             fill = fill.wrapping_sub(incr);
-            *next.offset((huff >> drop_0).wrapping_add(fill) as isize) = here;
+            let index = next + (huff >> drop_0).wrapping_add(fill) as usize;
+            let Some(entry) = table.get_mut(index) else {
+                return Err(1);
+            };
+            *entry = here;
             if fill == 0 as ::core::ffi::c_uint {
                 break;
             }
@@ -3135,13 +3144,13 @@ pub unsafe extern "C" fn inflate_table(
             if len == max {
                 break;
             }
-            len = *lens.offset(*work.offset(sym as isize) as isize) as ::core::ffi::c_uint;
+            len = lens[work[sym as usize] as usize] as ::core::ffi::c_uint;
         }
         if len > root && huff & mask != low {
             if drop_0 == 0 as ::core::ffi::c_uint {
                 drop_0 = root;
             }
-            next = next.offset(min as isize);
+            next += min as usize;
             curr = len.wrapping_sub(drop_0);
             left = (1 as ::core::ffi::c_int) << curr;
             while curr.wrapping_add(drop_0) < max {
@@ -3160,24 +3169,28 @@ pub unsafe extern "C" fn inflate_table(
                     == crate::src::inftrees::DISTS as ::core::ffi::c_int as ::core::ffi::c_uint
                     && used > crate::src::inftrees::ENOUGH_DISTS as ::core::ffi::c_uint
             {
-                return 1 as ::core::ffi::c_int;
+                return Err(1);
             }
             low = huff & mask;
-            (*(*table).offset(low as isize)).op = curr as ::core::ffi::c_uchar;
-            (*(*table).offset(low as isize)).bits = root as ::core::ffi::c_uchar;
-            (*(*table).offset(low as isize)).val =
-                next.offset_from(*table) as ::core::ffi::c_ushort;
+            let Some(entry) = table.get_mut(low as usize) else {
+                return Err(1);
+            };
+            entry.op = curr as ::core::ffi::c_uchar;
+            entry.bits = root as ::core::ffi::c_uchar;
+            entry.val = next as ::core::ffi::c_ushort;
         }
     }
     if huff != 0 as ::core::ffi::c_uint {
         here.op = 64 as ::core::ffi::c_int as ::core::ffi::c_uchar;
         here.bits = len.wrapping_sub(drop_0) as ::core::ffi::c_uchar;
         here.val = 0 as ::core::ffi::c_int as ::core::ffi::c_ushort;
-        *next.offset(huff as isize) = here;
+        let Some(entry) = table.get_mut(next + huff as usize) else {
+            return Err(1);
+        };
+        *entry = here;
     }
-    *table = (*table).offset(used as isize);
     *bits = root;
-    return 0 as ::core::ffi::c_int;
+    Ok(used as usize)
 }
 #[export_name = "inflate_table"]
 
@@ -3189,7 +3202,30 @@ pub unsafe extern "C" fn inflate_table_ffi(
     mut bits: *mut ::core::ffi::c_uint,
     mut work: *mut ::core::ffi::c_ushort,
 ) -> ::core::ffi::c_int {
-    inflate_table(type_0, lens, codes, table, bits, work)
+    let Some(bits) = (unsafe { bits.as_mut() }) else {
+        return -1;
+    };
+    let Some(work) = (unsafe { work.as_mut() }) else {
+        return -1;
+    };
+    let Some(table_slot) = (unsafe { table.as_mut() }) else {
+        return -1;
+    };
+    if lens.is_null() || (*table_slot).is_null() {
+        return -1;
+    }
+    let lens = unsafe { ::core::slice::from_raw_parts(lens, codes as usize) };
+    let work = unsafe { ::core::slice::from_raw_parts_mut(work, 288) };
+    let output = unsafe {
+        ::core::slice::from_raw_parts_mut(*table_slot, crate::src::inftrees::ENOUGH as usize)
+    };
+    match inflate_table(type_0, lens, codes, output, bits, work) {
+        Ok(used) => {
+            *table_slot = unsafe { (*table_slot).add(used) };
+            0
+        }
+        Err(error) => error,
+    }
 }
 pub fn inflate_fixed(state: &mut crate::src::inflate::inflate_state) {
     state.lencode = crate::src::inflate::CodeTable::FixedLens;
