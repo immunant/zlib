@@ -4136,8 +4136,19 @@ fn deflate_stored(
                 have = strm.avail_in as ::core::ffi::c_uint;
             }
             if have != 0 {
-                let output = state.window.wrapping_add(state.strstart as usize);
-                read_buf(stream, output, have, state.wrap);
+                // Select the refill tail through the same checked slice plan as
+                // `fill_window`, rather than advancing a raw window cursor.
+                // The raw adapter remains responsible only for its existing
+                // ABI input/output lends.
+                let Some(write_span) =
+                    fill_window_write_span(window.len(), state.strstart, 0, have)
+                else {
+                    return need_more;
+                };
+                let Some(output) = window.get_mut(write_span) else {
+                    return need_more;
+                };
+                read_buf(stream, output.as_mut_ptr(), have, state.wrap);
                 record_stored_input_state(state, have);
             }
             let tail_plan = stored_tail_block_plan(
