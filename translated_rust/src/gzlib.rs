@@ -1062,19 +1062,25 @@ pub unsafe extern "C" fn gzbuffer_ffi(
     file: crate::zlib_h::gzFile,
     size: ::core::ffi::c_uint,
 ) -> ::core::ffi::c_int {
-    if file.is_null() {
+    let state = file as *mut crate::gzguts_h::gz_state;
+    if state.is_null()
+        || state.align_offset(::core::mem::align_of::<crate::gzguts_h::gz_state>()) != 0
+    {
         return -1 as ::core::ffi::c_int;
     }
 
-    gzbuffer_core(&mut *(file as crate::gzguts_h::gz_statep), size)
+    gzbuffer_core(&mut *state, size)
 }
 #[export_name = "gzrewind"]
 pub unsafe extern "C" fn gzrewind_ffi(mut file: crate::zlib_h::gzFile) -> ::core::ffi::c_int {
-    if file.is_null() {
+    let state = file as *mut crate::gzguts_h::gz_state;
+    if state.is_null()
+        || state.align_offset(::core::mem::align_of::<crate::gzguts_h::gz_state>()) != 0
+    {
         return -1 as ::core::ffi::c_int;
     }
 
-    let state = &mut *(file as crate::gzguts_h::gz_statep);
+    let state = &mut *state;
     let Some(start) = gzrewind_start_offset(state.mode, state.err, state.start) else {
         return -1 as ::core::ffi::c_int;
     };
@@ -1099,11 +1105,13 @@ pub unsafe extern "C" fn gzseek64_ffi(
     requested_offset: crate::stdlib::off64_t,
     whence: ::core::ffi::c_int,
 ) -> crate::stdlib::off64_t {
-    if file.is_null() {
+    let state_ptr = file as crate::gzguts_h::gz_statep;
+    if state_ptr.is_null()
+        || state_ptr.align_offset(::core::mem::align_of::<crate::gzguts_h::gz_state>()) != 0
+    {
         return -1 as ::core::ffi::c_int as crate::stdlib::off64_t;
     }
 
-    let state_ptr = file as crate::gzguts_h::gz_statep;
     let seek_plan = {
         let state = &mut *state_ptr;
         gzseek_plan(
@@ -1377,11 +1385,14 @@ pub unsafe extern "C" fn gzerror_ffi(
 #[export_name = "gzclearerr"]
 
 pub unsafe extern "C" fn gzclearerr_ffi(mut file: crate::zlib_h::gzFile) {
-    if file.is_null() {
+    let state = file as crate::gzguts_h::gz_statep;
+    if state.is_null()
+        || state.align_offset(::core::mem::align_of::<crate::gzguts_h::gz_state>()) != 0
+    {
         return;
     }
 
-    let state = unsafe { &mut *(file as crate::gzguts_h::gz_statep) };
+    let state = &mut *state;
     let previous_message = state.msg;
     if gzclearerr_state_core(state) {
         crate::stdlib::free(previous_message as *mut ::core::ffi::c_void);
@@ -1440,7 +1451,8 @@ mod tests {
         gz_open_fd_plan, gz_open_fd_succeeded, gz_open_has_required_inputs, gz_open_offset_plan,
         gz_open_path_buffer_len, gz_open_recorded_offset, gz_parse_open_mode,
         gz_position_after_skip, gz_post_open_metadata, gz_prepare_open, gz_request_len,
-        gz_reset_core, gzbuffer_can_set_want, gzbuffer_normalized_want, gzclearerr_core,
+        gz_reset_core, gzbuffer_can_set_want, gzbuffer_normalized_want, gzbuffer_ffi,
+        gzclearerr_core, gzclearerr_ffi,
         gzclearerr_state_core, gzdopen_has_valid_descriptor, gzdopen_path_buffer_len, gzeof_result,
         gzerror_core, gzerror_ffi, gzoffset64_adjust_for_buffered_read, gzoffset64_result,
         gzrewind_request_is_valid, gzrewind_start_offset, gzseek_adjust_offset,
@@ -1450,8 +1462,9 @@ mod tests {
         gzseek_plan_fast_forward, gzseek_plan_read_buffer_consumption,
         gzseek_plan_remaining_offset, gzseek_plan_request, gzseek_read_buffer_consumed,
         gzseek_read_buffer_plan_for_mode, gzseek_read_buffer_uses_requested_offset,
-        gzseek_request_is_valid, gzseek_uses_read_buffer, gztell64_core, gztell64_result,
-        gzeof_ffi, gzoffset64_ffi, gzoffset_ffi, gztell64_ffi, gztell_ffi, GzErrorMessage,
+        gzseek_request_is_valid, gzseek_uses_read_buffer, gzseek64_ffi, gzseek_ffi,
+        gzrewind_ffi, gztell64_core, gztell64_result, gzeof_ffi, gzoffset64_ffi,
+        gzoffset_ffi, gztell64_ffi, gztell_ffi, GzErrorMessage,
         GzErrorPlan, GzOpenFdPlan, GzOpenOffsetPlan, GzResetFields,
         GzSeekFastForwardPlan, GzSeekOffsetPlan, GzSeekPlan, GzSeekReadBufferPlan,
         GzSeekRequestPlan,
@@ -2010,6 +2023,28 @@ mod tests {
             gz_legacy_offset_result(-1 as ::core::ffi::c_int as crate::stdlib::off64_t)
         );
         assert_eq!(unsafe { gzeof_ffi(file) }, 0);
+    }
+
+    #[test]
+    fn gzip_mutating_handle_operations_reject_misaligned_handles_before_dereferencing() {
+        assert!(::core::mem::align_of::<crate::gzguts_h::gz_state>() > 1);
+        let mut bytes = [0_u8; ::core::mem::size_of::<crate::gzguts_h::gz_state>() + 1];
+        let state_alignment = ::core::mem::align_of::<crate::gzguts_h::gz_state>();
+        let offset = if bytes.as_ptr().align_offset(state_alignment) == 0 {
+            1
+        } else {
+            0
+        };
+        let file = bytes.as_mut_ptr().wrapping_add(offset) as crate::zlib_h::gzFile;
+
+        assert_eq!(unsafe { gzbuffer_ffi(file, 8192) }, -1);
+        assert_eq!(unsafe { gzrewind_ffi(file) }, -1);
+        assert_eq!(
+            unsafe { gzseek64_ffi(file, 0, crate::stdlib::SEEK_SET) },
+            -1 as ::core::ffi::c_int as crate::stdlib::off64_t
+        );
+        assert_eq!(unsafe { gzseek_ffi(file, 0, crate::stdlib::SEEK_SET) }, -1);
+        unsafe { gzclearerr_ffi(file) };
     }
 
     #[test]
