@@ -4016,12 +4016,8 @@ unsafe extern "C" fn deflate_slow(
         );
         (*s).block_start = (*s).strstart as ::core::ffi::c_long;
         flush_pending((*s).strm);
-        if (*(*s).strm).avail_out == 0 as crate::stdlib::uInt {
-            return (if true {
-                finish_started as ::core::ffi::c_int
-            } else {
-                need_more as ::core::ffi::c_int
-            }) as block_state;
+        if let Some(state) = deflate_flush_block_state_after_output((*(*s).strm).avail_out, true) {
+            return state;
         }
         return finish_done;
     }
@@ -4191,12 +4187,10 @@ unsafe fn deflate_rle(
             );
             (*s).block_start = (*s).strstart as ::core::ffi::c_long;
             flush_pending((*s).strm);
-            if (*(*s).strm).avail_out == 0 as crate::stdlib::uInt {
-                return (if false {
-                    finish_started as ::core::ffi::c_int
-                } else {
-                    need_more as ::core::ffi::c_int
-                }) as block_state;
+            if let Some(state) =
+                deflate_flush_block_state_after_output((*(*s).strm).avail_out, false)
+            {
+                return state;
             }
         }
     }
@@ -4217,12 +4211,8 @@ unsafe fn deflate_rle(
         );
         (*s).block_start = (*s).strstart as ::core::ffi::c_long;
         flush_pending((*s).strm);
-        if (*(*s).strm).avail_out == 0 as crate::stdlib::uInt {
-            return (if true {
-                finish_started as ::core::ffi::c_int
-            } else {
-                need_more as ::core::ffi::c_int
-            }) as block_state;
+        if let Some(state) = deflate_flush_block_state_after_output((*(*s).strm).avail_out, true) {
+            return state;
         }
         return finish_done;
     }
@@ -4304,12 +4294,10 @@ unsafe fn deflate_huff(
             );
             (*s).block_start = (*s).strstart as ::core::ffi::c_long;
             flush_pending((*s).strm);
-            if (*(*s).strm).avail_out == 0 as crate::stdlib::uInt {
-                return (if false {
-                    finish_started as ::core::ffi::c_int
-                } else {
-                    need_more as ::core::ffi::c_int
-                }) as block_state;
+            if let Some(state) =
+                deflate_flush_block_state_after_output((*(*s).strm).avail_out, false)
+            {
+                return state;
             }
         }
     }
@@ -4330,12 +4318,8 @@ unsafe fn deflate_huff(
         );
         (*s).block_start = (*s).strstart as ::core::ffi::c_long;
         flush_pending((*s).strm);
-        if (*(*s).strm).avail_out == 0 as crate::stdlib::uInt {
-            return (if true {
-                finish_started as ::core::ffi::c_int
-            } else {
-                need_more as ::core::ffi::c_int
-            }) as block_state;
+        if let Some(state) = deflate_flush_block_state_after_output((*(*s).strm).avail_out, true) {
+            return state;
         }
         return finish_done;
     }
