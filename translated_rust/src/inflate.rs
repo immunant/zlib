@@ -193,6 +193,14 @@ fn dynamic_code_length_repeat_fits(
     have.wrapping_add(repeat) <= nlen.wrapping_add(ndist)
 }
 
+fn inflate_copy_limit(
+    requested: ::core::ffi::c_uint,
+    available_input: ::core::ffi::c_uint,
+    available_output: ::core::ffi::c_uint,
+) -> ::core::ffi::c_uint {
+    requested.min(available_input).min(available_output)
+}
+
 fn stored_block_lengths_are_valid(hold: crate::stdlib::uLong) -> bool {
     hold & 0xffff as crate::stdlib::uLong
         == hold >> 16 as ::core::ffi::c_int ^ 0xffff as crate::stdlib::uLong
@@ -1463,12 +1471,7 @@ pub unsafe extern "C" fn inflate(
             16745500758254703311 => {
                 copy = (*state).length;
                 if copy != 0 {
-                    if copy > have {
-                        copy = have;
-                    }
-                    if copy > left {
-                        copy = left;
-                    }
+                    copy = inflate_copy_limit(copy, have, left);
                     if copy == 0 as ::core::ffi::c_uint {
                         break;
                     }
@@ -2675,7 +2678,7 @@ pub unsafe extern "C" fn inflateCodesUsed_ffi(
 mod tests {
     use super::{
         apply_window_update, copy_dictionary_from_window, dynamic_code_length_repeat_fits,
-        dynamic_header_counts,
+        dynamic_header_counts, inflate_copy_limit,
         inflate_data_type_value, inflate_header_wrap_allows_capture, inflate_mark_value,
         inflate_mode_is_valid, inflate_needs_buffer_error, inflate_prime_update, inflate_undermine_core,
         inflate_reset2_params, inflate_state_metadata_is_valid, inflate_sync_point_value,
@@ -2837,6 +2840,15 @@ mod tests {
             ::core::ffi::c_uint::MAX,
             1,
         ));
+    }
+
+    #[test]
+    fn inflate_copy_limit_respects_input_and_output_boundaries() {
+        assert_eq!(inflate_copy_limit(8, 8, 8), 8);
+        assert_eq!(inflate_copy_limit(8, 7, 8), 7);
+        assert_eq!(inflate_copy_limit(8, 8, 7), 7);
+        assert_eq!(inflate_copy_limit(8, 0, 8), 0);
+        assert_eq!(inflate_copy_limit(0, 8, 8), 0);
     }
 
     #[test]

@@ -419,15 +419,23 @@ unsafe extern "C" fn slide_hash(mut s: *mut crate::src::deflate::deflate_state) 
     (*s).slid = 1 as ::core::ffi::c_int;
 }
 
+fn read_buf_len(
+    available: ::core::ffi::c_uint,
+    requested: ::core::ffi::c_uint,
+) -> ::core::ffi::c_uint {
+    if available > requested {
+        requested
+    } else {
+        available
+    }
+}
+
 unsafe extern "C" fn read_buf(
     mut strm: crate::zlib_h::z_streamp,
     mut buf: *mut crate::stdlib::Bytef,
     mut size: ::core::ffi::c_uint,
 ) -> ::core::ffi::c_uint {
-    let mut len: ::core::ffi::c_uint = (*strm).avail_in as ::core::ffi::c_uint;
-    if len > size {
-        len = size;
-    }
+    let len = read_buf_len((*strm).avail_in as ::core::ffi::c_uint, size);
     if len == 0 as ::core::ffi::c_uint {
         return 0 as ::core::ffi::c_uint;
     }
@@ -3615,7 +3623,7 @@ mod tests {
         deflate_bound_lengths, deflate_copyright, deflate_dictionary_len, deflate_prime_bits_valid,
         deflate_version_matches, gzip_header_crc, gzip_header_crc_pending,
         gzip_header_crc_pending_range, normalize_deflate_params, pending_output_len,
-        slide_hash_entry, stored_block_min_size, zlib_header,
+        read_buf_len, slide_hash_entry, stored_block_min_size, zlib_header,
     };
 
     #[test]
@@ -3747,6 +3755,19 @@ mod tests {
         assert_eq!(slide_hash_entry(31, window_size), 0);
         assert_eq!(slide_hash_entry(32, window_size), 0);
         assert_eq!(slide_hash_entry(47, window_size), 15);
+    }
+
+    #[test]
+    fn read_buf_len_clamps_to_requested_input() {
+        assert_eq!(read_buf_len(0, 0), 0);
+        assert_eq!(read_buf_len(0, 8), 0);
+        assert_eq!(read_buf_len(7, 8), 7);
+        assert_eq!(read_buf_len(8, 8), 8);
+        assert_eq!(read_buf_len(9, 8), 8);
+        assert_eq!(
+            read_buf_len(::core::ffi::c_uint::MAX, ::core::ffi::c_uint::MAX - 1),
+            ::core::ffi::c_uint::MAX - 1,
+        );
     }
 
     #[test]
