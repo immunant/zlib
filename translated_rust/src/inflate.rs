@@ -1231,31 +1231,34 @@ fn update_window_state_core(
     );
 }
 
-unsafe fn updatewindow(
+fn updatewindow(
     mut strm: crate::zlib_h::z_streamp,
     mut end: *const crate::stdlib::Bytef,
     mut copy: ::core::ffi::c_uint,
 ) -> ::core::ffi::c_int {
-    let state = &mut *((*strm).state as *mut crate::src::inflate::inflate_state);
-    let plan = update_window_state_plan(state, !state.window.is_null(), copy);
-    if let Some((items, size)) = window_allocation_request_for_plan(plan.allocation) {
-        state.window = Some((*strm).zalloc.expect("non-null function pointer"))
-            .expect("non-null function pointer")((*strm).opaque, items, size)
-            as *mut crate::stdlib::Byte;
-    }
-    let slices = match update_window_slices_after_allocation(plan, !state.window.is_null()) {
-        Ok(slices) => slices,
-        Err(status) => return status,
-    };
-    let window = core::slice::from_raw_parts_mut(state.window, slices.window_len);
-    let produced = match slices.produced_len {
-        Some(produced_len) => {
-            core::slice::from_raw_parts(end.wrapping_sub(produced_len), produced_len)
+    unsafe {
+        let state = &mut *((*strm).state as *mut crate::src::inflate::inflate_state);
+        let plan = update_window_state_plan(state, !state.window.is_null(), copy);
+        if let Some((items, size)) = window_allocation_request_for_plan(plan.allocation) {
+            state.window = Some((*strm).zalloc.expect("non-null function pointer"))
+                .expect("non-null function pointer")(
+                (*strm).opaque, items, size
+            ) as *mut crate::stdlib::Byte;
         }
-        None => update_window_produced_slice(None),
-    };
-    update_window_state_core(state, window, produced);
-    0
+        let slices = match update_window_slices_after_allocation(plan, !state.window.is_null()) {
+            Ok(slices) => slices,
+            Err(status) => return status,
+        };
+        let window = core::slice::from_raw_parts_mut(state.window, slices.window_len);
+        let produced = match slices.produced_len {
+            Some(produced_len) => {
+                core::slice::from_raw_parts(end.wrapping_sub(produced_len), produced_len)
+            }
+            None => update_window_produced_slice(None),
+        };
+        update_window_state_core(state, window, produced);
+        0
+    }
 }
 
 pub unsafe extern "C" fn inflate(
