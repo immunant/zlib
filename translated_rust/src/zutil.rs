@@ -133,6 +133,22 @@ fn zallocations() -> &'static Mutex<HashMap<usize, ZAllocation>> {
     ALLOCATIONS.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
+/// Install zlib's default allocator pair when a caller did not provide one.
+///
+/// This is deliberately limited to initialization: callers that supplied
+/// either callback retain that exact callback and opaque value.  Keeping this
+/// policy in safe implementation code lets the stream initializers share it
+/// without treating arbitrary ABI callbacks as safe Rust functions.
+pub(crate) fn install_default_allocators(strm: &mut crate::zlib_h::z_stream) {
+    if strm.zalloc.is_none() {
+        strm.zalloc = Some(zcalloc);
+        strm.opaque = ::core::ptr::null_mut::<::core::ffi::c_void>();
+    }
+    if strm.zfree.is_none() {
+        strm.zfree = Some(zcfree);
+    }
+}
+
 pub extern "C" fn zcalloc(
     _opaque: crate::stdlib::voidpf,
     mut items: ::core::ffi::c_uint,

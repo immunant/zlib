@@ -447,23 +447,7 @@ pub fn inflateInit2_(
         return crate::zlib_h::Z_VERSION_ERROR;
     }
     strm.msg = ::core::ptr::null_mut::<::core::ffi::c_char>();
-    if strm.zalloc.is_none() {
-        strm.zalloc = Some(
-            crate::src::zutil::zcalloc
-                as unsafe extern "C" fn(
-                    crate::stdlib::voidpf,
-                    ::core::ffi::c_uint,
-                    ::core::ffi::c_uint,
-                ) -> crate::stdlib::voidpf,
-        ) as crate::zlib_h::alloc_func;
-        strm.opaque = ::core::ptr::null_mut::<::core::ffi::c_void>();
-    }
-    if strm.zfree.is_none() {
-        strm.zfree = Some(
-            crate::src::zutil::zcfree
-                as unsafe extern "C" fn(crate::stdlib::voidpf, crate::stdlib::voidpf) -> (),
-        ) as crate::zlib_h::free_func;
-    }
+    crate::src::zutil::install_default_allocators(strm);
     initialize_allocated_inflate_state(strm, windowBits)
 }
 #[export_name = "inflateInit2_"]
