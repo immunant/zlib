@@ -15,7 +15,7 @@ pub use crate::stdlib::off64_t;
 pub use crate::stdlib::ssize_t;
 
 pub use crate::src::deflate::internal_state;
-pub use crate::src::inflate::inflate;
+pub use crate::src::inflate::inflate_impl;
 pub use crate::src::inflate::inflateEnd;
 pub use crate::src::inflate::inflateInit2_;
 pub use crate::stdlib::uInt;
@@ -449,8 +449,19 @@ unsafe fn gz_decomp(
             }
             let input = &state.in_0[input_start..input_start + input_len];
             let mut inflate_message = None;
-            ret = crate::src::inflate::inflate(
+            let inflate_state = state.strm.state.cast::<crate::src::inflate::inflate_state>();
+            let Some(inflate_state) = inflate_state.as_mut() else {
+                crate::src::gzlib::gz_error_state(
+                    state,
+                    crate::zlib_h::Z_STREAM_ERROR,
+                    Some(c"internal error: inflate stream corrupt"),
+                );
+                ret = crate::zlib_h::Z_STREAM_ERROR;
+                break;
+            };
+            ret = crate::src::inflate::inflate_impl(
                 &mut state.strm,
+                inflate_state,
                 crate::zlib_h::Z_NO_FLUSH,
                 input,
                 &mut output[..output_len],

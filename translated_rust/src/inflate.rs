@@ -809,8 +809,12 @@ fn inflate_table_from_state(
     )
 }
 
-pub unsafe fn inflate(
+/// Decode one bounded input/output segment using an already-validated
+/// inflater state.  Raw ABI state conversion stays at the call boundary;
+/// the decoder itself works only with ordinary Rust borrows.
+pub fn inflate_impl(
     strm: &mut crate::zlib_h::z_stream_s,
+    state: &mut crate::src::inflate::inflate_state,
     mut flush: ::core::ffi::c_int,
     input: &[crate::stdlib::Bytef],
     output: &mut [crate::stdlib::Bytef],
@@ -863,13 +867,9 @@ pub unsafe fn inflate(
         1 as ::core::ffi::c_ushort,
         15 as ::core::ffi::c_ushort,
     ];
-    if strm.state.is_null() {
-        return crate::zlib_h::Z_STREAM_ERROR;
-    }
     if input.len() != strm.avail_in as usize || output.len() != strm.avail_out as usize {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    let state = &mut *(strm.state as *mut crate::src::inflate::inflate_state);
     if !inflate_state_valid(&strm, state) {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
@@ -2527,12 +2527,13 @@ pub unsafe extern "C" fn inflate_ffi(
     // `inflateGetHeader()` retains this caller-owned pointer in the opaque
     // stream state.  Resolve its three writable ranges at the ABI boundary so
     // the decoder only sees bounded slices.
-    let header = if strm.state.is_null() {
-        None
-    } else {
-        let state = strm.state.cast::<crate::src::inflate::inflate_state>();
-        unsafe {
-            state.as_mut().and_then(|state| state.head.as_mut()).map(|header| {
+    let state = strm.state.cast::<crate::src::inflate::inflate_state>();
+    let Some(state) = (unsafe { state.as_mut() }) else {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    };
+    let head = state.head;
+    let header = unsafe {
+        head.as_mut().map(|header| {
                 let extra = (!header.extra.is_null()).then(|| {
                     ::core::slice::from_raw_parts_mut(header.extra, header.extra_max as usize)
                 });
@@ -2549,10 +2550,9 @@ pub unsafe extern "C" fn inflate_ffi(
                     comment,
                 }
             })
-        }
     };
     let mut message = None;
-    inflate(strm, flush, input, output, header, &mut message)
+    inflate_impl(strm, state, flush, input, output, header, &mut message)
 }
 pub unsafe fn inflateEnd(strm: &mut crate::zlib_h::z_stream_s) -> ::core::ffi::c_int {
     if inflate_validate_state(strm).is_none() {

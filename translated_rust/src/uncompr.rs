@@ -2,7 +2,7 @@ pub use crate::__stddef_null_h::NULL;
 pub use crate::__stddef_size_t_h::size_t;
 
 pub use crate::src::deflate::internal_state;
-pub use crate::src::inflate::inflate;
+pub use crate::src::inflate::inflate_impl;
 pub use crate::src::inflate::inflateEnd;
 pub use crate::src::inflate::inflateInit_;
 pub use crate::stdlib::uInt;
@@ -431,8 +431,14 @@ pub unsafe extern "C" fn uncompress2_z(
         };
         let output = ::core::slice::from_raw_parts_mut(stream.next_out, stream.avail_out as usize);
         let mut inflate_message = None;
-        err = crate::src::inflate::inflate(
+        let inflate_state = stream.state.cast::<crate::src::inflate::inflate_state>();
+        let Some(inflate_state) = inflate_state.as_mut() else {
+            err = crate::zlib_h::Z_STREAM_ERROR;
+            break;
+        };
+        err = crate::src::inflate::inflate_impl(
             &mut stream,
+            inflate_state,
             crate::zlib_h::Z_NO_FLUSH,
             input,
             output,
