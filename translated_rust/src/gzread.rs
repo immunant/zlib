@@ -345,15 +345,21 @@ fn gz_decomp(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
             break;
         } else {
             // `gz_look` initialized this stream and its input/output ranges
-            // are owned by the validated gzip state for this call. Borrow the
-            // output Vec from that registry rather than reconstructing a
-            // slice from the C-facing cursor in the inflater itself.
+            // are owned by the validated gzip state for this call. Borrow
+            // both Vecs from that registry rather than reconstructing either
+            // slice from a C-facing cursor in the inflater itself.
             let state_key = crate::src::gzlib::gz_owned_buffer_key(state);
-            let result = crate::src::gzlib::gz_with_owned_output_buffer(state_key, |output| {
-                if state.out != output.as_mut_ptr() {
+            let result = crate::src::gzlib::gz_with_owned_read_buffers(state_key, |input, output| {
+                if state.in_0 != input.as_mut_ptr() || state.out != output.as_mut_ptr() {
                     return None;
                 }
-                let range = gz_buffered_output_range(
+                let input_range = gz_buffered_input_range(
+                    input.as_ptr().addr(),
+                    state.strm.next_in.addr(),
+                    state.strm.avail_in,
+                    input.len(),
+                )?;
+                let output_range = gz_buffered_output_range(
                     output.as_ptr().addr(),
                     state.strm.next_out.addr(),
                     state.strm.avail_out,
@@ -362,7 +368,8 @@ fn gz_decomp(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
                 Some(crate::src::inflate::inflate(
                     &mut state.strm,
                     crate::zlib_h::Z_NO_FLUSH,
-                    &mut output[range],
+                    Some(&input[input_range]),
+                    &mut output[output_range],
                 ))
             });
             let Some(Some(result)) = result else {

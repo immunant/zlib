@@ -475,6 +475,7 @@ pub(crate) fn inflate_fast_bound_cursors(
 pub fn inflate_fast(
     strm: Option<&mut crate::zlib_h::z_stream>,
     start: ::core::ffi::c_uint,
+    input: &[crate::stdlib::Bytef],
     output: &mut [crate::stdlib::Bytef],
 ) {
     let Some(strm) = strm else {
@@ -484,6 +485,7 @@ pub fn inflate_fast(
     let _ = crate::src::inflate::inflate(
         strm,
         crate::zlib_h::Z_NO_FLUSH,
+        Some(input),
         output,
     );
 }
@@ -505,9 +507,14 @@ pub unsafe extern "C" fn inflate_fast_ffi(
         return;
     }
     // SAFETY: `inflate_fast` shares inflate's public cursor contract. This
-    // thin ABI adapter binds only the advertised output range.
+    // thin ABI adapter binds both advertised cursor ranges.
+    let input = if strm.avail_in == 0 {
+        &[]
+    } else {
+        unsafe { ::core::slice::from_raw_parts(strm.next_in, strm.avail_in as usize) }
+    };
     let output = unsafe {
         ::core::slice::from_raw_parts_mut(strm.next_out, strm.avail_out as usize)
     };
-    inflate_fast(Some(strm), start, output)
+    inflate_fast(Some(strm), start, input, output)
 }

@@ -919,6 +919,7 @@ pub(crate) fn updatewindow<T>(
 pub fn inflate(
     strm: &mut crate::zlib_h::z_stream,
     mut flush: ::core::ffi::c_int,
+    input_storage: Option<&[crate::stdlib::Bytef]>,
     mut output_storage: &mut [crate::stdlib::Bytef],
 ) -> ::core::ffi::c_int {
     // The state adapter and cursor validation below bind the stream before
@@ -980,6 +981,7 @@ pub fn inflate(
     };
     if strm.next_out.is_null()
         || strm.next_in.is_null() && strm.avail_in != 0 as crate::stdlib::uInt
+        || input_storage.is_some_and(|input| input.len() != strm.avail_in as usize)
         || output_storage.len() != strm.avail_out as usize
     {
         return crate::zlib_h::Z_STREAM_ERROR;
@@ -994,13 +996,19 @@ pub fn inflate(
     output_capacity = output_storage.len();
     next = strm.next_in as *mut ::core::ffi::c_uchar;
     have = strm.avail_in as ::core::ffi::c_uint;
-    // SAFETY: the entry guard established the non-null input cursor whenever
-    // bytes are available. The caller already supplied the output view, so
-    // the decoder only needs to bind this remaining input cursor.
-    let input = if have == 0 {
-        &[]
-    } else {
-        unsafe { ::core::slice::from_raw_parts(next, have as usize) }
+    // Most callers already own a checked input view and hand it to this core.
+    // `inflateBack()` is the remaining callback-driven exception: its input
+    // cursor is supplied afresh by each foreign callback, so it retains the
+    // established narrow binding until that callback API has its own safe
+    // ownership bridge.
+    let input = match input_storage {
+        Some(input) => input,
+        None if have == 0 => &[],
+        None => {
+            // SAFETY: the entry guard established the non-null input cursor
+            // whenever bytes are available.
+            unsafe { ::core::slice::from_raw_parts(next, have as usize) }
+        }
     };
     // `inflateGetHeader()` retains this optional caller-owned structure for
     // the duration of inflate. Bind it once for this decode call, so gzip
@@ -2706,12 +2714,17 @@ pub unsafe extern "C" fn inflate_ffi(
     {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    // SAFETY: the public ABI supplies `avail_out` writable bytes at its
-    // non-null output cursor. All decoding remains in the named safe core.
+    // SAFETY: the public ABI supplies the advertised readable and writable
+    // cursor ranges. All decoding remains in the named safe core.
+    let input = if strm.avail_in == 0 {
+        &[]
+    } else {
+        unsafe { ::core::slice::from_raw_parts(strm.next_in, strm.avail_in as usize) }
+    };
     let output = unsafe {
         ::core::slice::from_raw_parts_mut(strm.next_out, strm.avail_out as usize)
     };
-    inflate(strm, flush, output)
+    inflate(strm, flush, Some(input), output)
 }
 pub fn inflateEnd(strm: &mut crate::zlib_h::z_stream) -> ::core::ffi::c_int {
     let Some((strm, state)) = inflateStateCheck(strm) else {

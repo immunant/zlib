@@ -1183,6 +1183,7 @@ pub(crate) fn inflateBack(
                     let status = crate::src::inflate::inflate(
                         strm,
                         crate::zlib_h::Z_NO_FLUSH,
+                        None,
                         &mut callback_window[written..],
                     );
                     written = inflate_back_pending_output(
