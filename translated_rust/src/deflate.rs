@@ -497,6 +497,13 @@ fn fill_window_insert_after_slide(
     }
 }
 
+fn fill_window_cursor(
+    strstart: crate::stdlib::uInt,
+    lookahead: crate::stdlib::uInt,
+) -> crate::zutil_h::ulg {
+    (strstart as crate::zutil_h::ulg).wrapping_add(lookahead as crate::zutil_h::ulg)
+}
+
 unsafe extern "C" fn fill_window(mut s: *mut crate::src::deflate::deflate_state) {
     let mut n: ::core::ffi::c_uint = 0;
     let mut more: ::core::ffi::c_uint = 0;
@@ -577,8 +584,7 @@ unsafe extern "C" fn fill_window(mut s: *mut crate::src::deflate::deflate_state)
         }
     }
     if (*s).high_water < (*s).window_size {
-        let mut curr: crate::zutil_h::ulg = ((*s).strstart as crate::zutil_h::ulg)
-            .wrapping_add((*s).lookahead as crate::zutil_h::ulg);
+        let curr = fill_window_cursor((*s).strstart, (*s).lookahead);
         let mut init: crate::zutil_h::ulg = 0;
         if (*s).high_water < curr {
             init = (*s).window_size.wrapping_sub(curr);
@@ -3654,10 +3660,9 @@ mod tests {
         clamped_copy_len, deflate_bound_lengths, deflate_copyright, deflate_dictionary_len,
         deflate_pending_value, deflate_prime_bits_valid, deflate_should_return_buf_error,
         deflate_state_status_valid, deflate_version_matches, fill_window_available_space,
-        fill_window_insert_after_slide, gzip_header_crc, gzip_header_crc_pending,
-        gzip_header_crc_pending_range, normalize_deflate_params, pending_output_len, read_buf_len,
-        short_msb_bytes,
-        slide_hash_entry, stored_block_min_size,
+        fill_window_cursor, fill_window_insert_after_slide, gzip_header_crc,
+        gzip_header_crc_pending, gzip_header_crc_pending_range, normalize_deflate_params,
+        pending_output_len, read_buf_len, short_msb_bytes, slide_hash_entry, stored_block_min_size,
         stored_insert_after_input, zlib_header,
     };
 
@@ -3856,6 +3861,16 @@ mod tests {
         assert_eq!(
             fill_window_insert_after_slide(crate::stdlib::uInt::MAX, 42),
             42,
+        );
+    }
+
+    #[test]
+    fn fill_window_cursor_uses_wide_wrapping_arithmetic() {
+        assert_eq!(fill_window_cursor(0, 0), 0);
+        assert_eq!(fill_window_cursor(12, 20), 32);
+        assert_eq!(
+            fill_window_cursor(crate::stdlib::uInt::MAX, 1),
+            (crate::stdlib::uInt::MAX as crate::zutil_h::ulg) + 1,
         );
     }
 

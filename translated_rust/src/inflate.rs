@@ -925,9 +925,7 @@ pub unsafe extern "C" fn inflate(
                             & 1 as ::core::ffi::c_ulong)
                             as ::core::ffi::c_int;
                     }
-                    if (*state).flags & 0x200 as ::core::ffi::c_int != 0
-                        && (*state).wrap & 4 as ::core::ffi::c_int != 0
-                    {
+                    if inflate_header_crc_enabled((*state).flags, (*state).wrap) {
                         hbuf[0 as ::core::ffi::c_int as usize] = hold as ::core::ffi::c_uchar;
                         hbuf[1 as ::core::ffi::c_int as usize] =
                             (hold >> 8 as ::core::ffi::c_int) as ::core::ffi::c_uchar;
@@ -1293,9 +1291,7 @@ pub unsafe extern "C" fn inflate(
                 if !(*state).head.is_null() {
                     (*(*state).head).time = hold as crate::stdlib::uLong;
                 }
-                if (*state).flags & 0x200 as ::core::ffi::c_int != 0
-                    && (*state).wrap & 4 as ::core::ffi::c_int != 0
-                {
+                if inflate_header_crc_enabled((*state).flags, (*state).wrap) {
                     hbuf[0 as ::core::ffi::c_int as usize] = hold as ::core::ffi::c_uchar;
                     hbuf[1 as ::core::ffi::c_int as usize] =
                         (hold >> 8 as ::core::ffi::c_int) as ::core::ffi::c_uchar;
@@ -1574,9 +1570,7 @@ pub unsafe extern "C" fn inflate(
                         (hold & 0xff as ::core::ffi::c_ulong) as ::core::ffi::c_int;
                     (*(*state).head).os = (hold >> 8 as ::core::ffi::c_int) as ::core::ffi::c_int;
                 }
-                if (*state).flags & 0x200 as ::core::ffi::c_int != 0
-                    && (*state).wrap & 4 as ::core::ffi::c_int != 0
-                {
+                if inflate_header_crc_enabled((*state).flags, (*state).wrap) {
                     hbuf[0 as ::core::ffi::c_int as usize] = hold as ::core::ffi::c_uchar;
                     hbuf[1 as ::core::ffi::c_int as usize] =
                         (hold >> 8 as ::core::ffi::c_int) as ::core::ffi::c_uchar;
@@ -1666,9 +1660,7 @@ pub unsafe extern "C" fn inflate(
                         (*(*state).head).extra_len =
                             hold as ::core::ffi::c_uint as crate::stdlib::uInt;
                     }
-                    if (*state).flags & 0x200 as ::core::ffi::c_int != 0
-                        && (*state).wrap & 4 as ::core::ffi::c_int != 0
-                    {
+                    if inflate_header_crc_enabled((*state).flags, (*state).wrap) {
                         hbuf[0 as ::core::ffi::c_int as usize] = hold as ::core::ffi::c_uchar;
                         hbuf[1 as ::core::ffi::c_int as usize] =
                             (hold >> 8 as ::core::ffi::c_int) as ::core::ffi::c_uchar;
@@ -1820,9 +1812,7 @@ pub unsafe extern "C" fn inflate(
                                     as crate::__stddef_size_t_h::size_t,
                             );
                         }
-                        if (*state).flags & 0x200 as ::core::ffi::c_int != 0
-                            && (*state).wrap & 4 as ::core::ffi::c_int != 0
-                        {
+                        if inflate_header_crc_enabled((*state).flags, (*state).wrap) {
                             (*state).check = crate::src::crc32::crc32_ffi(
                                 (*state).check as crate::stdlib::uLong,
                                 next,
@@ -1894,9 +1884,7 @@ pub unsafe extern "C" fn inflate(
                             break;
                         }
                     }
-                    if (*state).flags & 0x200 as ::core::ffi::c_int != 0
-                        && (*state).wrap & 4 as ::core::ffi::c_int != 0
-                    {
+                    if inflate_header_crc_enabled((*state).flags, (*state).wrap) {
                         (*state).check = crate::src::crc32::crc32_ffi(
                             (*state).check as crate::stdlib::uLong,
                             next,
@@ -2010,9 +1998,7 @@ pub unsafe extern "C" fn inflate(
                             break;
                         }
                     }
-                    if (*state).flags & 0x200 as ::core::ffi::c_int != 0
-                        && (*state).wrap & 4 as ::core::ffi::c_int != 0
-                    {
+                    if inflate_header_crc_enabled((*state).flags, (*state).wrap) {
                         (*state).check = crate::src::crc32::crc32_ffi(
                             (*state).check as crate::stdlib::uLong,
                             next,
@@ -2379,6 +2365,10 @@ fn inflate_needs_buffer_error(
         && result == crate::zlib_h::Z_OK
 }
 
+fn inflate_header_crc_enabled(flags: ::core::ffi::c_int, wrap: ::core::ffi::c_int) -> bool {
+    flags & 0x200 != 0 && wrap & 4 != 0
+}
+
 fn inflate_should_update_window(
     wsize: ::core::ffi::c_uint,
     initial_out: ::core::ffi::c_uint,
@@ -2715,16 +2705,16 @@ mod tests {
     use super::{
         apply_window_update, copy_dictionary_from_window, dynamic_code_length_repeat_fits,
         dynamic_header_counts, inflateSyncPoint_ffi, inflate_block_header, inflate_copy_progress,
-        inflate_data_type_value, inflate_dictionary_is_allowed, inflate_header_wrap_allows_capture,
-        inflate_mark_progress, inflate_mark_value, inflate_mode_data_type_flags,
-        inflate_mode_is_valid, inflate_needs_buffer_error, inflate_prime_update,
-        inflate_reset2_params, inflate_should_update_window, inflate_state_metadata_is_valid,
-        inflate_stream_has_allocator_callbacks, inflate_sync_point_value,
-        inflate_sync_remaining_input, inflate_sync_search_core, inflate_undermine_core,
-        inflate_validate_wrap, initial_window_metadata, stored_block_length, syncsearch_safe,
-        window_needs_allocation, window_update_plan, InflateBlockKind, InflateCopyProgress,
-        InflatePrimeUpdate, InflateSyncSearch, BAD, CHECK, CODE_LENGTH_ORDER, COPY_, COPY_1, DICT, HEAD,
-        LEN_, MATCH, STORED, SYNC, TYPE,
+        inflate_data_type_value, inflate_dictionary_is_allowed, inflate_header_crc_enabled,
+        inflate_header_wrap_allows_capture, inflate_mark_progress, inflate_mark_value,
+        inflate_mode_data_type_flags, inflate_mode_is_valid, inflate_needs_buffer_error,
+        inflate_prime_update, inflate_reset2_params, inflate_should_update_window,
+        inflate_state_metadata_is_valid, inflate_stream_has_allocator_callbacks,
+        inflate_sync_point_value, inflate_sync_remaining_input, inflate_sync_search_core,
+        inflate_undermine_core, inflate_validate_wrap, initial_window_metadata,
+        stored_block_length, syncsearch_safe, window_needs_allocation, window_update_plan,
+        InflateBlockKind, InflateCopyProgress, InflatePrimeUpdate, InflateSyncSearch, BAD, CHECK,
+        CODE_LENGTH_ORDER, COPY_, COPY_1, DICT, HEAD, LEN_, MATCH, STORED, SYNC, TYPE,
     };
 
     #[test]
@@ -2751,6 +2741,15 @@ mod tests {
         assert!(inflate_dictionary_is_allowed(1, DICT));
         assert!(!inflate_dictionary_is_allowed(1, HEAD));
         assert!(!inflate_dictionary_is_allowed(4, BAD));
+    }
+
+    #[test]
+    fn inflate_header_crc_requires_gzip_header_and_checksum_wrapping() {
+        assert!(inflate_header_crc_enabled(0x200, 4));
+        assert!(inflate_header_crc_enabled(0x600, 5));
+        assert!(!inflate_header_crc_enabled(0, 4));
+        assert!(!inflate_header_crc_enabled(0x200, 0));
+        assert!(!inflate_header_crc_enabled(0x400, 2));
     }
 
     #[test]

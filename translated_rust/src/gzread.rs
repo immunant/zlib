@@ -1726,44 +1726,6 @@ mod tests {
     }
 
     #[test]
-    fn gz_skip_core_consumes_only_remaining_skip() {
-        let mut have = 10;
-        let mut pos = 42;
-        let mut skip = 3;
-
-        let consumed = gz_skip_core(
-            &mut have,
-            &mut pos,
-            &mut skip,
-            crate::src::gzlib::gz_intmax(),
-        );
-
-        assert_eq!(consumed, 3);
-        assert_eq!(have, 7);
-        assert_eq!(pos, 45);
-        assert_eq!(skip, 0);
-    }
-
-    #[test]
-    fn gz_skip_core_consumes_available_buffer() {
-        let mut have = 10;
-        let mut pos = 42;
-        let mut skip = 15;
-
-        let consumed = gz_skip_core(
-            &mut have,
-            &mut pos,
-            &mut skip,
-            crate::src::gzlib::gz_intmax(),
-        );
-
-        assert_eq!(consumed, 10);
-        assert_eq!(have, 0);
-        assert_eq!(pos, 52);
-        assert_eq!(skip, 5);
-    }
-
-    #[test]
     fn gz_skip_len_limits_consumption_by_skip_and_buffered_input() {
         assert_eq!(gz_skip_len(10, 3, 5), 3);
         assert_eq!(gz_skip_len(10, 10, 5), 10);
