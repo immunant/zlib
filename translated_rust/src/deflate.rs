@@ -3868,19 +3868,28 @@ unsafe fn deflate_fast(
     let mut hash_head: crate::src::deflate::IPos = 0;
     let mut bflush: ::core::ffi::c_int = 0;
     loop {
-        if (*s).lookahead < crate::src::deflate::MIN_LOOKAHEAD as crate::stdlib::uInt {
+        let needs_input = {
+            let state = &mut *s;
+            state.lookahead < crate::src::deflate::MIN_LOOKAHEAD as crate::stdlib::uInt
+        };
+        if needs_input {
             fill_window(s);
-            if (*s).lookahead < crate::src::deflate::MIN_LOOKAHEAD as crate::stdlib::uInt
+            let state = &mut *s;
+            if state.lookahead < crate::src::deflate::MIN_LOOKAHEAD as crate::stdlib::uInt
                 && flush == crate::zlib_h::Z_NO_FLUSH
             {
                 return need_more;
             }
-            if (*s).lookahead == 0 as crate::stdlib::uInt {
+            if state.lookahead == 0 as crate::stdlib::uInt {
                 break;
             }
         }
         hash_head = NIL as crate::src::deflate::IPos;
-        if (*s).lookahead >= crate::zutil_h::MIN_MATCH as crate::stdlib::uInt {
+        let has_min_match = {
+            let state = &mut *s;
+            state.lookahead >= crate::zutil_h::MIN_MATCH as crate::stdlib::uInt
+        };
+        if has_min_match {
             let state = &mut *s;
             let (Ok(window_len), Ok(head_len), Ok(prev_len)) = (
                 usize::try_from(state.window_size),
@@ -4723,14 +4732,19 @@ unsafe fn deflate_rle(
 ) -> block_state {
     let mut bflush: ::core::ffi::c_int = 0;
     loop {
-        if (*s).lookahead <= crate::zutil_h::MAX_MATCH as crate::stdlib::uInt {
+        let needs_input = {
+            let state = &mut *s;
+            state.lookahead <= crate::zutil_h::MAX_MATCH as crate::stdlib::uInt
+        };
+        if needs_input {
             fill_window(s);
-            if (*s).lookahead <= crate::zutil_h::MAX_MATCH as crate::stdlib::uInt
+            let state = &mut *s;
+            if state.lookahead <= crate::zutil_h::MAX_MATCH as crate::stdlib::uInt
                 && flush == crate::zlib_h::Z_NO_FLUSH
             {
                 return need_more;
             }
-            if (*s).lookahead == 0 as crate::stdlib::uInt {
+            if state.lookahead == 0 as crate::stdlib::uInt {
                 break;
             }
         }
@@ -4851,9 +4865,14 @@ unsafe fn deflate_huff(
 ) -> block_state {
     let mut bflush: ::core::ffi::c_int = 0;
     loop {
-        if (*s).lookahead == 0 as crate::stdlib::uInt {
+        let needs_input = {
+            let state = &mut *s;
+            state.lookahead == 0 as crate::stdlib::uInt
+        };
+        if needs_input {
             fill_window(s);
-            if (*s).lookahead == 0 as crate::stdlib::uInt {
+            let state = &mut *s;
+            if state.lookahead == 0 as crate::stdlib::uInt {
                 if flush == crate::zlib_h::Z_NO_FLUSH {
                     return need_more;
                 }
