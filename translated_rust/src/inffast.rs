@@ -585,7 +585,6 @@ pub unsafe extern "C" fn inflate_fast_ffi(
 ) {
     inflate_fast(strm, start)
 }
-
 #[cfg(test)]
 mod tests {
     use super::{

@@ -541,6 +541,16 @@ fn gz_apply_open_plan(state: &mut crate::gzguts_h::gz_state, plan: GzOpenPlan) {
     state.direct = plan.direct;
 }
 
+fn gz_open_initialize_state(
+    state: &mut crate::gzguts_h::gz_state,
+    mode: &[u8],
+) -> Option<GzOpenPlan> {
+    gz_open_defaults(state);
+    let plan = gz_parse_open_mode(mode).and_then(gz_prepare_open)?;
+    gz_apply_open_plan(state, plan);
+    Some(plan)
+}
+
 fn gz_post_open_metadata(
     mode: ::core::ffi::c_int,
     current_offset: crate::stdlib::off64_t,
@@ -651,17 +661,16 @@ unsafe fn gz_open(
     if state.is_null() {
         return ::core::ptr::null_mut::<crate::zlib_h::gzFile_s>();
     }
-    gz_open_defaults(&mut *state);
-    let plan = match gz_parse_open_mode(::core::ffi::CStr::from_ptr(mode).to_bytes())
-        .and_then(gz_prepare_open)
-    {
+    let plan = match gz_open_initialize_state(
+        &mut *state,
+        ::core::ffi::CStr::from_ptr(mode).to_bytes(),
+    ) {
         Some(plan) => plan,
         None => {
             crate::stdlib::free(state as *mut ::core::ffi::c_void);
             return ::core::ptr::null_mut::<crate::zlib_h::gzFile_s>();
         }
     };
-    gz_apply_open_plan(&mut *state, plan);
     len = crate::stdlib::strlen(path as *const ::core::ffi::c_char) as crate::stdlib::z_size_t;
     (*state).path = crate::stdlib::malloc(gz_open_path_buffer_len(len)) as *mut ::core::ffi::c_char;
     if (*state).path.is_null() {
