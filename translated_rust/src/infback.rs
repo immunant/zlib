@@ -288,13 +288,16 @@ pub unsafe extern "C" fn inflateBack(
         1 as ::core::ffi::c_ushort,
         15 as ::core::ffi::c_ushort,
     ];
-    if strm.is_null() || (*strm).state.is_null() {
+    if strm.is_null() {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    state = (*strm).state as *mut crate::src::inflate::inflate_state;
     // Keep the two ABI projections at this boundary. The decoder below uses
     // scoped Rust borrows; only the callback cursors remain raw.
     let strm = &mut *strm;
+    state = strm.state as *mut crate::src::inflate::inflate_state;
+    if state.is_null() {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    }
     let state = &mut *state;
     (*strm).msg = ::core::ptr::null_mut::<::core::ffi::c_char>();
     (*state).mode = crate::src::inflate::TYPE;
