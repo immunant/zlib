@@ -64,6 +64,10 @@ pub use crate::zlib_h::Z_MEM_ERROR;
 pub use crate::zlib_h::Z_OK;
 pub use crate::zlib_h::Z_RLE;
 
+fn gz_is_read_or_write_mode(mode: ::core::ffi::c_int) -> bool {
+    mode == crate::gzguts_h::GZ_READ || mode == crate::gzguts_h::GZ_WRITE
+}
+
 fn gz_clear_read_flags(eof: &mut ::core::ffi::c_int, past: &mut ::core::ffi::c_int) {
     *eof = 0;
     *past = 0;
@@ -437,7 +441,7 @@ fn gzbuffer_core(
     state: &mut crate::gzguts_h::gz_state,
     mut size: ::core::ffi::c_uint,
 ) -> ::core::ffi::c_int {
-    if state.mode != crate::gzguts_h::GZ_READ && state.mode != crate::gzguts_h::GZ_WRITE {
+    if !gz_is_read_or_write_mode(state.mode) {
         return -1 as ::core::ffi::c_int;
     }
     if state.size != 0 as ::core::ffi::c_uint {
@@ -505,7 +509,7 @@ pub unsafe extern "C" fn gzseek64(
         return -1 as ::core::ffi::c_int as crate::stdlib::off64_t;
     }
     state = file as crate::gzguts_h::gz_statep;
-    if (*state).mode != crate::gzguts_h::GZ_READ && (*state).mode != crate::gzguts_h::GZ_WRITE {
+    if !gz_is_read_or_write_mode((*state).mode) {
         return -1 as ::core::ffi::c_int as crate::stdlib::off64_t;
     }
     if (*state).err != crate::zlib_h::Z_OK && (*state).err != crate::zlib_h::Z_BUF_ERROR {
@@ -623,7 +627,7 @@ pub unsafe extern "C" fn gztell64(mut file: crate::zlib_h::gzFile) -> crate::std
         return -1 as ::core::ffi::c_int as crate::stdlib::off64_t;
     }
     state = file as crate::gzguts_h::gz_statep;
-    if (*state).mode != crate::gzguts_h::GZ_READ && (*state).mode != crate::gzguts_h::GZ_WRITE {
+    if !gz_is_read_or_write_mode((*state).mode) {
         return -1 as ::core::ffi::c_int as crate::stdlib::off64_t;
     }
     gztell64_core((*state).x.pos, (*state).past, (*state).skip)
@@ -667,7 +671,7 @@ pub unsafe extern "C" fn gzoffset64(mut file: crate::zlib_h::gzFile) -> crate::s
         return -1 as ::core::ffi::c_int as crate::stdlib::off64_t;
     }
     state = file as crate::gzguts_h::gz_statep;
-    if (*state).mode != crate::gzguts_h::GZ_READ && (*state).mode != crate::gzguts_h::GZ_WRITE {
+    if !gz_is_read_or_write_mode((*state).mode) {
         return -1 as ::core::ffi::c_int as crate::stdlib::off64_t;
     }
     offset = crate::stdlib::lseek64(
@@ -714,7 +718,7 @@ pub unsafe extern "C" fn gzeof_ffi(file: crate::zlib_h::gzFile) -> ::core::ffi::
     }
 
     let state = &*(file as crate::gzguts_h::gz_statep);
-    if state.mode != crate::gzguts_h::GZ_READ && state.mode != crate::gzguts_h::GZ_WRITE {
+    if !gz_is_read_or_write_mode(state.mode) {
         return 0 as ::core::ffi::c_int;
     }
 
@@ -732,7 +736,7 @@ fn gzerror_core(
     err: ::core::ffi::c_int,
     has_message: bool,
 ) -> Option<GzErrorMessage> {
-    if mode != crate::gzguts_h::GZ_READ && mode != crate::gzguts_h::GZ_WRITE {
+    if !gz_is_read_or_write_mode(mode) {
         return None;
     }
 
@@ -776,7 +780,7 @@ pub unsafe extern "C" fn gzclearerr(mut file: crate::zlib_h::gzFile) {
         return;
     }
     state = file as crate::gzguts_h::gz_statep;
-    if (*state).mode != crate::gzguts_h::GZ_READ && (*state).mode != crate::gzguts_h::GZ_WRITE {
+    if !gz_is_read_or_write_mode((*state).mode) {
         return;
     }
     if (*state).mode == crate::gzguts_h::GZ_READ {
@@ -855,9 +859,9 @@ pub unsafe extern "C" fn gz_intmax_ffi() -> ::core::ffi::c_uint {
 #[cfg(test)]
 mod tests {
     use super::{
-        gz_clear_read_flags, gz_parse_open_mode, gz_post_open_metadata, gz_prepare_open,
-        gzerror_core, gzoffset64_adjust_for_buffered_read, gzseek_read_buffer_consumed,
-        gztell64_core, GzErrorMessage,
+        gz_clear_read_flags, gz_is_read_or_write_mode, gz_parse_open_mode, gz_post_open_metadata,
+        gz_prepare_open, gzerror_core, gzoffset64_adjust_for_buffered_read,
+        gzseek_read_buffer_consumed, gztell64_core, GzErrorMessage,
     };
 
     #[test]
@@ -866,6 +870,14 @@ mod tests {
         let mut past = 1;
         gz_clear_read_flags(&mut eof, &mut past);
         assert_eq!((eof, past), (0, 0));
+    }
+
+    #[test]
+    fn read_or_write_mode_validation_accepts_active_modes_only() {
+        assert!(gz_is_read_or_write_mode(crate::gzguts_h::GZ_READ));
+        assert!(gz_is_read_or_write_mode(crate::gzguts_h::GZ_WRITE));
+        assert!(!gz_is_read_or_write_mode(crate::gzguts_h::GZ_NONE));
+        assert!(!gz_is_read_or_write_mode(crate::gzguts_h::GZ_APPEND));
     }
 
     #[test]

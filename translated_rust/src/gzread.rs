@@ -83,6 +83,10 @@ fn gz_fread_request_len(
     size.checked_mul(nitems)
 }
 
+fn gzread_request_fits_int(len: ::core::ffi::c_uint) -> bool {
+    (len as ::core::ffi::c_int) >= 0
+}
+
 unsafe extern "C" fn gz_load(
     state: crate::gzguts_h::gz_statep,
     buf: *mut ::core::ffi::c_uchar,
@@ -464,6 +468,14 @@ mod tests {
     }
 
     #[test]
+    fn gzread_request_fits_int_checks_signed_int_boundary() {
+        let largest_valid = ::core::ffi::c_int::MAX as ::core::ffi::c_uint;
+
+        assert!(gzread_request_fits_int(largest_valid));
+        assert!(!gzread_request_fits_int(largest_valid.wrapping_add(1)));
+    }
+
+    #[test]
     fn gz_is_gzip_header_accepts_valid_header() {
         assert!(gz_is_gzip_header(31, 139, 8, 31));
     }
@@ -619,7 +631,7 @@ pub unsafe extern "C" fn gzread(
         crate::zlib_h::Z_OK,
         ::core::ptr::null::<::core::ffi::c_char>(),
     );
-    if (len as ::core::ffi::c_int) < 0 as ::core::ffi::c_int {
+    if !gzread_request_fits_int(len) {
         crate::src::gzlib::gz_error(
             state as *mut crate::gzguts_h::gz_state,
             crate::zlib_h::Z_STREAM_ERROR,
