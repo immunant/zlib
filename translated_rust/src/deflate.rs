@@ -1867,6 +1867,71 @@ fn write_default_gzip_header_tail(
     true
 }
 
+fn write_gzip_header_magic(
+    state: &mut crate::src::deflate::deflate_state,
+    pending_buf: &mut [crate::stdlib::Bytef],
+) -> bool {
+    let Ok(start) = usize::try_from(state.pending) else {
+        return false;
+    };
+    let Some(end) = start.checked_add(3) else {
+        return false;
+    };
+    let Some(destination) = pending_buf.get_mut(start..end) else {
+        return false;
+    };
+    destination.copy_from_slice(&[31, 139, 8]);
+    state.pending = state.pending.wrapping_add(3);
+    true
+}
+
+fn write_gzip_header_fixed(
+    state: &mut crate::src::deflate::deflate_state,
+    pending_buf: &mut [crate::stdlib::Bytef],
+    header: &crate::zlib_h::gz_header_s,
+) -> bool {
+    let Ok(start) = usize::try_from(state.pending) else {
+        return false;
+    };
+    let flags = (if header.text != 0 { 1 } else { 0 })
+        + (if header.hcrc != 0 { 2 } else { 0 })
+        + (if header.extra.is_null() { 0 } else { 4 })
+        + (if header.name.is_null() { 0 } else { 8 })
+        + (if header.comment.is_null() { 0 } else { 16 });
+    let xfl = if state.level == 9 {
+        2
+    } else if state.strategy >= 2 || state.level < 2 {
+        4
+    } else {
+        0
+    };
+    let mut fixed = [
+        flags as crate::stdlib::Bytef,
+        header.time as crate::stdlib::Bytef,
+        (header.time >> 8) as crate::stdlib::Bytef,
+        (header.time >> 16) as crate::stdlib::Bytef,
+        (header.time >> 24) as crate::stdlib::Bytef,
+        xfl,
+        header.os as crate::stdlib::Bytef,
+        0,
+        0,
+    ];
+    let length = if header.extra.is_null() { 7 } else { 9 };
+    if !header.extra.is_null() {
+        fixed[7] = header.extra_len as crate::stdlib::Bytef;
+        fixed[8] = (header.extra_len >> 8) as crate::stdlib::Bytef;
+    }
+    let Some(end) = start.checked_add(length) else {
+        return false;
+    };
+    let Some(destination) = pending_buf.get_mut(start..end) else {
+        return false;
+    };
+    destination.copy_from_slice(&fixed[..length]);
+    state.pending = state.pending.wrapping_add(length as crate::zutil_h::ulg);
+    true
+}
+
 fn write_gzip_trailer(
     state: &mut crate::src::deflate::deflate_state,
     pending_buf: &mut [crate::stdlib::Bytef],
@@ -2108,24 +2173,15 @@ pub unsafe fn deflate(
     }
     if (*s).status == crate::src::deflate::GZIP_STATE {
         (*strm).adler = crate::src::crc32::crc32(0 as crate::stdlib::uLong, None);
-        let c2rust_fresh0 = (*s).pending;
-        (*s).pending = (*s).pending.wrapping_add(1);
-        *(*s).pending_buf.offset(c2rust_fresh0 as isize) =
-            31 as ::core::ffi::c_int as crate::stdlib::Bytef;
-        let c2rust_fresh1 = (*s).pending;
-        (*s).pending = (*s).pending.wrapping_add(1);
-        *(*s).pending_buf.offset(c2rust_fresh1 as isize) =
-            139 as ::core::ffi::c_int as crate::stdlib::Bytef;
-        let c2rust_fresh2 = (*s).pending;
-        (*s).pending = (*s).pending.wrapping_add(1);
-        *(*s).pending_buf.offset(c2rust_fresh2 as isize) =
-            8 as ::core::ffi::c_int as crate::stdlib::Bytef;
-        if (*s).gzhead.is_null() {
-            let state = &mut *s;
-            let pending_buf = ::core::slice::from_raw_parts_mut(
-                state.pending_buf,
-                state.pending_buf_size as usize,
-            );
+        let state = &mut *s;
+        let pending_buf = ::core::slice::from_raw_parts_mut(
+            state.pending_buf,
+            state.pending_buf_size as usize,
+        );
+        if !write_gzip_header_magic(state, pending_buf) {
+            return crate::zlib_h::Z_STREAM_ERROR;
+        }
+        if state.gzhead.is_null() {
             if !write_default_gzip_header_tail(state, pending_buf) {
                 return crate::zlib_h::Z_STREAM_ERROR;
             }
@@ -2135,88 +2191,24 @@ pub unsafe fn deflate(
                 return crate::zlib_h::Z_OK;
             }
         } else {
-            let c2rust_fresh10 = (*s).pending;
-            (*s).pending = (*s).pending.wrapping_add(1);
-            *(*s).pending_buf.offset(c2rust_fresh10 as isize) =
-                ((if (*(*s).gzhead).text != 0 {
-                    1 as ::core::ffi::c_int
-                } else {
-                    0 as ::core::ffi::c_int
-                }) + (if (*(*s).gzhead).hcrc != 0 {
-                    2 as ::core::ffi::c_int
-                } else {
-                    0 as ::core::ffi::c_int
-                }) + (if (*(*s).gzhead).extra.is_null() {
-                    0 as ::core::ffi::c_int
-                } else {
-                    4 as ::core::ffi::c_int
-                }) + (if (*(*s).gzhead).name.is_null() {
-                    0 as ::core::ffi::c_int
-                } else {
-                    8 as ::core::ffi::c_int
-                }) + (if (*(*s).gzhead).comment.is_null() {
-                    0 as ::core::ffi::c_int
-                } else {
-                    16 as ::core::ffi::c_int
-                })) as crate::stdlib::Bytef;
-            let c2rust_fresh11 = (*s).pending;
-            (*s).pending = (*s).pending.wrapping_add(1);
-            *(*s).pending_buf.offset(c2rust_fresh11 as isize) =
-                ((*(*s).gzhead).time & 0xff as crate::stdlib::uLong) as crate::stdlib::Byte;
-            let c2rust_fresh12 = (*s).pending;
-            (*s).pending = (*s).pending.wrapping_add(1);
-            *(*s).pending_buf.offset(c2rust_fresh12 as isize) =
-                ((*(*s).gzhead).time >> 8 as ::core::ffi::c_int & 0xff as crate::stdlib::uLong)
-                    as crate::stdlib::Byte;
-            let c2rust_fresh13 = (*s).pending;
-            (*s).pending = (*s).pending.wrapping_add(1);
-            *(*s).pending_buf.offset(c2rust_fresh13 as isize) =
-                ((*(*s).gzhead).time >> 16 as ::core::ffi::c_int & 0xff as crate::stdlib::uLong)
-                    as crate::stdlib::Byte;
-            let c2rust_fresh14 = (*s).pending;
-            (*s).pending = (*s).pending.wrapping_add(1);
-            *(*s).pending_buf.offset(c2rust_fresh14 as isize) =
-                ((*(*s).gzhead).time >> 24 as ::core::ffi::c_int & 0xff as crate::stdlib::uLong)
-                    as crate::stdlib::Byte;
-            let c2rust_fresh15 = (*s).pending;
-            (*s).pending = (*s).pending.wrapping_add(1);
-            *(*s).pending_buf.offset(c2rust_fresh15 as isize) =
-                (if (*s).level == 9 as ::core::ffi::c_int {
-                    2 as ::core::ffi::c_int
-                } else if (*s).strategy >= 2 as ::core::ffi::c_int
-                    || (*s).level < 2 as ::core::ffi::c_int
-                {
-                    4 as ::core::ffi::c_int
-                } else {
-                    0 as ::core::ffi::c_int
-                }) as crate::stdlib::Bytef;
-            let c2rust_fresh16 = (*s).pending;
-            (*s).pending = (*s).pending.wrapping_add(1);
-            *(*s).pending_buf.offset(c2rust_fresh16 as isize) =
-                ((*(*s).gzhead).os & 0xff as ::core::ffi::c_int) as crate::stdlib::Bytef;
-            if !(*(*s).gzhead).extra.is_null() {
-                let c2rust_fresh17 = (*s).pending;
-                (*s).pending = (*s).pending.wrapping_add(1);
-                *(*s).pending_buf.offset(c2rust_fresh17 as isize) = ((*(*s).gzhead).extra_len
-                    & 0xff as crate::stdlib::uInt)
-                    as crate::stdlib::Bytef;
-                let c2rust_fresh18 = (*s).pending;
-                (*s).pending = (*s).pending.wrapping_add(1);
-                *(*s).pending_buf.offset(c2rust_fresh18 as isize) =
-                    ((*(*s).gzhead).extra_len >> 8 as ::core::ffi::c_int
-                        & 0xff as crate::stdlib::uInt) as crate::stdlib::Bytef;
+            let header = &*state.gzhead;
+            if !write_gzip_header_fixed(state, pending_buf, header) {
+                return crate::zlib_h::Z_STREAM_ERROR;
             }
-            if (*(*s).gzhead).hcrc != 0 {
+            if header.hcrc != 0 {
+                let Ok(pending) = usize::try_from(state.pending) else {
+                    return crate::zlib_h::Z_STREAM_ERROR;
+                };
+                let Some(header_bytes) = pending_buf.get(..pending) else {
+                    return crate::zlib_h::Z_STREAM_ERROR;
+                };
                 (*strm).adler = crate::src::crc32::crc32_z(
                     (*strm).adler,
-                    Some(::core::slice::from_raw_parts(
-                        (*s).pending_buf,
-                        (*s).pending as crate::stdlib::z_size_t,
-                    )),
+                    Some(header_bytes),
                 );
             }
-            (*s).gzindex = 0 as crate::zutil_h::ulg;
-            (*s).status = crate::src::deflate::EXTRA_STATE;
+            state.gzindex = 0 as crate::zutil_h::ulg;
+            state.status = crate::src::deflate::EXTRA_STATE;
         }
     }
     if (*s).status == crate::src::deflate::EXTRA_STATE {
