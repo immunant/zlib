@@ -495,6 +495,65 @@ struct GzReadOwner {
     total_out: crate::stdlib::uLong,
 }
 
+// Importing a gzip read transaction from its opaque ABI state is deliberately
+// split into a pointer-free snapshot and the outer publication boundary.  The
+// snapshot owns every resource that a complete read may change; in
+// particular, it carries the descriptor and buffers together so a later
+// request kind cannot accidentally leave either behind in the ABI state.
+//
+// `gzFile_s::next` is intentionally absent.  That cursor is an ABI mirror of
+// the owned output cursor and must be rebuilt only after the transaction has
+// returned its buffers to the opaque state.
+struct GzReadOwnerSnapshot {
+    mode: ::core::ffi::c_int,
+    fd: rustix::fd::OwnedFd,
+    path: Option<Box<[u8]>>,
+    want: ::core::ffi::c_uint,
+    buffers: crate::gzguts_h::GzBuffers,
+    direct: ::core::ffi::c_int,
+    junk: ::core::ffi::c_int,
+    how: ::core::ffi::c_int,
+    again: ::core::ffi::c_int,
+    eof: ::core::ffi::c_int,
+    past: ::core::ffi::c_int,
+    skip: crate::stdlib::off64_t,
+    err: ::core::ffi::c_int,
+    message: Option<Box<[u8]>>,
+    have: crate::stdlib::uInt,
+    pos: crate::stdlib::off64_t,
+    avail_in: crate::stdlib::uInt,
+    avail_out: crate::stdlib::uInt,
+    total_in: crate::stdlib::uLong,
+    total_out: crate::stdlib::uLong,
+}
+
+impl GzReadOwnerSnapshot {
+    fn into_owner(self) -> GzReadOwner {
+        GzReadOwner {
+            mode: self.mode,
+            fd: self.fd,
+            path: self.path,
+            want: self.want,
+            buffers: self.buffers,
+            direct: self.direct,
+            junk: self.junk,
+            how: self.how,
+            again: self.again,
+            eof: self.eof,
+            past: self.past,
+            skip: self.skip,
+            err: self.err,
+            message: self.message,
+            have: self.have,
+            pos: self.pos,
+            avail_in: self.avail_in,
+            avail_out: self.avail_out,
+            total_in: self.total_in,
+            total_out: self.total_out,
+        }
+    }
+}
+
 // The public `gzFile_s::next` mirror is published after a bounded read but
 // before gzlib converts a zero-byte EAGAIN result into its stored error.  Keep
 // that ordering explicit without giving the safe owner an ABI cursor.
@@ -1547,7 +1606,7 @@ unsafe fn gzread_from_state(
         let Some(fd) = state.fd.take() else {
             return GzReadAbiResult::Items(0);
         };
-        let mut owner = GzReadOwner {
+        let mut owner = GzReadOwnerSnapshot {
             mode: state.mode,
             fd,
             path: state.path.take(),
@@ -1568,7 +1627,8 @@ unsafe fn gzread_from_state(
             avail_out: state.strm.avail_out,
             total_in: state.strm.total_in,
             total_out: state.strm.total_out,
-        };
+        }
+        .into_owner();
         let outcome = gzfread(&mut owner, output, size, nitems);
         let result = match outcome {
             GzFreadOutcome::Complete(result) => result,
