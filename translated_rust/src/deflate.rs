@@ -791,6 +791,13 @@ fn fill_window_should_refill(
     lookahead < crate::src::deflate::MIN_LOOKAHEAD as crate::stdlib::uInt && avail_in != 0
 }
 
+fn fill_window_has_insertable_match(
+    lookahead: crate::stdlib::uInt,
+    insert: crate::stdlib::uInt,
+) -> bool {
+    lookahead.wrapping_add(insert) >= crate::zutil_h::MIN_MATCH as crate::stdlib::uInt
+}
+
 fn fill_window_should_slide(strstart: crate::stdlib::uInt, wsize: crate::stdlib::uInt) -> bool {
     strstart
         >= wsize.wrapping_add(
@@ -837,9 +844,7 @@ unsafe fn fill_window(mut s: *mut crate::src::deflate::deflate_state) {
         let cursor = fill_window_cursor((*s).strstart, (*s).lookahead);
         n = read_buf((*s).strm, (*s).window.wrapping_add(cursor as usize), more);
         (*s).lookahead = (*s).lookahead.wrapping_add(n);
-        if (*s).lookahead.wrapping_add((*s).insert)
-            >= crate::zutil_h::MIN_MATCH as crate::stdlib::uInt
-        {
+        if fill_window_has_insertable_match((*s).lookahead, (*s).insert) {
             let mut str: crate::stdlib::uInt = (*s).strstart.wrapping_sub((*s).insert);
             (*s).ins_h = *(*s).window.wrapping_add(str as usize) as crate::stdlib::uInt;
             (*s).ins_h = fill_window_hash_update(
@@ -868,9 +873,7 @@ unsafe fn fill_window(mut s: *mut crate::src::deflate::deflate_state) {
                     str as crate::src::deflate::Pos as crate::src::deflate::Posf;
                 str = str.wrapping_add(1);
                 (*s).insert = (*s).insert.wrapping_sub(1);
-                if (*s).lookahead.wrapping_add((*s).insert)
-                    < crate::zutil_h::MIN_MATCH as crate::stdlib::uInt
-                {
+                if !fill_window_has_insertable_match((*s).lookahead, (*s).insert) {
                     break;
                 }
             }
@@ -4189,20 +4192,20 @@ mod tests {
         deflate_should_return_buf_error, deflate_state_check_impl, deflate_state_check_result,
         deflate_state_is_usable, deflate_state_status_valid, deflate_version_matches,
         dictionary_tail_offset, fill_window_available_space, fill_window_cursor,
-        fill_window_hash_update, fill_window_insert_after_slide, fill_window_should_refill,
-        fill_window_should_slide, fill_window_state_after_slide, fill_window_zero_range,
-        flush_pending_accounting, gzip_default_xfl, gzip_header_crc, gzip_header_crc_pending,
-        gzip_header_crc_pending_range, lm_head_clear_len, lm_initial_state, lm_match_parameters,
-        lm_reset_plan, longest_match_candidate_update, longest_match_clamp_length,
-        longest_match_limit, longest_match_next_chain_length, longest_match_search_parameters,
-        normalize_deflate_params, pending_buffer_needs_flush, pending_output_len,
-        pending_short_cursors, read_buf_checksum, read_buf_input_progress_after_copy, read_buf_len,
-        read_buf_total_in_after_copy, short_msb_bytes, slide_hash_entry,
-        stored_block_available_output, stored_block_can_emit, stored_block_header_bytes,
-        stored_block_is_last, stored_block_min_size, stored_block_payload_len,
-        stored_block_should_wait, stored_insert_after_input, symbol_triplet_cursors, zlib_header,
-        DeflateMatchRefillAction, DeflatePreflight, DeflateRleRefillAction, DeflateRleTallyPlan,
-        ReadBufChecksum,
+        fill_window_has_insertable_match, fill_window_hash_update, fill_window_insert_after_slide,
+        fill_window_should_refill, fill_window_should_slide, fill_window_state_after_slide,
+        fill_window_zero_range, flush_pending_accounting, gzip_default_xfl, gzip_header_crc,
+        gzip_header_crc_pending, gzip_header_crc_pending_range, lm_head_clear_len,
+        lm_initial_state, lm_match_parameters, lm_reset_plan, longest_match_candidate_update,
+        longest_match_clamp_length, longest_match_limit, longest_match_next_chain_length,
+        longest_match_search_parameters, normalize_deflate_params, pending_buffer_needs_flush,
+        pending_output_len, pending_short_cursors, read_buf_checksum,
+        read_buf_input_progress_after_copy, read_buf_len, read_buf_total_in_after_copy,
+        short_msb_bytes, slide_hash_entry, stored_block_available_output, stored_block_can_emit,
+        stored_block_header_bytes, stored_block_is_last, stored_block_min_size,
+        stored_block_payload_len, stored_block_should_wait, stored_insert_after_input,
+        symbol_triplet_cursors, zlib_header, DeflateMatchRefillAction, DeflatePreflight,
+        DeflateRleRefillAction, DeflateRleTallyPlan, ReadBufChecksum,
     };
 
     #[test]
@@ -4412,6 +4415,29 @@ mod tests {
             deflate_huff_literal_progress(7, 6, 0, crate::stdlib::uInt::MAX),
             (7, crate::stdlib::uInt::MAX, 0, false)
         );
+    }
+
+    #[test]
+    fn fill_window_has_insertable_match_preserves_minimum_and_wrapping_thresholds() {
+        let min_match = crate::zutil_h::MIN_MATCH as crate::stdlib::uInt;
+
+        assert!(!fill_window_has_insertable_match(
+            min_match.wrapping_sub(1),
+            0
+        ));
+        assert!(fill_window_has_insertable_match(min_match, 0));
+        assert!(fill_window_has_insertable_match(
+            1,
+            min_match.wrapping_sub(1)
+        ));
+        assert!(fill_window_has_insertable_match(
+            crate::stdlib::uInt::MAX,
+            4
+        ));
+        assert!(!fill_window_has_insertable_match(
+            crate::stdlib::uInt::MAX,
+            3
+        ));
     }
 
     #[test]

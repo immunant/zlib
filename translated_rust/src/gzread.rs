@@ -82,6 +82,21 @@ fn gz_avail_load_action(
     }
 }
 
+fn gz_avail_apply_load_action(
+    avail_in: &mut crate::stdlib::uInt,
+    action: GzAvailLoadAction,
+) -> bool {
+    match action {
+        GzAvailLoadAction::Error => false,
+        GzAvailLoadAction::Commit {
+            avail_in: committed_avail_in,
+        } => {
+            *avail_in = committed_avail_in;
+            true
+        }
+    }
+}
+
 fn gz_load_decision(
     have: ::core::ffi::c_uint,
     len: ::core::ffi::c_uint,
@@ -720,13 +735,13 @@ unsafe fn gz_avail(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int 
                 )
             };
             let load = gz_load(state, buf, len);
-            match gz_avail_load_action(prior_avail_in, &load) {
-                GzAvailLoadAction::Error => return -1 as ::core::ffi::c_int,
-                GzAvailLoadAction::Commit { avail_in } => {
-                    state.strm.avail_in = avail_in;
-                    state.strm.next_in = state.in_0 as *mut crate::stdlib::Bytef;
-                }
+            if !gz_avail_apply_load_action(
+                &mut state.strm.avail_in,
+                gz_avail_load_action(prior_avail_in, &load),
+            ) {
+                return -1 as ::core::ffi::c_int;
             }
+            state.strm.next_in = state.in_0 as *mut crate::stdlib::Bytef;
         }
     }
     return 0 as ::core::ffi::c_int;
@@ -1585,6 +1600,39 @@ mod tests {
             gz_avail_load_action(::core::ffi::c_uint::MAX, &load),
             GzAvailLoadAction::Commit { avail_in: 0 }
         );
+    }
+
+    #[test]
+    fn gz_avail_apply_load_action_preserves_input_after_error() {
+        let mut avail_in = 4;
+
+        assert!(!gz_avail_apply_load_action(
+            &mut avail_in,
+            GzAvailLoadAction::Error,
+        ));
+        assert_eq!(avail_in, 4);
+    }
+
+    #[test]
+    fn gz_avail_apply_load_action_commits_new_input_count() {
+        let mut avail_in = 4;
+
+        assert!(gz_avail_apply_load_action(
+            &mut avail_in,
+            GzAvailLoadAction::Commit { avail_in: 7 },
+        ));
+        assert_eq!(avail_in, 7);
+    }
+
+    #[test]
+    fn gz_avail_apply_load_action_commits_wrapped_input_count() {
+        let mut avail_in = 1;
+
+        assert!(gz_avail_apply_load_action(
+            &mut avail_in,
+            GzAvailLoadAction::Commit { avail_in: 0 },
+        ));
+        assert_eq!(avail_in, 0);
     }
 
     #[test]

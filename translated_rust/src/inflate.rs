@@ -1052,6 +1052,17 @@ fn update_window_metadata(
     }
 }
 
+fn update_window_history(
+    window: &mut [crate::stdlib::Bytef],
+    wnext: &mut ::core::ffi::c_uint,
+    whave: &mut ::core::ffi::c_uint,
+    produced: &[crate::stdlib::Bytef],
+) {
+    let plan = apply_window_update(window, *wnext, *whave, produced);
+    *wnext = plan.wnext;
+    *whave = plan.whave;
+}
+
 fn update_window_core(
     wbits: ::core::ffi::c_uint,
     wsize: &mut ::core::ffi::c_uint,
@@ -1061,10 +1072,7 @@ fn update_window_core(
     produced: &[crate::stdlib::Bytef],
 ) {
     update_window_metadata(wbits, wsize, wnext, whave);
-
-    let plan = apply_window_update(window, *wnext, *whave, produced);
-    *wnext = plan.wnext;
-    *whave = plan.whave;
+    update_window_history(window, wnext, whave, produced);
 }
 
 fn update_window_buffer_len(wsize: ::core::ffi::c_uint) -> usize {
@@ -1114,12 +1122,10 @@ unsafe fn updatewindow(
         Some(produced_len) => Some(core::slice::from_raw_parts(produced_start, produced_len)),
         None => None,
     };
-    update_window_core(
-        state.wbits,
-        &mut state.wsize,
+    update_window_history(
+        window,
         &mut state.wnext,
         &mut state.whave,
-        window,
         update_window_produced_slice(produced),
     );
     0
@@ -3199,14 +3205,15 @@ mod tests {
         inflate_validate_wrap, inflate_zlib_header_error, inflate_zlib_header_transition,
         inflate_zlib_window_params, initial_window_metadata, reset_window_history,
         stored_block_length, syncsearch_safe, update_window_buffer_len, update_window_core,
-        update_window_produced_len, window_allocation_failed, window_allocation_plan,
-        window_allocation_request, window_allocation_request_for_plan, window_metadata_update_plan,
-        window_needs_allocation, window_update_plan, DynamicCodeLengthRepeat, InflateBlockKind,
-        InflateCallProgress, InflateCopyProgress, InflateGzipExtraProgress, InflateGzipFlags,
-        InflateGzipFlagsError, InflateMatchPlan, InflateMatchSource, InflateOutputChecksum,
-        InflatePrimeUpdate, InflateSyncSearch, InflateZlibHeaderError, InflateZlibHeaderTransition,
-        InflateZlibWindowParams, WindowAllocationPlan, BAD, CHECK, CODE_LENGTH_ORDER, COPY_,
-        COPY_1, DICT, DICTID, HEAD, LEN_, MATCH, STORED, SYNC, TYPE, TYPEDO,
+        update_window_history, update_window_produced_len, window_allocation_failed,
+        window_allocation_plan, window_allocation_request, window_allocation_request_for_plan,
+        window_metadata_update_plan, window_needs_allocation, window_update_plan,
+        DynamicCodeLengthRepeat, InflateBlockKind, InflateCallProgress, InflateCopyProgress,
+        InflateGzipExtraProgress, InflateGzipFlags, InflateGzipFlagsError, InflateMatchPlan,
+        InflateMatchSource, InflateOutputChecksum, InflatePrimeUpdate, InflateSyncSearch,
+        InflateZlibHeaderError, InflateZlibHeaderTransition, InflateZlibWindowParams,
+        WindowAllocationPlan, BAD, CHECK, CODE_LENGTH_ORDER, COPY_, COPY_1, DICT, DICTID, HEAD,
+        LEN_, MATCH, STORED, SYNC, TYPE, TYPEDO,
     };
 
     #[test]
@@ -4493,6 +4500,30 @@ mod tests {
         let update = apply_window_update(&mut window, 3, 5, b"");
         assert_eq!(update.wnext, 3);
         assert_eq!(update.whave, 5);
+        assert_eq!(window, *b"abcdefgh");
+    }
+
+    #[test]
+    fn window_history_updates_cursors_after_wrapping_output() {
+        let mut window = *b"abcdefgh";
+        let mut wnext = 6;
+        let mut whave = 8;
+
+        update_window_history(&mut window, &mut wnext, &mut whave, b"WXYZ");
+
+        assert_eq!((wnext, whave), (2, 8));
+        assert_eq!(window, *b"YZcdefWX");
+    }
+
+    #[test]
+    fn window_history_preserves_cursors_for_empty_output() {
+        let mut window = *b"abcdefgh";
+        let mut wnext = 3;
+        let mut whave = 5;
+
+        update_window_history(&mut window, &mut wnext, &mut whave, b"");
+
+        assert_eq!((wnext, whave), (3, 5));
         assert_eq!(window, *b"abcdefgh");
     }
 
