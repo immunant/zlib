@@ -2439,30 +2439,33 @@ pub fn inflate(
         (*strm).avail_in = have as crate::stdlib::uInt;
         (*state).hold = hold;
         (*state).bits = bits;
+        let produced = out.wrapping_sub((*strm).avail_out as ::core::ffi::c_uint);
+        // The output cursor above now marks the end of this call's produced
+        // bytes. Borrow that one range once for both history and checksum
+        // updates, instead of rebuilding equivalent raw slices below.
+        let produced_output = if produced == 0 {
+            &[]
+        } else {
+            ::core::slice::from_raw_parts(
+                (*strm).next_out.wrapping_offset(-(produced as isize)),
+                produced as usize,
+            )
+        };
         if (*state).wsize != 0
-            || out != (*strm).avail_out
+            || produced != 0
                 && ((*state).mode as ::core::ffi::c_uint)
                     < crate::src::inflate::BAD as ::core::ffi::c_int as ::core::ffi::c_uint
                 && (((*state).mode as ::core::ffi::c_uint)
                     < crate::src::inflate::CHECK as ::core::ffi::c_int as ::core::ffi::c_uint
                     || flush != crate::zlib_h::Z_FINISH)
         {
-            let copy = out.wrapping_sub((*strm).avail_out as ::core::ffi::c_uint);
-            let input = if copy == 0 {
-                &[]
-            } else {
-                ::core::slice::from_raw_parts(
-                    (*strm).next_out.wrapping_offset(-(copy as isize)),
-                    copy as usize,
-                )
-            };
-            if updatewindow(&mut *strm, &mut *state, input) != 0 {
+            if updatewindow(&mut *strm, &mut *state, produced_output) != 0 {
                 (*state).mode = crate::src::inflate::MEM;
                 return crate::zlib_h::Z_MEM_ERROR;
             }
         }
         in_0 = in_0.wrapping_sub((*strm).avail_in as ::core::ffi::c_uint);
-        out = out.wrapping_sub((*strm).avail_out as ::core::ffi::c_uint);
+        out = produced;
         (*strm).total_in = (*strm).total_in.wrapping_add(in_0 as crate::stdlib::uLong);
         (*strm).total_out = (*strm).total_out.wrapping_add(out as crate::stdlib::uLong);
         (*state).total = (*state).total.wrapping_add(out as ::core::ffi::c_ulong);
@@ -2470,18 +2473,12 @@ pub fn inflate(
             (*state).check = (if (*state).flags != 0 {
                 crate::src::crc32::crc32(
                     (*state).check as crate::stdlib::uLong,
-                    Some(::core::slice::from_raw_parts(
-                        (*strm).next_out.wrapping_offset(-(out as isize)),
-                        out as usize,
-                    )),
+                    Some(produced_output),
                 )
             } else {
                 crate::src::adler32::adler32(
                     (*state).check as crate::stdlib::uLong,
-                    Some(::core::slice::from_raw_parts(
-                        (*strm).next_out.wrapping_offset(-(out as isize)),
-                        out as crate::stdlib::z_size_t,
-                    )),
+                    Some(produced_output),
                 )
             }) as ::core::ffi::c_ulong;
             (*strm).adler = (*state).check as crate::stdlib::uLong;
