@@ -994,33 +994,12 @@ pub unsafe extern "C" fn deflateSetDictionary_ffi(
     };
     deflateSetDictionary(&mut *strm, dictionary)
 }
-pub unsafe extern "C" fn deflateGetDictionary(
-    mut strm: crate::zlib_h::z_streamp,
-    mut dictionary: *mut crate::stdlib::Bytef,
-    mut dictLength: *mut crate::stdlib::uInt,
+pub fn deflateGetDictionary(
+    state: &crate::src::deflate::deflate_state,
+    window: Option<&[crate::stdlib::Bytef]>,
+    dictionary: Option<&mut [crate::stdlib::Bytef]>,
+    dict_length: Option<&mut crate::stdlib::uInt>,
 ) -> ::core::ffi::c_int {
-    let Some((_strm, state)) = deflateStateCheck(strm) else {
-        return crate::zlib_h::Z_STREAM_ERROR;
-    };
-    let len = deflate_dictionary_length(state);
-    let dictionary = if dictionary.is_null() || len == 0 {
-        None
-    } else {
-        Some(::core::slice::from_raw_parts_mut(dictionary, len as usize))
-    };
-    let window = if len == 0 {
-        None
-    } else {
-        Some(::core::slice::from_raw_parts(
-            state.window,
-            state.window_size as usize,
-        ))
-    };
-    let dict_length = if dictLength.is_null() {
-        None
-    } else {
-        Some(&mut *dictLength)
-    };
     deflate_get_dictionary(state, window, dictionary, dict_length)
 }
 
@@ -1056,7 +1035,31 @@ pub unsafe extern "C" fn deflateGetDictionary_ffi(
     mut dictionary: *mut crate::stdlib::Bytef,
     mut dictLength: *mut crate::stdlib::uInt,
 ) -> ::core::ffi::c_int {
-    deflateGetDictionary(strm, dictionary, dictLength)
+    let Some((_strm, state)) = deflateStateCheck(strm) else {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    };
+    let len = deflate_dictionary_length(state);
+    // SAFETY: the ABI caller supplies the optional output ranges. The
+    // validated deflater owns its window for `window_size` bytes; only the
+    // requested dictionary prefix is exposed to the safe dispatcher.
+    let (window, dictionary, dict_length) = unsafe {
+        let window = if len == 0 {
+            None
+        } else {
+            Some(::core::slice::from_raw_parts(
+                state.window,
+                state.window_size as usize,
+            ))
+        };
+        let dictionary = if dictionary.is_null() || len == 0 {
+            None
+        } else {
+            Some(::core::slice::from_raw_parts_mut(dictionary, len as usize))
+        };
+        let dict_length = dictLength.as_mut();
+        (window, dictionary, dict_length)
+    };
+    deflateGetDictionary(state, window, dictionary, dict_length)
 }
 // Resetting a previously validated deflater only needs its bound stream.
 // Keep raw stream dereferencing at the ABI wrappers so gzip's private reset
