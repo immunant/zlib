@@ -688,7 +688,10 @@ fn gztell64_state(
     if mode != crate::gzguts_h::GZ_READ && mode != crate::gzguts_h::GZ_WRITE {
         return None;
     }
-    Some(pos + if past != 0 { 0 } else { skip })
+    // zlib's position accounting uses the platform signed offset type.  Keep
+    // that legacy wrapping behavior explicit instead of allowing a debug
+    // build overflow panic to change an otherwise valid query result.
+    Some(pos.wrapping_add(if past != 0 { 0 } else { skip }))
 }
 #[export_name = "gztell64"]
 
@@ -726,7 +729,10 @@ fn gzoffset_state(
         return None;
     }
     Some(if mode == crate::gzguts_h::GZ_READ {
-        descriptor_offset - avail_in as crate::stdlib::off64_t
+        // `avail_in` was already consumed from the descriptor position by
+        // the inflater.  Mirror zlib's offset arithmetic without making this
+        // read-only query panic for extreme values.
+        descriptor_offset.wrapping_sub(avail_in as crate::stdlib::off64_t)
     } else {
         descriptor_offset
     })
