@@ -39,7 +39,10 @@ fn uncompress_chunk(
     } else {
         remaining as crate::stdlib::uInt
     };
-    (chunk, remaining.wrapping_sub(chunk as crate::stdlib::z_size_t))
+    (
+        chunk,
+        remaining.wrapping_sub(chunk as crate::stdlib::z_size_t),
+    )
 }
 
 fn uncompress_buffers_valid(
@@ -150,7 +153,9 @@ pub unsafe extern "C" fn uncompress2_z_ffi(
     }
     // SAFETY: the foreign caller supplied both required length pointers.
     // `uncompress2_z` validates the associated byte buffers.
-    uncompress2_z(dest, unsafe { &mut *destLen }, source, unsafe { &mut *sourceLen })
+    uncompress2_z(dest, unsafe { &mut *destLen }, source, unsafe {
+        &mut *sourceLen
+    })
 }
 pub unsafe extern "C" fn uncompress2(
     mut dest: *mut crate::stdlib::Bytef,
@@ -179,7 +184,9 @@ pub unsafe extern "C" fn uncompress2_ffi(
     }
     // SAFETY: the foreign caller supplied both required length pointers.
     // `uncompress2` validates the associated byte buffers.
-    uncompress2(dest, unsafe { &mut *destLen }, source, unsafe { &mut *sourceLen })
+    uncompress2(dest, unsafe { &mut *destLen }, source, unsafe {
+        &mut *sourceLen
+    })
 }
 pub unsafe extern "C" fn uncompress_z(
     mut dest: *mut crate::stdlib::Bytef,

@@ -2749,7 +2749,6 @@ pub mod inffixed_h {
             val: 0 as ::core::ffi::c_ushort,
         },
     ];
-    
 }
 
 pub use crate::__stddef_null_h::NULL;
@@ -2808,9 +2807,8 @@ pub use crate::zlib_h::z_streamp;
 pub const MAXBITS: ::core::ffi::c_int = 15 as ::core::ffi::c_int;
 #[no_mangle]
 
-pub static inflate_copyright: [::core::ffi::c_char; 49] = crate::c_char_bytes(
-    *b" inflate 1.3.2.1 Copyright 1995-2026 Mark Adler \0",
-);
+pub static inflate_copyright: [::core::ffi::c_char; 49] =
+    crate::c_char_bytes(*b" inflate 1.3.2.1 Copyright 1995-2026 Mark Adler \0");
 
 enum InflateTableBounds {
     Empty,
@@ -3105,8 +3103,7 @@ fn inflate_table_impl(
     while sym < codes {
         if lens[sym as usize] as ::core::ffi::c_int != 0 as ::core::ffi::c_int {
             let c2rust_fresh2 = offs[lens[sym as usize] as usize];
-            offs[lens[sym as usize] as usize] =
-                offs[lens[sym as usize] as usize].wrapping_add(1);
+            offs[lens[sym as usize] as usize] = offs[lens[sym as usize] as usize].wrapping_add(1);
             work[c2rust_fresh2 as usize] = sym as ::core::ffi::c_ushort;
         }
         sym = sym.wrapping_add(1);

@@ -264,6 +264,21 @@ fn inflate_fast_bound(
     publish_inflate_fast_result(strm, input, output, result);
 }
 
+// Fixed tables have their exact static length; dynamic tables use the
+// corresponding inflater workspace limit. Keep this policy value-only so the
+// raw cursor adapter below only identifies which table kind it was given.
+fn inflate_fast_table_len(
+    fixed: bool,
+    fixed_len: usize,
+    dynamic_len: usize,
+) -> usize {
+    if fixed {
+        fixed_len
+    } else {
+        dynamic_len
+    }
+}
+
 // The raw stream cursors are bound in one narrow scope, after which the
 // decoder remains entirely reference- and slice-based in `inflate_fast_bound`.
 // Keeping this adapter safe prevents internal callers from inheriting an
@@ -290,22 +305,24 @@ pub fn inflate_fast(
         } else {
             ::core::slice::from_raw_parts(state.window, state.wsize as usize)
         };
-        let lcode_len = if ::core::ptr::eq(
+        let lcode_fixed = ::core::ptr::eq(
             state.lencode,
             crate::src::inftrees::inffixed_h::lenfix.as_ptr(),
-        ) {
-            crate::src::inftrees::inffixed_h::lenfix.len()
-        } else {
-            crate::src::inftrees::ENOUGH_LENS as usize
-        };
-        let dcode_len = if ::core::ptr::eq(
+        );
+        let lcode_len = inflate_fast_table_len(
+            lcode_fixed,
+            crate::src::inftrees::inffixed_h::lenfix.len(),
+            crate::src::inftrees::ENOUGH_LENS as usize,
+        );
+        let dcode_fixed = ::core::ptr::eq(
             state.distcode,
             crate::src::inftrees::inffixed_h::distfix.as_ptr(),
-        ) {
-            crate::src::inftrees::inffixed_h::distfix.len()
-        } else {
-            crate::src::inftrees::ENOUGH_DISTS as usize
-        };
+        );
+        let dcode_len = inflate_fast_table_len(
+            dcode_fixed,
+            crate::src::inftrees::inffixed_h::distfix.len(),
+            crate::src::inftrees::ENOUGH_DISTS as usize,
+        );
         let lcode = ::core::slice::from_raw_parts(state.lencode, lcode_len);
         let dcode = ::core::slice::from_raw_parts(state.distcode, dcode_len);
         inflate_fast_bound(strm, state, input, output, window, lcode, dcode, used);

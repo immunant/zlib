@@ -144,9 +144,7 @@ fn gz_comp(
 ) -> ::core::ffi::c_int {
     let mut ret: ::core::ffi::c_int = 0;
     let mut have: ::core::ffi::c_uint = 0;
-    if crate::src::gzlib::gz_write_needs_init(state)
-        && gz_init(state) == -1 as ::core::ffi::c_int
-    {
+    if crate::src::gzlib::gz_write_needs_init(state) && gz_init(state) == -1 as ::core::ffi::c_int {
         return -1 as ::core::ffi::c_int;
     }
     match crate::src::gzlib::gz_comp_mode(state, flush) {
@@ -171,15 +169,15 @@ fn gz_comp(
                         crate::src::gzlib::gz_error(
                             state,
                             crate::zlib_h::Z_ERRNO,
-                            Some(::core::ffi::CStr::from_ptr(crate::stdlib::strerror(errno)).to_bytes_with_nul()),
+                            Some(
+                                ::core::ffi::CStr::from_ptr(crate::stdlib::strerror(errno))
+                                    .to_bytes_with_nul(),
+                            ),
                         );
                     }
                     return -1 as ::core::ffi::c_int;
                 }
-                crate::src::gzlib::gz_direct_write_progress(
-                    state,
-                    written as ::core::ffi::c_uint,
-                );
+                crate::src::gzlib::gz_direct_write_progress(state, written as ::core::ffi::c_uint);
                 state.strm.next_in = state.strm.next_in.wrapping_add(written as usize);
             }
             return 0 as ::core::ffi::c_int;
@@ -218,7 +216,10 @@ fn gz_comp(
                         crate::src::gzlib::gz_error(
                             state,
                             crate::zlib_h::Z_ERRNO,
-                            Some(::core::ffi::CStr::from_ptr(crate::stdlib::strerror(errno)).to_bytes_with_nul()),
+                            Some(
+                                ::core::ffi::CStr::from_ptr(crate::stdlib::strerror(errno))
+                                    .to_bytes_with_nul(),
+                            ),
                         );
                     }
                     return -1 as ::core::ffi::c_int;
@@ -411,7 +412,8 @@ fn gzwrite_preflight(
         );
         return Err(());
     }
-    let Some(slice_len) = crate::src::gzlib::gz_rust_slice_len(len as crate::stdlib::z_size_t) else {
+    let Some(slice_len) = crate::src::gzlib::gz_rust_slice_len(len as crate::stdlib::z_size_t)
+    else {
         crate::src::gzlib::gz_error(
             state,
             crate::zlib_h::Z_DATA_ERROR,
@@ -430,7 +432,9 @@ fn gzwrite_ffi_dispatch(
     source: Option<&[::core::ffi::c_uchar]>,
 ) -> ::core::ffi::c_int {
     match (prepared, source) {
-        (Ok(len), Some(source)) if source.len() == len => gz_write(state, source) as ::core::ffi::c_int,
+        (Ok(len), Some(source)) if source.len() == len => {
+            gz_write(state, source) as ::core::ffi::c_int
+        }
         (Ok(_), _) => {
             crate::src::gzlib::gz_error(
                 state,
@@ -486,9 +490,7 @@ pub fn gzfwrite(
             );
             0 as crate::stdlib::z_size_t
         }
-        crate::src::gzlib::GzItemRequest::Bytes(_) => {
-            gz_write(state, source).wrapping_div(size)
-        }
+        crate::src::gzlib::GzItemRequest::Bytes(_) => gz_write(state, source).wrapping_div(size),
     }
 }
 
@@ -534,7 +536,9 @@ fn gzfwrite_ffi_dispatch(
 ) -> crate::stdlib::z_size_t {
     match (prepared, source) {
         (Ok(0), _) => 0,
-        (Ok(len), Some(source)) if source.len() == len => gz_write(state, source).wrapping_div(size),
+        (Ok(len), Some(source)) if source.len() == len => {
+            gz_write(state, source).wrapping_div(size)
+        }
         (Ok(_), _) => {
             crate::src::gzlib::gz_error(
                 state,
@@ -586,11 +590,7 @@ pub fn gzputc(
     if state.skip != 0 && gz_zero(state) == -1 as ::core::ffi::c_int {
         return -1 as ::core::ffi::c_int;
     }
-    if gz_write(
-        state,
-        &buf,
-    ) != 1 as crate::stdlib::z_size_t
-    {
+    if gz_write(state, &buf) != 1 as crate::stdlib::z_size_t {
         return -1 as ::core::ffi::c_int;
     }
     return c & 0xff as ::core::ffi::c_int;
@@ -642,10 +642,7 @@ fn gzputs_write(
     crate::src::gzlib::gz_puts_result(len, put)
 }
 
-pub fn gzputs(
-    state: &mut crate::gzguts_h::gz_state,
-    s: &::core::ffi::CStr,
-) -> ::core::ffi::c_int {
+pub fn gzputs(state: &mut crate::gzguts_h::gz_state, s: &::core::ffi::CStr) -> ::core::ffi::c_int {
     if !crate::src::gzlib::gz_begin_write_operation(state) {
         return -1 as ::core::ffi::c_int;
     }
@@ -825,9 +822,7 @@ fn gz_close_write_prepare(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi:
 // The close dispatcher has already bound `file` to `state`, so this helper
 // can keep the close ordering and result selection in safe Rust. Allocation
 // release and descriptor closing remain confined to the raw boundary below.
-pub fn gzclose_w(
-    state: &mut crate::gzguts_h::gz_state,
-) -> ::core::ffi::c_int {
+pub fn gzclose_w(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
     let mut ret: ::core::ffi::c_int = crate::zlib_h::Z_OK;
     if !crate::src::gzlib::gz_has_mode(state, crate::gzguts_h::GZ_WRITE) {
         return crate::zlib_h::Z_STREAM_ERROR;
@@ -843,9 +838,7 @@ pub fn gzclose_w(
     unsafe {
         match cleanup {
             crate::src::gzlib::GzWriteCloseCleanup::DeflaterAndBuffers => {
-                crate::src::deflate::deflateEnd(
-                    &mut state.strm as *mut crate::zlib_h::z_stream_s,
-                );
+                crate::src::deflate::deflateEnd(&mut state.strm as *mut crate::zlib_h::z_stream_s);
                 crate::stdlib::free(state.out as *mut ::core::ffi::c_void);
             }
             crate::src::gzlib::GzWriteCloseCleanup::None

@@ -23,9 +23,7 @@ pub use crate::zlib_h::Z_STREAM_ERROR;
 // The FFI wrapper validates and binds `file` before reaching this dispatcher.
 // Selecting the read or write close coordinator only uses the bound state, so
 // keep that selection safe and leave the raw handle conversion at the ABI edge.
-pub fn gzclose(
-    state: &mut crate::gzguts_h::gz_state,
-) -> ::core::ffi::c_int {
+pub fn gzclose(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
     return if state.mode == crate::gzguts_h::GZ_READ {
         crate::src::gzread::gzclose_r(state)
     } else {

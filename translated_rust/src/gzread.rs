@@ -121,7 +121,9 @@ fn gz_load(
             crate::src::gzlib::gz_error(
                 state,
                 crate::zlib_h::Z_ERRNO,
-                Some(::core::ffi::CStr::from_ptr(crate::stdlib::strerror(errno)).to_bytes_with_nul()),
+                Some(
+                    ::core::ffi::CStr::from_ptr(crate::stdlib::strerror(errno)).to_bytes_with_nul(),
+                ),
             );
             return GzLoadResult {
                 received: loaded,
@@ -150,10 +152,7 @@ fn gz_avail(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
     {
         if buffered != 0 {
             let input = state.strm.next_in;
-            if crate::src::gzlib::gz_avail_needs_compaction(
-                buffered,
-                input == state.in_0,
-            ) {
+            if crate::src::gzlib::gz_avail_needs_compaction(buffered, input == state.in_0) {
                 // `next_in` is a cursor in this initialized input allocation.
                 // Bind that allocation once and use the slice operation that
                 // explicitly permits the source and destination to overlap.
@@ -162,9 +161,8 @@ fn gz_avail(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
                 // denotes the still-available portion of that allocation.
                 let input_start = (input as usize).wrapping_sub(state.in_0 as usize);
                 let input_end = input_start.wrapping_add(buffered as usize);
-                let buffer = unsafe {
-                    ::core::slice::from_raw_parts_mut(state.in_0, state.size as usize)
-                };
+                let buffer =
+                    unsafe { ::core::slice::from_raw_parts_mut(state.in_0, state.size as usize) };
                 buffer.copy_within(input_start..input_end, 0);
             }
         }
@@ -226,9 +224,7 @@ fn gz_look(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
         // SAFETY: initialization above, or the existing read state, provides
         // the live inflater state required by this reference-bound reset.
         let inflater = state.strm.state as *mut crate::src::inflate::inflate_state;
-        unsafe {
-            crate::src::inflate::inflate_reset_bound(&mut state.strm, &mut *inflater)
-        };
+        unsafe { crate::src::inflate::inflate_reset_bound(&mut state.strm, &mut *inflater) };
         crate::src::gzlib::gz_set_gzip_input(state, state.junk != -1 as ::core::ffi::c_int);
         return 0 as ::core::ffi::c_int;
     }
@@ -255,9 +251,7 @@ fn gz_look(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
             // SAFETY: `gz_look` has initialized the stream before classifying
             // a gzip member, so its bound inflater state is valid here.
             let inflater = state.strm.state as *mut crate::src::inflate::inflate_state;
-            unsafe {
-                crate::src::inflate::inflate_reset_bound(&mut state.strm, &mut *inflater)
-            };
+            unsafe { crate::src::inflate::inflate_reset_bound(&mut state.strm, &mut *inflater) };
             crate::src::gzlib::gz_set_gzip_input(state, true);
             return 0 as ::core::ffi::c_int;
         }
@@ -301,9 +295,8 @@ fn gz_decomp(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
         } else {
             // SAFETY: `gz_look` initialized this stream and its input/output
             // ranges are owned by the validated gzip state for this call.
-            ret = unsafe {
-                crate::src::inflate::inflate(&mut state.strm, crate::zlib_h::Z_NO_FLUSH)
-            };
+            ret =
+                unsafe { crate::src::inflate::inflate(&mut state.strm, crate::zlib_h::Z_NO_FLUSH) };
             match crate::src::gzlib::gz_decomp_after_inflate(state, had, ret) {
                 crate::src::gzlib::GzDecompStep::Continue => {}
                 crate::src::gzlib::GzDecompStep::Stop(result) => {
@@ -334,7 +327,9 @@ fn gz_decomp(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
                             if state.strm.msg.is_null() {
                                 Some(b"compressed data error\0" as &[u8])
                             } else {
-                                Some(::core::ffi::CStr::from_ptr(state.strm.msg).to_bytes_with_nul())
+                                Some(
+                                    ::core::ffi::CStr::from_ptr(state.strm.msg).to_bytes_with_nul(),
+                                )
                             },
                         );
                     }
@@ -485,9 +480,7 @@ fn gz_read(
                 // `gz_read_plan` bounds this source view and the destination
                 // subslice by both ranges. The copy itself is then checked
                 // Rust slice work rather than a raw C `memcpy` call.
-                let source = unsafe {
-                    ::core::slice::from_raw_parts(state.x.next, n as usize)
-                };
+                let source = unsafe { ::core::slice::from_raw_parts(state.x.next, n as usize) };
                 buf[got as usize..got as usize + n as usize].copy_from_slice(source);
                 n = gz_consume(state, n as crate::stdlib::off64_t);
                 consumed_buffered = true;
@@ -589,7 +582,12 @@ fn gzread(
                 crate::src::gzlib::gz_error(
                     state,
                     crate::zlib_h::Z_ERRNO,
-                    Some(::core::ffi::CStr::from_ptr(crate::stdlib::strerror(*crate::stdlib::__errno_location())).to_bytes_with_nul()),
+                    Some(
+                        ::core::ffi::CStr::from_ptr(crate::stdlib::strerror(
+                            *crate::stdlib::__errno_location(),
+                        ))
+                        .to_bytes_with_nul(),
+                    ),
                 );
             }
             return -1 as ::core::ffi::c_int;
@@ -615,7 +613,8 @@ fn gzread_request_len(
         );
         return Err(());
     }
-    let Some(slice_len) = crate::src::gzlib::gz_rust_slice_len(len as crate::stdlib::z_size_t) else {
+    let Some(slice_len) = crate::src::gzlib::gz_rust_slice_len(len as crate::stdlib::z_size_t)
+    else {
         crate::src::gzlib::gz_error(
             state,
             crate::zlib_h::Z_STREAM_ERROR,
@@ -642,15 +641,15 @@ pub unsafe extern "C" fn gzread_ffi(
     match request {
         GzReadRequest::Rejected => gzread(state, request, None),
         GzReadRequest::Bytes(0) => gzread(state, request, Some(&mut [])),
-        GzReadRequest::Bytes(_) if buf.is_null() => {
-            gzread(state, request, None)
-        }
-        GzReadRequest::Bytes(slice_len) => gzread(state, request, Some(
-            ::core::slice::from_raw_parts_mut(
+        GzReadRequest::Bytes(_) if buf.is_null() => gzread(state, request, None),
+        GzReadRequest::Bytes(slice_len) => gzread(
+            state,
+            request,
+            Some(::core::slice::from_raw_parts_mut(
                 buf as *mut ::core::ffi::c_uchar,
                 slice_len,
-            ),
-        )),
+            )),
+        ),
     }
 }
 
@@ -769,15 +768,16 @@ pub unsafe extern "C" fn gzfread_ffi(
         GzItemReadRequest::Rejected | GzItemReadRequest::Empty => {
             gzfread(state, size, request, None)
         }
-        GzItemReadRequest::Bytes(_) if buf.is_null() => {
-            gzfread(state, size, request, None)
-        }
-        GzItemReadRequest::Bytes(slice_len) => gzfread(state, size, request, Some(
-            ::core::slice::from_raw_parts_mut(
+        GzItemReadRequest::Bytes(_) if buf.is_null() => gzfread(state, size, request, None),
+        GzItemReadRequest::Bytes(slice_len) => gzfread(
+            state,
+            size,
+            request,
+            Some(::core::slice::from_raw_parts_mut(
                 buf as *mut ::core::ffi::c_uchar,
                 slice_len,
-            ),
-        )),
+            )),
+        ),
     }
 }
 // Reading one byte through `gz_read` preserves the buffered and unbuffered
@@ -788,11 +788,7 @@ pub fn gzgetc(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
     if !gz_begin_read_operation(state) {
         return -1 as ::core::ffi::c_int;
     }
-    return if gz_read(
-        state,
-        &mut buf,
-    ) < 1 as crate::stdlib::z_size_t
-    {
+    return if gz_read(state, &mut buf) < 1 as crate::stdlib::z_size_t {
         -1 as ::core::ffi::c_int
     } else {
         buf[0 as ::core::ffi::c_int as usize] as ::core::ffi::c_int
@@ -901,10 +897,7 @@ pub unsafe extern "C" fn gzungetc_ffi(
     // The dispatcher above reached `gz_look()` and accepted a plan derived
     // from its initialized output allocation. This ABI binder performs the
     // only raw conversion; the implementation receives the bounded slice.
-    let output = ::core::slice::from_raw_parts_mut(
-        state.out,
-        state.size.wrapping_shl(1) as usize,
-    );
+    let output = ::core::slice::from_raw_parts_mut(state.out, state.size.wrapping_shl(1) as usize);
     gzungetc(c, state, output, plan)
 }
 // Copying a fetched chunk into the caller's already-bound destination is
@@ -946,13 +939,9 @@ fn gzgets(state: &mut crate::gzguts_h::gz_state, buf: &mut [::core::ffi::c_char]
                     n = chunk;
                     // SAFETY: `gz_gets_plan()` bounds this view by `x.have`,
                     // whose initialized bytes begin at `x.next`.
-                    let source = unsafe {
-                        ::core::slice::from_raw_parts(state.x.next, n as usize)
-                    };
-                    let (copied, found_eol) = gzgets_copy_chunk(
-                        &mut buf[written..written + n as usize],
-                        source,
-                    );
+                    let source = unsafe { ::core::slice::from_raw_parts(state.x.next, n as usize) };
+                    let (copied, found_eol) =
+                        gzgets_copy_chunk(&mut buf[written..written + n as usize], source);
                     n = copied as ::core::ffi::c_uint;
                     gz_consume(state, n as crate::stdlib::off64_t);
                     crate::src::gzlib::gz_gets_after_copy(&mut left, n);
@@ -1051,9 +1040,7 @@ fn gz_close_read_finish(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c
 // The close dispatcher has already validated and bound `file` to `state`.
 // Keep its mode/error decisions safe; inflater teardown, allocation release,
 // and descriptor closing remain at the narrow raw cleanup boundary below.
-pub fn gzclose_r(
-    state: &mut crate::gzguts_h::gz_state,
-) -> ::core::ffi::c_int {
+pub fn gzclose_r(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
     let mut ret: ::core::ffi::c_int = 0;
     let mut err: ::core::ffi::c_int = 0;
     if !crate::src::gzlib::gz_has_mode(state, crate::gzguts_h::GZ_READ) {
