@@ -2360,7 +2360,7 @@ pub fn deflate(
                 deflate_rle(s, strm, flush) as ::core::ffi::c_uint
             } else {
                 match compression {
-                    CompressionFunction::Stored | CompressionFunction::Fast => {
+                    CompressionFunction::Stored | CompressionFunction::Fast | CompressionFunction::Slow => {
                         let input = if (*strm).avail_in == 0 {
                             Vec::new()
                         } else {
@@ -2376,7 +2376,7 @@ pub fn deflate(
                         let result = match compression {
                             CompressionFunction::Stored => deflate_stored(state, &mut io, flush),
                             CompressionFunction::Fast => deflate_fast(state, &mut io, flush),
-                            CompressionFunction::Slow => unreachable!(),
+                            CompressionFunction::Slow => deflate_slow(state, &mut io, flush),
                         };
                         ::core::slice::from_raw_parts_mut((*strm).next_out, io.output_capacity)
                             [..io.output.len()]
@@ -2394,9 +2394,6 @@ pub fn deflate(
                         (*strm).adler = io.adler;
                         (*strm).data_type = io.data_type;
                         result as ::core::ffi::c_uint
-                    }
-                    CompressionFunction::Slow => {
-                        deflate_slow(s, strm, flush) as ::core::ffi::c_uint
                     }
                 }
             }) as block_state;
@@ -3006,40 +3003,26 @@ fn deflate_fast(
     block_done
 }
 
-macro_rules! insert_string {
-    ($s:expr) => {{
-        let state = &mut *$s;
-        state.insert_hash_at(state.strstart)
-    }};
+fn flush_compression_block(
+    s: &mut crate::src::deflate::deflate_state,
+    io: &mut deflate_io,
+    last: ::core::ffi::c_int,
+) -> bool {
+    encode_block_from_window(s, last);
+    flush_pending_io(s, io);
+    io.avail_out() == 0
 }
 
-macro_rules! tally_symbol {
-    ($s:expr, $dist:expr, $lc:expr) => {{
-        let state = &mut *$s;
-        state.tally_symbol($dist as ::core::ffi::c_uint, $lc as ::core::ffi::c_uint) != 0
-    }};
-}
-
-macro_rules! flush_slow_block {
-    ($s:expr, $strm:expr, $last:expr) => {{
-        let state = &mut *$s;
-        encode_block_from_window(state, $last);
-        flush_pending($strm);
-        $strm.avail_out == 0 as crate::stdlib::uInt
-    }};
-}
-
-unsafe extern "C" fn deflate_slow(
-    s: *mut crate::src::deflate::deflate_state,
-    strm: &mut crate::zlib_h::z_stream,
+fn deflate_slow(
+    s: &mut crate::src::deflate::deflate_state,
+    io: &mut deflate_io,
     flush: ::core::ffi::c_int,
 ) -> block_state {
-    let s = &mut *s;
     let mut hash_head: crate::src::deflate::IPos = 0;
     let mut bflush = false;
     loop {
         if s.lookahead < crate::src::deflate::MIN_LOOKAHEAD as crate::stdlib::uInt {
-            fill_window(std::ptr::from_mut(s), strm);
+            fill_window_fast(s, io);
             if s.lookahead < crate::src::deflate::MIN_LOOKAHEAD as crate::stdlib::uInt
                 && flush == crate::zlib_h::Z_NO_FLUSH
             {
@@ -3051,7 +3034,7 @@ unsafe extern "C" fn deflate_slow(
         }
         hash_head = NIL as crate::src::deflate::IPos;
         if s.lookahead >= crate::zutil_h::MIN_MATCH as crate::stdlib::uInt {
-            hash_head = insert_string!(s);
+            hash_head = s.insert_hash_at(s.strstart);
         }
         s.prev_length = s.match_length;
         s.prev_match = s.match_start as crate::src::deflate::IPos;
@@ -3105,7 +3088,7 @@ unsafe extern "C" fn deflate_slow(
                 .wrapping_sub(1 as crate::src::deflate::IPos)
                 .wrapping_sub(s.prev_match)
                 as crate::zutil_h::ush;
-            bflush = tally_symbol!(s, dist, len);
+            bflush = s.tally_symbol(dist as ::core::ffi::c_uint, len as ::core::ffi::c_uint) != 0;
             s.lookahead = s
                 .lookahead
                 .wrapping_sub(s.prev_length.wrapping_sub(1 as crate::stdlib::uInt));
@@ -3113,7 +3096,7 @@ unsafe extern "C" fn deflate_slow(
             loop {
                 s.strstart = s.strstart.wrapping_add(1);
                 if s.strstart <= max_insert {
-                    hash_head = insert_string!(s);
+                    hash_head = s.insert_hash_at(s.strstart);
                 }
                 s.prev_length = s.prev_length.wrapping_sub(1);
                 if s.prev_length == 0 as crate::stdlib::uInt {
@@ -3125,7 +3108,7 @@ unsafe extern "C" fn deflate_slow(
                 (crate::zutil_h::MIN_MATCH - 1 as ::core::ffi::c_int) as crate::stdlib::uInt;
             s.strstart = s.strstart.wrapping_add(1);
             if bflush {
-                let out_full = flush_slow_block!(s, strm, 0);
+                let out_full = flush_compression_block(s, io, 0);
                 s.block_start = s.strstart as ::core::ffi::c_long;
                 if out_full {
                     return need_more;
@@ -3136,9 +3119,9 @@ unsafe extern "C" fn deflate_slow(
                 let buffers = s.buffers.as_ref().expect("deflate buffers initialized");
                 buffers.window[s.strstart.wrapping_sub(1) as usize] as crate::zutil_h::uch
             };
-            bflush = tally_symbol!(s, 0, cc);
+            bflush = s.tally_symbol(0, cc as ::core::ffi::c_uint) != 0;
             let out_full = if bflush {
-                let out_full = flush_slow_block!(s, strm, 0);
+                let out_full = flush_compression_block(s, io, 0);
                 s.block_start = s.strstart as ::core::ffi::c_long;
                 out_full
             } else {
@@ -3160,7 +3143,7 @@ unsafe extern "C" fn deflate_slow(
             let buffers = s.buffers.as_ref().expect("deflate buffers initialized");
             buffers.window[s.strstart.wrapping_sub(1) as usize] as crate::zutil_h::uch
         };
-        bflush = tally_symbol!(s, 0, cc);
+        bflush = s.tally_symbol(0, cc as ::core::ffi::c_uint) != 0;
         s.match_available = 0 as ::core::ffi::c_int;
     }
     s.insert = if s.strstart
@@ -3171,7 +3154,7 @@ unsafe extern "C" fn deflate_slow(
         (crate::zutil_h::MIN_MATCH - 1 as ::core::ffi::c_int) as crate::stdlib::uInt
     };
     if flush == crate::zlib_h::Z_FINISH {
-        let out_full = flush_slow_block!(s, strm, 1);
+        let out_full = flush_compression_block(s, io, 1);
         s.block_start = s.strstart as ::core::ffi::c_long;
         if out_full {
             return finish_started;
@@ -3179,7 +3162,7 @@ unsafe extern "C" fn deflate_slow(
         return finish_done;
     }
     if s.sym_next != 0 {
-        let out_full = flush_slow_block!(s, strm, 0);
+        let out_full = flush_compression_block(s, io, 0);
         s.block_start = s.strstart as ::core::ffi::c_long;
         if out_full {
             return need_more;
