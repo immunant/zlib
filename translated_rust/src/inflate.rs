@@ -715,31 +715,51 @@ fn inflate_prime(
     crate::zlib_h::Z_OK
 }
 
-// All callers reach this only after zlib's window-bit validation. Keeping the
-// byte length and allocator request together makes window allocation and
-// slice capacities agree without adding another raw-pointer boundary.
+// Keep the byte length and allocator request together so window allocation
+// and slice capacities agree without adding another raw-pointer boundary.
+// A stream can retain `wbits == 0` while it waits to learn the window size
+// from a zlib header, so only an operation that actually needs a window may
+// require this layout.
 struct InflateWindowLayout {
     len: usize,
     alloc_items: crate::stdlib::uInt,
     alloc_size: crate::stdlib::uInt,
 }
 
-fn inflate_window_layout(wbits: crate::stdlib::uInt) -> InflateWindowLayout {
-    let len = 1usize << wbits;
-    InflateWindowLayout {
+fn inflate_window_layout(wbits: crate::stdlib::uInt) -> Option<InflateWindowLayout> {
+    if !(8..=crate::stdlib::MAX_WBITS as crate::stdlib::uInt).contains(&wbits) {
+        return None;
+    }
+    let len = 1usize.checked_shl(wbits)?;
+    Some(InflateWindowLayout {
         len,
         alloc_items: len as crate::stdlib::uInt,
         alloc_size: ::core::mem::size_of::<::core::ffi::c_uchar>() as crate::stdlib::uInt,
+    })
+}
+
+// Before borrowing the state-owned window, make the scalar cursor metadata
+// agree with the one layout that zlib can allocate for these window bits.
+// This keeps a malformed internal state from reaching slice indexing or the
+// raw owner binding below.
+fn inflate_window_metadata_is_valid(
+    state: &crate::src::inflate::inflate_state,
+    layout: &InflateWindowLayout,
+) -> bool {
+    if state.wsize == 0 {
+        return state.wnext == 0 && state.whave == 0;
     }
+    state.wsize as usize == layout.len && state.wnext < state.wsize && state.whave <= state.wsize
 }
 
 fn update_window(
     state: &mut crate::src::inflate::inflate_state,
     window: &mut [crate::stdlib::Bytef],
     end: &[crate::stdlib::Bytef],
+    layout: &InflateWindowLayout,
 ) {
     if state.wsize == 0 {
-        state.wsize = inflate_window_layout(state.wbits).len as ::core::ffi::c_uint;
+        state.wsize = layout.len as ::core::ffi::c_uint;
         state.wnext = 0;
         state.whave = 0;
     }
@@ -942,7 +962,10 @@ pub(crate) fn updatewindow<T>(
         Option<&mut [crate::stdlib::Bytef]>,
     ) -> T,
 ) -> Result<T, ()> {
-    let layout = inflate_window_layout(state.wbits);
+    let layout = inflate_window_layout(state.wbits).ok_or(())?;
+    if !inflate_window_metadata_is_valid(state, &layout) {
+        return Err(());
+    }
     if state.window.is_null() && !matches!(access, InflateWindowAccess::Existing) {
         state.window = Some(stream.zalloc.expect("non-null function pointer"))
             .expect("non-null function pointer")(
@@ -970,6 +993,7 @@ pub(crate) fn updatewindow<T>(
                 state,
                 window.expect("window updates require a bound window"),
                 output,
+                &layout,
             );
             Ok(operation(stream, state, None))
         }
@@ -3422,7 +3446,11 @@ enum InflateCopyTableCursor {
 // ordinary state inspection.  The surrounding `inflateCopy()` keeps the
 // allocator and raw storage bindings at its existing ABI boundary.
 fn inflate_copy_plan(state: &crate::src::inflate::inflate_state) -> Option<InflateCopyPlan> {
-    let window_len = (!state.window.is_null()).then_some(inflate_window_layout(state.wbits).len);
+    let window_len = if state.window.is_null() {
+        None
+    } else {
+        Some(inflate_window_layout(state.wbits)?.len)
+    };
     let window_copy_len = state.whave as usize;
     // A copied inflater's history must fit in the allocation derived from
     // its configured window bits. Validate that scalar relationship before
@@ -3431,7 +3459,8 @@ fn inflate_copy_plan(state: &crate::src::inflate::inflate_state) -> Option<Infla
         return None;
     }
     if let Some(window_len) = window_len {
-        if window_copy_len > window_len {
+        let layout = inflate_window_layout(state.wbits)?;
+        if window_copy_len > window_len || !inflate_window_metadata_is_valid(state, &layout) {
             return None;
         }
     }
