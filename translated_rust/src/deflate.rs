@@ -1678,23 +1678,28 @@ fn deflate_set_header_impl(
     return crate::zlib_h::Z_OK;
 }
 
-pub unsafe fn deflateSetHeader<F>(
-    strm: &mut crate::zlib_h::z_stream_s,
-    header: F,
-) -> ::core::ffi::c_int
-where
-    F: FnOnce() -> Option<GzipHeader>,
-{
-    if !deflate_params_stream_is_valid(strm) {
+/// Pointer-free stream view used by the gzip-header operation.  The exported
+/// boundary performs the one raw state-link conversion; validation remains
+/// with the implementation so every caller receives the same error result.
+struct DeflateHeaderStream<'a> {
+    allocators_present: bool,
+    state: Option<&'a mut crate::src::deflate::deflate_state>,
+}
+
+fn deflateSetHeader(
+    stream: DeflateHeaderStream<'_>,
+    header: Option<GzipHeader>,
+) -> ::core::ffi::c_int {
+    if !stream.allocators_present {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    let Some(state) = strm.state.as_mut() else {
+    let Some(state) = stream.state else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
-    if !deflate_params_state_is_valid(state) {
+    let Some(state) = DeflateState::validated(state) else {
         return crate::zlib_h::Z_STREAM_ERROR;
-    }
-    deflate_set_header_impl(state, header())
+    };
+    deflate_set_header_impl(state.state, header)
 }
 #[export_name = "deflateSetHeader"]
 
@@ -1704,6 +1709,10 @@ pub unsafe extern "C" fn deflateSetHeader_ffi(
 ) -> ::core::ffi::c_int {
     let Some(strm) = strm.as_mut() else {
         return crate::zlib_h::Z_STREAM_ERROR;
+    };
+    let stream = DeflateHeaderStream {
+        allocators_present: strm.zalloc.is_some() && strm.zfree.is_some(),
+        state: strm.state.as_mut(),
     };
     let header = head.as_ref().map(|head| {
         let extra = (!head.extra.is_null())
@@ -1724,7 +1733,7 @@ pub unsafe extern "C" fn deflateSetHeader_ffi(
             head.hcrc,
         )
     });
-    deflateSetHeader(strm, || header)
+    deflateSetHeader(stream, header)
 }
 pub unsafe extern "C" fn deflatePending(
     mut strm: crate::zlib_h::z_streamp,
