@@ -4933,10 +4933,10 @@ pub unsafe extern "C" fn crc32_combine_ffi(
 #[cfg(test)]
 mod tests {
     use super::{
-        crc32, crc32_combine, crc32_combine64, crc32_combine_gen64, crc32_combine_op,
-        crc32_combine_operator, crc32_from_state, crc32_initial_state, crc32_update_byte,
-        crc32_update_bytes, crc32_z, crc_table_ref, multmodp, next_poly_term, x2n_table, x2nmodp,
-        classify_ffi_input, FfiInputKind, CRC32_INITIAL, CRC32_MASK, POLY,
+        classify_ffi_input, crc32, crc32_combine, crc32_combine64, crc32_combine_gen64,
+        crc32_combine_op, crc32_combine_operator, crc32_from_state, crc32_initial_state,
+        crc32_update_byte, crc32_update_bytes, crc32_z, crc_table_ref, multmodp, next_poly_term,
+        x2n_table, x2nmodp, FfiInputKind, CRC32_INITIAL, CRC32_MASK, POLY,
     };
 
     const HELLO_SPACE_CRC: crate::stdlib::uLong = 0xed81_f9f6;
@@ -4993,10 +4993,7 @@ mod tests {
         let input = b"input";
 
         assert_eq!(FfiInputKind::Null.checksum(seed, &[]), 0);
-        assert_eq!(
-            FfiInputKind::Empty.checksum(seed, &[]),
-            crc32_z(seed, &[])
-        );
+        assert_eq!(FfiInputKind::Empty.checksum(seed, &[]), crc32_z(seed, &[]));
         assert_eq!(
             FfiInputKind::NonEmpty.checksum(seed, input),
             crc32_z(seed, input)

@@ -661,16 +661,14 @@ unsafe fn gz_open(
     if state.is_null() {
         return ::core::ptr::null_mut::<crate::zlib_h::gzFile_s>();
     }
-    let plan = match gz_open_initialize_state(
-        &mut *state,
-        ::core::ffi::CStr::from_ptr(mode).to_bytes(),
-    ) {
-        Some(plan) => plan,
-        None => {
-            crate::stdlib::free(state as *mut ::core::ffi::c_void);
-            return ::core::ptr::null_mut::<crate::zlib_h::gzFile_s>();
-        }
-    };
+    let plan =
+        match gz_open_initialize_state(&mut *state, ::core::ffi::CStr::from_ptr(mode).to_bytes()) {
+            Some(plan) => plan,
+            None => {
+                crate::stdlib::free(state as *mut ::core::ffi::c_void);
+                return ::core::ptr::null_mut::<crate::zlib_h::gzFile_s>();
+            }
+        };
     len = crate::stdlib::strlen(path as *const ::core::ffi::c_char) as crate::stdlib::z_size_t;
     (*state).path = crate::stdlib::malloc(gz_open_path_buffer_len(len)) as *mut ::core::ffi::c_char;
     if (*state).path.is_null() {

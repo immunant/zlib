@@ -591,8 +591,8 @@ mod tests {
         add_and_consume_extra_bits, append_input_byte, bit_mask, code, consume_bits,
         fast_dist_action, fast_litlen_action, fast_match_uses_window,
         fast_window_distance_is_invalid, input_bytes_needed, input_remaining_after_read, low_bits,
-        output_cursor_after_write, subtable_index, table_index, unread_input_state, window_match_start,
-        FastDistAction, FastLitLenAction,
+        output_cursor_after_write, subtable_index, table_index, unread_input_state,
+        window_match_start, FastDistAction, FastLitLenAction,
     };
 
     #[test]

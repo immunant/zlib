@@ -251,17 +251,26 @@ mod tests {
 
     #[test]
     fn error_message_kind_classifies_each_zlib_error_code() {
-        assert_eq!(ErrorMessageKind::for_error(2), ErrorMessageKind::NeedDictionary);
+        assert_eq!(
+            ErrorMessageKind::for_error(2),
+            ErrorMessageKind::NeedDictionary
+        );
         assert_eq!(ErrorMessageKind::for_error(1), ErrorMessageKind::StreamEnd);
         assert_eq!(ErrorMessageKind::for_error(0), ErrorMessageKind::Empty);
         assert_eq!(ErrorMessageKind::for_error(-1), ErrorMessageKind::FileError);
-        assert_eq!(ErrorMessageKind::for_error(-2), ErrorMessageKind::StreamError);
+        assert_eq!(
+            ErrorMessageKind::for_error(-2),
+            ErrorMessageKind::StreamError
+        );
         assert_eq!(ErrorMessageKind::for_error(-3), ErrorMessageKind::DataError);
         assert_eq!(
             ErrorMessageKind::for_error(-4),
             ErrorMessageKind::InsufficientMemory
         );
-        assert_eq!(ErrorMessageKind::for_error(-5), ErrorMessageKind::BufferError);
+        assert_eq!(
+            ErrorMessageKind::for_error(-5),
+            ErrorMessageKind::BufferError
+        );
         assert_eq!(
             ErrorMessageKind::for_error(-6),
             ErrorMessageKind::IncompatibleVersion
