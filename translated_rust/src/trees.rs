@@ -2487,29 +2487,51 @@ fn init_block_fields(
     *sym_next = *matches;
 }
 
-pub unsafe extern "C" fn _tr_init(mut s: *mut crate::src::deflate::deflate_state) {
+pub fn tr_init(
+    dyn_ltree: &mut [crate::src::deflate::ct_data_s; 573],
+    dyn_dtree: &mut [crate::src::deflate::ct_data_s; 61],
+    bl_tree: &mut [crate::src::deflate::ct_data_s; 39],
+    l_desc: &mut crate::src::deflate::tree_desc_s,
+    d_desc: &mut crate::src::deflate::tree_desc_s,
+    bl_desc: &mut crate::src::deflate::tree_desc_s,
+    static_len: &mut crate::zutil_h::ulg,
+    opt_len: &mut crate::zutil_h::ulg,
+    matches: &mut crate::stdlib::uInt,
+    sym_next: &mut crate::stdlib::uInt,
+    bi_buf: &mut crate::zutil_h::ush,
+    bi_valid: &mut ::core::ffi::c_int,
+    bi_used: &mut ::core::ffi::c_int,
+) {
     tr_static_init();
-    let state = &mut *s;
-    state.l_desc.kind = crate::src::deflate::TreeKind::LitLen;
-    state.d_desc.kind = crate::src::deflate::TreeKind::Dist;
-    state.bl_desc.kind = crate::src::deflate::TreeKind::BitLen;
-    state.bi_buf = 0 as crate::zutil_h::ush;
-    state.bi_valid = 0 as ::core::ffi::c_int;
-    state.bi_used = 0 as ::core::ffi::c_int;
+    l_desc.kind = crate::src::deflate::TreeKind::LitLen;
+    d_desc.kind = crate::src::deflate::TreeKind::Dist;
+    bl_desc.kind = crate::src::deflate::TreeKind::BitLen;
+    *bi_buf = 0 as crate::zutil_h::ush;
+    *bi_valid = 0 as ::core::ffi::c_int;
+    *bi_used = 0 as ::core::ffi::c_int;
     init_block_fields(
-        &mut state.dyn_ltree,
-        &mut state.dyn_dtree,
-        &mut state.bl_tree,
-        &mut state.static_len,
-        &mut state.opt_len,
-        &mut state.matches,
-        &mut state.sym_next,
+        dyn_ltree, dyn_dtree, bl_tree, static_len, opt_len, matches, sym_next,
     );
 }
 #[export_name = "_tr_init"]
 
 pub unsafe extern "C" fn _tr_init_ffi(mut s: *mut crate::src::deflate::deflate_state) {
-    _tr_init(s)
+    let state = &mut *s;
+    tr_init(
+        &mut state.dyn_ltree,
+        &mut state.dyn_dtree,
+        &mut state.bl_tree,
+        &mut state.l_desc,
+        &mut state.d_desc,
+        &mut state.bl_desc,
+        &mut state.static_len,
+        &mut state.opt_len,
+        &mut state.matches,
+        &mut state.sym_next,
+        &mut state.bi_buf,
+        &mut state.bi_valid,
+        &mut state.bi_used,
+    )
 }
 pub const SMALLEST: ::core::ffi::c_int = 1 as ::core::ffi::c_int;
 

@@ -148,7 +148,7 @@ pub use crate::src::trees::_dist_code;
 pub use crate::src::trees::_length_code;
 pub use crate::src::trees::_tr_align;
 pub use crate::src::trees::_tr_flush_block;
-pub use crate::src::trees::_tr_init;
+pub use crate::src::trees::tr_init;
 pub use crate::src::trees::_tr_stored_block;
 pub use crate::src::zutil::z_errmsg;
 pub use crate::src::zutil::zcalloc;
@@ -931,7 +931,22 @@ pub unsafe extern "C" fn deflateResetKeep(
         crate::src::adler32::adler32_z(0 as crate::stdlib::uLong, None)
     };
     (*s).last_flush = -2 as ::core::ffi::c_int;
-    crate::src::trees::_tr_init(s as *mut crate::src::deflate::internal_state);
+    let state = &mut *s;
+    crate::src::trees::tr_init(
+        &mut state.dyn_ltree,
+        &mut state.dyn_dtree,
+        &mut state.bl_tree,
+        &mut state.l_desc,
+        &mut state.d_desc,
+        &mut state.bl_desc,
+        &mut state.static_len,
+        &mut state.opt_len,
+        &mut state.matches,
+        &mut state.sym_next,
+        &mut state.bi_buf,
+        &mut state.bi_valid,
+        &mut state.bi_used,
+    );
     return crate::zlib_h::Z_OK;
 }
 #[export_name = "deflateResetKeep"]
