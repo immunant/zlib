@@ -524,47 +524,58 @@ pub unsafe extern "C" fn inflateBack_ffi(
                             (*state).mode = crate::src::inflate::BAD;
                             continue;
                         } else {
-                            (*state).next =
-                                &raw mut (*state).codes as *mut crate::src::inftrees::code;
-                            (*state).lencode = (*state).next as *const crate::src::inftrees::code;
-                            (*state).lenbits = 9 as ::core::ffi::c_uint;
-                            ret = crate::src::inftrees::inflate_table_ffi(
+                            let state_ref = &mut *state;
+                            let codes_base = state_ref.codes.as_mut_ptr();
+                            state_ref.next = codes_base;
+                            state_ref.lencode = codes_base as *const crate::src::inftrees::code;
+                            state_ref.lenbits = 9 as ::core::ffi::c_uint;
+                            let mut lens_used = 0usize;
+                            ret = crate::src::inftrees::inflate_table_impl(
                                 crate::src::inftrees::LENS,
-                                &raw mut (*state).lens as *mut ::core::ffi::c_ushort,
-                                (*state).nlen,
-                                &raw mut (*state).next as *mut _
-                                    as *mut *mut crate::src::inftrees::code,
-                                &raw mut (*state).lenbits,
-                                &raw mut (*state).work as *mut ::core::ffi::c_ushort,
+                                &state_ref.lens,
+                                state_ref.nlen,
+                                &mut state_ref.codes,
+                                &mut lens_used,
+                                &mut state_ref.lenbits,
+                                &mut state_ref.work,
                             );
                             if ret != 0 {
                                 (*strm).msg = b"invalid literal/lengths set\0".as_ptr()
                                     as *const ::core::ffi::c_char
                                     as *mut ::core::ffi::c_char;
-                                (*state).mode = crate::src::inflate::BAD;
+                                state_ref.mode = crate::src::inflate::BAD;
                                 continue;
                             } else {
-                                (*state).distcode =
-                                    (*state).next as *const crate::src::inftrees::code;
-                                (*state).distbits = 6 as ::core::ffi::c_uint;
-                                ret = crate::src::inftrees::inflate_table_ffi(
+                                state_ref.next = codes_base.wrapping_add(lens_used);
+                                state_ref.distcode =
+                                    state_ref.next as *const crate::src::inftrees::code;
+                                state_ref.distbits = 6 as ::core::ffi::c_uint;
+                                let mut dist_used = 0usize;
+                                let dist_lens =
+                                    state_ref.lens.get(state_ref.nlen as usize..).unwrap_or(&[]);
+                                let dist_table = if lens_used <= state_ref.codes.len() {
+                                    &mut state_ref.codes[lens_used..]
+                                } else {
+                                    &mut []
+                                };
+                                ret = crate::src::inftrees::inflate_table_impl(
                                     crate::src::inftrees::DISTS,
-                                    (&raw mut (*state).lens as *mut ::core::ffi::c_ushort)
-                                        .offset((*state).nlen as isize),
-                                    (*state).ndist,
-                                    &raw mut (*state).next as *mut _
-                                        as *mut *mut crate::src::inftrees::code,
-                                    &raw mut (*state).distbits,
-                                    &raw mut (*state).work as *mut ::core::ffi::c_ushort,
+                                    dist_lens,
+                                    state_ref.ndist,
+                                    dist_table,
+                                    &mut dist_used,
+                                    &mut state_ref.distbits,
+                                    &mut state_ref.work,
                                 );
                                 if ret != 0 {
                                     (*strm).msg = b"invalid distances set\0".as_ptr()
                                         as *const ::core::ffi::c_char
                                         as *mut ::core::ffi::c_char;
-                                    (*state).mode = crate::src::inflate::BAD;
+                                    state_ref.mode = crate::src::inflate::BAD;
                                     continue;
                                 } else {
-                                    (*state).mode = crate::src::inflate::LEN;
+                                    state_ref.next = codes_base.wrapping_add(lens_used + dist_used);
+                                    state_ref.mode = crate::src::inflate::LEN;
                                 }
                             }
                         }
