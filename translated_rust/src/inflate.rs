@@ -851,12 +851,10 @@ fn inflate_reset_keep_state(
 pub unsafe extern "C" fn inflateResetKeep_ffi(
     mut strm: crate::zlib_h::z_streamp,
 ) -> ::core::ffi::c_int {
-    let mut state: *mut crate::src::inflate::inflate_state =
-        ::core::ptr::null_mut::<crate::src::inflate::inflate_state>();
     if inflate_state_check_raw!(strm) != 0 {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    state = (*strm).state as *mut crate::src::inflate::inflate_state;
+    let state = (*strm).state as *mut crate::src::inflate::inflate_state;
     return inflate_reset_keep_state(&mut *strm, &mut *state);
 }
 #[export_name = "inflateReset"]
@@ -864,12 +862,10 @@ pub unsafe extern "C" fn inflateResetKeep_ffi(
 pub unsafe extern "C" fn inflateReset_ffi(
     mut strm: crate::zlib_h::z_streamp,
 ) -> ::core::ffi::c_int {
-    let mut state: *mut crate::src::inflate::inflate_state =
-        ::core::ptr::null_mut::<crate::src::inflate::inflate_state>();
     if inflate_state_check_raw!(strm) != 0 {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    state = (*strm).state as *mut crate::src::inflate::inflate_state;
+    let state = (*strm).state as *mut crate::src::inflate::inflate_state;
     let state_ref = &mut *state;
     inflate_reset_window_state(state_ref);
     return inflate_reset_keep_state(&mut *strm, state_ref);
@@ -2580,12 +2576,10 @@ pub unsafe extern "C" fn inflateGetHeader_ffi(
     mut strm: crate::zlib_h::z_streamp,
     mut head: crate::zlib_h::gz_headerp,
 ) -> ::core::ffi::c_int {
-    let mut state: *mut crate::src::inflate::inflate_state =
-        ::core::ptr::null_mut::<crate::src::inflate::inflate_state>();
     if inflate_state_check_raw!(strm) != 0 {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    state = (*strm).state as *mut crate::src::inflate::inflate_state;
+    let state = (*strm).state as *mut crate::src::inflate::inflate_state;
     if !inflate_get_header_allowed(&*state) {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
@@ -2892,12 +2886,10 @@ pub unsafe extern "C" fn inflateMark_ffi(
 pub unsafe extern "C" fn inflateCodesUsed_ffi(
     mut strm: crate::zlib_h::z_streamp,
 ) -> ::core::ffi::c_ulong {
-    let mut state: *mut crate::src::inflate::inflate_state =
-        ::core::ptr::null_mut::<crate::src::inflate::inflate_state>();
     if inflate_state_check_raw!(strm) != 0 {
         return -1 as ::core::ffi::c_int as ::core::ffi::c_ulong;
     }
-    state = (*strm).state as *mut crate::src::inflate::inflate_state;
+    let state = (*strm).state as *mut crate::src::inflate::inflate_state;
     return (*state)
         .next
         .offset_from(&raw mut (*state).codes as *mut crate::src::inftrees::code)
