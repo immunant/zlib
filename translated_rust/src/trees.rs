@@ -4122,6 +4122,33 @@ fn tree_run_continues(
     count < max_count && current_len == next_len
 }
 
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+enum ScanTreeAction {
+    LiteralCount(crate::zutil_h::ush),
+    RepeatLength { emit_length_once: bool },
+    RepeatZeroShort,
+    RepeatZeroLong,
+}
+
+fn classify_tree_run(
+    count: ::core::ffi::c_int,
+    min_count: ::core::ffi::c_int,
+    current_len: ::core::ffi::c_int,
+    previous_len: ::core::ffi::c_int,
+) -> ScanTreeAction {
+    if count < min_count {
+        ScanTreeAction::LiteralCount(count as crate::zutil_h::ush)
+    } else if current_len != 0 {
+        ScanTreeAction::RepeatLength {
+            emit_length_once: current_len != previous_len,
+        }
+    } else if count <= 10 {
+        ScanTreeAction::RepeatZeroShort
+    } else {
+        ScanTreeAction::RepeatZeroLong
+    }
+}
+
 fn tree_next_cursor(index: ::core::ffi::c_int) -> usize {
     index.wrapping_add(1) as usize
 }
@@ -4163,24 +4190,29 @@ unsafe fn scan_tree(
         nextlen = (*tree.wrapping_add(tree_next_cursor(n))).dl.len as ::core::ffi::c_int;
         count += 1;
         if !tree_run_continues(count, max_count, curlen, nextlen) {
-            if count < min_count {
-                (*s).bl_tree[curlen as usize].fc.value = ((*s).bl_tree[curlen as usize].fc.value
-                    as ::core::ffi::c_int
-                    + count as crate::zutil_h::ush as ::core::ffi::c_int)
-                    as crate::zutil_h::ush;
-            } else if curlen != 0 as ::core::ffi::c_int {
-                if curlen != prevlen {
-                    (*s).bl_tree[curlen as usize].fc.value =
-                        (*s).bl_tree[curlen as usize].fc.value.wrapping_add(1);
+            match classify_tree_run(count, min_count, curlen, prevlen) {
+                ScanTreeAction::LiteralCount(literal_count) => {
+                    (*s).bl_tree[curlen as usize].fc.value = ((*s).bl_tree[curlen as usize].fc.value
+                        as ::core::ffi::c_int
+                        + literal_count as ::core::ffi::c_int)
+                        as crate::zutil_h::ush;
                 }
-                (*s).bl_tree[REP_3_6 as usize].fc.value =
-                    (*s).bl_tree[REP_3_6 as usize].fc.value.wrapping_add(1);
-            } else if count <= 10 as ::core::ffi::c_int {
-                (*s).bl_tree[REPZ_3_10 as usize].fc.value =
-                    (*s).bl_tree[REPZ_3_10 as usize].fc.value.wrapping_add(1);
-            } else {
-                (*s).bl_tree[REPZ_11_138 as usize].fc.value =
-                    (*s).bl_tree[REPZ_11_138 as usize].fc.value.wrapping_add(1);
+                ScanTreeAction::RepeatLength { emit_length_once } => {
+                    if emit_length_once {
+                        (*s).bl_tree[curlen as usize].fc.value =
+                            (*s).bl_tree[curlen as usize].fc.value.wrapping_add(1);
+                    }
+                    (*s).bl_tree[REP_3_6 as usize].fc.value =
+                        (*s).bl_tree[REP_3_6 as usize].fc.value.wrapping_add(1);
+                }
+                ScanTreeAction::RepeatZeroShort => {
+                    (*s).bl_tree[REPZ_3_10 as usize].fc.value =
+                        (*s).bl_tree[REPZ_3_10 as usize].fc.value.wrapping_add(1);
+                }
+                ScanTreeAction::RepeatZeroLong => {
+                    (*s).bl_tree[REPZ_11_138 as usize].fc.value =
+                        (*s).bl_tree[REPZ_11_138 as usize].fc.value.wrapping_add(1);
+                }
             }
             count = 0 as ::core::ffi::c_int;
             prevlen = curlen;
@@ -5190,13 +5222,13 @@ pub unsafe extern "C" fn _tr_tally_ffi(
 mod tests {
     use super::{
         bi_flush_core, bi_reverse, bi_windup_core, bl_order, bl_tree_header_bit_length,
-        block_bit_length_bytes, block_header_bits, combined_tree_frequency,
+        block_bit_length_bytes, block_header_bits, classify_tree_run, combined_tree_frequency,
         detect_data_type_from_ltree, dist_code_index, heap_node_precedes,
         last_nonzero_bl_code_rank, next_code_for_len, next_codes, pending_cursor_after_bytes,
         rebalance_overflowed_bit_lengths, reset_block_trees, select_block_encoding, static_bl_desc,
         static_d_desc, static_l_desc, supplemental_tree_node, symbol_buffer_is_full,
         symbol_triplet_cursors, tally_match_tree_indices, tally_symbol_bytes, tree_next_cursor,
-        tree_run_continues, tree_run_limits, BlockEncoding, END_BLOCK, MAX_BITS,
+        tree_run_continues, tree_run_limits, BlockEncoding, ScanTreeAction, END_BLOCK, MAX_BITS,
     };
 
     fn ltree_with_frequency(
@@ -5284,6 +5316,34 @@ mod tests {
         assert!(!tree_run_continues(3, 3, 7, 7));
         assert!(!tree_run_continues(2, 3, 7, 8));
         assert!(tree_run_continues(-1, 0, 0, 0));
+    }
+
+    #[test]
+    fn scan_tree_run_classification_preserves_repeat_code_selection() {
+        assert_eq!(
+            classify_tree_run(2, 3, 7, 6),
+            ScanTreeAction::LiteralCount(2)
+        );
+        assert_eq!(
+            classify_tree_run(3, 3, 7, 6),
+            ScanTreeAction::RepeatLength {
+                emit_length_once: true
+            }
+        );
+        assert_eq!(
+            classify_tree_run(4, 3, 7, 7),
+            ScanTreeAction::RepeatLength {
+                emit_length_once: false
+            }
+        );
+        assert_eq!(
+            classify_tree_run(10, 3, 0, -1),
+            ScanTreeAction::RepeatZeroShort
+        );
+        assert_eq!(
+            classify_tree_run(11, 3, 0, -1),
+            ScanTreeAction::RepeatZeroLong
+        );
     }
 
     #[test]

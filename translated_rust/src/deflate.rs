@@ -2659,6 +2659,20 @@ fn stored_block_should_wait(
             || len != (left as crate::stdlib::uInt).wrapping_add(avail_in))
 }
 
+fn stored_block_can_emit(
+    left: ::core::ffi::c_uint,
+    min_block: ::core::ffi::c_uint,
+    flush: ::core::ffi::c_int,
+    avail_in: crate::stdlib::uInt,
+    have: ::core::ffi::c_uint,
+) -> bool {
+    left >= min_block
+        || (left != 0 || flush == crate::zlib_h::Z_FINISH)
+            && flush != crate::zlib_h::Z_NO_FLUSH
+            && avail_in == 0
+            && left <= have
+}
+
 fn stored_insert_after_input(
     insert: crate::stdlib::uInt,
     window_size: crate::stdlib::uInt,
@@ -2869,12 +2883,7 @@ unsafe extern "C" fn deflate_stored(
         have
     };
     left = ((*s).strstart as ::core::ffi::c_long - (*s).block_start) as ::core::ffi::c_uint;
-    if left >= min_block
-        || (left != 0 || flush == crate::zlib_h::Z_FINISH)
-            && flush != crate::zlib_h::Z_NO_FLUSH
-            && (*(*s).strm).avail_in == 0 as crate::stdlib::uInt
-            && left <= have
-    {
+    if stored_block_can_emit(left, min_block, flush, (*(*s).strm).avail_in, have) {
         len = if left > have { have } else { left };
         last = if flush == crate::zlib_h::Z_FINISH
             && (*(*s).strm).avail_in == 0 as crate::stdlib::uInt
@@ -3783,9 +3792,9 @@ mod tests {
         gzip_default_xfl, gzip_header_crc, gzip_header_crc_pending, gzip_header_crc_pending_range,
         normalize_deflate_params, pending_buffer_needs_flush, pending_output_len,
         pending_short_cursors, read_buf_len, read_buf_total_in_after_copy, short_msb_bytes,
-        slide_hash_entry, stored_block_available_output, stored_block_min_size,
-        stored_block_should_wait, stored_insert_after_input, symbol_triplet_cursors, zlib_header,
-        DeflatePreflight,
+        slide_hash_entry, stored_block_available_output, stored_block_can_emit,
+        stored_block_min_size, stored_block_should_wait, stored_insert_after_input,
+        symbol_triplet_cursors, zlib_header, DeflatePreflight,
     };
 
     #[test]
@@ -4165,6 +4174,27 @@ mod tests {
             0,
             0,
             crate::zlib_h::Z_FINISH,
+        ));
+    }
+
+    #[test]
+    fn stored_block_can_emit_preserves_threshold_and_flush_rules() {
+        assert!(stored_block_can_emit(8, 8, crate::zlib_h::Z_NO_FLUSH, 3, 4,));
+        assert!(stored_block_can_emit(4, 8, crate::zlib_h::Z_FINISH, 0, 4,));
+        assert!(!stored_block_can_emit(
+            4,
+            8,
+            crate::zlib_h::Z_NO_FLUSH,
+            0,
+            4,
+        ));
+        assert!(!stored_block_can_emit(4, 8, crate::zlib_h::Z_FINISH, 1, 4,));
+        assert!(!stored_block_can_emit(
+            5,
+            8,
+            crate::zlib_h::Z_FULL_FLUSH,
+            0,
+            4,
         ));
     }
 
