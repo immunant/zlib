@@ -859,11 +859,15 @@ pub(crate) unsafe fn deflate_tree_bit_output_from_state(
     // owner form their one pending view as well, so tree output cannot become
     // a second raw callback-buffer projection boundary.
     let storage_layout = state.callback_storage.storage();
-    let (state, storage) = callback_owner::storage_request(
-        state,
-        storage_layout,
-        &DeflateStorageProjection::Pending,
-    );
+    let lifecycle = state.callback_storage;
+    let (state, views) = if lifecycle.is_complete() {
+        let (state, views) = callback_owner::storage_views(state, storage_layout);
+        (state, Some(views))
+    } else {
+        (state, None)
+    };
+    let storage =
+        callback_owner::storage_request(lifecycle, &DeflateStorageProjection::Pending, views);
     let pending_buf = storage
         .into_pending_storage()
         .expect("initialized pending storage projection")
@@ -1397,27 +1401,90 @@ mod callback_owner {
         }
     }
 
-    // This is the sole raw callback-storage projection.  The returned request
-    // contains only bounded Rust slices and no allocation identity; callers
-    // cannot reopen one backing buffer independently of this owner.
-    pub(super) unsafe fn storage_request<'storage, 'request>(
+    // This is the sole raw callback-storage projection. Checked handles stay
+    // in the state adapter and never escape this call: this helper returns
+    // only scoped ordinary slices, not callback identities.
+    pub(super) unsafe fn storage_views<'storage>(
         state: &'storage mut crate::src::deflate::deflate_state,
         storage_layout: DeflateStorageLayout,
-        projection: &DeflateStorageProjection<'request>,
     ) -> (
         &'storage mut crate::src::deflate::deflate_state,
-        DeflateCallbackStorageRequest<'storage>,
+        DeflateCallbackStorageViews<'storage>,
     ) {
-        // Copy the checked handles before lending the backing regions.  The
-        // state allocation and its four callback allocations are disjoint, so
-        // the returned state borrow never has to be reconstructed from a raw
-        // handle after the scoped views are made.
-        let lifecycle = state.callback_storage;
-        let window_handle = state.window;
-        let prev_handle = state.prev;
-        let head_handle = state.head;
-        let pending_handle = state.pending_buf;
-        let request = match projection {
+        // Tie every returned view to this scoped state borrow. In particular,
+        // callback storage is never promoted to a forged `'static` lifetime.
+        let window_handle = state.window.expect("initialized window");
+        let prev_handle = state.prev.expect("initialized prev table");
+        let head_handle = state.head.expect("initialized head table");
+        let pending_handle = state.pending_buf.expect("initialized pending buffer");
+        // Every live C4 operation opens the same four regions once, then the
+        // pointer-free request builder narrows those views to its action.
+        let mut byte_views: [Option<&mut [crate::stdlib::Bytef]>; 2] = [None, None];
+        for (view, (handle, len)) in byte_views.iter_mut().zip([
+            (
+                window_handle,
+                storage_layout
+                    .window
+                    .byte_len()
+                    .expect("validated window allocation geometry"),
+            ),
+            (
+                pending_handle,
+                storage_layout
+                    .pending
+                    .byte_len()
+                    .expect("validated pending allocation geometry"),
+            ),
+        ]) {
+            *view = Some(::core::slice::from_raw_parts_mut(handle.as_ptr(), len));
+        }
+        let [Some(window), Some(pending)] = byte_views else {
+            unreachable!("two byte callback views were constructed")
+        };
+        // The two hash regions have the same typed element layout. Build them
+        // through one projection site, just as the byte regions above do.
+        let mut hash_views: [Option<&mut [crate::src::deflate::Posf]>; 2] = [None, None];
+        for (view, (handle, len)) in hash_views.iter_mut().zip([
+            (
+                prev_handle,
+                storage_layout
+                    .prev
+                    .element_len::<crate::src::deflate::Posf>()
+                    .expect("validated prev allocation geometry"),
+            ),
+            (
+                head_handle,
+                storage_layout
+                    .head
+                    .element_len::<crate::src::deflate::Posf>()
+                    .expect("validated head allocation geometry"),
+            ),
+        ]) {
+            *view = Some(::core::slice::from_raw_parts_mut(handle.as_ptr(), len));
+        }
+        let [Some(prev), Some(head)] = hash_views else {
+            unreachable!("two hash callback views were constructed")
+        };
+        (
+            state,
+            DeflateCallbackStorageViews {
+                window,
+                prev,
+                head,
+                pending,
+            },
+        )
+    }
+
+    // The request builder is pointer-free: the lifecycle ledger determines
+    // whether the complete scoped view may be used, then hands only the
+    // slices required by the operation to deflate's safe cores.
+    pub(super) fn storage_request<'storage, 'request>(
+        lifecycle: DeflateCallbackStorageOwner,
+        projection: &DeflateStorageProjection<'request>,
+        views: Option<DeflateCallbackStorageViews<'storage>>,
+    ) -> DeflateCallbackStorageRequest<'storage> {
+        match projection {
             DeflateStorageProjection::None => lifecycle.empty_request(),
             _ if !lifecycle.is_complete() => lifecycle.empty_request(),
             DeflateStorageProjection::Pending
@@ -1428,80 +1495,38 @@ mod callback_owner {
             | DeflateStorageProjection::ParameterDispatch(_)
             | DeflateStorageProjection::DictionaryInstall { .. }
             | DeflateStorageProjection::DictionaryQuery { .. } => {
-                // Every live C4 operation opens the same four regions once,
-                // then narrows that owner to the view its scalar action needs.
-                // This prevents pending/hash/dictionary paths from becoming
-                // independent raw projection boundaries.
-                // The byte-addressed regions share one projection loop. The
-                // typed hash regions remain separate only because their Rust
-                // element layouts differ from the byte buffers.
-                let mut byte_views: [Option<&mut [crate::stdlib::Bytef]>; 2] = [None, None];
-                for (view, (handle, len)) in byte_views.iter_mut().zip([
-                    (
-                        window_handle.expect("initialized window"),
-                        storage_layout
-                            .window
-                            .byte_len()
-                            .expect("validated window allocation geometry"),
-                    ),
-                    (
-                        pending_handle.expect("initialized pending buffer"),
-                        storage_layout
-                            .pending
-                            .byte_len()
-                            .expect("validated pending allocation geometry"),
-                    ),
-                ]) {
-                    *view = Some(::core::slice::from_raw_parts_mut(handle.as_ptr(), len));
-                }
-                let [window, pending] = byte_views;
-                // The two hash regions have the same typed element layout.
-                // Build them through one projection site, just as the byte
-                // regions above do.  The callback ledger has already proved
-                // that these are distinct complete allocations, and this
-                // owner remains the sole place that turns their handles into
-                // bounded views.
-                let mut hash_views: [Option<&mut [crate::src::deflate::Posf]>; 2] = [None, None];
-                for (view, (handle, len)) in hash_views.iter_mut().zip([
-                    (
-                        prev_handle.expect("initialized prev table"),
-                        storage_layout
-                            .prev
-                            .element_len::<crate::src::deflate::Posf>()
-                            .expect("validated prev allocation geometry"),
-                    ),
-                    (
-                        head_handle.expect("initialized head table"),
-                        storage_layout
-                            .head
-                            .element_len::<crate::src::deflate::Posf>()
-                            .expect("validated head allocation geometry"),
-                    ),
-                ]) {
-                    *view = Some(::core::slice::from_raw_parts_mut(handle.as_ptr(), len));
-                }
-                let [prev, head] = hash_views;
+                let Some(DeflateCallbackStorageViews {
+                    window,
+                    prev,
+                    head,
+                    pending,
+                }) = views
+                else {
+                    return lifecycle.empty_request();
+                };
                 match projection {
                     DeflateStorageProjection::Pending => lifecycle
-                        .pending_storage(pending)
+                        .pending_storage(Some(pending))
                         .map(DeflateCallbackStorageRequest::Pending)
                         .unwrap_or_else(|| lifecycle.empty_request()),
-                    DeflateStorageProjection::Hash => lifecycle.hash_request(head),
+                    DeflateStorageProjection::Hash => lifecycle.hash_request(Some(head)),
                     DeflateStorageProjection::Dictionary
                     | DeflateStorageProjection::DictionaryInstall { .. }
                     | DeflateStorageProjection::DictionaryQuery { .. } => {
-                        lifecycle.dictionary_request(window, prev, head)
+                        lifecycle.dictionary_request(Some(window), Some(prev), Some(head))
                     }
                     DeflateStorageProjection::Complete
                     | DeflateStorageProjection::Dispatch
-                    | DeflateStorageProjection::ParameterDispatch(_) => {
-                        lifecycle.complete_request(window, prev, head, pending)
-                    }
+                    | DeflateStorageProjection::ParameterDispatch(_) => lifecycle.complete_request(
+                        Some(window),
+                        Some(prev),
+                        Some(head),
+                        Some(pending),
+                    ),
                     DeflateStorageProjection::None => unreachable!("none projection handled above"),
                 }
             }
-        };
-        (state, request)
+        }
     }
 
     // Pair every callback-owned allocation with the live zfree callback in
@@ -2198,6 +2223,17 @@ struct DeflateAbiCursors<'stream> {
     output: &'stream mut [crate::stdlib::Bytef],
 }
 
+// `callback_owner::storage_views()` is the sole raw-to-slice boundary for
+// callback-backed deflate storage. This carrier is intentionally only scoped
+// ordinary borrows, so request selection cannot retain allocation identity or
+// extend a callback buffer lifetime.
+struct DeflateCallbackStorageViews<'stream> {
+    window: &'stream mut [crate::stdlib::Bytef],
+    prev: &'stream mut [crate::src::deflate::Posf],
+    head: &'stream mut [crate::src::deflate::Posf],
+    pending: &'stream mut [crate::stdlib::Bytef],
+}
+
 // This operation-facing owner is intentionally pointer-free: the persistent
 // callback owner proves which allocations exist and their exact geometry,
 // while the stream boundary lends it ordinary bounded slices for one call.
@@ -2327,7 +2363,14 @@ unsafe fn deflate_stream_and_state<'stream, 'request>(
     let storage_layout = admission.storage_layout;
     let dispatch_cursors = admission.dispatch_cursors;
     let lifecycle = state.callback_storage;
-    let (state, mut storage) = callback_owner::storage_request(state, storage_layout, &projection);
+    let (state, views) =
+        if lifecycle.is_complete() && !matches!(projection, DeflateStorageProjection::None) {
+            let (state, views) = callback_owner::storage_views(state, storage_layout);
+            (state, Some(views))
+        } else {
+            (state, None)
+        };
+    let mut storage = callback_owner::storage_request(lifecycle, &projection, views);
     if dispatch_cursors {
         if strm.next_out.is_null() || (strm.avail_in != 0 && strm.next_in.is_null()) {
             strm.msg = crate::src::zutil::zError(crate::zlib_h::Z_STREAM_ERROR)
