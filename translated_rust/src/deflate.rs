@@ -4068,19 +4068,21 @@ unsafe extern "C" fn deflate_huff(
             }
         }
         (*s).match_length = 0 as crate::stdlib::uInt;
-        let mut cc: crate::zutil_h::uch =
+        let cc: crate::zutil_h::uch =
             *(*s).window.offset((*s).strstart as isize) as crate::zutil_h::uch;
-        let c2rust_fresh56 = (*s).sym_next;
-        (*s).sym_next = (*s).sym_next.wrapping_add(1);
-        *(*s).sym_buf.offset(c2rust_fresh56 as isize) = 0 as crate::zutil_h::uchf;
-        let c2rust_fresh57 = (*s).sym_next;
-        (*s).sym_next = (*s).sym_next.wrapping_add(1);
-        *(*s).sym_buf.offset(c2rust_fresh57 as isize) = 0 as crate::zutil_h::uchf;
-        let c2rust_fresh58 = (*s).sym_next;
-        (*s).sym_next = (*s).sym_next.wrapping_add(1);
-        *(*s).sym_buf.offset(c2rust_fresh58 as isize) = cc as crate::zutil_h::uchf;
-        (*s).dyn_ltree[cc as usize].fc.freq = (*s).dyn_ltree[cc as usize].fc.freq.wrapping_add(1);
-        bflush = ((*s).sym_next == (*s).sym_end) as ::core::ffi::c_int;
+        // The legacy strategy owns the raw state and pending allocation.  Its
+        // literal tally itself is shared with the checked safe tree helper.
+        let state = &mut *s;
+        let pending_buf = ::core::slice::from_raw_parts_mut(
+            state.pending_buf,
+            state.pending_buf_size as usize,
+        );
+        bflush = crate::src::trees::tr_tally(
+            state,
+            pending_buf,
+            0 as ::core::ffi::c_uint,
+            cc as ::core::ffi::c_uint,
+        );
         (*s).lookahead = (*s).lookahead.wrapping_sub(1);
         (*s).strstart = (*s).strstart.wrapping_add(1);
         if bflush != 0 {

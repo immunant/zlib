@@ -4562,7 +4562,7 @@ pub unsafe extern "C" fn _tr_flush_block_ffi(
     };
     tr_flush_block(state, strm, pending_buf, source, stored_len, last)
 }
-fn tr_tally(
+pub(crate) fn tr_tally(
     state: &mut crate::src::deflate::deflate_state,
     pending_buf: &mut [crate::stdlib::Byte],
     mut dist: ::core::ffi::c_uint,
