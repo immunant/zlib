@@ -128,7 +128,6 @@ pub struct internal_state {
     pub heap_len: ::core::ffi::c_int,
     pub heap_max: ::core::ffi::c_int,
     pub depth: [crate::zutil_h::uch; 573],
-    pub sym_buf: *mut crate::zutil_h::uchf,
     pub lit_bufsize: crate::stdlib::uInt,
     pub sym_next: crate::stdlib::uInt,
     pub sym_end: crate::stdlib::uInt,
@@ -151,6 +150,7 @@ pub struct internal_state {
 #[derive(Clone)]
 struct deflate_buffers {
     pending: Vec<crate::stdlib::Bytef>,
+    sym_buf: Vec<crate::zutil_h::uchf>,
     window: Vec<crate::stdlib::Bytef>,
     prev: Vec<crate::src::deflate::Posf>,
     head: Vec<crate::src::deflate::Posf>,
@@ -169,9 +169,15 @@ impl deflate_buffers {
         Ok(values)
     }
 
-    fn new(w_size: crate::stdlib::uInt, hash_size: crate::stdlib::uInt, lit_bufsize: crate::stdlib::uInt) -> Result<Self, ()> {
+    fn new(
+        w_size: crate::stdlib::uInt,
+        hash_size: crate::stdlib::uInt,
+        lit_bufsize: crate::stdlib::uInt,
+    ) -> Result<Self, ()> {
+        let sym_len = lit_bufsize.wrapping_sub(1).wrapping_mul(3) as usize;
         Ok(Self {
             pending: Self::zeroed(lit_bufsize as usize * 4)?,
+            sym_buf: Self::zeroed(sym_len)?,
             window: Self::zeroed(w_size as usize * 2)?,
             prev: Self::zeroed(w_size as usize)?,
             head: Self::zeroed(hash_size as usize)?,
@@ -211,10 +217,49 @@ impl Default for internal_state {
             d_desc: tree_desc_s { max_code: 0, stat_desc: &EMPTY_STATIC_TREE_DESC },
             bl_desc: tree_desc_s { max_code: 0, stat_desc: &EMPTY_STATIC_TREE_DESC },
             bl_count: [0; 16], heap: [0; 573], heap_len: 0, heap_max: 0, depth: [0; 573],
-            sym_buf: ::core::ptr::null_mut(), lit_bufsize: 0, sym_next: 0, sym_end: 0,
+            lit_bufsize: 0, sym_next: 0, sym_end: 0,
             opt_len: 0, static_len: 0, matches: 0, insert: 0, bi_buf: 0, bi_valid: 0,
             bi_used: 0, high_water: 0, slid: 0, buffers: None,
         }
+    }
+}
+
+impl internal_state {
+    pub(crate) fn symbol_slice(&self) -> &[crate::zutil_h::uchf] {
+        self.buffers
+            .as_deref()
+            .expect("deflate buffers initialized")
+            .sym_buf
+            .as_slice()
+    }
+
+    pub(crate) fn tally_symbol(
+        &mut self,
+        dist: ::core::ffi::c_uint,
+        lc: ::core::ffi::c_uint,
+    ) -> ::core::ffi::c_int {
+        let Self {
+            buffers,
+            sym_next,
+            dyn_ltree,
+            dyn_dtree,
+            matches,
+            ..
+        } = self;
+        let sym_buf = buffers
+            .as_deref_mut()
+            .expect("deflate buffers initialized")
+            .sym_buf
+            .as_mut_slice();
+        crate::src::trees::_tr_tally(
+            sym_buf,
+            sym_next,
+            dyn_ltree,
+            dyn_dtree,
+            matches,
+            dist,
+            lc,
+        )
     }
 }
 
@@ -630,13 +675,12 @@ pub fn deflateInit2_(
     mut memLevel: ::core::ffi::c_int,
     mut strategy: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
-    unsafe {
     let mut s: *mut crate::src::deflate::deflate_state =
         ::core::ptr::null_mut::<crate::src::deflate::deflate_state>();
     let mut wrap: ::core::ffi::c_int = 1 as ::core::ffi::c_int;
-    (*strm).msg = ::core::ptr::null_mut::<::core::ffi::c_char>();
-    if (*strm).zalloc.is_none() {
-        (*strm).zalloc = Some(
+    strm.msg = ::core::ptr::null_mut::<::core::ffi::c_char>();
+    if strm.zalloc.is_none() {
+        strm.zalloc = Some(
             crate::src::zutil::zcalloc
                 as unsafe extern "C" fn(
                     crate::stdlib::voidpf,
@@ -644,10 +688,10 @@ pub fn deflateInit2_(
                     ::core::ffi::c_uint,
                 ) -> crate::stdlib::voidpf,
         ) as crate::zlib_h::alloc_func;
-        (*strm).opaque = ::core::ptr::null_mut::<::core::ffi::c_void>();
+        strm.opaque = ::core::ptr::null_mut::<::core::ffi::c_void>();
     }
-    if (*strm).zfree.is_none() {
-        (*strm).zfree = Some(
+    if strm.zfree.is_none() {
+        strm.zfree = Some(
             crate::src::zutil::zcfree
                 as unsafe extern "C" fn(crate::stdlib::voidpf, crate::stdlib::voidpf) -> (),
         ) as crate::zlib_h::free_func;
@@ -707,14 +751,9 @@ pub fn deflateInit2_(
     ) {
         Ok(buffers) => Some(Box::new(buffers)),
         Err(()) => {
-            (*strm).msg = crate::src::zutil::z_errmsg[(if (-4 as ::core::ffi::c_int)
-                < -6 as ::core::ffi::c_int
-                || -4 as ::core::ffi::c_int > 2 as ::core::ffi::c_int
-            {
-                9 as ::core::ffi::c_int
-            } else {
-                2 as ::core::ffi::c_int - -4 as ::core::ffi::c_int
-            }) as usize];
+            // `z_errmsg` is still a legacy mutable C export. Its fixed
+            // memory-error entry is read only at this FFI-facing boundary.
+            strm.msg = unsafe { crate::src::zutil::z_errmsg[6] };
             return crate::zlib_h::Z_MEM_ERROR;
         }
     };
@@ -726,9 +765,8 @@ pub fn deflateInit2_(
     owned.strategy = strategy;
     owned.method = method as crate::stdlib::Byte;
     s = Box::into_raw(owned);
-    (*strm).state = s as *mut crate::src::deflate::internal_state;
+    strm.state = s as *mut crate::src::deflate::internal_state;
     return deflateReset(strm);
-    }
 }
 #[export_name = "deflateInit2_"]
 
@@ -988,7 +1026,6 @@ unsafe extern "C" fn lm_init(mut s: *mut crate::src::deflate::deflate_state) {
     s.window = window;
     s.prev = prev;
     s.head = head;
-    s.sym_buf = pending_buf.wrapping_add(s.lit_bufsize as usize) as *mut crate::zutil_h::uchf;
     s.window_size = (2 as ::core::ffi::c_long as crate::zutil_h::ulg)
         .wrapping_mul(s.w_size as crate::zutil_h::ulg);
     s.buffers
@@ -2166,7 +2203,6 @@ pub unsafe extern "C" fn deflateCopy(
     copied.window = window;
     copied.prev = prev;
     copied.head = head;
-    copied.sym_buf = pending_buf.wrapping_add(copied.lit_bufsize as usize) as *mut crate::zutil_h::uchf;
     *dest = *source;
     (*dest).state = Box::into_raw(Box::new(copied));
     return crate::zlib_h::Z_OK;
@@ -2566,16 +2602,16 @@ unsafe extern "C" fn deflate_fast(
                 (*s).strstart.wrapping_sub((*s).match_start) as crate::zutil_h::ush;
             let c2rust_fresh44 = (*s).sym_next;
             (*s).sym_next = (*s).sym_next.wrapping_add(1);
-            *(*s).sym_buf.offset(c2rust_fresh44 as isize) =
+            (&mut (*s).buffers).as_deref_mut().expect("deflate buffers initialized").sym_buf[c2rust_fresh44 as usize] =
                 dist as crate::zutil_h::uch as crate::zutil_h::uchf;
             let c2rust_fresh45 = (*s).sym_next;
             (*s).sym_next = (*s).sym_next.wrapping_add(1);
-            *(*s).sym_buf.offset(c2rust_fresh45 as isize) =
+            (&mut (*s).buffers).as_deref_mut().expect("deflate buffers initialized").sym_buf[c2rust_fresh45 as usize] =
                 (dist as ::core::ffi::c_int >> 8 as ::core::ffi::c_int) as crate::zutil_h::uch
                     as crate::zutil_h::uchf;
             let c2rust_fresh46 = (*s).sym_next;
             (*s).sym_next = (*s).sym_next.wrapping_add(1);
-            *(*s).sym_buf.offset(c2rust_fresh46 as isize) = len as crate::zutil_h::uchf;
+            (&mut (*s).buffers).as_deref_mut().expect("deflate buffers initialized").sym_buf[c2rust_fresh46 as usize] = len as crate::zutil_h::uchf;
             dist = dist.wrapping_sub(1);
             let length_code = crate::src::trees::_length_code[len as usize] as ::core::ffi::c_int;
             let dist_code = crate::src::trees::_dist_code[if (dist as ::core::ffi::c_int)
@@ -2641,13 +2677,13 @@ unsafe extern "C" fn deflate_fast(
                 *(*s).window.offset((*s).strstart as isize) as crate::zutil_h::uch;
             let c2rust_fresh47 = (*s).sym_next;
             (*s).sym_next = (*s).sym_next.wrapping_add(1);
-            *(*s).sym_buf.offset(c2rust_fresh47 as isize) = 0 as crate::zutil_h::uchf;
+            (&mut (*s).buffers).as_deref_mut().expect("deflate buffers initialized").sym_buf[c2rust_fresh47 as usize] = 0 as crate::zutil_h::uchf;
             let c2rust_fresh48 = (*s).sym_next;
             (*s).sym_next = (*s).sym_next.wrapping_add(1);
-            *(*s).sym_buf.offset(c2rust_fresh48 as isize) = 0 as crate::zutil_h::uchf;
+            (&mut (*s).buffers).as_deref_mut().expect("deflate buffers initialized").sym_buf[c2rust_fresh48 as usize] = 0 as crate::zutil_h::uchf;
             let c2rust_fresh49 = (*s).sym_next;
             (*s).sym_next = (*s).sym_next.wrapping_add(1);
-            *(*s).sym_buf.offset(c2rust_fresh49 as isize) = cc as crate::zutil_h::uchf;
+            (&mut (*s).buffers).as_deref_mut().expect("deflate buffers initialized").sym_buf[c2rust_fresh49 as usize] = cc as crate::zutil_h::uchf;
             (*s).dyn_ltree[cc as usize].fc.freq =
                 (*s).dyn_ltree[cc as usize].fc.freq.wrapping_add(1);
             bflush = ((*s).sym_next == (*s).sym_end) as ::core::ffi::c_int;
@@ -2760,15 +2796,7 @@ macro_rules! insert_string {
 macro_rules! tally_symbol {
     ($s:expr, $dist:expr, $lc:expr) => {{
         let state = &mut *$s;
-        let sym_start = state.lit_bufsize as usize;
-        let sym_end = sym_start + state.sym_end as usize;
-        let buffers = state.buffers.as_mut().expect("deflate buffers initialized");
-        crate::src::trees::_tr_tally(
-            &mut buffers.pending[sym_start..sym_end],
-            &mut state.sym_next,
-            &mut state.dyn_ltree,
-            &mut state.dyn_dtree,
-            &mut state.matches,
+        state.tally_symbol(
             $dist as ::core::ffi::c_uint,
             $lc as ::core::ffi::c_uint,
         ) != 0
@@ -3046,16 +3074,16 @@ unsafe extern "C" fn deflate_rle(
             let mut dist: crate::zutil_h::ush = 1 as ::core::ffi::c_int as crate::zutil_h::ush;
             let c2rust_fresh50 = (*s).sym_next;
             (*s).sym_next = (*s).sym_next.wrapping_add(1);
-            *(*s).sym_buf.offset(c2rust_fresh50 as isize) =
+            (&mut (*s).buffers).as_deref_mut().expect("deflate buffers initialized").sym_buf[c2rust_fresh50 as usize] =
                 dist as crate::zutil_h::uch as crate::zutil_h::uchf;
             let c2rust_fresh51 = (*s).sym_next;
             (*s).sym_next = (*s).sym_next.wrapping_add(1);
-            *(*s).sym_buf.offset(c2rust_fresh51 as isize) =
+            (&mut (*s).buffers).as_deref_mut().expect("deflate buffers initialized").sym_buf[c2rust_fresh51 as usize] =
                 (dist as ::core::ffi::c_int >> 8 as ::core::ffi::c_int) as crate::zutil_h::uch
                     as crate::zutil_h::uchf;
             let c2rust_fresh52 = (*s).sym_next;
             (*s).sym_next = (*s).sym_next.wrapping_add(1);
-            *(*s).sym_buf.offset(c2rust_fresh52 as isize) = len as crate::zutil_h::uchf;
+            (&mut (*s).buffers).as_deref_mut().expect("deflate buffers initialized").sym_buf[c2rust_fresh52 as usize] = len as crate::zutil_h::uchf;
             dist = dist.wrapping_sub(1);
             let length_code = crate::src::trees::_length_code[len as usize] as ::core::ffi::c_int;
             let dist_code = crate::src::trees::_dist_code[if (dist as ::core::ffi::c_int)
@@ -3088,13 +3116,13 @@ unsafe extern "C" fn deflate_rle(
                 *(*s).window.offset((*s).strstart as isize) as crate::zutil_h::uch;
             let c2rust_fresh53 = (*s).sym_next;
             (*s).sym_next = (*s).sym_next.wrapping_add(1);
-            *(*s).sym_buf.offset(c2rust_fresh53 as isize) = 0 as crate::zutil_h::uchf;
+            (&mut (*s).buffers).as_deref_mut().expect("deflate buffers initialized").sym_buf[c2rust_fresh53 as usize] = 0 as crate::zutil_h::uchf;
             let c2rust_fresh54 = (*s).sym_next;
             (*s).sym_next = (*s).sym_next.wrapping_add(1);
-            *(*s).sym_buf.offset(c2rust_fresh54 as isize) = 0 as crate::zutil_h::uchf;
+            (&mut (*s).buffers).as_deref_mut().expect("deflate buffers initialized").sym_buf[c2rust_fresh54 as usize] = 0 as crate::zutil_h::uchf;
             let c2rust_fresh55 = (*s).sym_next;
             (*s).sym_next = (*s).sym_next.wrapping_add(1);
-            *(*s).sym_buf.offset(c2rust_fresh55 as isize) = cc as crate::zutil_h::uchf;
+            (&mut (*s).buffers).as_deref_mut().expect("deflate buffers initialized").sym_buf[c2rust_fresh55 as usize] = cc as crate::zutil_h::uchf;
             (*s).dyn_ltree[cc as usize].fc.freq =
                 (*s).dyn_ltree[cc as usize].fc.freq.wrapping_add(1);
             bflush = ((*s).sym_next == (*s).sym_end) as ::core::ffi::c_int;
@@ -3196,13 +3224,13 @@ unsafe extern "C" fn deflate_huff(
             *(*s).window.offset((*s).strstart as isize) as crate::zutil_h::uch;
         let c2rust_fresh56 = (*s).sym_next;
         (*s).sym_next = (*s).sym_next.wrapping_add(1);
-        *(*s).sym_buf.offset(c2rust_fresh56 as isize) = 0 as crate::zutil_h::uchf;
+        (&mut (*s).buffers).as_deref_mut().expect("deflate buffers initialized").sym_buf[c2rust_fresh56 as usize] = 0 as crate::zutil_h::uchf;
         let c2rust_fresh57 = (*s).sym_next;
         (*s).sym_next = (*s).sym_next.wrapping_add(1);
-        *(*s).sym_buf.offset(c2rust_fresh57 as isize) = 0 as crate::zutil_h::uchf;
+        (&mut (*s).buffers).as_deref_mut().expect("deflate buffers initialized").sym_buf[c2rust_fresh57 as usize] = 0 as crate::zutil_h::uchf;
         let c2rust_fresh58 = (*s).sym_next;
         (*s).sym_next = (*s).sym_next.wrapping_add(1);
-        *(*s).sym_buf.offset(c2rust_fresh58 as isize) = cc as crate::zutil_h::uchf;
+        (&mut (*s).buffers).as_deref_mut().expect("deflate buffers initialized").sym_buf[c2rust_fresh58 as usize] = cc as crate::zutil_h::uchf;
         (*s).dyn_ltree[cc as usize].fc.freq = (*s).dyn_ltree[cc as usize].fc.freq.wrapping_add(1);
         bflush = ((*s).sym_next == (*s).sym_end) as ::core::ffi::c_int;
         (*s).lookahead = (*s).lookahead.wrapping_sub(1);

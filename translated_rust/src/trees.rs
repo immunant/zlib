@@ -4462,7 +4462,9 @@ pub unsafe extern "C" fn _tr_flush_block(
     let s = &mut *s;
     let pending_buf =
         ::core::slice::from_raw_parts_mut(s.pending_buf, s.pending_buf_size as usize);
-    let sym_buf = ::core::slice::from_raw_parts(s.sym_buf, s.sym_next as usize);
+    // Keep a snapshot while block encoding mutates the rest of the state.
+    // The symbols themselves are Rust-owned storage, not a raw alias.
+    let sym_buf = s.symbol_slice()[..s.sym_next as usize].to_vec();
     let stored = if buf.is_null() {
         None
     } else {
@@ -4472,7 +4474,7 @@ pub unsafe extern "C" fn _tr_flush_block(
         ))
     };
     let data_type = &mut (*s.strm).data_type;
-    tr_flush_block_safe(s, pending_buf, sym_buf, stored, last, data_type);
+    tr_flush_block_safe(s, pending_buf, &sym_buf, stored, last, data_type);
 }
 #[export_name = "_tr_flush_block"]
 
@@ -4543,14 +4545,5 @@ pub unsafe extern "C" fn _tr_tally_ffi(
     mut lc: ::core::ffi::c_uint,
 ) -> ::core::ffi::c_int {
     let s = &mut *s;
-    let sym_buf = ::core::slice::from_raw_parts_mut(s.sym_buf, s.sym_end as usize);
-    _tr_tally(
-        sym_buf,
-        &mut s.sym_next,
-        &mut s.dyn_ltree,
-        &mut s.dyn_dtree,
-        &mut s.matches,
-        dist,
-        lc,
-    )
+    s.tally_symbol(dist, lc)
 }
