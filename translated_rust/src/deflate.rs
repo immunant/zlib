@@ -1088,6 +1088,17 @@ fn deflate_lm_init_reset_fields(state: &mut crate::src::deflate::deflate_state) 
     state.match_available = 0 as ::core::ffi::c_int;
     state.ins_h = 0 as crate::stdlib::uInt;
 }
+
+pub(crate) fn deflate_reset_state(
+    strm: &mut crate::zlib_h::z_stream_s,
+    state: &mut crate::src::deflate::deflate_state,
+    head: &mut [crate::src::deflate::Posf],
+) -> ::core::ffi::c_int {
+    deflate_reset_keep_state(strm, state);
+    lm_init(state, head);
+    crate::zlib_h::Z_OK
+}
+
 #[export_name = "deflateReset"]
 
 pub unsafe extern "C" fn deflateReset_ffi(
@@ -1098,12 +1109,10 @@ pub unsafe extern "C" fn deflateReset_ffi(
     }
     let strm_ref = &mut *strm;
     let state = &mut *(strm_ref.state as *mut crate::src::deflate::deflate_state);
-    deflate_reset_keep_state(strm_ref, state);
     let head_ptr = state.head;
     let hash_size = state.hash_size as usize;
     let head = ::core::slice::from_raw_parts_mut(head_ptr, hash_size);
-    lm_init(state, head);
-    return crate::zlib_h::Z_OK;
+    return deflate_reset_state(strm_ref, state, head);
 }
 fn deflate_set_header_allowed(state: &crate::src::deflate::deflate_state) -> bool {
     state.wrap == 2 as ::core::ffi::c_int
