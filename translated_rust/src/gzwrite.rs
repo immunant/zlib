@@ -75,6 +75,22 @@ fn gz_zero_needs_initialization(first: ::core::ffi::c_int) -> bool {
     first != 0
 }
 
+enum GzZeroAction {
+    Error,
+    Done,
+    Continue,
+}
+
+fn gz_zero_action(ret: ::core::ffi::c_int, has_skip: bool) -> GzZeroAction {
+    if ret == -1 as ::core::ffi::c_int {
+        GzZeroAction::Error
+    } else if !has_skip {
+        GzZeroAction::Done
+    } else {
+        GzZeroAction::Continue
+    }
+}
+
 fn gzclose_w_result(
     zero_error: Option<::core::ffi::c_int>,
     finish_error: Option<::core::ffi::c_int>,
@@ -633,11 +649,10 @@ unsafe fn gz_zero(mut state: crate::gzguts_h::gz_statep) -> ::core::ffi::c_int {
             n,
             remaining_avail_in,
         );
-        if ret == -1 as ::core::ffi::c_int {
-            return -1 as ::core::ffi::c_int;
-        }
-        if !has_skip {
-            break;
+        match gz_zero_action(ret, has_skip) {
+            GzZeroAction::Error => return -1 as ::core::ffi::c_int,
+            GzZeroAction::Done => break,
+            GzZeroAction::Continue => {}
         }
     }
     return 0 as ::core::ffi::c_int;
@@ -1030,11 +1045,11 @@ mod tests {
         gz_write_buffered_have_after_copy, gz_write_buffered_step, gz_write_chunk_len,
         gz_write_errno_is_retryable, gz_write_error_result, gz_write_is_empty,
         gz_write_remaining_after_consumption, gz_write_state_is_usable,
-        gz_write_uses_buffered_path, gz_zero_apply_progress, gz_zero_chunk_len,
+        gz_write_uses_buffered_path, gz_zero_action, gz_zero_apply_progress, gz_zero_chunk_len,
         gz_zero_needs_initialization, gzclose_mode_is_writable, gzclose_w_result,
         gzflush_mode_is_valid, gzfwrite_result, gzputc_result, gzputs_len_fits_int, gzputs_result,
         gzsetparams_settings_match, gzsetparams_state_is_usable, gzwrite_len_fits_int,
-        GzCompWriteFailure,
+        GzCompWriteFailure, GzZeroAction,
     };
 
     #[test]
@@ -1728,5 +1743,21 @@ mod tests {
         assert!(!gz_zero_apply_progress(&mut pos, &mut skip, 0, 1));
         assert_eq!(pos, ::core::ffi::c_uint::MAX as crate::stdlib::off64_t);
         assert_eq!(skip, 0);
+    }
+
+    #[test]
+    fn gz_zero_action_prioritizes_error_over_skip_exhaustion() {
+        assert!(matches!(gz_zero_action(-1, false), GzZeroAction::Error));
+    }
+
+    #[test]
+    fn gz_zero_action_finishes_when_skip_is_exhausted() {
+        assert!(matches!(gz_zero_action(0, false), GzZeroAction::Done));
+    }
+
+    #[test]
+    fn gz_zero_action_continues_for_other_statuses_with_skip_remaining() {
+        assert!(matches!(gz_zero_action(0, true), GzZeroAction::Continue));
+        assert!(matches!(gz_zero_action(1, true), GzZeroAction::Continue));
     }
 }

@@ -1704,6 +1704,18 @@ fn deflate_should_return_buf_error(
         && flush != crate::zlib_h::Z_FINISH
 }
 
+fn deflate_request_is_invalid(
+    next_out_is_null: bool,
+    avail_in: crate::stdlib::uInt,
+    next_in_is_null: bool,
+    status: ::core::ffi::c_int,
+    flush: ::core::ffi::c_int,
+) -> bool {
+    next_out_is_null
+        || avail_in != 0 as crate::stdlib::uInt && next_in_is_null
+        || status == crate::src::deflate::FINISH_STATE && flush != crate::zlib_h::Z_FINISH
+}
+
 pub unsafe extern "C" fn deflate(
     mut strm: crate::zlib_h::z_streamp,
     mut flush: ::core::ffi::c_int,
@@ -1723,10 +1735,13 @@ pub unsafe extern "C" fn deflate(
     } else {
         core::slice::from_raw_parts((*s).pending_buf, (*s).pending_buf_size as usize)
     };
-    if (*strm).next_out.is_null()
-        || (*strm).avail_in != 0 as crate::stdlib::uInt && (*strm).next_in.is_null()
-        || (*s).status == crate::src::deflate::FINISH_STATE && flush != crate::zlib_h::Z_FINISH
-    {
+    if deflate_request_is_invalid(
+        (*strm).next_out.is_null(),
+        (*strm).avail_in,
+        (*strm).next_in.is_null(),
+        (*s).status,
+        flush,
+    ) {
         (*strm).msg = crate::src::zutil::z_errmsg[(if (-2 as ::core::ffi::c_int)
             < -6 as ::core::ffi::c_int
             || -2 as ::core::ffi::c_int > 2 as ::core::ffi::c_int
@@ -3685,10 +3700,10 @@ unsafe extern "C" fn deflate_huff(
 mod tests {
     use super::{
         clamped_copy_len, deflate_bound_lengths, deflate_copyright, deflate_dictionary_len,
-        deflate_pending_value, deflate_prime_bits_valid, deflate_should_return_buf_error,
-        deflate_state_status_valid, deflate_version_matches, fill_window_available_space,
-        fill_window_cursor, fill_window_insert_after_slide, fill_window_zero_range,
-        flush_pending_accounting, gzip_header_crc, gzip_header_crc_pending,
+        deflate_pending_value, deflate_prime_bits_valid, deflate_request_is_invalid,
+        deflate_should_return_buf_error, deflate_state_status_valid, deflate_version_matches,
+        fill_window_available_space, fill_window_cursor, fill_window_insert_after_slide,
+        fill_window_zero_range, flush_pending_accounting, gzip_header_crc, gzip_header_crc_pending,
         gzip_header_crc_pending_range, normalize_deflate_params, pending_output_len,
         pending_short_cursors, read_buf_len, read_buf_total_in_after_copy, short_msb_bytes,
         slide_hash_entry, stored_block_min_size, stored_insert_after_input, symbol_triplet_cursors,
@@ -4010,6 +4025,45 @@ mod tests {
         assert!(!deflate_should_return_buf_error(
             0,
             crate::zlib_h::Z_FINISH,
+            crate::zlib_h::Z_FINISH,
+        ));
+    }
+
+    #[test]
+    fn deflate_request_is_invalid_preserves_pointer_and_finish_rules() {
+        assert!(deflate_request_is_invalid(
+            true,
+            0,
+            false,
+            0,
+            crate::zlib_h::Z_NO_FLUSH
+        ));
+        assert!(deflate_request_is_invalid(
+            false,
+            1,
+            true,
+            0,
+            crate::zlib_h::Z_NO_FLUSH
+        ));
+        assert!(!deflate_request_is_invalid(
+            false,
+            0,
+            true,
+            0,
+            crate::zlib_h::Z_NO_FLUSH
+        ));
+        assert!(deflate_request_is_invalid(
+            false,
+            0,
+            false,
+            crate::src::deflate::FINISH_STATE,
+            crate::zlib_h::Z_NO_FLUSH,
+        ));
+        assert!(!deflate_request_is_invalid(
+            false,
+            0,
+            false,
+            crate::src::deflate::FINISH_STATE,
             crate::zlib_h::Z_FINISH,
         ));
     }
