@@ -3050,7 +3050,13 @@ pub unsafe extern "C" fn inflateSync_ffi(mut strm: crate::zlib_h::z_streamp) -> 
 pub unsafe extern "C" fn inflateSyncPoint_ffi(
     mut strm: crate::zlib_h::z_streamp,
 ) -> ::core::ffi::c_int {
-    let Some(strm) = (unsafe { strm.as_mut() }) else {
+    // SAFETY: this ABI adapter only binds the optional foreign stream. The
+    // named implementation owns inflater-state validation.
+    inflateSyncPoint(unsafe { strm.as_mut() })
+}
+
+pub fn inflateSyncPoint(strm: Option<&mut crate::zlib_h::z_stream>) -> ::core::ffi::c_int {
+    let Some(strm) = strm else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
     let Some((_strm, state)) = inflateStateCheck(strm) else {
@@ -3377,9 +3383,18 @@ pub unsafe extern "C" fn inflateCopy_ffi(
 
 pub unsafe extern "C" fn inflateUndermine_ffi(
     mut strm: crate::zlib_h::z_streamp,
+    mut subvert: ::core::ffi::c_int,
+) -> ::core::ffi::c_int {
+    // SAFETY: this ABI adapter only binds the optional foreign stream. The
+    // named implementation owns inflater-state validation.
+    inflateUndermine(unsafe { strm.as_mut() }, subvert)
+}
+
+pub fn inflateUndermine(
+    strm: Option<&mut crate::zlib_h::z_stream>,
     _subvert: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
-    let Some(strm) = (unsafe { strm.as_mut() }) else {
+    let Some(strm) = strm else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
     let Some((_strm, state)) = inflateStateCheck(strm) else {
@@ -3393,7 +3408,16 @@ pub unsafe extern "C" fn inflateValidate_ffi(
     mut strm: crate::zlib_h::z_streamp,
     mut check: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
-    let Some(strm) = (unsafe { strm.as_mut() }) else {
+    // SAFETY: this ABI adapter only binds the optional foreign stream. The
+    // named implementation owns inflater-state validation.
+    inflateValidate(unsafe { strm.as_mut() }, check)
+}
+
+pub fn inflateValidate(
+    strm: Option<&mut crate::zlib_h::z_stream>,
+    check: ::core::ffi::c_int,
+) -> ::core::ffi::c_int {
+    let Some(strm) = strm else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
     let Some((_strm, state)) = inflateStateCheck(strm) else {
@@ -3447,7 +3471,13 @@ fn inflate_mark(state: &crate::src::inflate::inflate_state) -> ::core::ffi::c_lo
 pub unsafe extern "C" fn inflateMark_ffi(
     mut strm: crate::zlib_h::z_streamp,
 ) -> ::core::ffi::c_long {
-    let Some(strm) = (unsafe { strm.as_mut() }) else {
+    // SAFETY: this ABI adapter only binds the optional foreign stream. The
+    // named implementation owns inflater-state validation.
+    inflateMark(unsafe { strm.as_mut() })
+}
+
+pub fn inflateMark(strm: Option<&mut crate::zlib_h::z_stream>) -> ::core::ffi::c_long {
+    let Some(strm) = strm else {
         return -((1 as ::core::ffi::c_long) << 16 as ::core::ffi::c_int);
     };
     let Some((_strm, state)) = inflateStateCheck(strm) else {
@@ -3460,7 +3490,15 @@ pub unsafe extern "C" fn inflateMark_ffi(
 pub unsafe extern "C" fn inflateCodesUsed_ffi(
     mut strm: crate::zlib_h::z_streamp,
 ) -> ::core::ffi::c_ulong {
-    let Some(strm) = (unsafe { strm.as_mut() }) else {
+    // SAFETY: this ABI adapter only binds the optional foreign stream. The
+    // named implementation owns inflater-state validation.
+    inflateCodesUsed(unsafe { strm.as_mut() })
+}
+
+pub fn inflateCodesUsed(
+    strm: Option<&mut crate::zlib_h::z_stream>,
+) -> ::core::ffi::c_ulong {
+    let Some(strm) = strm else {
         return -1 as ::core::ffi::c_int as ::core::ffi::c_ulong;
     };
     let Some((_strm, state)) = inflateStateCheck(strm) else {
