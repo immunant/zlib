@@ -309,6 +309,10 @@ fn gz_ungetc_buffer_state(
     }
 }
 
+fn gz_ungetc_next_have(have: ::core::ffi::c_uint) -> ::core::ffi::c_uint {
+    have.wrapping_add(1)
+}
+
 unsafe extern "C" fn gz_load(
     state: crate::gzguts_h::gz_statep,
     buf: *mut ::core::ffi::c_uchar,
@@ -1375,6 +1379,15 @@ mod tests {
     }
 
     #[test]
+    fn gz_ungetc_next_have_wraps_buffered_count() {
+        assert_eq!(gz_ungetc_next_have(0), 1);
+        assert_eq!(
+            gz_ungetc_next_have(::core::ffi::c_uint::MAX),
+            0
+        );
+    }
+
+    #[test]
     fn gz_is_gzip_header_accepts_valid_header() {
         assert!(gz_is_gzip_header(31, 139, 8, 31));
     }
@@ -1832,7 +1845,7 @@ pub unsafe extern "C" fn gzungetc(
     }
     match gz_ungetc_buffer_state((*state).x.have, (*state).size) {
         GzUngetcBufferState::Empty => {
-            (*state).x.have = 1 as ::core::ffi::c_uint;
+            (*state).x.have = gz_ungetc_next_have(0);
             (*state).x.next = (*state)
                 .out
                 .offset(((*state).size << 1 as ::core::ffi::c_int) as isize)
@@ -1864,7 +1877,7 @@ pub unsafe extern "C" fn gzungetc(
         }
         (*state).x.next = dest;
     }
-    (*state).x.have = (*state).x.have.wrapping_add(1);
+    (*state).x.have = gz_ungetc_next_have((*state).x.have);
     (*state).x.next = (*state).x.next.offset(-1);
     *(*state).x.next.offset(0 as ::core::ffi::c_int as isize) = c as ::core::ffi::c_uchar;
     (*state).x.pos -= 1;

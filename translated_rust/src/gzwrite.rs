@@ -166,6 +166,10 @@ fn gz_buffered_have(
         .wrapping_add(avail_in as usize) as ::core::ffi::c_uint
 }
 
+fn gzputc_can_buffer(have: ::core::ffi::c_uint, size: ::core::ffi::c_uint) -> bool {
+    have < size
+}
+
 fn gz_write_chunk_len(remaining: crate::stdlib::z_size_t) -> ::core::ffi::c_uint {
     if ::core::ffi::c_uint::MAX as crate::stdlib::z_size_t > remaining {
         remaining as ::core::ffi::c_uint
@@ -728,7 +732,7 @@ pub unsafe extern "C" fn gzputc(
             (*strm).next_in as usize,
             (*strm).avail_in,
         );
-        if have < (*state).size {
+        if gzputc_can_buffer(have, (*state).size) {
             *(*state).in_0.offset(have as isize) = c as ::core::ffi::c_uchar;
             (*strm).avail_in = (*strm).avail_in.wrapping_add(1);
             (*state).x.pos += 1;
@@ -935,9 +939,9 @@ mod tests {
         gz_write_chunk_len, gz_write_errno_is_retryable, gz_write_error_result,
         gz_write_needs_pending_flush, gz_write_state_is_usable, gz_write_uses_buffered_path,
         gz_zero_apply_progress, gz_zero_chunk_len, gz_zero_needs_initialization,
-        gz_zero_needs_pending_flush, gzflush_mode_is_valid, gzfwrite_len, gzputc_result,
-        gzclose_w_result, gzputs_len_fits_int, gzputs_result, gzsetparams_settings_match,
-        gzwrite_len_fits_int,
+        gz_zero_needs_pending_flush, gzclose_w_result, gzflush_mode_is_valid, gzfwrite_len,
+        gzputc_can_buffer, gzputc_result, gzputs_len_fits_int, gzputs_result,
+        gzsetparams_settings_match, gzwrite_len_fits_int,
     };
 
     #[test]
@@ -1353,6 +1357,14 @@ mod tests {
             ),
             5
         );
+    }
+
+    #[test]
+    fn gzputc_can_buffer_only_when_space_remains() {
+        assert!(gzputc_can_buffer(0, 1));
+        assert!(gzputc_can_buffer(1023, 1024));
+        assert!(!gzputc_can_buffer(1024, 1024));
+        assert!(!gzputc_can_buffer(::core::ffi::c_uint::MAX, 0));
     }
 
     #[test]

@@ -893,6 +893,13 @@ fn gzoffset64_result(
 
     gzoffset64_adjust_for_buffered_read(offset, mode, avail_in)
 }
+
+fn gzoffset64_state_result(
+    state: &crate::gzguts_h::gz_state,
+    offset: crate::stdlib::off64_t,
+) -> crate::stdlib::off64_t {
+    gzoffset64_result(state.mode, offset, state.strm.avail_in)
+}
 #[export_name = "gzoffset64"]
 
 pub unsafe extern "C" fn gzoffset64_ffi(mut file: crate::zlib_h::gzFile) -> crate::stdlib::off64_t {
@@ -908,7 +915,7 @@ pub unsafe extern "C" fn gzoffset64_ffi(mut file: crate::zlib_h::gzFile) -> crat
             crate::stdlib::SEEK_CUR,
         ) as crate::stdlib::off64_t
     };
-    gzoffset64_result(state.mode, offset, state.strm.avail_in)
+    gzoffset64_state_result(state, offset)
 }
 #[export_name = "gzoffset"]
 pub unsafe extern "C" fn gzoffset_ffi(file: crate::zlib_h::gzFile) -> crate::stdlib::off_t {
@@ -924,7 +931,7 @@ pub unsafe extern "C" fn gzoffset_ffi(file: crate::zlib_h::gzFile) -> crate::std
             crate::stdlib::SEEK_CUR,
         ) as crate::stdlib::off64_t
     };
-    gz_legacy_offset_result(gzoffset64_result(state.mode, offset, state.strm.avail_in))
+    gz_legacy_offset_result(gzoffset64_state_result(state, offset))
 }
 fn gzeof_result(mode: ::core::ffi::c_int, past: ::core::ffi::c_int) -> ::core::ffi::c_int {
     if mode == crate::gzguts_h::GZ_READ {
