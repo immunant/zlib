@@ -394,6 +394,13 @@ fn clamped_copy_len(
     available.min(requested) as ::core::ffi::c_uint
 }
 
+fn deflate_rle_clamp_match_length(
+    match_length: crate::stdlib::uInt,
+    lookahead: crate::stdlib::uInt,
+) -> crate::stdlib::uInt {
+    match_length.min(lookahead)
+}
+
 pub(crate) fn symbol_triplet_cursors(
     start: crate::stdlib::uInt,
 ) -> ([crate::stdlib::uInt; 3], crate::stdlib::uInt) {
@@ -3578,9 +3585,8 @@ unsafe fn deflate_rle(
                     .wrapping_sub(
                         strend.offset_from(scan) as ::core::ffi::c_long as crate::stdlib::uInt
                     );
-                if (*s).match_length > (*s).lookahead {
-                    (*s).match_length = (*s).lookahead;
-                }
+                (*s).match_length =
+                    deflate_rle_clamp_match_length((*s).match_length, (*s).lookahead);
             }
         }
         if (*s).match_length >= crate::zutil_h::MIN_MATCH as crate::stdlib::uInt {
@@ -3840,7 +3846,7 @@ mod tests {
         can_search_hash_match, clamped_copy_len, deflate_block_state_actions,
         deflate_bound_lengths, deflate_copyright, deflate_dictionary_len, deflate_flush_rank,
         deflate_pending_value, deflate_preflight, deflate_prime_bits_valid,
-        deflate_request_is_invalid, deflate_reset_status_and_adler,
+        deflate_request_is_invalid, deflate_reset_status_and_adler, deflate_rle_clamp_match_length,
         deflate_should_return_buf_error, deflate_state_check_impl, deflate_state_check_result,
         deflate_state_is_usable, deflate_state_status_valid, deflate_version_matches,
         dictionary_tail_offset, fill_window_available_space, fill_window_cursor,
@@ -3873,6 +3879,18 @@ mod tests {
             (true, false)
         );
         assert_eq!(deflate_block_state_actions(4), (false, false));
+    }
+
+    #[test]
+    fn deflate_rle_clamp_match_length_preserves_match_bounds() {
+        assert_eq!(deflate_rle_clamp_match_length(3, 258), 3);
+        assert_eq!(deflate_rle_clamp_match_length(258, 258), 258);
+        assert_eq!(deflate_rle_clamp_match_length(258, 17), 17);
+        assert_eq!(deflate_rle_clamp_match_length(258, 0), 0);
+        assert_eq!(
+            deflate_rle_clamp_match_length(crate::stdlib::uInt::MAX, crate::stdlib::uInt::MAX),
+            crate::stdlib::uInt::MAX
+        );
     }
 
     #[test]

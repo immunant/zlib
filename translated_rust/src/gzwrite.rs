@@ -449,7 +449,7 @@ fn gz_comp_max_write_chunk() -> ::core::ffi::c_uint {
 }
 
 fn gz_write_errno_is_retryable(errno: ::core::ffi::c_int) -> bool {
-    errno == crate::stdlib::EAGAIN || errno == crate::stdlib::EWOULDBLOCK
+    crate::src::gzlib::gz_errno_is_retryable(errno)
 }
 
 enum GzCompWriteFailure {

@@ -87,7 +87,7 @@ fn gz_load_decision(
             }
         }
         Err(errno) => {
-            let again = errno == crate::stdlib::EAGAIN || errno == crate::stdlib::EWOULDBLOCK;
+            let again = crate::src::gzlib::gz_errno_is_retryable(errno);
             GzLoadDecision {
                 have,
                 eof: false,

@@ -464,6 +464,12 @@ fn window_needs_allocation(has_window: bool) -> bool {
     !has_window
 }
 
+fn window_allocation_request(
+    wbits: crate::stdlib::uInt,
+) -> (crate::stdlib::uInt, crate::stdlib::uInt) {
+    (1_u32 << wbits, 1)
+}
+
 fn window_update_plan(
     wsize: ::core::ffi::c_uint,
     wnext: ::core::ffi::c_uint,
@@ -902,11 +908,10 @@ unsafe fn updatewindow(
 ) -> ::core::ffi::c_int {
     let state = (*strm).state as *mut crate::src::inflate::inflate_state;
     if window_needs_allocation(!(*state).window.is_null()) {
+        let (items, size) = window_allocation_request((*state).wbits);
         (*state).window = Some((*strm).zalloc.expect("non-null function pointer"))
             .expect("non-null function pointer")(
-            (*strm).opaque,
-            (1 as crate::stdlib::uInt) << (*state).wbits,
-            ::core::mem::size_of::<::core::ffi::c_uchar>() as crate::stdlib::uInt,
+            (*strm).opaque, items, size
         ) as *mut ::core::ffi::c_uchar;
         if (*state).window.is_null() {
             return 1;
@@ -2957,10 +2962,11 @@ mod tests {
         inflate_sync_search_core, inflate_undermine_core, inflate_validate_core,
         inflate_validate_wrap, inflate_zlib_header_error, inflate_zlib_window_params,
         initial_window_metadata, reset_window_history, stored_block_length, syncsearch_safe,
-        window_needs_allocation, window_update_plan, InflateBlockKind, InflateCopyProgress,
-        InflateMatchPlan, InflateMatchSource, InflateOutputChecksum, InflatePrimeUpdate,
-        InflateSyncSearch, InflateZlibHeaderError, InflateZlibWindowParams, BAD, CHECK,
-        CODE_LENGTH_ORDER, COPY_, COPY_1, DICT, DICTID, HEAD, LEN_, MATCH, STORED, SYNC, TYPE,
+        window_allocation_request, window_needs_allocation, window_update_plan, InflateBlockKind,
+        InflateCopyProgress, InflateMatchPlan, InflateMatchSource, InflateOutputChecksum,
+        InflatePrimeUpdate, InflateSyncSearch, InflateZlibHeaderError, InflateZlibWindowParams,
+        BAD, CHECK, CODE_LENGTH_ORDER, COPY_, COPY_1, DICT, DICTID, HEAD, LEN_, MATCH, STORED,
+        SYNC, TYPE,
     };
 
     #[test]
@@ -3865,6 +3871,12 @@ mod tests {
     fn window_allocation_is_needed_only_without_a_window() {
         assert!(window_needs_allocation(false));
         assert!(!window_needs_allocation(true));
+    }
+
+    #[test]
+    fn window_allocation_request_matches_supported_window_widths() {
+        assert_eq!(window_allocation_request(8), (256, 1));
+        assert_eq!(window_allocation_request(15), (32_768, 1));
     }
 
     #[test]

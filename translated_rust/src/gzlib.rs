@@ -79,6 +79,10 @@ pub(crate) fn gz_request_len(
     size.checked_mul(nitems)
 }
 
+pub(crate) fn gz_errno_is_retryable(errno: ::core::ffi::c_int) -> bool {
+    errno == crate::stdlib::EAGAIN || errno == crate::stdlib::EWOULDBLOCK
+}
+
 fn gz_clear_read_flags(eof: &mut ::core::ffi::c_int, past: &mut ::core::ffi::c_int) {
     *eof = 0;
     *past = 0;
@@ -1218,22 +1222,22 @@ pub unsafe extern "C" fn gz_intmax_ffi() -> ::core::ffi::c_uint {
 #[cfg(test)]
 mod tests {
     use super::{
-        gz_clear_read_flags, gz_error_clears_buffer, gz_error_message_allocation_len,
-        gz_error_needs_message_allocation, gz_error_plan, gz_is_read_mode,
-        gz_is_read_or_write_mode, gz_legacy_offset_result, gz_lseek_succeeded, gz_open_fd_plan,
-        gz_open_offset_plan, gz_open_path_buffer_len, gz_open_recorded_offset, gz_parse_open_mode,
-        gz_position_after_skip, gz_post_open_metadata, gz_prepare_open, gz_request_len,
-        gz_reset_core, gzbuffer_can_set_want, gzbuffer_normalized_want, gzclearerr_core,
-        gzdopen_has_valid_descriptor, gzdopen_path_buffer_len, gzeof_result, gzerror_core,
-        gzoffset64_adjust_for_buffered_read, gzoffset64_result, gzrewind_request_is_valid,
-        gzseek_adjust_offset, gzseek_can_fast_forward, gzseek_clears_pending_skip,
-        gzseek_effective_skip, gzseek_error_allows_positioning, gzseek_fast_forward_lseek_offset,
-        gzseek_fast_forward_reset, gzseek_finish_fast_forward, gzseek_plan_read_buffer_consumption,
-        gzseek_plan_remaining_offset, gzseek_plan_request, gzseek_read_buffer_consumed,
-        gzseek_read_buffer_plan_for_mode, gzseek_read_buffer_uses_requested_offset,
-        gzseek_request_is_valid, gzseek_uses_read_buffer, gztell64_core, gztell64_result,
-        GzErrorMessage, GzErrorPlan, GzOpenFdPlan, GzOpenOffsetPlan, GzResetFields,
-        GzSeekOffsetPlan, GzSeekReadBufferPlan, GzSeekRequestPlan,
+        gz_clear_read_flags, gz_errno_is_retryable, gz_error_clears_buffer,
+        gz_error_message_allocation_len, gz_error_needs_message_allocation, gz_error_plan,
+        gz_is_read_mode, gz_is_read_or_write_mode, gz_legacy_offset_result, gz_lseek_succeeded,
+        gz_open_fd_plan, gz_open_offset_plan, gz_open_path_buffer_len, gz_open_recorded_offset,
+        gz_parse_open_mode, gz_position_after_skip, gz_post_open_metadata, gz_prepare_open,
+        gz_request_len, gz_reset_core, gzbuffer_can_set_want, gzbuffer_normalized_want,
+        gzclearerr_core, gzdopen_has_valid_descriptor, gzdopen_path_buffer_len, gzeof_result,
+        gzerror_core, gzoffset64_adjust_for_buffered_read, gzoffset64_result,
+        gzrewind_request_is_valid, gzseek_adjust_offset, gzseek_can_fast_forward,
+        gzseek_clears_pending_skip, gzseek_effective_skip, gzseek_error_allows_positioning,
+        gzseek_fast_forward_lseek_offset, gzseek_fast_forward_reset, gzseek_finish_fast_forward,
+        gzseek_plan_read_buffer_consumption, gzseek_plan_remaining_offset, gzseek_plan_request,
+        gzseek_read_buffer_consumed, gzseek_read_buffer_plan_for_mode,
+        gzseek_read_buffer_uses_requested_offset, gzseek_request_is_valid, gzseek_uses_read_buffer,
+        gztell64_core, gztell64_result, GzErrorMessage, GzErrorPlan, GzOpenFdPlan,
+        GzOpenOffsetPlan, GzResetFields, GzSeekOffsetPlan, GzSeekReadBufferPlan, GzSeekRequestPlan,
     };
 
     #[test]
@@ -1258,6 +1262,14 @@ mod tests {
     #[test]
     fn gz_request_len_rejects_overflow() {
         assert_eq!(gz_request_len(crate::stdlib::z_size_t::MAX, 2), None);
+    }
+
+    #[test]
+    fn gz_errno_is_retryable_accepts_only_would_block_errors() {
+        assert!(gz_errno_is_retryable(crate::stdlib::EAGAIN));
+        assert!(gz_errno_is_retryable(crate::stdlib::EWOULDBLOCK));
+        assert!(!gz_errno_is_retryable(0));
+        assert!(!gz_errno_is_retryable(::core::ffi::c_int::MIN));
     }
 
     #[test]
