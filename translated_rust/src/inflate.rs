@@ -1418,10 +1418,10 @@ pub fn inflate(
                                                                                                             bits = bits.wrapping_add(8 as ::core::ffi::c_uint);
                                                                                                         }
                                                                                                         out = out.wrapping_sub(left);
-                                                                                                        strm.total_out = (*strm)
+                                                                                                        strm.total_out = strm
                                                                                                             .total_out
                                                                                                             .wrapping_add(out as crate::stdlib::uLong);
-                                                                                                        state.total = (*state)
+                                                                                                        state.total = state
                                                                                                             .total
                                                                                                             .wrapping_add(out as ::core::ffi::c_ulong);
                                                                                                         if state.wrap & 4 as ::core::ffi::c_int != 0 && out != 0
@@ -1550,12 +1550,12 @@ pub fn inflate(
                                                                                             state.lens[order[c2rust_fresh16 as usize] as usize] = 0
                                                                                                 as ::core::ffi::c_ushort;
                                                                                         }
-                                                                                        state.next = &raw mut state.codes as *mut crate::src::inftrees::code;
+                                                                                        state.next = state.codes.as_mut_ptr();
                                                                                         state.distcode = state.next as *const crate::src::inftrees::code;
                                                                                         state.lencode = state.distcode;
                                                                                         state.lenbits = 7 as ::core::ffi::c_uint;
                                                                                         ret = match inflate_build_dynamic_table(
-                                                                                            &mut *state,
+                                                                                            state,
                                                                                             crate::src::inftrees::CODES,
                                                                                             0,
                                                                                             19 as ::core::ffi::c_uint,
@@ -1593,7 +1593,7 @@ pub fn inflate(
                                                                                         None,
                                                                                     ) as ::core::ffi::c_ulong;
                                                                                     strm.adler =
-                                                                                        (*state)
+                                                                                        state
                                                                                             .check
                                                                                             as crate::stdlib::uLong;
                                                                                     state.mode =
@@ -1638,7 +1638,7 @@ pub fn inflate(
                                                                             break 'c_2356;
                                                                         }
                                                                         while state.have
-                                                                            < (*state)
+                                                                            < state
                                                                                 .nlen
                                                                                 .wrapping_add(
                                                                                     state.ndist,
@@ -1706,7 +1706,7 @@ pub fn inflate(
                                                                                         state.mode = crate::src::inflate::BAD;
                                                                                         break;
                                                                                     } else {
-                                                                                        len = (*state)
+                                                                                        len = state
                                                                                             .lens[state.have.wrapping_sub(1 as ::core::ffi::c_uint)
                                                                                             as usize] as ::core::ffi::c_uint;
                                                                                         copy = (3 as ::core::ffi::c_uint)
@@ -1820,12 +1820,12 @@ pub fn inflate(
                                                                             state.mode = crate::src::inflate::BAD;
                                                                             continue '_inf_leave;
                                                                         } else {
-                                                                            state.next = &raw mut state.codes as *mut crate::src::inftrees::code;
+                                                                            state.next = state.codes.as_mut_ptr();
                                                                             state.lencode = state.next as *const crate::src::inftrees::code;
                                                                             state.lenbits = 9 as ::core::ffi::c_uint;
                                                                             let nlen = state.nlen;
                                                                             ret = match inflate_build_dynamic_table(
-                                                                                &mut *state,
+                                                                                state,
                                                                                 crate::src::inftrees::LENS,
                                                                                 0,
                                                                                 nlen,
@@ -1847,7 +1847,7 @@ pub fn inflate(
                                                                                 state.distbits = 6 as ::core::ffi::c_uint;
                                                                                 let (nlen, ndist) = (state.nlen, state.ndist);
                                                                                 ret = match inflate_build_dynamic_table(
-                                                                                    &mut *state,
+                                                                                    state,
                                                                                     crate::src::inftrees::DISTS,
                                                                                     nlen as usize,
                                                                                     ndist,
@@ -1913,7 +1913,7 @@ pub fn inflate(
                                                                         put = output
                                                                             [copy as usize..]
                                                                             .as_mut_ptr();
-                                                                        state.length = (*state)
+                                                                        state.length = state
                                                                             .length
                                                                             .wrapping_sub(copy);
                                                                         continue '_inf_leave;
@@ -2041,11 +2041,8 @@ pub fn inflate(
                                                                     crate::src::inflate::STORED;
                                                             }
                                                             1 => {
-                                                                let state_ref = &mut *state;
-                                                                crate::src::inftrees::inflate_fixed(
-                                                                    state_ref,
-                                                                );
-                                                                state_ref.mode =
+                                                                crate::src::inftrees::inflate_fixed(state);
+                                                                state.mode =
                                                                     crate::src::inflate::LEN_;
                                                                 if flush == crate::zlib_h::Z_TREES {
                                                                     hold >>=
