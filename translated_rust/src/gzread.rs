@@ -163,7 +163,7 @@ fn gz_compact_input_buffer(buf: &mut [crate::stdlib::Bytef], next_offset: usize,
     }
 }
 
-unsafe fn gz_avail(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
+fn gz_avail(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
     let mut got: ::core::ffi::c_uint = 0;
     if state.err != crate::zlib_h::Z_OK && state.err != crate::zlib_h::Z_BUF_ERROR {
         return -1 as ::core::ffi::c_int;
@@ -174,17 +174,19 @@ unsafe fn gz_avail(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int 
             state.in_0 as usize,
             state.strm.avail_in as usize,
         ) {
-            let input = ::core::slice::from_raw_parts_mut(
-                state.in_0 as *mut crate::stdlib::Bytef,
-                state.size as usize,
-            );
+            let input = unsafe {
+                ::core::slice::from_raw_parts_mut(
+                    state.in_0 as *mut crate::stdlib::Bytef,
+                    state.size as usize,
+                )
+            };
             gz_compact_input_buffer(input, next_offset, state.strm.avail_in as usize);
         }
         let load_buf = state.in_0.wrapping_add(state.strm.avail_in as usize);
         let load_len = state
             .size
             .wrapping_sub(state.strm.avail_in as ::core::ffi::c_uint);
-        if gz_load(state, load_buf, load_len, &mut got) == -1 as ::core::ffi::c_int {
+        if unsafe { gz_load(state, load_buf, load_len, &mut got) } == -1 as ::core::ffi::c_int {
             return -1 as ::core::ffi::c_int;
         }
         state.strm.avail_in = state.strm.avail_in.wrapping_add(got);
@@ -300,7 +302,7 @@ unsafe fn gz_look(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
     return 0 as ::core::ffi::c_int;
 }
 
-unsafe fn gz_decomp(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
+fn gz_decomp(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
     let mut ret: ::core::ffi::c_int = crate::zlib_h::Z_OK;
     let had: ::core::ffi::c_uint = state.strm.avail_out as ::core::ffi::c_uint;
     loop {
@@ -319,10 +321,12 @@ unsafe fn gz_decomp(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int
             }
             break;
         } else {
-            ret = crate::src::inflate::inflate_ffi(
-                &raw mut state.strm as *mut _ as *mut crate::zlib_h::z_stream_s,
-                crate::zlib_h::Z_NO_FLUSH,
-            );
+            ret = unsafe {
+                crate::src::inflate::inflate_ffi(
+                    &raw mut state.strm as *mut _ as *mut crate::zlib_h::z_stream_s,
+                    crate::zlib_h::Z_NO_FLUSH,
+                )
+            };
             if state.strm.avail_out < had {
                 state.junk = 0 as ::core::ffi::c_int;
             }
@@ -404,7 +408,7 @@ fn gz_fetch(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
             }
             crate::gzguts_h::GZIP => {
                 gz_prepare_fetch_output(state);
-                if unsafe { gz_decomp(state) } == -1 as ::core::ffi::c_int {
+                if gz_decomp(state) == -1 as ::core::ffi::c_int {
                     return -1 as ::core::ffi::c_int;
                 }
             }
