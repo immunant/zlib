@@ -1000,10 +1000,7 @@ pub unsafe extern "C" fn deflateGetDictionary(
     let Some((_strm, state)) = deflateStateCheck(strm) else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
-    let mut len = state.strstart.wrapping_add(state.lookahead);
-    if len > state.w_size {
-        len = state.w_size;
-    }
+    let len = deflate_dictionary_length(state);
     let dictionary = if dictionary.is_null() || len == 0 {
         None
     } else {
@@ -1022,6 +1019,15 @@ pub unsafe extern "C" fn deflateGetDictionary(
         Some(&mut *dictLength)
     };
     deflate_get_dictionary(window, dictionary, dict_length, len)
+}
+
+// Once the ABI adapter has bound the state window and optional caller ranges,
+// dictionary reporting is entirely ordinary slice and scalar work.
+fn deflate_dictionary_length(state: &crate::src::deflate::deflate_state) -> crate::stdlib::uInt {
+    state
+        .strstart
+        .wrapping_add(state.lookahead)
+        .min(state.w_size)
 }
 
 fn deflate_get_dictionary(
