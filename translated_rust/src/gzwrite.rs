@@ -530,7 +530,9 @@ unsafe fn gz_zero(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
     gz_zero_impl(&mut GzCompressor { state })
 }
 
-unsafe fn gz_write(state: &mut crate::gzguts_h::gz_state, input: &[u8]) -> crate::stdlib::z_size_t {
+impl GzCompressor<'_> {
+fn write(&mut self, input: &[u8]) -> crate::stdlib::z_size_t {
+    let state = &mut *self.state;
     let len = input.len();
     let mut put: crate::stdlib::z_size_t = len;
     let mut ret: ::core::ffi::c_int = 0;
@@ -633,23 +635,39 @@ unsafe fn gz_write(state: &mut crate::gzguts_h::gz_state, input: &[u8]) -> crate
     }
     return put;
 }
-unsafe fn gzwrite(state: &mut crate::gzguts_h::gz_state, buf: &[u8]) -> ::core::ffi::c_int {
+}
+
+unsafe fn gz_write(
+    state: &mut crate::gzguts_h::gz_state,
+    input: &[u8],
+) -> crate::stdlib::z_size_t {
+    (GzCompressor { state }).write(input)
+}
+
+fn gzwrite_impl(
+    compressor: &mut GzCompressor<'_>,
+    buf: &[u8],
+) -> ::core::ffi::c_int {
     let len = buf.len() as ::core::ffi::c_uint;
-    if state.mode != crate::gzguts_h::GZ_WRITE
-        || state.err != crate::zlib_h::Z_OK && state.again == 0
+    if compressor.state.mode != crate::gzguts_h::GZ_WRITE
+        || compressor.state.err != crate::zlib_h::Z_OK && compressor.state.again == 0
     {
         return 0 as ::core::ffi::c_int;
     }
-    crate::src::gzlib::gz_error_state(state, crate::zlib_h::Z_OK, None);
+    crate::src::gzlib::gz_error_state(compressor.state, crate::zlib_h::Z_OK, None);
     if (len as ::core::ffi::c_int) < 0 as ::core::ffi::c_int {
         crate::src::gzlib::gz_error_state(
-            state,
+            compressor.state,
             crate::zlib_h::Z_DATA_ERROR,
             Some(c"requested length does not fit in int"),
         );
         return 0 as ::core::ffi::c_int;
     }
-    gz_write(state, buf) as ::core::ffi::c_int
+    compressor.write(buf) as ::core::ffi::c_int
+}
+
+unsafe fn gzwrite(state: &mut crate::gzguts_h::gz_state, buf: &[u8]) -> ::core::ffi::c_int {
+    gzwrite_impl(&mut GzCompressor { state }, buf)
 }
 #[export_name = "gzwrite"]
 
@@ -719,21 +737,28 @@ pub unsafe extern "C" fn gzfwrite_ffi(
     };
     gzfwrite(state, input, size, nitems)
 }
+fn gzputc_impl(
+    compressor: &mut GzCompressor<'_>,
+    c: ::core::ffi::c_int,
+) -> ::core::ffi::c_int {
+    if compressor.state.mode != crate::gzguts_h::GZ_WRITE
+        || compressor.state.err != crate::zlib_h::Z_OK && compressor.state.again == 0
+    {
+        return -1 as ::core::ffi::c_int;
+    }
+    crate::src::gzlib::gz_error_state(compressor.state, crate::zlib_h::Z_OK, None);
+    let buf = [c as u8];
+    if gzwrite_impl(compressor, &buf) != 1 {
+        return -1 as ::core::ffi::c_int;
+    }
+    return c & 0xff as ::core::ffi::c_int;
+}
+
 pub unsafe extern "C" fn gzputc(
     state: &mut crate::gzguts_h::gz_state,
     c: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
-    if state.mode != crate::gzguts_h::GZ_WRITE
-        || state.err != crate::zlib_h::Z_OK && state.again == 0
-    {
-        return -1 as ::core::ffi::c_int;
-    }
-    crate::src::gzlib::gz_error_state(state, crate::zlib_h::Z_OK, None);
-    let buf = [c as u8];
-    if gzwrite(state, &buf) != 1 {
-        return -1 as ::core::ffi::c_int;
-    }
-    return c & 0xff as ::core::ffi::c_int;
+    gzputc_impl(&mut GzCompressor { state }, c)
 }
 #[export_name = "gzputc"]
 
