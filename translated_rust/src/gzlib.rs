@@ -829,32 +829,41 @@ fn gztell64_core(
     pos + if past != 0 { 0 } else { skip }
 }
 
-pub unsafe extern "C" fn gztell64(mut file: crate::zlib_h::gzFile) -> crate::stdlib::off64_t {
-    let mut state: crate::gzguts_h::gz_statep =
-        ::core::ptr::null_mut::<crate::gzguts_h::gz_state>();
-    if file.is_null() {
+fn gztell64_result(
+    mode: ::core::ffi::c_int,
+    pos: crate::stdlib::off64_t,
+    past: ::core::ffi::c_int,
+    skip: crate::stdlib::off64_t,
+) -> crate::stdlib::off64_t {
+    if !gz_is_read_or_write_mode(mode) {
         return -1 as ::core::ffi::c_int as crate::stdlib::off64_t;
     }
-    state = file as crate::gzguts_h::gz_statep;
-    if !gz_is_read_or_write_mode((*state).mode) {
-        return -1 as ::core::ffi::c_int as crate::stdlib::off64_t;
-    }
-    gztell64_core((*state).x.pos, (*state).past, (*state).skip)
+
+    gztell64_core(pos, past, skip)
+}
+
+fn gztell64_state_result(state: &crate::gzguts_h::gz_state) -> crate::stdlib::off64_t {
+    gztell64_result(state.mode, state.x.pos, state.past, state.skip)
 }
 #[export_name = "gztell64"]
 
-pub unsafe extern "C" fn gztell64_ffi(mut file: crate::zlib_h::gzFile) -> crate::stdlib::off64_t {
-    gztell64(file)
-}
-pub unsafe extern "C" fn gztell(mut file: crate::zlib_h::gzFile) -> crate::stdlib::off_t {
-    let mut ret: crate::stdlib::off64_t = 0;
-    ret = gztell64(file);
-    return gz_legacy_offset_result(ret);
+pub unsafe extern "C" fn gztell64_ffi(file: crate::zlib_h::gzFile) -> crate::stdlib::off64_t {
+    if file.is_null() {
+        return -1 as ::core::ffi::c_int as crate::stdlib::off64_t;
+    }
+
+    let state = unsafe { &*(file as *const crate::gzguts_h::gz_state) };
+    gztell64_state_result(state)
 }
 #[export_name = "gztell"]
 
-pub unsafe extern "C" fn gztell_ffi(mut file: crate::zlib_h::gzFile) -> crate::stdlib::off_t {
-    gztell(file)
+pub unsafe extern "C" fn gztell_ffi(file: crate::zlib_h::gzFile) -> crate::stdlib::off_t {
+    if file.is_null() {
+        return gz_legacy_offset_result(-1 as ::core::ffi::c_int as crate::stdlib::off64_t);
+    }
+
+    let state = unsafe { &*(file as *const crate::gzguts_h::gz_state) };
+    gz_legacy_offset_result(gztell64_state_result(state))
 }
 fn gzoffset64_adjust_for_buffered_read(
     offset: crate::stdlib::off64_t,
@@ -1067,8 +1076,9 @@ mod tests {
         gzseek_can_fast_forward, gzseek_clears_pending_skip, gzseek_error_allows_positioning,
         gzseek_fast_forward_lseek_offset, gzseek_fast_forward_reset,
         gzseek_plan_read_buffer_consumption, gzseek_plan_remaining_offset,
-        gzseek_read_buffer_consumed, gzseek_request_is_valid, gztell64_core, GzErrorMessage,
-        GzOpenOffsetPlan, GzResetFields, GzSeekOffsetPlan, GzSeekReadBufferPlan,
+        gzseek_read_buffer_consumed, gzseek_request_is_valid, gztell64_core,
+        gztell64_result, GzErrorMessage, GzOpenOffsetPlan, GzResetFields, GzSeekOffsetPlan,
+        GzSeekReadBufferPlan,
     };
 
     #[test]
@@ -1296,6 +1306,18 @@ mod tests {
     #[test]
     fn gztell64_core_ignores_skip_after_eof() {
         assert_eq!(gztell64_core(42, 1, 7), 42);
+    }
+
+    #[test]
+    fn gztell64_result_rejects_inactive_modes() {
+        assert_eq!(gztell64_result(crate::gzguts_h::GZ_NONE, 42, 0, 7), -1);
+        assert_eq!(gztell64_result(crate::gzguts_h::GZ_APPEND, 42, 0, 7), -1);
+    }
+
+    #[test]
+    fn gztell64_result_preserves_active_mode_position_rules() {
+        assert_eq!(gztell64_result(crate::gzguts_h::GZ_READ, 42, 0, 7), 49);
+        assert_eq!(gztell64_result(crate::gzguts_h::GZ_WRITE, 42, 1, 7), 42);
     }
 
     #[test]
