@@ -16,7 +16,6 @@ pub use crate::stdlib::ssize_t;
 pub use crate::src::deflate::deflate;
 pub use crate::src::deflate::deflateEnd;
 pub use crate::src::deflate::deflateInit2_;
-pub use crate::src::deflate::deflateReset;
 pub use crate::src::deflate::internal_state;
 
 pub use crate::stdlib::uInt;
@@ -132,7 +131,7 @@ macro_rules! gz_comp_at_boundary {
                 if state_ref.strm.avail_in == 0 && flush == crate::zlib_h::Z_NO_FLUSH {
                     break 'gz_comp_result 0;
                 }
-                crate::src::deflate::deflateReset(&raw mut state_ref.strm);
+                crate::src::deflate::deflate_reset_at_boundary!(&raw mut state_ref.strm);
                 state_ref.reset = 0;
             }
             let mut ret = crate::zlib_h::Z_OK;

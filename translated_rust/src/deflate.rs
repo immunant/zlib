@@ -876,9 +876,10 @@ pub unsafe extern "C" fn deflateInit2_(
     if strm.is_null() {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    (*strm).msg = ::core::ptr::null_mut::<::core::ffi::c_char>();
-    if (*strm).zalloc.is_none() {
-        (*strm).zalloc = Some(
+    let strm_ref = &mut *strm;
+    strm_ref.msg = ::core::ptr::null_mut::<::core::ffi::c_char>();
+    if strm_ref.zalloc.is_none() {
+        strm_ref.zalloc = Some(
             crate::src::zutil::zcalloc_ffi
                 as unsafe extern "C" fn(
                     crate::stdlib::voidpf,
@@ -886,10 +887,10 @@ pub unsafe extern "C" fn deflateInit2_(
                     ::core::ffi::c_uint,
                 ) -> crate::stdlib::voidpf,
         ) as crate::zlib_h::alloc_func;
-        (*strm).opaque = ::core::ptr::null_mut::<::core::ffi::c_void>();
+        strm_ref.opaque = ::core::ptr::null_mut::<::core::ffi::c_void>();
     }
-    if (*strm).zfree.is_none() {
-        (*strm).zfree = Some(
+    if strm_ref.zfree.is_none() {
+        strm_ref.zfree = Some(
             crate::src::zutil::zcfree_ffi
                 as unsafe extern "C" fn(crate::stdlib::voidpf, crate::stdlib::voidpf) -> (),
         ) as crate::zlib_h::free_func;
@@ -923,8 +924,9 @@ pub unsafe extern "C" fn deflateInit2_(
     if windowBits == 8 as ::core::ffi::c_int {
         windowBits = 9 as ::core::ffi::c_int;
     }
-    s = Some((*strm).zalloc.expect("non-null function pointer")).expect("non-null function pointer")(
-        (*strm).opaque,
+    s = Some(strm_ref.zalloc.expect("non-null function pointer"))
+        .expect("non-null function pointer")(
+        strm_ref.opaque,
         1 as crate::stdlib::uInt,
         ::core::mem::size_of::<crate::src::deflate::deflate_state>() as crate::stdlib::uInt,
     ) as *mut crate::src::deflate::deflate_state;
@@ -936,7 +938,7 @@ pub unsafe extern "C" fn deflateInit2_(
         0 as ::core::ffi::c_int,
         ::core::mem::size_of::<crate::src::deflate::deflate_state>(),
     );
-    (*strm).state = s as *mut crate::src::deflate::internal_state;
+    strm_ref.state = s as *mut crate::src::deflate::internal_state;
     (*s).strm = strm;
     (*s).status = crate::src::deflate::INIT_STATE;
     (*s).wrap = wrap;
@@ -952,31 +954,31 @@ pub unsafe extern "C" fn deflateInit2_(
         .wrapping_add(crate::zutil_h::MIN_MATCH as crate::stdlib::uInt)
         .wrapping_sub(1 as crate::stdlib::uInt)
         .wrapping_div(crate::zutil_h::MIN_MATCH as crate::stdlib::uInt);
-    (*s).window = Some((*strm).zalloc.expect("non-null function pointer"))
+    (*s).window = Some(strm_ref.zalloc.expect("non-null function pointer"))
         .expect("non-null function pointer")(
-        (*strm).opaque,
+        strm_ref.opaque,
         (*s).w_size,
         (2 as usize).wrapping_mul(::core::mem::size_of::<crate::stdlib::Byte>())
             as crate::stdlib::uInt,
     ) as *mut crate::stdlib::Bytef;
-    (*s).prev = Some((*strm).zalloc.expect("non-null function pointer"))
+    (*s).prev = Some(strm_ref.zalloc.expect("non-null function pointer"))
         .expect("non-null function pointer")(
-        (*strm).opaque,
+        strm_ref.opaque,
         (*s).w_size,
         ::core::mem::size_of::<crate::src::deflate::Pos>() as crate::stdlib::uInt,
     ) as *mut crate::src::deflate::Posf;
-    (*s).head = Some((*strm).zalloc.expect("non-null function pointer"))
+    (*s).head = Some(strm_ref.zalloc.expect("non-null function pointer"))
         .expect("non-null function pointer")(
-        (*strm).opaque,
+        strm_ref.opaque,
         (*s).hash_size,
         ::core::mem::size_of::<crate::src::deflate::Pos>() as crate::stdlib::uInt,
     ) as *mut crate::src::deflate::Posf;
     (*s).high_water = 0 as crate::zutil_h::ulg;
     (*s).lit_bufsize =
         ((1 as ::core::ffi::c_int) << memLevel + 6 as ::core::ffi::c_int) as crate::stdlib::uInt;
-    (*s).pending_buf = Some((*strm).zalloc.expect("non-null function pointer"))
+    (*s).pending_buf = Some(strm_ref.zalloc.expect("non-null function pointer"))
         .expect("non-null function pointer")(
-        (*strm).opaque,
+        strm_ref.opaque,
         (*s).lit_bufsize,
         4 as crate::stdlib::uInt,
     ) as *mut crate::zutil_h::uchf as *mut crate::stdlib::Bytef;
@@ -988,7 +990,7 @@ pub unsafe extern "C" fn deflateInit2_(
         || (*s).pending_buf.is_null()
     {
         (*s).status = crate::src::deflate::FINISH_STATE;
-        (*strm).msg =
+        strm_ref.msg =
             crate::src::zutil::z_errmsg[(if (-4 as ::core::ffi::c_int) < -6 as ::core::ffi::c_int
                 || -4 as ::core::ffi::c_int > 2 as ::core::ffi::c_int
             {
@@ -1007,7 +1009,20 @@ pub unsafe extern "C" fn deflateInit2_(
     (*s).level = level;
     (*s).strategy = strategy;
     (*s).method = method as crate::stdlib::Byte;
-    return deflateReset(strm);
+    let state = &mut *s;
+    let ret = deflate_reset_keep_state(strm_ref, state);
+    if ret == crate::zlib_h::Z_OK {
+        let Ok(head_len) = usize::try_from(state.hash_size) else {
+            return ret;
+        };
+        if head_len == 0 {
+            let _ = lm_init_state(state, &mut []);
+        } else if !state.head.is_null() {
+            let head = ::core::slice::from_raw_parts_mut(state.head, head_len);
+            let _ = lm_init_state(state, head);
+        }
+    }
+    ret
 }
 #[export_name = "deflateInit2_"]
 
@@ -1241,20 +1256,14 @@ pub unsafe extern "C" fn deflateGetDictionary_ffi(
     }
     crate::zlib_h::Z_OK
 }
-pub unsafe extern "C" fn deflateResetKeep(
-    mut strm: crate::zlib_h::z_streamp,
+pub(crate) fn deflate_reset_keep_state(
+    strm: &mut crate::zlib_h::z_stream_s,
+    state: &mut crate::src::deflate::deflate_state,
 ) -> ::core::ffi::c_int {
-    let mut s: *mut crate::src::deflate::deflate_state =
-        ::core::ptr::null_mut::<crate::src::deflate::deflate_state>();
-    if deflateStateCheck(strm) != 0 {
-        return crate::zlib_h::Z_STREAM_ERROR;
-    }
-    (*strm).total_out = 0 as crate::stdlib::uLong;
-    (*strm).total_in = (*strm).total_out;
-    (*strm).msg = ::core::ptr::null_mut::<::core::ffi::c_char>();
-    (*strm).data_type = crate::zlib_h::Z_UNKNOWN;
-    s = (*strm).state as *mut crate::src::deflate::deflate_state;
-    let state = &mut *s;
+    strm.total_out = 0 as crate::stdlib::uLong;
+    strm.total_in = strm.total_out;
+    strm.msg = ::core::ptr::null_mut::<::core::ffi::c_char>();
+    strm.data_type = crate::zlib_h::Z_UNKNOWN;
     state.pending = 0 as crate::zutil_h::ulg;
     state.pending_out = state.pending_buf;
     if state.wrap < 0 as ::core::ffi::c_int {
@@ -1265,23 +1274,38 @@ pub unsafe extern "C" fn deflateResetKeep(
     } else {
         crate::src::deflate::INIT_STATE
     };
-    (*strm).adler = if state.wrap == 2 as ::core::ffi::c_int {
+    strm.adler = if state.wrap == 2 as ::core::ffi::c_int {
         crate::src::crc32::crc32_slice(0, &[])
     } else {
         crate::src::adler32::ADLER32_INITIAL
     };
     state.last_flush = -2 as ::core::ffi::c_int;
     crate::src::trees::tr_init_state(state);
-    return crate::zlib_h::Z_OK;
+    crate::zlib_h::Z_OK
+}
+
+// This expands only at ABI boundaries.  The state allocation is still owned
+// by the callback-backed deflate stream, so converting its raw handle remains
+// at that boundary while the reset itself is safe state mutation.
+macro_rules! deflate_reset_keep_at_boundary {
+    ($strm:expr $(,)?) => {{
+        let strm = $strm;
+        if crate::src::deflate::deflateStateCheck(strm) != 0 {
+            crate::zlib_h::Z_STREAM_ERROR
+        } else {
+            let state = (*strm).state as *mut crate::src::deflate::deflate_state;
+            crate::src::deflate::deflate_reset_keep_state(&mut *strm, &mut *state)
+        }
+    }};
 }
 #[export_name = "deflateResetKeep"]
 
 pub unsafe extern "C" fn deflateResetKeep_ffi(
     mut strm: crate::zlib_h::z_streamp,
 ) -> ::core::ffi::c_int {
-    deflateResetKeep(strm)
+    deflate_reset_keep_at_boundary!(strm)
 }
-fn lm_init_state(
+pub(crate) fn lm_init_state(
     s: &mut crate::src::deflate::deflate_state,
     head: &mut [crate::src::deflate::Posf],
 ) -> bool {
@@ -1317,38 +1341,38 @@ fn lm_init_state(
     true
 }
 
-unsafe extern "C" fn lm_init(mut s: *mut crate::src::deflate::deflate_state) {
-    if s.is_null() {
-        return;
-    }
-    let Ok(head_len) = usize::try_from((*s).hash_size) else {
-        return;
-    };
-    if head_len != 0 && (*s).head.is_null() {
-        return;
-    }
-    let head = if head_len == 0 {
-        &mut []
-    } else {
-        ::core::slice::from_raw_parts_mut((*s).head, head_len)
-    };
-    let _ = lm_init_state(&mut *s, head);
+// The raw head allocation belongs to the callback-backed deflate state. Keep
+// its temporary slice at the ABI boundary; the reset arithmetic itself lives
+// in the safe helpers above.
+macro_rules! deflate_reset_at_boundary {
+    ($strm:expr $(,)?) => {{
+        let strm = $strm;
+        if crate::src::deflate::deflateStateCheck(strm) != 0 {
+            crate::zlib_h::Z_STREAM_ERROR
+        } else {
+            let state = (*strm).state as *mut crate::src::deflate::deflate_state;
+            let ret = crate::src::deflate::deflate_reset_keep_state(&mut *strm, &mut *state);
+            if ret == crate::zlib_h::Z_OK {
+                if let Ok(head_len) = usize::try_from((*state).hash_size) {
+                    if head_len == 0 {
+                        let _ = crate::src::deflate::lm_init_state(&mut *state, &mut []);
+                    } else if !(*state).head.is_null() {
+                        let head = ::core::slice::from_raw_parts_mut((*state).head, head_len);
+                        let _ = crate::src::deflate::lm_init_state(&mut *state, head);
+                    }
+                }
+            }
+            ret
+        }
+    }};
 }
-
-pub unsafe extern "C" fn deflateReset(mut strm: crate::zlib_h::z_streamp) -> ::core::ffi::c_int {
-    let mut ret: ::core::ffi::c_int = 0;
-    ret = deflateResetKeep(strm);
-    if ret == crate::zlib_h::Z_OK {
-        lm_init((*strm).state as *mut crate::src::deflate::deflate_state);
-    }
-    return ret;
-}
+pub(crate) use deflate_reset_at_boundary;
 #[export_name = "deflateReset"]
 
 pub unsafe extern "C" fn deflateReset_ffi(
     mut strm: crate::zlib_h::z_streamp,
 ) -> ::core::ffi::c_int {
-    deflateReset(strm)
+    deflate_reset_at_boundary!(strm)
 }
 #[export_name = "deflateSetHeader"]
 pub unsafe extern "C" fn deflateSetHeader_ffi(
