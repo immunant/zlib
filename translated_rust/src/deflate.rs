@@ -4759,29 +4759,26 @@ fn deflate_slow(
         let mut bflush: ::core::ffi::c_int = 0;
         loop {
             let needs_input = {
-                let state = &mut *s;
-                state.lookahead < crate::src::deflate::MIN_LOOKAHEAD as crate::stdlib::uInt
+                s.lookahead < crate::src::deflate::MIN_LOOKAHEAD as crate::stdlib::uInt
             };
             if needs_input {
                 fill_window(s, strm);
-                let state = &mut *s;
-                if state.lookahead < crate::src::deflate::MIN_LOOKAHEAD as crate::stdlib::uInt
+                if s.lookahead < crate::src::deflate::MIN_LOOKAHEAD as crate::stdlib::uInt
                     && flush == crate::zlib_h::Z_NO_FLUSH
                 {
                     return need_more;
                 }
-                if state.lookahead == 0 as crate::stdlib::uInt {
+                if s.lookahead == 0 as crate::stdlib::uInt {
                     break;
                 }
             }
             hash_head = NIL as crate::src::deflate::IPos;
             let has_min_match = {
-                let state = &mut *s;
-                state.prev_length = state.match_length;
-                state.prev_match = state.match_start as crate::src::deflate::IPos;
-                state.match_length =
+                s.prev_length = s.match_length;
+                s.prev_match = s.match_start as crate::src::deflate::IPos;
+                s.match_length =
                     (crate::zutil_h::MIN_MATCH - 1 as ::core::ffi::c_int) as crate::stdlib::uInt;
-                state.lookahead >= crate::zutil_h::MIN_MATCH as crate::stdlib::uInt
+                s.lookahead >= crate::zutil_h::MIN_MATCH as crate::stdlib::uInt
             };
             let mut handled_previous_match = false;
             // Both slow-parser outcomes inspect the same window and may tally
@@ -4972,8 +4969,7 @@ fn deflate_slow(
             }
             if bflush != 0 {
                 let avail_out = {
-                    let state = &mut *s;
-                    let strm = state.strm;
+                    let strm = s.strm;
                     flush_pending(strm)
                 };
                 if let Some(result) = deflate_post_flush_result(avail_out, false) {
@@ -5073,9 +5069,8 @@ fn deflate_slow(
         };
         if let Some(last) = tail_last {
             let avail_out = {
-                let state = &mut *s;
-                state.block_start = state.strstart as ::core::ffi::c_long;
-                let strm = state.strm;
+                s.block_start = s.strstart as ::core::ffi::c_long;
+                let strm = s.strm;
                 flush_pending(strm)
             };
             if let Some(result) = deflate_post_flush_result(avail_out, last) {
