@@ -515,13 +515,6 @@ pub unsafe extern "C" fn inflateInit2__ffi(
 ) -> ::core::ffi::c_int {
     inflateInit2_(strm, windowBits, version, stream_size)
 }
-pub unsafe extern "C" fn inflateInit_(
-    mut strm: crate::zlib_h::z_streamp,
-    mut version: *const ::core::ffi::c_char,
-    mut stream_size: ::core::ffi::c_int,
-) -> ::core::ffi::c_int {
-    return inflateInit2_(strm, crate::zutil_h::DEF_WBITS, version, stream_size);
-}
 #[export_name = "inflateInit_"]
 
 pub unsafe extern "C" fn inflateInit__ffi(
@@ -529,7 +522,7 @@ pub unsafe extern "C" fn inflateInit__ffi(
     mut version: *const ::core::ffi::c_char,
     mut stream_size: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
-    inflateInit_(strm, version, stream_size)
+    inflateInit2_(strm, crate::zutil_h::DEF_WBITS, version, stream_size)
 }
 fn inflate_prime_impl(
     mode: crate::src::inflate::inflate_mode,
