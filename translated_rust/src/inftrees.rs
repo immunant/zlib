@@ -3295,7 +3295,7 @@ pub unsafe extern "C" fn inflate_table_ffi(
         work_slice,
     );
     if ret == 0 {
-        *table_ref = (*table_ref).add(table_used);
+        *table_ref = (*table_ref).wrapping_add(table_used);
     }
     ret
 }

@@ -165,9 +165,8 @@ pub unsafe extern "C" fn compress2_ffi(
     mut sourceLen: crate::stdlib::uLong,
     mut level: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
-    let mut ret: ::core::ffi::c_int = 0;
     let mut got: crate::stdlib::z_size_t = *destLen as crate::stdlib::z_size_t;
-    ret = compress2_z_body!(
+    let ret = compress2_z_ffi(
         dest,
         &raw mut got,
         source,
@@ -175,7 +174,7 @@ pub unsafe extern "C" fn compress2_ffi(
         level,
     );
     *destLen = got as crate::stdlib::uLong as crate::stdlib::uLongf;
-    return ret;
+    ret
 }
 #[export_name = "compress_z"]
 pub unsafe extern "C" fn compress_z_ffi(
