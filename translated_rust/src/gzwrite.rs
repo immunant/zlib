@@ -58,6 +58,13 @@ fn gz_init_core(state: &mut crate::gzguts_h::gz_state) {
     }
 }
 
+fn gz_init_stream_defaults(strm: &mut crate::zlib_h::z_stream) {
+    strm.zalloc = None;
+    strm.zfree = None;
+    strm.opaque = ::core::ptr::null_mut::<::core::ffi::c_void>();
+    strm.next_in = ::core::ptr::null_mut::<crate::stdlib::Bytef>();
+}
+
 fn gz_zero_chunk_len(
     size: ::core::ffi::c_uint,
     skip: crate::stdlib::off64_t,
@@ -495,9 +502,7 @@ unsafe fn gz_init(mut state: crate::gzguts_h::gz_statep) -> ::core::ffi::c_int {
             );
             return -1 as ::core::ffi::c_int;
         }
-        state.strm.zalloc = None;
-        state.strm.zfree = None;
-        state.strm.opaque = ::core::ptr::null_mut::<::core::ffi::c_void>();
+        gz_init_stream_defaults(&mut state.strm);
         if crate::src::deflate::deflateInit2_(
             &mut state.strm as *mut crate::zlib_h::z_stream_s,
             state.level,
@@ -518,7 +523,6 @@ unsafe fn gz_init(mut state: crate::gzguts_h::gz_statep) -> ::core::ffi::c_int {
             );
             return -1 as ::core::ffi::c_int;
         }
-        state.strm.next_in = ::core::ptr::null_mut::<crate::stdlib::Bytef>();
     }
     gz_init_core(state);
     0 as ::core::ffi::c_int
@@ -1053,16 +1057,16 @@ mod tests {
         gz_comp_pending_after_output, gz_comp_pending_after_write, gz_comp_reset_action,
         gz_comp_reset_after_flush, gz_comp_skips_empty_flush, gz_comp_write_again,
         gz_comp_write_chunk_len, gz_comp_write_failed, gz_comp_write_failure, gz_has_pending_input,
-        gz_has_pending_skip, gz_write_advanced_pos, gz_write_apply_chunk_progress,
-        gz_write_buffered_copy_len, gz_write_buffered_have_after_copy, gz_write_buffered_step,
-        gz_write_chunk_len, gz_write_direct_progress, gz_write_errno_is_retryable,
-        gz_write_error_result, gz_write_is_empty, gz_write_remaining_after_consumption,
-        gz_write_state_is_usable, gz_write_uses_buffered_path, gz_zero_action,
-        gz_zero_apply_progress, gz_zero_chunk_len, gz_zero_needs_initialization,
-        gzclose_mode_is_writable, gzclose_w_result, gzflush_mode_is_valid, gzfwrite_result,
-        gzputc_result, gzputs_len_fits_int, gzputs_result, gzsetparams_settings_match,
-        gzsetparams_state_is_usable, gzwrite_len_fits_int, GzCompResetAction, GzCompWriteFailure,
-        GzZeroAction,
+        gz_has_pending_skip, gz_init_stream_defaults, gz_write_advanced_pos,
+        gz_write_apply_chunk_progress, gz_write_buffered_copy_len,
+        gz_write_buffered_have_after_copy, gz_write_buffered_step, gz_write_chunk_len,
+        gz_write_direct_progress, gz_write_errno_is_retryable, gz_write_error_result,
+        gz_write_is_empty, gz_write_remaining_after_consumption, gz_write_state_is_usable,
+        gz_write_uses_buffered_path, gz_zero_action, gz_zero_apply_progress, gz_zero_chunk_len,
+        gz_zero_needs_initialization, gzclose_mode_is_writable, gzclose_w_result,
+        gzflush_mode_is_valid, gzfwrite_result, gzputc_result, gzputs_len_fits_int, gzputs_result,
+        gzsetparams_settings_match, gzsetparams_state_is_usable, gzwrite_len_fits_int,
+        GzCompResetAction, GzCompWriteFailure, GzZeroAction,
     };
 
     #[test]
@@ -1146,6 +1150,33 @@ mod tests {
         assert!(!gz_buffer_is_initialized(0));
         assert!(gz_buffer_is_initialized(1));
         assert!(gz_buffer_is_initialized(::core::ffi::c_uint::MAX));
+    }
+
+    #[test]
+    fn gz_init_stream_defaults_clears_callbacks_and_input() {
+        let mut strm = crate::zlib_h::z_stream {
+            next_in: ::core::ptr::null_mut(),
+            avail_in: 0,
+            total_in: 0,
+            next_out: ::core::ptr::null_mut(),
+            avail_out: 0,
+            total_out: 0,
+            msg: ::core::ptr::null_mut(),
+            state: ::core::ptr::null_mut(),
+            zalloc: Some(crate::src::zutil::zcalloc_ffi),
+            zfree: Some(crate::src::zutil::zcfree_ffi),
+            opaque: ::core::ptr::null_mut(),
+            data_type: 0,
+            adler: 0,
+            reserved: 0,
+        };
+
+        gz_init_stream_defaults(&mut strm);
+
+        assert!(strm.zalloc.is_none());
+        assert!(strm.zfree.is_none());
+        assert!(strm.opaque.is_null());
+        assert!(strm.next_in.is_null());
     }
 
     #[test]
