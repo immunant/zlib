@@ -1485,6 +1485,10 @@ struct DeflateCallbackStorage<'stream> {
 
 enum DeflateStorageProjection {
     None,
+    // A full reset only clears the hash table.  Keep that bounded callback
+    // view in the shared stream/state projection, rather than reconstructing
+    // it at the reset adapter after the opaque state has been borrowed.
+    Hash,
     Dictionary,
 }
 
@@ -1515,6 +1519,15 @@ unsafe fn deflate_stream_and_state<'stream>(
             window: None,
             prev: None,
             head: None,
+            pending: None,
+        },
+        DeflateStorageProjection::Hash => DeflateCallbackStorage {
+            window: None,
+            prev: None,
+            head: Some(::core::slice::from_raw_parts_mut(
+                state.head.expect("initialized head table").as_ptr(),
+                state.hash_size as usize,
+            )),
             pending: None,
         },
         DeflateStorageProjection::Dictionary => DeflateCallbackStorage {
@@ -2123,8 +2136,11 @@ pub(crate) unsafe fn deflate_reset_keep_from_stream(
     strm: &mut crate::zlib_h::z_stream_s,
     kind: DeflateResetKind,
 ) -> ::core::ffi::c_int {
-    let Some((strm, state, _storage)) =
-        deflate_stream_and_state(strm, DeflateStorageProjection::None)
+    let projection = match kind {
+        DeflateResetKind::Keep => DeflateStorageProjection::None,
+        DeflateResetKind::Full => DeflateStorageProjection::Hash,
+    };
+    let Some((strm, state, mut storage)) = deflate_stream_and_state(strm, projection)
     else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
@@ -2155,12 +2171,9 @@ pub(crate) unsafe fn deflate_reset_keep_from_stream(
     strm.data_type = crate::zlib_h::Z_UNKNOWN;
     strm.adler = adler;
     if matches!(kind, DeflateResetKind::Full) {
-        // `head` has exactly `hash_size` elements from `deflateInit2_()` or
-        // `deflateCopy()`.
-        let head = ::core::slice::from_raw_parts_mut(
-            state.head.expect("initialized head table").as_ptr(),
-            state.hash_size as usize,
-        );
+        // The shared projection validates the callback-backed table's exact
+        // `hash_size` extent before this pointer-free reset core receives it.
+        let head = storage.head.take().expect("full-reset hash projection");
         let w_size = state.w_size;
         let config = &configuration_table[state.level as usize];
         DeflateResetCore {
