@@ -134,17 +134,25 @@ unsafe fn gz_comp(
                 state.strm.next_in as *const ::core::ffi::c_void,
                 put as crate::__stddef_size_t_h::size_t,
             ) as ::core::ffi::c_int;
-            if writ < 0 as ::core::ffi::c_int {
-                let errno = *crate::stdlib::__errno_location();
-                state.again = gz_write_errno_again(errno);
-                crate::src::gzlib::gz_error(
-                    state_ptr,
-                    crate::zlib_h::Z_ERRNO,
-                    crate::stdlib::strerror(errno),
-                );
-                return -1 as ::core::ffi::c_int;
+            let write_result = if writ < 0 as ::core::ffi::c_int {
+                gz_write_syscall_result(writ, *crate::stdlib::__errno_location())
+            } else {
+                gz_write_syscall_result(writ, 0 as ::core::ffi::c_int)
+            };
+            match write_result {
+                GzWriteSyscallResult::Wrote(written) => {
+                    gz_note_direct_input_written(&mut state.strm, written);
+                }
+                GzWriteSyscallResult::Error { errno, again } => {
+                    state.again = again;
+                    crate::src::gzlib::gz_error(
+                        state_ptr,
+                        crate::zlib_h::Z_ERRNO,
+                        crate::stdlib::strerror(errno),
+                    );
+                    return -1 as ::core::ffi::c_int;
+                }
             }
-            gz_note_direct_input_written(&mut state.strm, writ);
         }
         return 0 as ::core::ffi::c_int;
     }
@@ -172,17 +180,25 @@ unsafe fn gz_comp(
                     state.x.next as *const ::core::ffi::c_void,
                     put as crate::__stddef_size_t_h::size_t,
                 ) as ::core::ffi::c_int;
-                if writ < 0 as ::core::ffi::c_int {
-                    let errno = *crate::stdlib::__errno_location();
-                    state.again = gz_write_errno_again(errno);
-                    crate::src::gzlib::gz_error(
-                        state_ptr,
-                        crate::zlib_h::Z_ERRNO,
-                        crate::stdlib::strerror(errno),
-                    );
-                    return -1 as ::core::ffi::c_int;
+                let write_result = if writ < 0 as ::core::ffi::c_int {
+                    gz_write_syscall_result(writ, *crate::stdlib::__errno_location())
+                } else {
+                    gz_write_syscall_result(writ, 0 as ::core::ffi::c_int)
+                };
+                match write_result {
+                    GzWriteSyscallResult::Wrote(written) => {
+                        gz_note_pending_output_written(state, written);
+                    }
+                    GzWriteSyscallResult::Error { errno, again } => {
+                        state.again = again;
+                        crate::src::gzlib::gz_error(
+                            state_ptr,
+                            crate::zlib_h::Z_ERRNO,
+                            crate::stdlib::strerror(errno),
+                        );
+                        return -1 as ::core::ffi::c_int;
+                    }
                 }
-                gz_note_pending_output_written(state, writ);
             }
             if state.strm.avail_out == 0 as crate::stdlib::uInt {
                 gz_reset_write_output(state);
@@ -334,6 +350,28 @@ fn gz_write_errno_again(errno: ::core::ffi::c_int) -> ::core::ffi::c_int {
         1 as ::core::ffi::c_int
     } else {
         0 as ::core::ffi::c_int
+    }
+}
+
+enum GzWriteSyscallResult {
+    Wrote(::core::ffi::c_int),
+    Error {
+        errno: ::core::ffi::c_int,
+        again: ::core::ffi::c_int,
+    },
+}
+
+fn gz_write_syscall_result(
+    writ: ::core::ffi::c_int,
+    errno: ::core::ffi::c_int,
+) -> GzWriteSyscallResult {
+    if writ < 0 as ::core::ffi::c_int {
+        GzWriteSyscallResult::Error {
+            errno,
+            again: gz_write_errno_again(errno),
+        }
+    } else {
+        GzWriteSyscallResult::Wrote(writ)
     }
 }
 
