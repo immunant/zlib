@@ -62,10 +62,10 @@ pub(crate) unsafe fn gzclose(
             None => return crate::zlib_h::Z_STREAM_ERROR,
         };
     let ret = close(state);
-    // `gz_open()` allocated this opaque handle as a one-element Vec.  The
-    // selected close path has released its owned resources, so reclaim that
+    // `gz_open()` allocated this opaque handle as one Box.  The selected
+    // close path has released its owned resources, so reclaim that matching
     // allocation exactly once after mode-dependent cleanup.
-    drop(Vec::from_raw_parts(state_ptr, 1, 1));
+    drop(Box::from_raw(state_ptr));
     ret
 }
 #[export_name = "gzclose"]

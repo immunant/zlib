@@ -6,6 +6,7 @@
 #![allow(unused_assignments)]
 #![allow(unused_mut)]
 #![feature(extern_types)]
+#![feature(allocator_api)]
 #![feature(register_tool)]
 #![feature(strict_provenance)]
 #![register_tool(c2rust)]

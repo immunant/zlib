@@ -1791,10 +1791,14 @@ unsafe fn gz_open(path: &[u8], fd: ::core::ffi::c_int, mode: &[u8]) -> crate::zl
     // The gzip handle is opaque at the ABI.  Keep its allocation owned until
     // the handle is successfully returned, rather than using malloc/free for
     // the state record itself.
-    let mut state_owner = Vec::new();
-    if state_owner.try_reserve_exact(1).is_err() {
-        return ::core::ptr::null_mut::<crate::zlib_h::gzFile_s>();
-    }
+    // Reserve the exact one-state allocation before parsing or opening, as
+    // the former Vec owner did, so allocation failure has the same ordering.
+    // `Box::write()` publishes the initialized state without an intermediate
+    // raw handle; close can now reclaim the matching one-state Box directly.
+    let state_owner = match Box::<crate::gzguts_h::gz_state>::try_new_uninit() {
+        Ok(owner) => owner,
+        Err(_) => return ::core::ptr::null_mut::<crate::zlib_h::gzFile_s>(),
+    };
     let Some(mode) = parse_gz_open_mode(mode).and_then(GzOpenMode::normalize) else {
         return ::core::ptr::null_mut::<crate::zlib_h::gzFile_s>();
     };
@@ -1813,7 +1817,7 @@ unsafe fn gz_open(path: &[u8], fd: ::core::ffi::c_int, mode: &[u8]) -> crate::zl
     let Some(initial) = gz_open_state(config, path, source) else {
         return ::core::ptr::null_mut::<crate::zlib_h::gzFile_s>();
     };
-    state_owner.push(crate::gzguts_h::gz_state {
+    let state_owner = Box::write(state_owner, crate::gzguts_h::gz_state {
         x: crate::zlib_h::gzFile_s {
             have: initial.reset.have,
             next: ::core::ptr::null_mut(),
@@ -1860,9 +1864,7 @@ unsafe fn gz_open(path: &[u8], fd: ::core::ffi::c_int, mode: &[u8]) -> crate::zl
             reserved: 0,
         },
     });
-    let state = state_owner.as_mut_ptr();
-    ::core::mem::forget(state_owner);
-    return state as crate::zlib_h::gzFile;
+    return Box::into_raw(state_owner) as crate::zlib_h::gzFile;
 }
 
 #[export_name = "gzopen"]
