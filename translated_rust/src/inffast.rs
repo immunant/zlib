@@ -390,7 +390,7 @@ fn inflate_fast_slices(
         strm,
         state,
         crate::src::inflate::InflateWindowAccess::Existing,
-        |state, window| {
+        |_, state, window| {
             let window = window.as_deref().unwrap_or(&[]);
             // Fixed tables are static; dynamic tables are checked subranges
             // of the state-owned workspace.  Resolve both through the
@@ -475,12 +475,17 @@ pub(crate) fn inflate_fast_bound_cursors(
 pub fn inflate_fast(
     strm: Option<&mut crate::zlib_h::z_stream>,
     start: ::core::ffi::c_uint,
+    output: &mut [crate::stdlib::Bytef],
 ) {
     let Some(strm) = strm else {
         return;
     };
     let _ = start;
-    let _ = crate::src::inflate::inflate(strm, crate::zlib_h::Z_NO_FLUSH);
+    let _ = crate::src::inflate::inflate(
+        strm,
+        crate::zlib_h::Z_NO_FLUSH,
+        output,
+    );
 }
 
 #[export_name = "inflate_fast"]
@@ -491,5 +496,18 @@ pub unsafe extern "C" fn inflate_fast_ffi(
     // SAFETY: the ABI adapter only binds the optional stream reference. The
     // implementation owns the fallback dispatch and stream validation.
     let strm = unsafe { strm.as_mut() };
-    inflate_fast(strm, start)
+    let Some(strm) = strm else {
+        return;
+    };
+    if strm.next_out.is_null()
+        || strm.next_in.is_null() && strm.avail_in != 0 as crate::stdlib::uInt
+    {
+        return;
+    }
+    // SAFETY: `inflate_fast` shares inflate's public cursor contract. This
+    // thin ABI adapter binds only the advertised output range.
+    let output = unsafe {
+        ::core::slice::from_raw_parts_mut(strm.next_out, strm.avail_out as usize)
+    };
+    inflate_fast(Some(strm), start, output)
 }

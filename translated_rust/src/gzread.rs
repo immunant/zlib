@@ -148,6 +148,20 @@ fn gz_buffered_input_range(
     (end <= capacity).then_some(start..end)
 }
 
+// The decompressor's output cursor always refers to the registry-owned
+// output allocation. Convert its address and advertised length into a range
+// before lending that allocation to the slice-based inflater core.
+fn gz_buffered_output_range(
+    output_addr: usize,
+    cursor_addr: usize,
+    available: ::core::ffi::c_uint,
+    capacity: usize,
+) -> Option<::core::ops::Range<usize>> {
+    let start = cursor_addr.checked_sub(output_addr)?;
+    let end = start.checked_add(available as usize)?;
+    (end <= capacity).then_some(start..end)
+}
+
 // This helper is internal and all of its callers have already bound the
 // validated gzip state. Descriptor I/O remains confined to `gz_load`.
 fn gz_avail(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
@@ -331,8 +345,31 @@ fn gz_decomp(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
             break;
         } else {
             // `gz_look` initialized this stream and its input/output ranges
-            // are owned by the validated gzip state for this call.
-            ret = crate::src::inflate::inflate(&mut state.strm, crate::zlib_h::Z_NO_FLUSH);
+            // are owned by the validated gzip state for this call. Borrow the
+            // output Vec from that registry rather than reconstructing a
+            // slice from the C-facing cursor in the inflater itself.
+            let state_key = crate::src::gzlib::gz_owned_buffer_key(state);
+            let result = crate::src::gzlib::gz_with_owned_output_buffer(state_key, |output| {
+                if state.out != output.as_mut_ptr() {
+                    return None;
+                }
+                let range = gz_buffered_output_range(
+                    output.as_ptr().addr(),
+                    state.strm.next_out.addr(),
+                    state.strm.avail_out,
+                    output.len(),
+                )?;
+                Some(crate::src::inflate::inflate(
+                    &mut state.strm,
+                    crate::zlib_h::Z_NO_FLUSH,
+                    &mut output[range],
+                ))
+            });
+            let Some(Some(result)) = result else {
+                ret = crate::zlib_h::Z_STREAM_ERROR;
+                break;
+            };
+            ret = result;
             match crate::src::gzlib::gz_decomp_after_inflate(state, had, ret) {
                 crate::src::gzlib::GzDecompStep::Continue => {}
                 crate::src::gzlib::GzDecompStep::Stop(result) => {

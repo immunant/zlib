@@ -114,9 +114,11 @@ fn uncompress2_z_bound(
     }
     len = *sourceLen;
     left = *destLen;
-    stream.next_in = source
-        .map_or(::core::ptr::null(), <[crate::stdlib::Bytef]>::as_ptr)
-        as *mut crate::stdlib::Bytef;
+    let source = source.unwrap_or(&[]);
+    let dest = dest.as_deref_mut().unwrap_or(&mut empty_output[..]);
+    let mut source_offset = 0usize;
+    let mut dest_offset = 0usize;
+    stream.next_in = source.as_ptr() as *mut crate::stdlib::Bytef;
     stream.avail_in = 0 as crate::stdlib::uInt;
     stream.zalloc = None;
     stream.zfree = None;
@@ -129,12 +131,7 @@ fn uncompress2_z_bound(
     if err != crate::zlib_h::Z_OK {
         return err;
     }
-    stream.next_out = if left == 0 && dest.is_none() {
-        empty_output.as_mut_ptr()
-    } else {
-        dest.as_deref_mut()
-            .map_or(::core::ptr::null_mut(), <[crate::stdlib::Bytef]>::as_mut_ptr)
-    };
+    stream.next_out = dest.as_mut_ptr();
     stream.avail_out = 0 as crate::stdlib::uInt;
     loop {
         if stream.avail_out == 0 as crate::stdlib::uInt {
@@ -143,7 +140,18 @@ fn uncompress2_z_bound(
         if stream.avail_in == 0 as crate::stdlib::uInt {
             (stream.avail_in, len) = uncompress_chunk(len, max);
         }
-        err = crate::src::inflate::inflate(&mut stream, crate::zlib_h::Z_NO_FLUSH);
+        let input_end = source_offset + stream.avail_in as usize;
+        let output_end = dest_offset + stream.avail_out as usize;
+        let before_in = stream.avail_in;
+        let before_out = stream.avail_out;
+        err = crate::src::inflate::inflate(
+            &mut stream,
+            crate::zlib_h::Z_NO_FLUSH,
+            &mut dest[dest_offset..output_end],
+        );
+        source_offset += before_in.wrapping_sub(stream.avail_in) as usize;
+        dest_offset += before_out.wrapping_sub(stream.avail_out) as usize;
+        debug_assert!(input_end >= source_offset);
         if err != crate::zlib_h::Z_OK {
             break;
         }
