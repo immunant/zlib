@@ -89,6 +89,15 @@ pub struct internal_state {
     pub pending: crate::zutil_h::ulg,
     pub wrap: ::core::ffi::c_int,
     pub gzhead: crate::zlib_h::gz_headerp,
+    // `deflateBound()` only needs these stable header lengths.  Keep that
+    // metadata in the stream state so its ABI wrapper does not need to walk
+    // the retained caller header.
+    gzhead_bound_set: bool,
+    gzhead_bound_has_extra: bool,
+    gzhead_bound_extra_len: crate::stdlib::uInt,
+    gzhead_bound_name_len: usize,
+    gzhead_bound_comment_len: usize,
+    gzhead_bound_hcrc: ::core::ffi::c_int,
     pub gzindex: crate::zutil_h::ulg,
     pub method: crate::stdlib::Byte,
     pub last_flush: ::core::ffi::c_int,
@@ -633,6 +642,7 @@ fn initialize_deflate_state_base(
     state.status = crate::src::deflate::INIT_STATE;
     state.wrap = wrap;
     state.gzhead = ::core::ptr::null_mut::<crate::zlib_h::gz_header>();
+    state.gzhead_bound_set = false;
     state.w_bits = window_bits as crate::stdlib::uInt;
     state.w_size = (1 as crate::stdlib::uInt) << state.w_bits;
     state.w_mask = state.w_size.wrapping_sub(1);
@@ -1250,11 +1260,18 @@ pub unsafe extern "C" fn deflateReset_ffi(
 fn deflate_set_header(
     state: &mut crate::src::deflate::deflate_state,
     head: &mut crate::zlib_h::gz_header_s,
+    bound: DeflateBoundHeaderMetadata,
 ) -> ::core::ffi::c_int {
     if state.wrap != 2 as ::core::ffi::c_int {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
     state.gzhead = head;
+    state.gzhead_bound_set = true;
+    state.gzhead_bound_has_extra = bound.has_extra;
+    state.gzhead_bound_extra_len = bound.extra_len;
+    state.gzhead_bound_name_len = bound.name_len;
+    state.gzhead_bound_comment_len = bound.comment_len;
+    state.gzhead_bound_hcrc = bound.hcrc;
     crate::zlib_h::Z_OK
 }
 
@@ -1263,6 +1280,7 @@ fn deflate_clear_header(state: &mut crate::src::deflate::deflate_state) -> ::cor
         return crate::zlib_h::Z_STREAM_ERROR;
     }
     state.gzhead = ::core::ptr::null_mut();
+    state.gzhead_bound_set = false;
     crate::zlib_h::Z_OK
 }
 #[export_name = "deflateSetHeader"]
@@ -1286,7 +1304,49 @@ pub unsafe extern "C" fn deflateSetHeader_ffi(
     if head.is_null() {
         deflate_clear_header(state)
     } else {
-        deflate_set_header(state, &mut *head)
+        let header = &mut *head;
+        let name = if header.name.is_null() {
+            None
+        } else {
+            Some(::std::ffi::CStr::from_ptr(header.name.cast()))
+        };
+        let comment = if header.comment.is_null() {
+            None
+        } else {
+            Some(::std::ffi::CStr::from_ptr(header.comment.cast()))
+        };
+        let bound = deflate_bound_header_metadata(
+            !header.extra.is_null(),
+            header.extra_len,
+            name,
+            comment,
+            header.hcrc,
+        );
+        deflate_set_header(state, header, bound)
+    }
+}
+
+struct DeflateBoundHeaderMetadata {
+    has_extra: bool,
+    extra_len: crate::stdlib::uInt,
+    name_len: usize,
+    comment_len: usize,
+    hcrc: ::core::ffi::c_int,
+}
+
+fn deflate_bound_header_metadata(
+    has_extra: bool,
+    extra_len: crate::stdlib::uInt,
+    name: Option<&::std::ffi::CStr>,
+    comment: Option<&::std::ffi::CStr>,
+    hcrc: ::core::ffi::c_int,
+) -> DeflateBoundHeaderMetadata {
+    DeflateBoundHeaderMetadata {
+        has_extra,
+        extra_len,
+        name_len: name.map_or(0, |name| name.to_bytes_with_nul().len()),
+        comment_len: comment.map_or(0, |comment| comment.to_bytes_with_nul().len()),
+        hcrc,
     }
 }
 fn deflate_pending(
@@ -1595,17 +1655,8 @@ pub unsafe extern "C" fn deflateTune_ffi(
     }
     deflate_tune(state, good_length, max_lazy, nice_length, max_chain)
 }
-struct DeflateBoundGzipHeader<'a> {
-    has_extra: bool,
-    extra_len: crate::stdlib::uInt,
-    name: Option<&'a ::std::ffi::CStr>,
-    comment: Option<&'a ::std::ffi::CStr>,
-    hcrc: ::core::ffi::c_int,
-}
-
 fn deflate_bound_z(
     state: Option<&crate::src::deflate::deflate_state>,
-    gzip_header: Option<DeflateBoundGzipHeader<'_>>,
     source_len: crate::stdlib::z_size_t,
 ) -> crate::stdlib::z_size_t {
     let mut fixedlen: crate::stdlib::z_size_t = 0;
@@ -1658,19 +1709,16 @@ fn deflate_bound_z(
         }
         2 => {
             wraplen = 18 as crate::stdlib::z_size_t;
-            if let Some(header) = gzip_header {
-                if header.has_extra {
-                    wraplen = wraplen
-                        .wrapping_add((2 as crate::stdlib::uInt).wrapping_add(header.extra_len)
-                            as crate::stdlib::z_size_t);
+            if state.gzhead_bound_set {
+                if state.gzhead_bound_has_extra {
+                    wraplen = wraplen.wrapping_add(
+                        (2 as crate::stdlib::uInt).wrapping_add(state.gzhead_bound_extra_len)
+                            as crate::stdlib::z_size_t,
+                    );
                 }
-                if let Some(name) = header.name {
-                    wraplen = wraplen.wrapping_add(name.to_bytes_with_nul().len());
-                }
-                if let Some(comment) = header.comment {
-                    wraplen = wraplen.wrapping_add(comment.to_bytes_with_nul().len());
-                }
-                if header.hcrc != 0 {
+                wraplen = wraplen.wrapping_add(state.gzhead_bound_name_len);
+                wraplen = wraplen.wrapping_add(state.gzhead_bound_comment_len);
+                if state.gzhead_bound_hcrc != 0 {
                     wraplen = wraplen.wrapping_add(2 as crate::stdlib::z_size_t);
                 }
             }
@@ -1720,29 +1768,7 @@ pub unsafe extern "C" fn deflateBound_z_ffi(
         let state = (strm.state as *const crate::src::deflate::deflate_state).as_ref()?;
         deflate_stream_state_valid(Some(strm), Some(state)).then_some(state)
     });
-    let gzip_header = state.and_then(|state| {
-        if state.gzhead.is_null() || (state.wrap != 2 && state.wrap != -2) {
-            None
-        } else {
-            let header = &*state.gzhead;
-            Some(DeflateBoundGzipHeader {
-                has_extra: !header.extra.is_null(),
-                extra_len: header.extra_len,
-                name: if header.name.is_null() {
-                    None
-                } else {
-                    Some(::std::ffi::CStr::from_ptr(header.name.cast()))
-                },
-                comment: if header.comment.is_null() {
-                    None
-                } else {
-                    Some(::std::ffi::CStr::from_ptr(header.comment.cast()))
-                },
-                hcrc: header.hcrc,
-            })
-        }
-    });
-    deflate_bound_z(state, gzip_header, sourceLen)
+    deflate_bound_z(state, sourceLen)
 }
 fn deflate_bound_result(bound: crate::stdlib::z_size_t) -> crate::stdlib::uLong {
     if bound != bound {
@@ -1764,33 +1790,7 @@ pub unsafe extern "C" fn deflateBound_ffi(
         let state = (strm.state as *const crate::src::deflate::deflate_state).as_ref()?;
         deflate_stream_state_valid(Some(strm), Some(state)).then_some(state)
     });
-    let gzip_header = state.and_then(|state| {
-        if state.gzhead.is_null() || (state.wrap != 2 && state.wrap != -2) {
-            None
-        } else {
-            let header = &*state.gzhead;
-            Some(DeflateBoundGzipHeader {
-                has_extra: !header.extra.is_null(),
-                extra_len: header.extra_len,
-                name: if header.name.is_null() {
-                    None
-                } else {
-                    Some(::std::ffi::CStr::from_ptr(header.name.cast()))
-                },
-                comment: if header.comment.is_null() {
-                    None
-                } else {
-                    Some(::std::ffi::CStr::from_ptr(header.comment.cast()))
-                },
-                hcrc: header.hcrc,
-            })
-        }
-    });
-    deflate_bound_result(deflate_bound_z(
-        state,
-        gzip_header,
-        sourceLen as crate::stdlib::z_size_t,
-    ))
+    deflate_bound_result(deflate_bound_z(state, sourceLen as crate::stdlib::z_size_t))
 }
 fn put_short_msb(
     state: &mut crate::src::deflate::deflate_state,
