@@ -734,7 +734,7 @@ pub unsafe extern "C" fn deflateInit2_(
             2 as ::core::ffi::c_int - -4 as ::core::ffi::c_int
         }) as usize]
             .load(::core::sync::atomic::Ordering::Relaxed);
-        deflateEnd(strm);
+        deflateEnd(stream);
         return crate::zlib_h::Z_MEM_ERROR;
     }
     // The allocation above reserves four bytes for every literal entry, so
@@ -2452,8 +2452,11 @@ pub unsafe extern "C" fn deflate_ffi(
 ) -> ::core::ffi::c_int {
     deflate(strm, flush)
 }
-pub unsafe extern "C" fn deflateEnd(mut strm: crate::zlib_h::z_streamp) -> ::core::ffi::c_int {
-    let Some((stream, state)) = deflateStateCheck(strm) else {
+// The public ABI wrapper binds the foreign stream pointer.  Teardown itself
+// only needs the already-owned stream and state, so keep the release plan
+// reference-bound here.
+pub fn deflateEnd(stream: &mut crate::zlib_h::z_stream) -> ::core::ffi::c_int {
+    let Some((stream, state)) = deflateStateCheck(stream as *mut _) else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
     // `deflateStateCheck()` has established both links. Snapshot the release
@@ -2471,19 +2474,24 @@ pub unsafe extern "C" fn deflateEnd(mut strm: crate::zlib_h::z_streamp) -> ::cor
             stream.state,
         )
     };
-    if !pending_buf.is_null() {
-        zfree(opaque, pending_buf as crate::stdlib::voidpf);
+    // SAFETY: `deflateStateCheck()` validated the matching allocator and all
+    // captured allocations. They are released in zlib's established order,
+    // and no stream or state reference is used while a callback is active.
+    unsafe {
+        if !pending_buf.is_null() {
+            zfree(opaque, pending_buf as crate::stdlib::voidpf);
+        }
+        if !head.is_null() {
+            zfree(opaque, head as crate::stdlib::voidpf);
+        }
+        if !prev.is_null() {
+            zfree(opaque, prev as crate::stdlib::voidpf);
+        }
+        if !window.is_null() {
+            zfree(opaque, window as crate::stdlib::voidpf);
+        }
+        zfree(opaque, state_ptr as crate::stdlib::voidpf);
     }
-    if !head.is_null() {
-        zfree(opaque, head as crate::stdlib::voidpf);
-    }
-    if !prev.is_null() {
-        zfree(opaque, prev as crate::stdlib::voidpf);
-    }
-    if !window.is_null() {
-        zfree(opaque, window as crate::stdlib::voidpf);
-    }
-    zfree(opaque, state_ptr as crate::stdlib::voidpf);
     // `deflateStateCheck()` returned this same bound stream.  Complete the
     // teardown through that reference rather than re-binding the raw ABI
     // pointer after the release callbacks have run.
@@ -2543,6 +2551,9 @@ fn deflate_end_complete(
 #[export_name = "deflateEnd"]
 
 pub unsafe extern "C" fn deflateEnd_ffi(mut strm: crate::zlib_h::z_streamp) -> ::core::ffi::c_int {
+    let Some(strm) = (unsafe { strm.as_mut() }) else {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    };
     deflateEnd(strm)
 }
 pub unsafe extern "C" fn deflateCopy(
@@ -2571,9 +2582,18 @@ pub unsafe extern "C" fn deflateCopy(
         .addr()
         .wrapping_sub((*ss).pending_buf.addr());
     let plan = deflate_copy_plan(&*ss, pending_offset);
-    ds = Some((*dest).zalloc.expect("non-null function pointer"))
-        .expect("non-null function pointer")(
-        (*dest).opaque,
+    // Capture this allocation callback and its argument together before it
+    // runs, matching the original evaluation order without retaining a
+    // stream reference across the foreign callback.
+    let (zalloc, opaque) = {
+        let dest_stream = &mut *dest;
+        (
+            dest_stream.zalloc.expect("non-null function pointer"),
+            dest_stream.opaque,
+        )
+    };
+    ds = Some(zalloc).expect("non-null function pointer")(
+        opaque,
         1 as crate::stdlib::uInt,
         ::core::mem::size_of::<crate::src::deflate::deflate_state>() as crate::stdlib::uInt,
     ) as *mut crate::src::deflate::deflate_state;
@@ -2612,7 +2632,7 @@ pub unsafe extern "C" fn deflateCopy(
         4 as crate::stdlib::uInt,
     ) as *mut crate::zutil_h::uchf as *mut crate::stdlib::Bytef;
     if window.is_null() || prev.is_null() || head.is_null() || pending_buf.is_null() {
-        deflateEnd(dest);
+        deflateEnd(&mut *dest);
         return crate::zlib_h::Z_MEM_ERROR;
     }
     // `pending_out` is an offset into the source pending allocation. Retain
