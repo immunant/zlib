@@ -507,15 +507,11 @@ pub unsafe extern "C" fn gzfwrite_ffi(
     gzfwrite(state, input, size, nitems)
 }
 unsafe fn gzputc(
-    mut state: Option<::core::ptr::NonNull<crate::gzguts_h::gz_state>>,
+    state: &mut crate::gzguts_h::gz_state,
     mut c: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
     let mut have: ::core::ffi::c_uint = 0;
     let mut buf: [::core::ffi::c_uchar; 1] = [0; 1];
-    let Some(mut state) = state else {
-        return -1 as ::core::ffi::c_int;
-    };
-    let state = state.as_mut();
     let policy = GzWritePolicy {
         mode: state.mode,
         err: state.err,
@@ -575,19 +571,12 @@ pub unsafe extern "C" fn gzputc_ffi(
     mut file: crate::zlib_h::gzFile,
     mut c: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
-    gzputc(
-        ::core::ptr::NonNull::new(file as crate::gzguts_h::gz_statep),
-        c,
-    )
-}
-unsafe fn gzputs(
-    mut state: Option<::core::ptr::NonNull<crate::gzguts_h::gz_state>>,
-    text: &[u8],
-) -> ::core::ffi::c_int {
-    let Some(mut state) = state else {
+    let Some(state) = (file as crate::gzguts_h::gz_statep).as_mut() else {
         return -1 as ::core::ffi::c_int;
     };
-    let state = state.as_mut();
+    gzputc(state, c)
+}
+unsafe fn gzputs(state: &mut crate::gzguts_h::gz_state, text: &[u8]) -> ::core::ffi::c_int {
     let policy = GzWritePolicy {
         mode: state.mode,
         err: state.err,
@@ -628,19 +617,15 @@ pub unsafe extern "C" fn gzputs_ffi(
         return -1 as ::core::ffi::c_int;
     }
     let text = ::core::ffi::CStr::from_ptr(s).to_bytes();
-    gzputs(
-        ::core::ptr::NonNull::new(file as crate::gzguts_h::gz_statep),
-        text,
-    )
+    let Some(state) = (file as crate::gzguts_h::gz_statep).as_mut() else {
+        return -1 as ::core::ffi::c_int;
+    };
+    gzputs(state, text)
 }
 unsafe fn gzflush(
-    mut state: Option<::core::ptr::NonNull<crate::gzguts_h::gz_state>>,
+    state: &mut crate::gzguts_h::gz_state,
     mut flush: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
-    let Some(mut state) = state else {
-        return crate::zlib_h::Z_STREAM_ERROR;
-    };
-    let state = state.as_mut();
     let policy = GzWritePolicy {
         mode: state.mode,
         err: state.err,
@@ -666,20 +651,16 @@ pub unsafe extern "C" fn gzflush_ffi(
     mut file: crate::zlib_h::gzFile,
     mut flush: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
-    gzflush(
-        ::core::ptr::NonNull::new(file as crate::gzguts_h::gz_statep),
-        flush,
-    )
+    let Some(state) = (file as crate::gzguts_h::gz_statep).as_mut() else {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    };
+    gzflush(state, flush)
 }
 unsafe fn gzsetparams(
-    mut state: Option<::core::ptr::NonNull<crate::gzguts_h::gz_state>>,
+    state: &mut crate::gzguts_h::gz_state,
     mut level: ::core::ffi::c_int,
     mut strategy: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
-    let Some(mut state) = state else {
-        return crate::zlib_h::Z_STREAM_ERROR;
-    };
-    let state = state.as_mut();
     let policy = GzWritePolicy {
         mode: state.mode,
         err: state.err,
@@ -719,11 +700,10 @@ pub unsafe extern "C" fn gzsetparams_ffi(
     mut level: ::core::ffi::c_int,
     mut strategy: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
-    gzsetparams(
-        ::core::ptr::NonNull::new(file as crate::gzguts_h::gz_statep),
-        level,
-        strategy,
-    )
+    let Some(state) = (file as crate::gzguts_h::gz_statep).as_mut() else {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    };
+    gzsetparams(state, level, strategy)
 }
 pub unsafe extern "C" fn gzclose_w(mut file: crate::zlib_h::gzFile) -> ::core::ffi::c_int {
     let mut ret: ::core::ffi::c_int = crate::zlib_h::Z_OK;
