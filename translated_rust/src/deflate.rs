@@ -3225,7 +3225,6 @@ fn deflate_validated(
     input: Option<&[crate::stdlib::Bytef]>,
     output: Option<&mut [crate::stdlib::Bytef]>,
 ) -> ::core::ffi::c_int {
-    let mut old_flush: ::core::ffi::c_int = 0;
     if strm.avail_in != 0 as crate::stdlib::uInt
         && (strm.next_in.is_null()
             || input.map_or(true, |input| input.len() != strm.avail_in as usize))
@@ -3243,16 +3242,44 @@ fn deflate_validated(
             .load(::core::sync::atomic::Ordering::Relaxed);
         return -5 as ::core::ffi::c_int;
     }
-    // `pending_buf` is allocated with the deflate state and remains stable for
-    // the whole call.  Form its checked Rust view once at this legacy storage
-    // boundary instead of rebuilding raw views for every header, flush, and
-    // update path below.
+    with_callback_deflate_pending_buffer(state, |state, pending_buffer| {
+        deflate_with_pending_buffer(strm, state, flush, input, output, pending_buffer)
+    })
+    .unwrap_or(crate::zlib_h::Z_STREAM_ERROR)
+}
+
+/// Borrow the one legacy pending allocation for one synchronous deflate
+/// operation.
+///
+/// The pending buffer is still an ABI callback allocation for custom and
+/// mixed allocator streams. Keep its raw conversion at this type-specific
+/// storage boundary so the stream state machine only receives a checked
+/// slice. A future owned pending-buffer path can replace this boundary
+/// without moving header, flush, or strategy logic into an FFI wrapper.
+fn with_callback_deflate_pending_buffer<R>(
+    state: &mut crate::src::deflate::deflate_state,
+    action: impl FnOnce(&mut crate::src::deflate::deflate_state, &mut [crate::stdlib::Bytef]) -> R,
+) -> Option<R> {
     if state.pending_buf.is_null() {
-        return crate::zlib_h::Z_STREAM_ERROR;
+        return None;
     }
-    let mut pending_buffer = unsafe {
+    let pending_buffer = unsafe {
         ::core::slice::from_raw_parts_mut(state.pending_buf, state.pending_buf_size as usize)
     };
+    Some(action(state, pending_buffer))
+}
+
+/// Run the deflate state machine after the legacy pending allocation has been
+/// converted at its type-specific boundary.
+fn deflate_with_pending_buffer(
+    strm: &mut crate::zlib_h::z_stream,
+    state: &mut crate::src::deflate::deflate_state,
+    flush: ::core::ffi::c_int,
+    input: Option<&[crate::stdlib::Bytef]>,
+    output: Option<&mut [crate::stdlib::Bytef]>,
+    mut pending_buffer: &mut [crate::stdlib::Bytef],
+) -> ::core::ffi::c_int {
+    let mut old_flush: ::core::ffi::c_int = 0;
     let mut output_buffer = output.expect("validated deflate output");
     old_flush = state.last_flush;
     state.last_flush = flush;
