@@ -669,49 +669,36 @@ pub unsafe extern "C" fn gzputc_ffi(
 ) -> ::core::ffi::c_int {
     gzputc(file, c)
 }
-pub unsafe extern "C" fn gzputs(
-    mut file: crate::zlib_h::gzFile,
-    mut s: *const ::core::ffi::c_char,
-) -> ::core::ffi::c_int {
-    let mut len: crate::stdlib::z_size_t = 0;
-    let mut put: crate::stdlib::z_size_t = 0;
-    let mut state: crate::gzguts_h::gz_statep =
-        ::core::ptr::null_mut::<crate::gzguts_h::gz_state>();
-    if file.is_null() {
-        return -1 as ::core::ffi::c_int;
-    }
-    state = file as crate::gzguts_h::gz_statep;
-    if !gzwrite_state_is_valid((*state).mode, (*state).err, (*state).again) {
-        return -1 as ::core::ffi::c_int;
-    }
-    crate::src::gzlib::gz_error(
-        state as *mut crate::gzguts_h::gz_state,
-        crate::zlib_h::Z_OK,
-        ::core::ptr::null::<::core::ffi::c_char>(),
-    );
-    len = crate::stdlib::strlen(s) as crate::stdlib::z_size_t;
-    if !crate::src::gzlib::gz_len_fits_int(len) {
-        crate::src::gzlib::gz_error(
-            state as *mut crate::gzguts_h::gz_state,
-            crate::zlib_h::Z_STREAM_ERROR,
-            b"string length does not fit in int\0".as_ptr() as *const ::core::ffi::c_char,
-        );
-        return -1 as ::core::ffi::c_int;
-    }
-    put = gz_write(state, s as crate::stdlib::voidpc, len);
-    return if len != 0 && put == 0 as crate::stdlib::z_size_t {
-        -1 as ::core::ffi::c_int
-    } else {
-        put as ::core::ffi::c_int
-    };
-}
 #[export_name = "gzputs"]
 
 pub unsafe extern "C" fn gzputs_ffi(
     mut file: crate::zlib_h::gzFile,
     mut s: *const ::core::ffi::c_char,
 ) -> ::core::ffi::c_int {
-    gzputs(file, s)
+    if file.is_null() || s.is_null() {
+        return -1;
+    }
+    let state = &mut *(file as crate::gzguts_h::gz_statep);
+    if !gzwrite_state_is_valid(state.mode, state.err, state.again) {
+        return -1;
+    }
+    crate::src::gzlib::gz_error_clear(state);
+    let bytes = ::std::ffi::CStr::from_ptr(s).to_bytes();
+    let len = bytes.len();
+    if !crate::src::gzlib::gz_len_fits_int(len) {
+        crate::src::gzlib::gz_error_static(
+            state,
+            crate::zlib_h::Z_STREAM_ERROR,
+            b"string length does not fit in int\0",
+        );
+        return -1;
+    }
+    let put = gz_write(state, bytes.as_ptr() as crate::stdlib::voidpc, len);
+    if len != 0 && put == 0 {
+        -1
+    } else {
+        put as ::core::ffi::c_int
+    }
 }
 pub unsafe extern "C" fn gzflush(
     mut file: crate::zlib_h::gzFile,
