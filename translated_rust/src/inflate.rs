@@ -3408,10 +3408,10 @@ fn inflate_mark_value(
         }) as ::core::ffi::c_long
 }
 
-pub unsafe extern "C" fn inflateMark(mut strm: crate::zlib_h::z_streamp) -> ::core::ffi::c_long {
-    let Some(strm) = strm.as_mut() else {
-        return -((1 as ::core::ffi::c_long) << 16 as ::core::ffi::c_int);
-    };
+// The export boundary validates the nullable stream handle.  The named
+// implementation keeps the stream-bound opaque-state projection together
+// with the scalar query, so the wrapper remains a conversion and dispatch.
+pub unsafe fn inflateMark(strm: &mut crate::zlib_h::z_stream_s) -> ::core::ffi::c_long {
     let Some((_strm, state)) = inflate_stream_and_state(strm) else {
         return -((1 as ::core::ffi::c_long) << 16 as ::core::ffi::c_int);
     };
@@ -3427,6 +3427,9 @@ pub unsafe extern "C" fn inflateMark(mut strm: crate::zlib_h::z_streamp) -> ::co
 pub unsafe extern "C" fn inflateMark_ffi(
     mut strm: crate::zlib_h::z_streamp,
 ) -> ::core::ffi::c_long {
+    let Some(strm) = strm.as_mut() else {
+        return -((1 as ::core::ffi::c_long) << 16 as ::core::ffi::c_int);
+    };
     inflateMark(strm)
 }
 
