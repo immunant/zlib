@@ -145,9 +145,10 @@ pub struct inflate_state {
     pub check: ::core::ffi::c_ulong,
     pub total: ::core::ffi::c_ulong,
     // `inflateGetHeader()` registers a caller-owned ABI header for later
-    // `inflate()` calls.  Retain only a checked non-null handle here; the
-    // boundary that dereferences it is the exported `inflate()` wrapper.
-    pub head: Option<core::ptr::NonNull<crate::zlib_h::gz_header_s>>,
+    // `inflate()` calls.  Decoder state only records that such a header is
+    // attached; the ABI boundary owns the address needed to materialize its
+    // bounded output views for a single call.
+    pub head: bool,
     pub wbits: ::core::ffi::c_uint,
     pub wsize: ::core::ffi::c_uint,
     pub whave: ::core::ffi::c_uint,
@@ -190,7 +191,7 @@ pub(crate) fn new_inflate_state() -> inflate_state {
         dmax: 0,
         check: 0,
         total: 0,
-        head: None,
+        head: false,
         wbits: 0,
         wsize: 0,
         whave: 0,
@@ -291,7 +292,10 @@ fn inflate_reset_keep_state(
     state.havedict = 0 as ::core::ffi::c_int;
     state.flags = -1 as ::core::ffi::c_int;
     state.dmax = 32768 as ::core::ffi::c_uint;
-    state.head = None;
+    if state.head {
+        remove_inflate_header(state);
+    }
+    state.head = false;
     state.hold = 0 as ::core::ffi::c_ulong;
     state.bits = 0 as ::core::ffi::c_uint;
     state.next = 0;
@@ -525,6 +529,10 @@ fn inflate_release_owned_state(state: &mut crate::src::inflate::inflate_state) {
     // than dropping that callback-owned allocation in place through a raw
     // pointer.
     state.window = None;
+    if state.head {
+        remove_inflate_header(state);
+    }
+    state.head = false;
 }
 
 pub unsafe fn inflateInit2_(
@@ -808,6 +816,101 @@ pub struct InflateHeader<'a> {
     extra: Option<&'a mut [crate::stdlib::Bytef]>,
     name: Option<&'a mut [crate::stdlib::Bytef]>,
     comment: Option<&'a mut [crate::stdlib::Bytef]>,
+}
+
+/// The exported header API keeps caller memory alive across `inflate()`
+/// calls.  Keep that ABI-only association outside decoder state: the decoder
+/// receives ordinary bounded borrows for the duration of each call, and the
+/// state itself never retains a pointer into caller memory.
+struct InflateHeaderRegistration {
+    state_address: usize,
+    header_address: usize,
+}
+
+static INFLATE_HEADER_REGISTRATIONS: std::sync::OnceLock<
+    std::sync::Mutex<Vec<InflateHeaderRegistration>>,
+> = std::sync::OnceLock::new();
+
+fn inflate_header_registrations() -> &'static std::sync::Mutex<Vec<InflateHeaderRegistration>> {
+    INFLATE_HEADER_REGISTRATIONS.get_or_init(|| std::sync::Mutex::new(Vec::new()))
+}
+
+fn inflate_state_address(state: &crate::src::inflate::inflate_state) -> usize {
+    core::ptr::from_ref(state).addr()
+}
+
+fn register_inflate_header(
+    state: &crate::src::inflate::inflate_state,
+    header: &crate::zlib_h::gz_header_s,
+) -> bool {
+    let mut registrations = inflate_header_registrations()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let state_address = inflate_state_address(state);
+    if let Some(registration) = registrations
+        .iter_mut()
+        .find(|registration| registration.state_address == state_address)
+    {
+        registration.header_address = core::ptr::from_ref(header).addr();
+        return true;
+    }
+    if registrations.try_reserve(1).is_err() {
+        return false;
+    }
+    registrations.push(InflateHeaderRegistration {
+        state_address,
+        header_address: core::ptr::from_ref(header).addr(),
+    });
+    true
+}
+
+fn registered_inflate_header(
+    state: &crate::src::inflate::inflate_state,
+) -> Option<usize> {
+    let registrations = inflate_header_registrations()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let state_address = inflate_state_address(state);
+    registrations
+        .iter()
+        .find(|registration| registration.state_address == state_address)
+        .map(|registration| registration.header_address)
+}
+
+fn remove_inflate_header(state: &crate::src::inflate::inflate_state) {
+    let mut registrations = inflate_header_registrations()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let state_address = inflate_state_address(state);
+    if let Some(index) = registrations
+        .iter()
+        .position(|registration| registration.state_address == state_address)
+    {
+        registrations.swap_remove(index);
+    }
+}
+
+fn copy_inflate_header_registration(
+    source: &crate::src::inflate::inflate_state,
+    destination_address: usize,
+) {
+    let Some(header_address) = registered_inflate_header(source) else {
+        return;
+    };
+    let mut registrations = inflate_header_registrations()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    if let Some(registration) = registrations
+        .iter_mut()
+        .find(|registration| registration.state_address == destination_address)
+    {
+        registration.header_address = header_address;
+    } else if registrations.try_reserve(1).is_ok() {
+        registrations.push(InflateHeaderRegistration {
+            state_address: destination_address,
+            header_address,
+        });
+    }
 }
 
 impl<'a> InflateInput<'a> {
@@ -2607,8 +2710,9 @@ pub unsafe extern "C" fn inflate_ffi(
     let Some(state) = (unsafe { state.as_mut() }) else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
-    let header = state.head.map(|mut head| unsafe {
-        let header = head.as_mut();
+    let header = state.head.then(|| registered_inflate_header(state)).flatten().map(|address| unsafe {
+        let header = core::ptr::with_exposed_provenance_mut::<crate::zlib_h::gz_header_s>(address);
+        let header = &mut *header;
                 let extra = (!header.extra.is_null()).then(|| {
                     ::core::slice::from_raw_parts_mut(header.extra, header.extra_max as usize)
                 });
@@ -2668,7 +2772,7 @@ unsafe fn inflate_end_boundary(
     let state_allocation = strm.state.cast::<::core::ffi::c_void>();
     let zfree = strm.zfree;
     let opaque = strm.opaque;
-    let Some(state) = strm
+    let Some(inflate_state) = strm
         .state
         .cast::<crate::src::inflate::inflate_state>()
         .as_mut()
@@ -2676,11 +2780,15 @@ unsafe fn inflate_end_boundary(
         return crate::zlib_h::Z_STREAM_ERROR;
     };
     let state = InflateEndState {
-        mode: state.mode,
-        window: &mut state.window,
+        mode: inflate_state.mode,
+        window: &mut inflate_state.window,
     };
     let end = inflate_end_impl(state, strm.zalloc.is_some() && zfree.is_some());
     if end != crate::zlib_h::Z_STREAM_ERROR {
+        if inflate_state.head {
+            remove_inflate_header(inflate_state);
+            inflate_state.head = false;
+        }
         zfree.expect("inflate_end_impl validates zfree")(opaque, state_allocation);
         clear_inflate_state(strm);
     }
@@ -2873,7 +2981,10 @@ fn inflate_get_header_impl(
     if state.wrap & 2 as ::core::ffi::c_int == 0 as ::core::ffi::c_int {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    state.head = Some(core::ptr::NonNull::from(&mut *head));
+    if !register_inflate_header(state, head) {
+        return crate::zlib_h::Z_MEM_ERROR;
+    }
+    state.head = true;
     head.done = 0 as ::core::ffi::c_int;
     crate::zlib_h::Z_OK
 }
@@ -3048,6 +3159,7 @@ unsafe fn inflate_copy_impl(
     }
     *dest = *source;
     copy.write(state.clone());
+    copy_inflate_header_registration(state, copy.addr());
     dest.state = copy as *mut crate::src::deflate::internal_state;
     return crate::zlib_h::Z_OK;
 }
