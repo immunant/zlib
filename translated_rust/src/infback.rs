@@ -323,11 +323,12 @@ pub unsafe extern "C" fn inflateBack(
                         if copy > left {
                             copy = left;
                         }
-                        crate::stdlib::memcpy(
-                            put as *mut ::core::ffi::c_void,
-                            next as *const ::core::ffi::c_void,
-                            copy as crate::__stddef_size_t_h::size_t,
-                        );
+                        // This is the translated C `memcpy` path: input and
+                        // caller window are distinct callback buffers, so
+                        // preserve its non-overlap requirement without a C
+                        // memory call. The callback-state slice facade will
+                        // eventually make this copy fully safe.
+                        ::core::ptr::copy_nonoverlapping(next, put, copy as usize);
                         have = have.wrapping_sub(copy);
                         next = next.offset(copy as isize);
                         left = left.wrapping_sub(copy);
