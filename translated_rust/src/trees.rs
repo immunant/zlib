@@ -3695,23 +3695,15 @@ pub(crate) fn flush_block_from_views(
     );
 }
 
-pub unsafe extern "C" fn _tr_flush_block(
-    mut s: *mut crate::src::deflate::deflate_state,
-    mut buf: *mut crate::stdlib::charf,
+pub unsafe fn _tr_flush_block(
+    state: &mut crate::src::deflate::deflate_state,
+    input: Option<&[crate::stdlib::Bytef]>,
     mut stored_len: crate::zutil_h::ulg,
     mut last: ::core::ffi::c_int,
 ) {
-    let state = &mut *s;
-    let input = if buf.is_null() {
-        None
-    } else if stored_len == 0 {
-        Some(&[][..])
-    } else {
-        Some(::core::slice::from_raw_parts(
-            buf as *const crate::stdlib::Bytef,
-            stored_len as usize,
-        ))
-    };
+    // The export shim has already validated and borrowed the opaque state
+    // plus its optional input range. Keep this named adapter as a direct C4
+    // callback-owner dispatch; it must not reopen either raw handle.
     crate::src::deflate::deflate_tree_bit_output_from_state(
         state,
         BitOutputAction::Block {
@@ -3729,7 +3721,20 @@ pub unsafe extern "C" fn _tr_flush_block_ffi(
     mut stored_len: crate::zutil_h::ulg,
     mut last: ::core::ffi::c_int,
 ) {
-    _tr_flush_block(s, buf, stored_len, last)
+    let Some(state) = s.as_mut() else {
+        return;
+    };
+    let input = if buf.is_null() {
+        None
+    } else if stored_len == 0 {
+        Some(&[][..])
+    } else {
+        Some(::core::slice::from_raw_parts(
+            buf.cast_const().cast::<crate::stdlib::Bytef>(),
+            stored_len as usize,
+        ))
+    };
+    _tr_flush_block(state, input, stored_len, last)
 }
 pub(crate) fn tally_symbol(
     sym_buf: &mut [crate::zutil_h::uchf],
