@@ -686,7 +686,12 @@ impl WindowHistory {
     ) -> Option<Self> {
         if size == 0 {
             (next == 0 && have == 0).then_some(Self { size, next, have })
-        } else if next < size && have <= size {
+        // Before the history has wrapped, the initialized bytes are exactly
+        // the prefix `[0..have)`, so the next write must immediately follow
+        // that prefix.  Keeping this invariant at construction prevents an
+        // opaque-state cursor from turning a partial history into an
+        // arbitrary in-bounds window view.
+        } else if next < size && have <= size && (have == size || next == have) {
             Some(Self { size, next, have })
         } else {
             None
@@ -5363,15 +5368,15 @@ mod tests {
     #[test]
     fn window_update_copies_replace_append_and_wrap_data() {
         let mut replace_window = [0; 8];
-        let replace = apply_window_update(&mut replace_window, 3, 5, b"0123456789").unwrap();
+        let replace = apply_window_update(&mut replace_window, 5, 5, b"0123456789").unwrap();
         assert_eq!(replace.wnext, 0);
         assert_eq!(replace.whave, 8);
         assert_eq!(replace_window, *b"23456789");
 
         let mut append_window = *b"abcdefgh";
-        let append = apply_window_update(&mut append_window, 3, 5, b"XY").unwrap();
+        let append = apply_window_update(&mut append_window, 3, 3, b"XY").unwrap();
         assert_eq!(append.wnext, 5);
-        assert_eq!(append.whave, 7);
+        assert_eq!(append.whave, 5);
         assert_eq!(append_window, *b"abcXYfgh");
 
         let mut wrap_window = *b"abcdefgh";
@@ -5384,9 +5389,9 @@ mod tests {
     #[test]
     fn window_update_ignores_empty_output() {
         let mut window = *b"abcdefgh";
-        let update = apply_window_update(&mut window, 3, 5, b"").unwrap();
+        let update = apply_window_update(&mut window, 3, 3, b"").unwrap();
         assert_eq!(update.wnext, 3);
-        assert_eq!(update.whave, 5);
+        assert_eq!(update.whave, 3);
         assert_eq!(window, *b"abcdefgh");
     }
 
@@ -5412,6 +5417,7 @@ mod tests {
         assert_eq!(apply_window_update(&mut window, 8, 5, b"XY"), None);
         assert_eq!(window, *b"abcdefgh");
         assert_eq!(super::WindowHistory::new(8, 3, 9), None);
+        assert_eq!(super::WindowHistory::new(8, 3, 5), None);
         assert!(super::WindowHistory::new(0, 0, 0).is_some());
         assert_eq!(super::WindowHistory::new(0, 1, 0), None);
     }
@@ -5444,12 +5450,7 @@ mod tests {
 
     #[test]
     fn window_history_rejects_non_wrapped_partial_dictionary_cursor() {
-        let history = super::WindowHistory::new(8, 3, 5).unwrap();
-        let mut dictionary = *b"unchanged";
-
-        assert_eq!(history.dictionary_segments(), None);
-        assert_eq!(history.copy_dictionary_to(b"abcdefgh", &mut dictionary[..5]), None);
-        assert_eq!(dictionary, *b"unchanged");
+        assert_eq!(super::WindowHistory::new(8, 3, 5), None);
     }
 
     #[test]
@@ -5457,13 +5458,13 @@ mod tests {
         let mut window = [0; 7];
         let mut wsize = 8;
         let mut wnext = 3;
-        let mut whave = 5;
+        let mut whave = 3;
 
         assert_eq!(
             update_window_core(3, &mut wsize, &mut wnext, &mut whave, &mut window, b"XY"),
             None
         );
-        assert_eq!((wsize, wnext, whave), (8, 3, 5));
+        assert_eq!((wsize, wnext, whave), (8, 3, 3));
         assert_eq!(window, [0; 7]);
     }
 
@@ -5501,14 +5502,14 @@ mod tests {
     fn window_history_preserves_cursors_for_empty_output() {
         let mut window = *b"abcdefgh";
         let mut wnext = 3;
-        let mut whave = 5;
+        let mut whave = 3;
 
         assert_eq!(
             update_window_history(&mut window, &mut wnext, &mut whave, b""),
             Some(())
         );
 
-        assert_eq!((wnext, whave), (3, 5));
+        assert_eq!((wnext, whave), (3, 3));
         assert_eq!(window, *b"abcdefgh");
     }
 
@@ -5625,14 +5626,14 @@ mod tests {
         let mut window = *b"abcdefgh";
         let mut wsize = 8;
         let mut wnext = 3;
-        let mut whave = 5;
+        let mut whave = 3;
 
         assert_eq!(
             update_window_core(3, &mut wsize, &mut wnext, &mut whave, &mut window, b""),
             Some(())
         );
 
-        assert_eq!((wsize, wnext, whave), (8, 3, 5));
+        assert_eq!((wsize, wnext, whave), (8, 3, 3));
         assert_eq!(window, *b"abcdefgh");
     }
 
