@@ -149,7 +149,7 @@ pub const MIN_LOOKAHEAD: ::core::ffi::c_int =
 pub const WIN_INIT: ::core::ffi::c_int = crate::zutil_h::MAX_MATCH;
 pub use crate::__stddef_size_t_h::size_t;
 
-pub use crate::src::adler32::adler32;
+pub use crate::src::adler32::adler32_z as adler32;
 pub use crate::src::crc32::crc32;
 pub use crate::src::crc32::crc32_z;
 pub use crate::src::trees::_dist_code;
@@ -1097,7 +1097,11 @@ pub unsafe extern "C" fn deflateSetDictionary(
         return crate::zlib_h::Z_STREAM_ERROR;
     }
     if wrap == 1 as ::core::ffi::c_int {
-        (*strm).adler = crate::src::adler32::adler32((*strm).adler, dictionary, dictLength);
+        (*strm).adler = crate::src::adler32::adler32_z(
+            (*strm).adler,
+            dictionary,
+            dictLength as crate::stdlib::z_size_t,
+        );
     }
     (*s).wrap = 0 as ::core::ffi::c_int;
     if dictLength >= (*s).w_size {

@@ -61,13 +61,6 @@ pub unsafe extern "C" fn adler32_z(
     adler32_slice(adler, unsafe { core::slice::from_raw_parts(buf, len) })
 }
 
-pub unsafe extern "C" fn adler32(
-    adler: crate::stdlib::uLong,
-    buf: *const crate::stdlib::Bytef,
-    len: crate::stdlib::uInt,
-) -> crate::stdlib::uLong {
-    unsafe { adler32_z(adler, buf, len as crate::stdlib::z_size_t) }
-}
 #[export_name = "adler32_z"]
 
 pub unsafe extern "C" fn adler32_z_ffi(
@@ -84,7 +77,7 @@ pub unsafe extern "C" fn adler32_ffi(
     buf: *const crate::stdlib::Bytef,
     len: crate::stdlib::uInt,
 ) -> crate::stdlib::uLong {
-    unsafe { adler32(adler, buf, len) }
+    unsafe { adler32_z(adler, buf, len as crate::stdlib::z_size_t) }
 }
 fn adler32_combine_(
     adler1: crate::stdlib::uLong,

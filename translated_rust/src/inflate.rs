@@ -106,7 +106,7 @@ pub struct inflate_state {
 }
 pub use crate::__stddef_size_t_h::size_t;
 
-pub use crate::src::adler32::adler32;
+pub use crate::src::adler32::adler32_z as adler32;
 pub use crate::src::crc32::crc32;
 pub use crate::src::deflate::internal_state;
 pub use crate::src::inftrees::code;
@@ -979,10 +979,10 @@ pub unsafe extern "C" fn inflate(
                                                                                                                     out as crate::stdlib::uInt,
                                                                                                                 )
                                                                                                             } else {
-                                                                                                                crate::src::adler32::adler32(
+                                                                                                                crate::src::adler32::adler32_z(
                                                                                                                     (*state).check as crate::stdlib::uLong,
                                                                                                                     put.offset(-(out as isize)),
-                                                                                                                    out as crate::stdlib::uInt,
+                                                                                                                    out as crate::stdlib::z_size_t,
                                                                                                                 )
                                                                                                             }) as ::core::ffi::c_ulong;
                                                                                                             (*strm).adler = (*state).check as crate::stdlib::uLong;
@@ -2191,10 +2191,10 @@ pub unsafe extern "C" fn inflate(
                 out as crate::stdlib::uInt,
             )
         } else {
-            crate::src::adler32::adler32(
+            crate::src::adler32::adler32_z(
                 (*state).check as crate::stdlib::uLong,
                 (*strm).next_out.offset(-(out as isize)),
-                out as crate::stdlib::uInt,
+                out as crate::stdlib::z_size_t,
             )
         }) as ::core::ffi::c_ulong;
         (*strm).adler = (*state).check as crate::stdlib::uLong;
@@ -2318,8 +2318,11 @@ pub unsafe extern "C" fn inflateSetDictionary_ffi(
     {
         dictid = crate::src::adler32::ADLER32_INITIAL as ::core::ffi::c_ulong;
         dictid =
-            crate::src::adler32::adler32(dictid as crate::stdlib::uLong, dictionary, dictLength)
-                as ::core::ffi::c_ulong;
+            crate::src::adler32::adler32_z(
+                dictid as crate::stdlib::uLong,
+                dictionary,
+                dictLength as crate::stdlib::z_size_t,
+            ) as ::core::ffi::c_ulong;
         if dictid != (*state).check {
             return crate::zlib_h::Z_DATA_ERROR;
         }
