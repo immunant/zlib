@@ -1396,11 +1396,11 @@ pub unsafe extern "C" fn inflate(
             12883017672845564788 => {
                 while (*state).have < (*state).nlen.wrapping_add((*state).ndist) {
                     loop {
-                        here = *(*state).lencode.offset(
+                        here = *(*state).lencode.wrapping_add(
                             (hold as ::core::ffi::c_uint
                                 & ((1 as ::core::ffi::c_uint) << (*state).lenbits)
                                     .wrapping_sub(1 as ::core::ffi::c_uint))
-                                as isize,
+                                as usize,
                         );
                         if here.bits as ::core::ffi::c_uint <= bits {
                             break;
@@ -1785,11 +1785,11 @@ pub unsafe extern "C" fn inflate(
                 } else {
                     (*state).back = 0 as ::core::ffi::c_int;
                     loop {
-                        here = *(*state).lencode.offset(
+                        here = *(*state).lencode.wrapping_add(
                             (hold as ::core::ffi::c_uint
                                 & ((1 as ::core::ffi::c_uint) << (*state).lenbits)
                                     .wrapping_sub(1 as ::core::ffi::c_uint))
-                                as isize,
+                                as usize,
                         );
                         if here.bits as ::core::ffi::c_uint <= bits {
                             break;
@@ -1809,7 +1809,7 @@ pub unsafe extern "C" fn inflate(
                     {
                         last = here;
                         loop {
-                            here = *(*state).lencode.offset(
+                            here = *(*state).lencode.wrapping_add(
                                 (last.val as ::core::ffi::c_uint).wrapping_add(
                                     (hold as ::core::ffi::c_uint
                                         & ((1 as ::core::ffi::c_uint)
@@ -1817,7 +1817,7 @@ pub unsafe extern "C" fn inflate(
                                                 + last.op as ::core::ffi::c_int)
                                             .wrapping_sub(1 as ::core::ffi::c_uint))
                                         >> last.bits as ::core::ffi::c_int,
-                                ) as isize,
+                                ) as usize,
                             );
                             if (last.bits as ::core::ffi::c_int + here.bits as ::core::ffi::c_int)
                                 as ::core::ffi::c_uint
@@ -1878,7 +1878,7 @@ pub unsafe extern "C" fn inflate(
                                 copy,
                             ) {
                                 crate::stdlib::memcpy(
-                                    (*(*state).head).extra.offset(offset as isize)
+                                    (*(*state).head).extra.wrapping_add(offset as usize)
                                         as *mut ::core::ffi::c_void,
                                     next as *const ::core::ffi::c_void,
                                     copy_len as crate::__stddef_size_t_h::size_t,
@@ -1943,14 +1943,14 @@ pub unsafe extern "C" fn inflate(
                     loop {
                         let c2rust_fresh5 = copy;
                         copy = copy.wrapping_add(1);
-                        len = *next.offset(c2rust_fresh5 as isize) as ::core::ffi::c_uint;
+                        len = *next.wrapping_add(c2rust_fresh5 as usize) as ::core::ffi::c_uint;
                         if !(*state).head.is_null()
                             && !(*(*state).head).name.is_null()
                             && (*state).length < (*(*state).head).name_max
                         {
                             let c2rust_fresh6 = (*state).length;
                             (*state).length = (*state).length.wrapping_add(1);
-                            *(*(*state).head).name.offset(c2rust_fresh6 as isize) =
+                            *(*(*state).head).name.wrapping_add(c2rust_fresh6 as usize) =
                                 len as crate::stdlib::Bytef;
                         }
                         if !(len != 0 && copy < have) {
@@ -1981,11 +1981,11 @@ pub unsafe extern "C" fn inflate(
         match c2rust_current_block {
             14619999244790055076 => {
                 loop {
-                    here = *(*state).distcode.offset(
+                    here = *(*state).distcode.wrapping_add(
                         (hold as ::core::ffi::c_uint
                             & ((1 as ::core::ffi::c_uint) << (*state).distbits)
                                 .wrapping_sub(1 as ::core::ffi::c_uint))
-                            as isize,
+                            as usize,
                     );
                     if here.bits as ::core::ffi::c_uint <= bits {
                         break;
@@ -2004,7 +2004,7 @@ pub unsafe extern "C" fn inflate(
                 {
                     last = here;
                     loop {
-                        here = *(*state).distcode.offset(
+                        here = *(*state).distcode.wrapping_add(
                             (last.val as ::core::ffi::c_uint).wrapping_add(
                                 (hold as ::core::ffi::c_uint
                                     & ((1 as ::core::ffi::c_uint)
@@ -2012,7 +2012,7 @@ pub unsafe extern "C" fn inflate(
                                             + last.op as ::core::ffi::c_int)
                                         .wrapping_sub(1 as ::core::ffi::c_uint))
                                     >> last.bits as ::core::ffi::c_int,
-                            ) as isize,
+                            ) as usize,
                         );
                         if (last.bits as ::core::ffi::c_int + here.bits as ::core::ffi::c_int)
                             as ::core::ffi::c_uint
@@ -2057,15 +2057,16 @@ pub unsafe extern "C" fn inflate(
                     loop {
                         let c2rust_fresh7 = copy;
                         copy = copy.wrapping_add(1);
-                        len = *next.offset(c2rust_fresh7 as isize) as ::core::ffi::c_uint;
+                        len = *next.wrapping_add(c2rust_fresh7 as usize) as ::core::ffi::c_uint;
                         if !(*state).head.is_null()
                             && !(*(*state).head).comment.is_null()
                             && (*state).length < (*(*state).head).comm_max
                         {
                             let c2rust_fresh8 = (*state).length;
                             (*state).length = (*state).length.wrapping_add(1);
-                            *(*(*state).head).comment.offset(c2rust_fresh8 as isize) =
-                                len as crate::stdlib::Bytef;
+                            *(*(*state).head)
+                                .comment
+                                .wrapping_add(c2rust_fresh8 as usize) = len as crate::stdlib::Bytef;
                         }
                         if !(len != 0 && copy < have) {
                             break;
@@ -2184,8 +2185,8 @@ pub unsafe extern "C" fn inflate(
             continue;
         };
         from = match source {
-            InflateMatchSource::Window { index } => (*state).window.offset(index as isize),
-            InflateMatchSource::Output { offset } => put.offset(-(offset as isize)),
+            InflateMatchSource::Window { index } => (*state).window.wrapping_add(index as usize),
+            InflateMatchSource::Output { offset } => put.wrapping_sub(offset as usize),
         };
         copy = count;
         left = remaining_output;
