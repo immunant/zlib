@@ -79,6 +79,64 @@ fn initialize_inflate_back_state(
     state.sane = 1 as ::core::ffi::c_int;
 }
 
+/// Borrow inflateBack's caller-owned window only after checking the span that
+/// `inflateBackInit_` established.  The state has no ownership of this buffer,
+/// so malformed internal metadata must not be used as a slice capacity.
+fn inflate_back_window(
+    state: &mut crate::src::inflate::inflate_state,
+    put: usize,
+    length: usize,
+) -> Option<&mut [u8]> {
+    let window_bits = usize::try_from(state.wbits).ok()?;
+    if !(8..=15).contains(&window_bits) || state.window.is_null() {
+        return None;
+    }
+    let window_len = 1usize.checked_shl(window_bits as u32)?;
+    if usize::try_from(state.wsize).ok()? != window_len {
+        return None;
+    }
+    if put.checked_add(length)? > window_len {
+        return None;
+    }
+
+    // `inflateBackInit__ffi` creates exactly this validated span from the
+    // caller's window, and no inflateBack path changes its allocation or size.
+    Some(unsafe {
+        ::core::slice::from_raw_parts_mut(state.window, window_len)
+    })
+}
+
+/// Copy a possibly overlapping match within the caller-owned inflateBack
+/// window.  Byte order intentionally matches DEFLATE's forward expansion.
+fn copy_inflate_back_match(
+    window: &mut [u8],
+    put: usize,
+    distance: usize,
+    length: usize,
+) -> Option<()> {
+    if distance == 0 || distance > window.len() {
+        return None;
+    }
+    let end = put.checked_add(length)?;
+    if end > window.len() {
+        return None;
+    }
+    let from = if distance <= put {
+        put.checked_sub(distance)?
+    } else {
+        put.checked_add(window.len().checked_sub(distance)?)?
+    };
+    if from.checked_add(length)? > window.len() {
+        return None;
+    }
+
+    for index in 0..length {
+        let byte = window[from + index];
+        window[put + index] = byte;
+    }
+    Some(())
+}
+
 /// Allocate, initialize, and install the opaque inflateBack state through one
 /// named implementation boundary. The stream takes ownership only after its
 /// ABI state field has been installed.
@@ -180,7 +238,6 @@ pub fn inflateBack(
     let mut hold: ::core::ffi::c_ulong = 0;
     let mut bits: ::core::ffi::c_uint = 0;
     let mut copy: ::core::ffi::c_uint = 0;
-    let mut from: *mut ::core::ffi::c_uchar = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
     let mut here: crate::src::inftrees::code = crate::src::inftrees::code {
         op: 0,
         bits: 0,
@@ -1011,28 +1068,42 @@ pub fn inflateBack(
                             }
                             copy = state.wsize.wrapping_sub(state.offset);
                             if copy < left {
-                                from = put.wrapping_add(copy as usize);
                                 copy = left.wrapping_sub(copy);
                             } else {
-                                from = put.wrapping_offset(-(state.offset as isize));
                                 copy = left;
                             }
                             if copy > state.length {
                                 copy = state.length;
                             }
+                            let Some(remaining) = state.wsize.checked_sub(left) else {
+                                ret = crate::zlib_h::Z_STREAM_ERROR;
+                                break '_inf_leave;
+                            };
+                            let Some(put_index) = usize::try_from(remaining).ok() else {
+                                ret = crate::zlib_h::Z_STREAM_ERROR;
+                                break '_inf_leave;
+                            };
+                            let copy_len = copy as usize;
+                            let distance = state.offset as usize;
+                            let Some(window) = inflate_back_window(state, put_index, copy_len)
+                            else {
+                                ret = crate::zlib_h::Z_STREAM_ERROR;
+                                break '_inf_leave;
+                            };
+                            if copy_inflate_back_match(
+                                window,
+                                put_index,
+                                distance,
+                                copy_len,
+                            )
+                            .is_none()
+                            {
+                                ret = crate::zlib_h::Z_STREAM_ERROR;
+                                break '_inf_leave;
+                            }
                             state.length = state.length.wrapping_sub(copy);
                             left = left.wrapping_sub(copy);
-                            loop {
-                                let c2rust_fresh20 = from;
-                                from = from.wrapping_add(1);
-                                let c2rust_fresh21 = put;
-                                put = put.wrapping_add(1);
-                                *c2rust_fresh21 = *c2rust_fresh20;
-                                copy = copy.wrapping_sub(1);
-                                if copy == 0 {
-                                    break;
-                                }
-                            }
+                            put = state.window.wrapping_add(put_index + copy_len);
                             if state.length == 0 as ::core::ffi::c_uint {
                                 break;
                             }
