@@ -656,6 +656,7 @@ fn initialize_inflate_state_base(
 /// they cannot form an initialized reference before the value exists.
 fn with_callback_inflate_state_slot<R>(
     strm: &mut crate::zlib_h::z_stream,
+    value: crate::src::inflate::inflate_state,
     initialize: impl FnOnce(
         &mut crate::zlib_h::z_stream,
         &mut crate::src::inflate::inflate_state,
@@ -669,7 +670,7 @@ fn with_callback_inflate_state_slot<R>(
     let mut slot = ::core::ptr::NonNull::new(allocation)?;
     // The callback allocation is live and uniquely owned by stream setup.
     // Write the first value before exposing a typed state reference.
-    let state = unsafe { slot.as_mut().write(empty_inflate_state()) };
+    let state = unsafe { slot.as_mut().write(value) };
     Some(initialize(strm, state))
 }
 
@@ -681,7 +682,7 @@ fn initialize_allocated_inflate_state(
     window_bits: ::core::ffi::c_int,
     allocator_provenance: crate::src::zutil::AllocatorProvenance,
 ) -> ::core::ffi::c_int {
-    let ret = with_callback_inflate_state_slot(strm, |strm, state| {
+    let ret = with_callback_inflate_state_slot(strm, empty_inflate_state(), |strm, state| {
         strm.state = ::core::ptr::from_mut(state).cast::<crate::src::deflate::internal_state>();
         initialize_inflate_state_base(state, strm, allocator_provenance);
         match prepare_inflate_reset2(strm, state, window_bits) {
@@ -3332,57 +3333,83 @@ fn initialize_inflate_copy(
     source: &crate::zlib_h::z_stream,
     source_state: &crate::src::inflate::inflate_state,
 ) -> ::core::ffi::c_int {
-    let copy = Some(source.zalloc.expect("validated allocator"))
-            .expect("validated allocator")(
-            source.opaque,
-            1 as crate::stdlib::uInt,
-            ::core::mem::size_of::<crate::src::inflate::inflate_state>() as crate::stdlib::uInt,
-        ) as *mut crate::src::inflate::inflate_state;
-    if copy.is_null() {
-        return crate::zlib_h::Z_MEM_ERROR;
-    }
-    let mut owned_window = None;
-    let mut owned_window_failed = false;
-    if let Some(source_window) = source_state.owned_window.as_ref() {
-        owned_window = source_window.try_copy_for_state(source_state);
-        owned_window_failed = owned_window.is_none();
-    }
-    let mut window = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
-    if source_state.window.is_some() && owned_window.is_none() && !owned_window_failed {
-        let layout = InflateWindowLayout::from_state(source_state)
-            .expect("inflateCopy validated the source window layout");
-        window = Some(source.zalloc.expect("validated allocator"))
-                .expect("validated allocator")(
-                source.opaque,
-                layout.allocation_items,
-                ::core::mem::size_of::<::core::ffi::c_uchar>() as crate::stdlib::uInt,
-            ) as *mut ::core::ffi::c_uchar;
-    }
-    if owned_window_failed || (source_state.window.is_some() && window.is_null() && owned_window.is_none()) {
-        Some(source.zfree.expect("validated allocator"))
-            .expect("validated allocator")(source.opaque, copy.cast());
-        return crate::zlib_h::Z_MEM_ERROR;
-    }
-    crate::zlib_h::copy_z_stream(dest, source);
-    let copy_ref = unsafe { &mut *copy };
-    *copy_ref = copy_inflate_state(source_state);
-    copy_ref.strm = stream_identity(dest);
-    if !window.is_null() {
-        unsafe {
-            ::core::ptr::copy_nonoverlapping(
-                source_state.window.expect("checked non-null window").as_ptr(),
-                window,
-                source_state.whave as usize,
-            );
-        }
-    }
-    if let Some(owned_window) = owned_window {
-        install_owned_inflate_window(copy_ref, owned_window);
-    } else {
-        copy_ref.window = ::core::ptr::NonNull::new(window);
-    }
-    dest.state = copy.cast::<crate::src::deflate::internal_state>();
-    crate::zlib_h::Z_OK
+    // Keep allocation callbacks on a local stream copy until every fallible
+    // allocation succeeds. This preserves C's observable rule that a failed
+    // copy leaves `dest` untouched, while the typed slot helper publishes the
+    // first initialized Rust state without a second raw conversion.
+    let mut allocation_stream = crate::zlib_h::z_stream_s {
+        next_in: source.next_in,
+        avail_in: source.avail_in,
+        total_in: source.total_in,
+        next_out: source.next_out,
+        avail_out: source.avail_out,
+        total_out: source.total_out,
+        msg: source.msg,
+        state: source.state,
+        zalloc: source.zalloc,
+        zfree: source.zfree,
+        opaque: source.opaque,
+        data_type: source.data_type,
+        adler: source.adler,
+        reserved: source.reserved,
+    };
+    with_callback_inflate_state_slot(
+        &mut allocation_stream,
+        copy_inflate_state(source_state),
+        |allocation_stream, copy_ref| {
+            // Record the new allocation only in the local stream so failure
+            // cleanup can use the original callback pair without exposing a
+            // half-initialized destination.
+            allocation_stream.state =
+                ::core::ptr::from_mut(copy_ref).cast::<crate::src::deflate::internal_state>();
+            let mut owned_window = None;
+            let mut owned_window_failed = false;
+            if let Some(source_window) = source_state.owned_window.as_ref() {
+                owned_window = source_window.try_copy_for_state(source_state);
+                owned_window_failed = owned_window.is_none();
+            }
+            let mut window = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
+            if source_state.window.is_some() && owned_window.is_none() && !owned_window_failed {
+                let layout = InflateWindowLayout::from_state(source_state)
+                    .expect("inflateCopy validated the source window layout");
+                window = Some(allocation_stream.zalloc.expect("validated allocator"))
+                    .expect("validated allocator")(
+                    allocation_stream.opaque,
+                    layout.allocation_items,
+                    ::core::mem::size_of::<::core::ffi::c_uchar>() as crate::stdlib::uInt,
+                ) as *mut ::core::ffi::c_uchar;
+            }
+            if owned_window_failed
+                || (source_state.window.is_some() && window.is_null() && owned_window.is_none())
+            {
+                Some(allocation_stream.zfree.expect("validated allocator"))
+                    .expect("validated allocator")(
+                    allocation_stream.opaque,
+                    allocation_stream.state.cast(),
+                );
+                return crate::zlib_h::Z_MEM_ERROR;
+            }
+            if !window.is_null() {
+                unsafe {
+                    ::core::ptr::copy_nonoverlapping(
+                        source_state.window.expect("checked non-null window").as_ptr(),
+                        window,
+                        source_state.whave as usize,
+                    );
+                }
+            }
+            copy_ref.strm = stream_identity(dest);
+            if let Some(owned_window) = owned_window {
+                install_owned_inflate_window(copy_ref, owned_window);
+            } else {
+                copy_ref.window = ::core::ptr::NonNull::new(window);
+            }
+            crate::zlib_h::copy_z_stream(dest, source);
+            dest.state = allocation_stream.state;
+            crate::zlib_h::Z_OK
+        },
+    )
+    .unwrap_or(crate::zlib_h::Z_MEM_ERROR)
 }
 
 /// Copy an already validated source state into a destination stream.
