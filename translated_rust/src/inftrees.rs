@@ -3287,6 +3287,10 @@ pub unsafe extern "C" fn inflate_table_ffi(
         let lens = ::core::slice::from_raw_parts(lens, codes as usize);
         let work = ::core::slice::from_raw_parts_mut(work, codes as usize);
         let bits = &mut *bits;
+        // Bind the caller's table cursor once.  The implementation advances
+        // only the resulting bounded slice, and this reference lets the ABI
+        // adapter publish that final cursor without a second raw dereference.
+        let table = &mut *table;
         let table_entries = ::core::slice::from_raw_parts_mut(*table, ENOUGH as usize);
         match inflate_table(type_0, lens, codes, table_entries, bits, work) {
             Ok(cursor) => {
