@@ -1387,10 +1387,16 @@ pub unsafe fn inflate(
                                                                                                         hold = hold
                                                                                                             .wrapping_add(
                                                                                                                 (*c2rust_fresh10 as ::core::ffi::c_ulong) << bits,
-                                                                                                            );
+                                                                                                        );
                                                                                                         bits = bits.wrapping_add(8 as ::core::ffi::c_uint);
                                                                                                     }
-                                                                                                    (*state).check = (hold >> 24 as ::core::ffi::c_int
+                                                                                                    // This transition only commits the
+                                                                                                    // already-consumed dictionary id. Keep the
+                                                                                                    // stream/state adoption local instead of
+                                                                                                    // repeatedly traversing both ABI records.
+                                                                                                    let strm_ref = &mut *strm;
+                                                                                                    let state_ref = &mut *state;
+                                                                                                    state_ref.check = (hold >> 24 as ::core::ffi::c_int
                                                                                                         & 0xff as ::core::ffi::c_ulong)
                                                                                                         .wrapping_add(
                                                                                                             hold >> 8 as ::core::ffi::c_int
@@ -1404,10 +1410,10 @@ pub unsafe fn inflate(
                                                                                                             (hold & 0xff as ::core::ffi::c_ulong)
                                                                                                                 << 24 as ::core::ffi::c_int,
                                                                                                         );
-                                                                                                    (*strm).adler = (*state).check as crate::stdlib::uLong;
+                                                                                                    strm_ref.adler = state_ref.check as crate::stdlib::uLong;
                                                                                                     hold = 0 as ::core::ffi::c_ulong;
                                                                                                     bits = 0 as ::core::ffi::c_uint;
-                                                                                                    (*state).mode = crate::src::inflate::DICT;
+                                                                                                    state_ref.mode = crate::src::inflate::DICT;
                                                                                                     break 'c_2336;
                                                                                                 }
                                                                                                 16190 => {
@@ -1433,23 +1439,25 @@ pub unsafe fn inflate(
                                                                                                         hold = hold
                                                                                                             .wrapping_add(
                                                                                                                 (*c2rust_fresh12 as ::core::ffi::c_ulong) << bits,
-                                                                                                            );
+                                                                                                        );
                                                                                                         bits = bits.wrapping_add(8 as ::core::ffi::c_uint);
                                                                                                     }
+                                                                                                    let strm_ref = &mut *strm;
+                                                                                                    let state_ref = &mut *state;
                                                                                                     if hold & 0xffff as ::core::ffi::c_ulong
                                                                                                         != hold >> 16 as ::core::ffi::c_int
                                                                                                             ^ 0xffff as ::core::ffi::c_ulong
                                                                                                     {
-                                                                                                        (*strm).msg = INFLATE_ERROR_MESSAGES[4].as_ptr()
+                                                                                                        strm_ref.msg = INFLATE_ERROR_MESSAGES[4].as_ptr()
                                                                                                             as *const ::core::ffi::c_char as *mut ::core::ffi::c_char;
-                                                                                                        (*state).mode = crate::src::inflate::BAD;
+                                                                                                        state_ref.mode = crate::src::inflate::BAD;
                                                                                                         continue '_inf_leave;
                                                                                                     } else {
-                                                                                                        (*state).length = hold as ::core::ffi::c_uint
+                                                                                                        state_ref.length = hold as ::core::ffi::c_uint
                                                                                                             & 0xffff as ::core::ffi::c_uint;
                                                                                                         hold = 0 as ::core::ffi::c_ulong;
                                                                                                         bits = 0 as ::core::ffi::c_uint;
-                                                                                                        (*state).mode = crate::src::inflate::COPY_;
+                                                                                                        state_ref.mode = crate::src::inflate::COPY_;
                                                                                                         if flush == crate::zlib_h::Z_TREES {
                                                                                                             break '_inf_leave;
                                                                                                         } else {
@@ -1475,10 +1483,16 @@ pub unsafe fn inflate(
                                                                                                         hold = hold
                                                                                                             .wrapping_add(
                                                                                                                 (*c2rust_fresh13 as ::core::ffi::c_ulong) << bits,
-                                                                                                            );
+                                                                                                        );
                                                                                                         bits = bits.wrapping_add(8 as ::core::ffi::c_uint);
                                                                                                     }
-                                                                                                    (*state).nlen = (hold as ::core::ffi::c_uint
+                                                                                                    // Dynamic-table header parsing has no
+                                                                                                    // callbacks or buffer lends. Adopt the two
+                                                                                                    // compatibility records once for all of its
+                                                                                                    // scalar commits and diagnostics.
+                                                                                                    let strm_ref = &mut *strm;
+                                                                                                    let state_ref = &mut *state;
+                                                                                                    state_ref.nlen = (hold as ::core::ffi::c_uint
                                                                                                         & ((1 as ::core::ffi::c_uint) << 5 as ::core::ffi::c_int)
                                                                                                             .wrapping_sub(1 as ::core::ffi::c_uint))
                                                                                                         .wrapping_add(257 as ::core::ffi::c_uint);
@@ -1487,7 +1501,7 @@ pub unsafe fn inflate(
                                                                                                         .wrapping_sub(
                                                                                                             5 as ::core::ffi::c_int as ::core::ffi::c_uint,
                                                                                                         );
-                                                                                                    (*state).ndist = (hold as ::core::ffi::c_uint
+                                                                                                    state_ref.ndist = (hold as ::core::ffi::c_uint
                                                                                                         & ((1 as ::core::ffi::c_uint) << 5 as ::core::ffi::c_int)
                                                                                                             .wrapping_sub(1 as ::core::ffi::c_uint))
                                                                                                         .wrapping_add(1 as ::core::ffi::c_uint);
@@ -1496,7 +1510,7 @@ pub unsafe fn inflate(
                                                                                                         .wrapping_sub(
                                                                                                             5 as ::core::ffi::c_int as ::core::ffi::c_uint,
                                                                                                         );
-                                                                                                    (*state).ncode = (hold as ::core::ffi::c_uint
+                                                                                                    state_ref.ncode = (hold as ::core::ffi::c_uint
                                                                                                         & ((1 as ::core::ffi::c_uint) << 4 as ::core::ffi::c_int)
                                                                                                             .wrapping_sub(1 as ::core::ffi::c_uint))
                                                                                                         .wrapping_add(4 as ::core::ffi::c_uint);
@@ -1505,17 +1519,17 @@ pub unsafe fn inflate(
                                                                                                         .wrapping_sub(
                                                                                                             4 as ::core::ffi::c_int as ::core::ffi::c_uint,
                                                                                                         );
-                                                                                                    if (*state).nlen > 286 as ::core::ffi::c_uint
-                                                                                                        || (*state).ndist > 30 as ::core::ffi::c_uint
+                                                                                                    if state_ref.nlen > 286 as ::core::ffi::c_uint
+                                                                                                        || state_ref.ndist > 30 as ::core::ffi::c_uint
                                                                                                     {
-                                                                                                        (*strm).msg = INFLATE_ERROR_MESSAGES[5]
+                                                                                                        strm_ref.msg = INFLATE_ERROR_MESSAGES[5]
                                                                                                             .as_ptr() as *const ::core::ffi::c_char
                                                                                                             as *mut ::core::ffi::c_char;
-                                                                                                        (*state).mode = crate::src::inflate::BAD;
+                                                                                                        state_ref.mode = crate::src::inflate::BAD;
                                                                                                         continue '_inf_leave;
                                                                                                     } else {
-                                                                                                        (*state).have = 0 as ::core::ffi::c_uint;
-                                                                                                        (*state).mode = crate::src::inflate::LENLENS;
+                                                                                                        state_ref.have = 0 as ::core::ffi::c_uint;
+                                                                                                        state_ref.mode = crate::src::inflate::LENLENS;
                                                                                                         break 's_1582;
                                                                                                     }
                                                                                                 }
