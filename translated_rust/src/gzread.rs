@@ -1158,8 +1158,8 @@ unsafe fn gz_look(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
     if avail == -1 as ::core::ffi::c_int {
         return -1 as ::core::ffi::c_int;
     }
-    let header = if gz_look_header_is_available((*strm).avail_in) {
-        let next_in = (*strm).next_in;
+    let header = if gz_look_header_is_available(state.strm.avail_in) {
+        let next_in = state.strm.next_in;
         Some([
             *next_in,
             *next_in.wrapping_add(1),
@@ -1169,7 +1169,7 @@ unsafe fn gz_look(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
     } else {
         None
     };
-    match gz_look_action((*strm).avail_in, again, header) {
+    match gz_look_action(state.strm.avail_in, again, header) {
         GzLookAction::NeedMoreInput => return 0 as ::core::ffi::c_int,
         GzLookAction::Gzip => {
             crate::src::inflate::inflateReset(strm as *mut crate::zlib_h::z_stream_s);
@@ -1187,12 +1187,12 @@ unsafe fn gz_look(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
     state.x.next = state.out;
     crate::stdlib::memcpy(
         state.x.next as *mut ::core::ffi::c_void,
-        (*strm).next_in as *const ::core::ffi::c_void,
-        (*strm).avail_in as crate::__stddef_size_t_h::size_t,
+        state.strm.next_in as *const ::core::ffi::c_void,
+        state.strm.avail_in as crate::__stddef_size_t_h::size_t,
     );
-    let plan = gz_look_transparent_copy_plan((*strm).avail_in);
+    let plan = gz_look_transparent_copy_plan(state.strm.avail_in);
     state.x.have = plan.have;
-    (*strm).avail_in = plan.avail_in;
+    state.strm.avail_in = plan.avail_in;
     state.how = plan.how;
     return 0 as ::core::ffi::c_int;
 }
