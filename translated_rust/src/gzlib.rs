@@ -622,11 +622,32 @@ impl<'a> GzEmbeddedDeflateSetup<'a> {
         input: &'input [u8],
         input_available: crate::stdlib::uInt,
     ) -> Option<GzEmbeddedDeflateCall<'input, 'a>> {
+        let output_available = crate::stdlib::uInt::try_from(self.output.bytes.len()).ok()?;
+        let output_cursor = self.output.bytes.as_ptr().addr();
+        self.call_at_output_cursor(input, input_available, output_cursor, output_available)
+    }
+
+    // A deflate call can resume partway through the owned output allocation.
+    // Validate that ABI cursor projection as an address-relative bounded range
+    // before handing the request to the codec, so the later gzip owner need
+    // retain only this request rather than a raw `next_out` cursor.
+    pub(crate) fn call_at_output_cursor<'input>(
+        mut self,
+        input: &'input [u8],
+        input_available: crate::stdlib::uInt,
+        output_cursor: usize,
+        output_available: crate::stdlib::uInt,
+    ) -> Option<GzEmbeddedDeflateCall<'input, 'a>> {
         let input_len = usize::try_from(input_available).ok()?;
+        let output_start = output_cursor.checked_sub(self.output.bytes.as_ptr().addr())?;
+        let output_end = output_start.checked_add(usize::try_from(output_available).ok()?)?;
+        let output = GzCodecOutputView {
+            bytes: self.output.bytes.get_mut(output_start..output_end)?,
+        };
         Some(GzEmbeddedDeflateCall {
             input: input.get(..input_len)?,
             input_available,
-            output: self.output,
+            output,
         })
     }
 }
