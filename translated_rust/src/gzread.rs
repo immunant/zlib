@@ -2134,7 +2134,7 @@ pub unsafe extern "C" fn gzgetc(mut file: crate::zlib_h::gzFile) -> ::core::ffi:
         let (have, pos, result) = gzgetc_buffered_result(buffered.have, buffered.pos, *next);
         buffered.have = have;
         buffered.pos = pos;
-        buffered.next = next.offset(1);
+        buffered.next = next.wrapping_add(1);
         return result;
     }
     return gzgetc_read_result(
