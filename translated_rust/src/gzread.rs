@@ -51,30 +51,30 @@ fn gz_load_error(state: &mut crate::gzguts_h::gz_state, error: rustix::io::Errno
 }
 
 fn gz_load(
-    state: &mut crate::gzguts_h::gz_state,
     fd: BorrowedFd<'_>,
     buf: &mut [u8],
-) -> Result<usize, usize> {
+    again: &mut ::core::ffi::c_int,
+    eof: &mut ::core::ffi::c_int,
+) -> Result<usize, (usize, rustix::io::Errno)> {
     let mut have = 0usize;
     let max = ((-1 as ::core::ffi::c_int as ::core::ffi::c_uint >> 2) + 1) as usize;
-    state.again = 0;
+    *again = 0;
     while have != buf.len() {
         let get = (buf.len() - have).min(max);
         match rustix::io::read(fd, &mut buf[have..have + get]) {
             Ok(0) => {
-                state.eof = 1;
+                *eof = 1;
                 break;
             }
             Ok(read) => have += read,
             Err(error) => {
                 if error == rustix::io::Errno::AGAIN || error == rustix::io::Errno::WOULDBLOCK {
-                    state.again = 1;
+                    *again = 1;
                     if have != 0 {
                         return Ok(have);
                     }
                 }
-                gz_load_error(state, error);
-                return Err(have);
+                return Err((have, error));
             }
         }
     }
@@ -86,7 +86,7 @@ unsafe fn gz_avail(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int 
         return -1 as ::core::ffi::c_int;
     }
     if state.eof == 0 as ::core::ffi::c_int {
-        if state.in_0.is_null() {
+        if state.in_0.len() != state.size as usize {
             crate::src::gzlib::gz_static_error(
                 state,
                 crate::zlib_h::Z_STREAM_ERROR,
@@ -103,7 +103,8 @@ unsafe fn gz_avail(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int 
             );
             return -1 as ::core::ffi::c_int;
         }
-        let input = ::core::slice::from_raw_parts_mut(state.in_0, state.size as usize);
+        let (input, again, eof) = (&mut state.in_0, &mut state.again, &mut state.eof);
+        let input = &mut input[..];
         if available != 0 {
             if state.strm.next_in.is_null() {
                 crate::src::gzlib::gz_static_error(
@@ -154,12 +155,15 @@ unsafe fn gz_avail(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int 
             );
             return -1 as ::core::ffi::c_int;
         };
-        let read = match gz_load(state, fd, input) {
+        let read = match gz_load(fd, input, again, eof) {
             Ok(read) => read,
-            Err(_) => return -1 as ::core::ffi::c_int,
+            Err((_, error)) => {
+                gz_load_error(state, error);
+                return -1 as ::core::ffi::c_int;
+            }
         };
         state.strm.avail_in = state.strm.avail_in.wrapping_add(read as ::core::ffi::c_uint);
-        state.strm.next_in = state.in_0 as *mut crate::stdlib::Bytef;
+        state.strm.next_in = state.in_0.as_mut_ptr() as *mut crate::stdlib::Bytef;
     }
     return 0 as ::core::ffi::c_int;
 }
@@ -167,14 +171,20 @@ unsafe fn gz_avail(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int 
 unsafe extern "C" fn gz_look(mut state: crate::gzguts_h::gz_statep) -> ::core::ffi::c_int {
     let mut strm: crate::zlib_h::z_streamp = &raw mut (*state).strm;
     if (*state).size == 0 as ::core::ffi::c_uint {
-        (*state).in_0 = crate::stdlib::malloc((*state).want as crate::__stddef_size_t_h::size_t)
-            as *mut ::core::ffi::c_uchar;
-        (*state).out = crate::stdlib::malloc(
-            ((*state).want << 1 as ::core::ffi::c_int) as crate::__stddef_size_t_h::size_t,
-        ) as *mut ::core::ffi::c_uchar;
-        if (*state).in_0.is_null() || (*state).out.is_null() {
-            crate::stdlib::free((*state).out as *mut ::core::ffi::c_void);
-            crate::stdlib::free((*state).in_0 as *mut ::core::ffi::c_void);
+        let want = (*state).want as usize;
+        let Some(output_len) = want.checked_mul(2) else {
+            crate::src::gzlib::gz_static_error(
+                &mut *state,
+                crate::zlib_h::Z_MEM_ERROR,
+                b"out of memory\0",
+            );
+            return -1 as ::core::ffi::c_int;
+        };
+        let mut input = Vec::new();
+        let mut output = Vec::new();
+        if input.try_reserve_exact(want).is_err()
+            || output.try_reserve_exact(output_len).is_err()
+        {
             crate::src::gzlib::gz_static_error(
                 &mut *state,
                 crate::zlib_h::Z_MEM_ERROR,
@@ -182,6 +192,10 @@ unsafe extern "C" fn gz_look(mut state: crate::gzguts_h::gz_statep) -> ::core::f
             );
             return -1 as ::core::ffi::c_int;
         }
+        input.resize(want, 0);
+        output.resize(output_len, 0);
+        (*state).in_0 = ::core::mem::ManuallyDrop::new(input);
+        (*state).out = ::core::mem::ManuallyDrop::new(output);
         (*state).size = (*state).want;
         (*state).strm.zalloc = None;
         (*state).strm.zfree = None;
@@ -195,8 +209,8 @@ unsafe extern "C" fn gz_look(mut state: crate::gzguts_h::gz_statep) -> ::core::f
             ::core::mem::size_of::<crate::zlib_h::z_stream>() as ::core::ffi::c_int,
         ) != crate::zlib_h::Z_OK
         {
-            crate::stdlib::free((*state).out as *mut ::core::ffi::c_void);
-            crate::stdlib::free((*state).in_0 as *mut ::core::ffi::c_void);
+            ::core::mem::ManuallyDrop::drop(&mut (*state).out);
+            ::core::mem::ManuallyDrop::drop(&mut (*state).in_0);
             (*state).size = 0 as ::core::ffi::c_uint;
             crate::src::gzlib::gz_static_error(
                 &mut *state,
@@ -237,7 +251,7 @@ unsafe extern "C" fn gz_look(mut state: crate::gzguts_h::gz_statep) -> ::core::f
         (*state).direct = 0 as ::core::ffi::c_int;
         return 0 as ::core::ffi::c_int;
     }
-    (*state).x.next = (*state).out;
+    (*state).x.next = (*state).out.as_mut_ptr();
     crate::stdlib::memcpy(
         (*state).x.next as *mut ::core::ffi::c_void,
         (*strm).next_in as *const ::core::ffi::c_void,
@@ -352,21 +366,24 @@ unsafe extern "C" fn gz_fetch(mut state: crate::gzguts_h::gz_statep) -> ::core::
                     BorrowedFd::borrow_raw((*state).fd)
                 };
                 let output = ::core::slice::from_raw_parts_mut(
-                    (*state).out,
+                    (*state).out.as_mut_ptr(),
                     ((*state).size << 1) as usize,
                 );
-                let read = match gz_load(&mut *state, fd, output) {
+                let read = match gz_load(fd, output, &mut (*state).again, &mut (*state).eof) {
                     Ok(read) => read,
-                    Err(_) => return -1 as ::core::ffi::c_int,
+                    Err((_, error)) => {
+                        gz_load_error(&mut *state, error);
+                        return -1 as ::core::ffi::c_int;
+                    }
                 };
                 (*state).x.have = read as ::core::ffi::c_uint;
-                (*state).x.next = (*state).out;
+                (*state).x.next = (*state).out.as_mut_ptr();
                 return 0 as ::core::ffi::c_int;
             }
             crate::gzguts_h::GZIP => {
                 (*strm).avail_out =
                     ((*state).size << 1 as ::core::ffi::c_int) as crate::stdlib::uInt;
-                (*strm).next_out = (*state).out as *mut crate::stdlib::Bytef;
+                (*strm).next_out = (*state).out.as_mut_ptr() as *mut crate::stdlib::Bytef;
                 if gz_decomp(state) == -1 as ::core::ffi::c_int {
                     return -1 as ::core::ffi::c_int;
                 }
@@ -476,9 +493,10 @@ unsafe fn gz_read(
                         n = 0;
                     } else {
                         let fd = BorrowedFd::borrow_raw((*state).fd);
-                        match gz_load(&mut *state, fd, &mut buf[..n as usize]) {
+                        match gz_load(fd, &mut buf[..n as usize], &mut (*state).again, &mut (*state).eof) {
                             Ok(read) => n = read as ::core::ffi::c_uint,
-                            Err(read) => {
+                            Err((read, error)) => {
+                                gz_load_error(&mut *state, error);
                                 err = -1;
                                 n = read as ::core::ffi::c_uint;
                             }
@@ -692,6 +710,7 @@ pub unsafe extern "C" fn gzungetc(
         (*state).x.have = 1 as ::core::ffi::c_uint;
         (*state).x.next = (*state)
             .out
+            .as_mut_ptr()
             .offset(((*state).size << 1 as ::core::ffi::c_int) as isize)
             .offset(-(1 as ::core::ffi::c_int as isize));
         *(*state).x.next.offset(0 as ::core::ffi::c_int as isize) = c as ::core::ffi::c_uchar;
@@ -707,12 +726,16 @@ pub unsafe extern "C" fn gzungetc(
         );
         return -1 as ::core::ffi::c_int;
     }
-    if (*state).x.next == (*state).out {
-        let mut src: *mut ::core::ffi::c_uchar = (*state).out.offset((*state).x.have as isize);
+    if (*state).x.next == (*state).out.as_mut_ptr() {
+        let mut src: *mut ::core::ffi::c_uchar = (*state)
+            .out
+            .as_mut_ptr()
+            .offset((*state).x.have as isize);
         let mut dest: *mut ::core::ffi::c_uchar = (*state)
             .out
+            .as_mut_ptr()
             .offset(((*state).size << 1 as ::core::ffi::c_int) as isize);
-        while src > (*state).out {
+        while src > (*state).out.as_mut_ptr() {
             src = src.offset(-1);
             dest = dest.offset(-1);
             *dest = *src;
@@ -837,8 +860,8 @@ pub unsafe extern "C" fn gzclose_r(mut file: crate::zlib_h::gzFile) -> ::core::f
         crate::src::inflate::inflateEnd(
             &raw mut (*state).strm as *mut _ as *mut crate::zlib_h::z_stream_s,
         );
-        crate::stdlib::free((*state).out as *mut ::core::ffi::c_void);
-        crate::stdlib::free((*state).in_0 as *mut ::core::ffi::c_void);
+        ::core::mem::ManuallyDrop::drop(&mut (*state).out);
+        ::core::mem::ManuallyDrop::drop(&mut (*state).in_0);
     }
     err = if (*state).err == crate::zlib_h::Z_BUF_ERROR {
         crate::zlib_h::Z_BUF_ERROR
