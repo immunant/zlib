@@ -50,13 +50,15 @@ pub unsafe extern "C" fn compress2_z(
     let mut err: ::core::ffi::c_int = 0;
     let max: crate::stdlib::uInt = -1 as ::core::ffi::c_int as crate::stdlib::uInt;
     let mut left: crate::stdlib::z_size_t = 0;
+    let mut out_capacity: crate::stdlib::z_size_t = 0;
     if sourceLen > 0 as crate::stdlib::z_size_t && source.is_null()
         || destLen.is_null()
         || *destLen > 0 as crate::stdlib::z_size_t && dest.is_null()
     {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    left = *destLen;
+    out_capacity = *destLen;
+    left = out_capacity;
     *destLen = 0 as crate::stdlib::z_size_t;
     stream.zalloc = None;
     stream.zfree = None;
@@ -103,7 +105,9 @@ pub unsafe extern "C" fn compress2_z(
             break;
         }
     }
-    *destLen = stream.next_out.offset_from(dest) as crate::stdlib::z_size_t;
+    *destLen = out_capacity.wrapping_sub(
+        left.wrapping_add(stream.avail_out as crate::stdlib::z_size_t),
+    );
     crate::src::deflate::deflateEnd(&raw mut stream as *mut _ as *mut crate::zlib_h::z_stream_s);
     return if err == crate::zlib_h::Z_STREAM_END {
         crate::zlib_h::Z_OK
