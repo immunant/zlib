@@ -551,14 +551,32 @@ fn window_needs_allocation(has_window: bool) -> bool {
     !has_window
 }
 
-fn window_allocation_failed(allocation_was_required: bool, has_window: bool) -> bool {
-    allocation_was_required && !has_window
-}
-
 fn window_allocation_request(
     wbits: crate::stdlib::uInt,
 ) -> (crate::stdlib::uInt, crate::stdlib::uInt) {
     (1_u32 << wbits, 1)
+}
+
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+enum WindowAllocationPlan {
+    Existing,
+    Allocate {
+        items: crate::stdlib::uInt,
+        size: crate::stdlib::uInt,
+    },
+}
+
+fn window_allocation_plan(has_window: bool, wbits: crate::stdlib::uInt) -> WindowAllocationPlan {
+    if window_needs_allocation(has_window) {
+        let (items, size) = window_allocation_request(wbits);
+        WindowAllocationPlan::Allocate { items, size }
+    } else {
+        WindowAllocationPlan::Existing
+    }
+}
+
+fn window_allocation_failed(plan: WindowAllocationPlan, has_window: bool) -> bool {
+    matches!(plan, WindowAllocationPlan::Allocate { .. }) && !has_window
 }
 
 fn window_update_plan(
@@ -1023,15 +1041,14 @@ unsafe fn updatewindow(
     mut copy: ::core::ffi::c_uint,
 ) -> ::core::ffi::c_int {
     let state = (*strm).state as *mut crate::src::inflate::inflate_state;
-    let allocation_was_required = window_needs_allocation(!(*state).window.is_null());
-    if allocation_was_required {
-        let (items, size) = window_allocation_request((*state).wbits);
+    let allocation_plan = window_allocation_plan(!(*state).window.is_null(), (*state).wbits);
+    if let WindowAllocationPlan::Allocate { items, size } = allocation_plan {
         (*state).window = Some((*strm).zalloc.expect("non-null function pointer"))
             .expect("non-null function pointer")(
             (*strm).opaque, items, size
         ) as *mut ::core::ffi::c_uchar;
     }
-    if window_allocation_failed(allocation_was_required, !(*state).window.is_null()) {
+    if window_allocation_failed(allocation_plan, !(*state).window.is_null()) {
         return 1;
     }
     let state = &mut *state;
@@ -3087,13 +3104,14 @@ mod tests {
         inflate_validate_core, inflate_validate_wrap, inflate_zlib_header_error,
         inflate_zlib_header_transition, inflate_zlib_window_params, initial_window_metadata,
         reset_window_history, stored_block_length, syncsearch_safe, update_window_core,
-        update_window_has_produced_bytes, window_allocation_failed, window_allocation_request,
-        window_needs_allocation, window_update_plan, DynamicCodeLengthRepeat, InflateBlockKind,
-        InflateCopyProgress, InflateGzipExtraProgress, InflateGzipFlags, InflateGzipFlagsError,
-        InflateMatchPlan, InflateMatchSource, InflateOutputChecksum, InflatePrimeUpdate,
-        InflateSyncSearch, InflateZlibHeaderError, InflateZlibHeaderTransition,
-        InflateZlibWindowParams, BAD, CHECK, CODE_LENGTH_ORDER, COPY_, COPY_1, DICT, DICTID, HEAD,
-        LEN_, MATCH, STORED, SYNC, TYPE, TYPEDO,
+        update_window_has_produced_bytes, window_allocation_failed, window_allocation_plan,
+        window_allocation_request, window_needs_allocation, window_update_plan,
+        DynamicCodeLengthRepeat, InflateBlockKind, InflateCopyProgress, InflateGzipExtraProgress,
+        InflateGzipFlags, InflateGzipFlagsError, InflateMatchPlan, InflateMatchSource,
+        InflateOutputChecksum, InflatePrimeUpdate, InflateSyncSearch, InflateZlibHeaderError,
+        InflateZlibHeaderTransition, InflateZlibWindowParams, WindowAllocationPlan, BAD, CHECK,
+        CODE_LENGTH_ORDER, COPY_, COPY_1, DICT, DICTID, HEAD, LEN_, MATCH, STORED, SYNC, TYPE,
+        TYPEDO,
     };
 
     #[test]
@@ -4166,15 +4184,34 @@ mod tests {
 
     #[test]
     fn window_allocation_failure_requires_a_missing_allocated_window() {
-        assert!(window_allocation_failed(true, false));
-        assert!(!window_allocation_failed(true, true));
-        assert!(!window_allocation_failed(false, false));
+        let allocation = window_allocation_plan(false, 15);
+        assert!(window_allocation_failed(allocation, false));
+        assert!(!window_allocation_failed(allocation, true));
+        assert!(!window_allocation_failed(
+            window_allocation_plan(true, 15),
+            false
+        ));
     }
 
     #[test]
     fn window_allocation_request_matches_supported_window_widths() {
         assert_eq!(window_allocation_request(8), (256, 1));
         assert_eq!(window_allocation_request(15), (32_768, 1));
+    }
+
+    #[test]
+    fn window_allocation_plan_distinguishes_existing_and_required_windows() {
+        assert_eq!(
+            window_allocation_plan(true, 15),
+            WindowAllocationPlan::Existing
+        );
+        assert_eq!(
+            window_allocation_plan(false, 8),
+            WindowAllocationPlan::Allocate {
+                items: 256,
+                size: 1,
+            }
+        );
     }
 
     #[test]

@@ -1079,6 +1079,33 @@ fn dictionary_tail_offset(
     dict_length.wrapping_sub(window_size) as usize
 }
 
+fn deflate_dictionary_state_after_load(
+    strstart: crate::stdlib::uInt,
+    lookahead: crate::stdlib::uInt,
+) -> (
+    crate::stdlib::uInt,
+    ::core::ffi::c_long,
+    crate::stdlib::uInt,
+    crate::stdlib::uInt,
+    crate::stdlib::uInt,
+    crate::stdlib::uInt,
+    ::core::ffi::c_int,
+) {
+    let strstart = strstart.wrapping_add(lookahead);
+    let previous_match_length =
+        (crate::zutil_h::MIN_MATCH - 1 as ::core::ffi::c_int) as crate::stdlib::uInt;
+
+    (
+        strstart,
+        strstart as ::core::ffi::c_long,
+        lookahead,
+        0,
+        previous_match_length,
+        previous_match_length,
+        0,
+    )
+}
+
 unsafe fn deflateStateCheck(mut strm: crate::zlib_h::z_streamp) -> ::core::ffi::c_int {
     if strm.is_null() {
         return deflate_state_check_impl(None, None, false);
@@ -1169,13 +1196,15 @@ pub unsafe extern "C" fn deflateSetDictionary(
             (crate::zutil_h::MIN_MATCH - 1 as ::core::ffi::c_int) as crate::stdlib::uInt;
         fill_window(s);
     }
-    (*s).strstart = (*s).strstart.wrapping_add((*s).lookahead);
-    (*s).block_start = (*s).strstart as ::core::ffi::c_long;
-    (*s).insert = (*s).lookahead;
-    (*s).lookahead = 0 as crate::stdlib::uInt;
-    (*s).prev_length = (crate::zutil_h::MIN_MATCH - 1 as ::core::ffi::c_int) as crate::stdlib::uInt;
-    (*s).match_length = (*s).prev_length;
-    (*s).match_available = 0 as ::core::ffi::c_int;
+    (
+        (*s).strstart,
+        (*s).block_start,
+        (*s).insert,
+        (*s).lookahead,
+        (*s).prev_length,
+        (*s).match_length,
+        (*s).match_available,
+    ) = deflate_dictionary_state_after_load((*s).strstart, (*s).lookahead);
     (*strm).next_in = next as *mut crate::stdlib::Bytef;
     (*strm).avail_in = avail as crate::stdlib::uInt;
     (*s).wrap = wrap;
@@ -4063,10 +4092,11 @@ mod tests {
     use super::{
         can_search_hash_match, clamped_copy_len, deflate_block_state_actions,
         deflate_bound_lengths, deflate_copyright, deflate_dictionary_len,
-        deflate_fast_literal_state_after_emit, deflate_flush_rank, deflate_huff_literal_progress,
-        deflate_match_refill_action, deflate_pending_value, deflate_preflight,
-        deflate_prime_bits_valid, deflate_request_is_invalid, deflate_reset_status_and_adler,
-        deflate_rle_can_scan_match, deflate_rle_clamp_match_length, deflate_rle_match_length,
+        deflate_dictionary_state_after_load, deflate_fast_literal_state_after_emit,
+        deflate_flush_rank, deflate_huff_literal_progress, deflate_match_refill_action,
+        deflate_pending_value, deflate_preflight, deflate_prime_bits_valid,
+        deflate_request_is_invalid, deflate_reset_status_and_adler, deflate_rle_can_scan_match,
+        deflate_rle_clamp_match_length, deflate_rle_match_length,
         deflate_rle_match_state_after_emit, deflate_rle_refill_action,
         deflate_set_dictionary_allowed, deflate_should_return_buf_error, deflate_state_check_impl,
         deflate_state_check_result, deflate_state_is_usable, deflate_state_status_valid,
@@ -4350,6 +4380,36 @@ mod tests {
         assert_eq!(deflate_dictionary_len(27, 5, 32), 32);
         assert_eq!(deflate_dictionary_len(30, 5, 32), 32);
         assert_eq!(deflate_dictionary_len(crate::stdlib::uInt::MAX, 1, 32), 0);
+    }
+
+    #[test]
+    fn deflate_dictionary_state_after_load_preserves_post_load_state() {
+        let previous_match_length =
+            (crate::zutil_h::MIN_MATCH - 1 as ::core::ffi::c_int) as crate::stdlib::uInt;
+
+        assert_eq!(
+            deflate_dictionary_state_after_load(10, 5),
+            (
+                15,
+                15,
+                5,
+                0,
+                previous_match_length,
+                previous_match_length,
+                0
+            ),
+        );
+    }
+
+    #[test]
+    fn deflate_dictionary_state_after_load_preserves_wrapping_cursor() {
+        let previous_match_length =
+            (crate::zutil_h::MIN_MATCH - 1 as ::core::ffi::c_int) as crate::stdlib::uInt;
+
+        assert_eq!(
+            deflate_dictionary_state_after_load(crate::stdlib::uInt::MAX, 1),
+            (0, 0, 1, 0, previous_match_length, previous_match_length, 0),
+        );
     }
 
     #[test]

@@ -4335,6 +4335,18 @@ fn classify_tree_run(
     }
 }
 
+fn tree_run_extra_bits(
+    action: ScanTreeAction,
+    count: ::core::ffi::c_int,
+) -> Option<(::core::ffi::c_int, ::core::ffi::c_int)> {
+    match action {
+        ScanTreeAction::LiteralCount(_) => None,
+        ScanTreeAction::RepeatLength { .. } => Some((count - 3, 2)),
+        ScanTreeAction::RepeatZeroShort => Some((count - 3, 3)),
+        ScanTreeAction::RepeatZeroLong => Some((count - 11, 7)),
+    }
+}
+
 fn tree_next_cursor(index: ::core::ffi::c_int) -> usize {
     index.wrapping_add(1) as usize
 }
@@ -4504,6 +4516,11 @@ unsafe fn send_tree(
                         }
                         count -= 1;
                     }
+                    let (extra_value, extra_bit_count) = tree_run_extra_bits(
+                        ScanTreeAction::RepeatLength { emit_length_once },
+                        count,
+                    )
+                    .unwrap();
                     let mut len_1: ::core::ffi::c_int =
                         (*s).bl_tree[16 as ::core::ffi::c_int as usize].dl.len
                             as ::core::ffi::c_int;
@@ -4536,9 +4553,9 @@ unsafe fn send_tree(
                             as crate::zutil_h::ush;
                         (*s).bi_valid += len_1;
                     }
-                    let mut len_2: ::core::ffi::c_int = 2 as ::core::ffi::c_int;
+                    let mut len_2: ::core::ffi::c_int = extra_bit_count;
                     if bit_buffer_would_overflow((*s).bi_valid, len_2) {
-                        let mut val_2: ::core::ffi::c_int = count - 3 as ::core::ffi::c_int;
+                        let mut val_2: ::core::ffi::c_int = extra_value;
                         (*s).bi_buf = ((*s).bi_buf as ::core::ffi::c_int
                             | (val_2 as crate::zutil_h::ush as ::core::ffi::c_int) << (*s).bi_valid)
                             as crate::zutil_h::ush;
@@ -4558,14 +4575,15 @@ unsafe fn send_tree(
                         (*s).bi_valid += len_2 - crate::src::deflate::Buf_size;
                     } else {
                         (*s).bi_buf = ((*s).bi_buf as ::core::ffi::c_int
-                            | ((count - 3 as ::core::ffi::c_int) as crate::zutil_h::ush
-                                as ::core::ffi::c_int)
+                            | (extra_value as crate::zutil_h::ush as ::core::ffi::c_int)
                                 << (*s).bi_valid)
                             as crate::zutil_h::ush;
                         (*s).bi_valid += len_2;
                     }
                 }
                 ScanTreeAction::RepeatZeroShort => {
+                    let (extra_value, extra_bit_count) =
+                        tree_run_extra_bits(ScanTreeAction::RepeatZeroShort, count).unwrap();
                     let mut len_3: ::core::ffi::c_int =
                         (*s).bl_tree[17 as ::core::ffi::c_int as usize].dl.len
                             as ::core::ffi::c_int;
@@ -4598,9 +4616,9 @@ unsafe fn send_tree(
                             as crate::zutil_h::ush;
                         (*s).bi_valid += len_3;
                     }
-                    let mut len_4: ::core::ffi::c_int = 3 as ::core::ffi::c_int;
+                    let mut len_4: ::core::ffi::c_int = extra_bit_count;
                     if bit_buffer_would_overflow((*s).bi_valid, len_4) {
-                        let mut val_4: ::core::ffi::c_int = count - 3 as ::core::ffi::c_int;
+                        let mut val_4: ::core::ffi::c_int = extra_value;
                         (*s).bi_buf = ((*s).bi_buf as ::core::ffi::c_int
                             | (val_4 as crate::zutil_h::ush as ::core::ffi::c_int) << (*s).bi_valid)
                             as crate::zutil_h::ush;
@@ -4620,14 +4638,15 @@ unsafe fn send_tree(
                         (*s).bi_valid += len_4 - crate::src::deflate::Buf_size;
                     } else {
                         (*s).bi_buf = ((*s).bi_buf as ::core::ffi::c_int
-                            | ((count - 3 as ::core::ffi::c_int) as crate::zutil_h::ush
-                                as ::core::ffi::c_int)
+                            | (extra_value as crate::zutil_h::ush as ::core::ffi::c_int)
                                 << (*s).bi_valid)
                             as crate::zutil_h::ush;
                         (*s).bi_valid += len_4;
                     }
                 }
                 ScanTreeAction::RepeatZeroLong => {
+                    let (extra_value, extra_bit_count) =
+                        tree_run_extra_bits(ScanTreeAction::RepeatZeroLong, count).unwrap();
                     let mut len_5: ::core::ffi::c_int =
                         (*s).bl_tree[18 as ::core::ffi::c_int as usize].dl.len
                             as ::core::ffi::c_int;
@@ -4660,9 +4679,9 @@ unsafe fn send_tree(
                             as crate::zutil_h::ush;
                         (*s).bi_valid += len_5;
                     }
-                    let mut len_6: ::core::ffi::c_int = 7 as ::core::ffi::c_int;
+                    let mut len_6: ::core::ffi::c_int = extra_bit_count;
                     if bit_buffer_would_overflow((*s).bi_valid, len_6) {
-                        let mut val_6: ::core::ffi::c_int = count - 11 as ::core::ffi::c_int;
+                        let mut val_6: ::core::ffi::c_int = extra_value;
                         (*s).bi_buf = ((*s).bi_buf as ::core::ffi::c_int
                             | (val_6 as crate::zutil_h::ush as ::core::ffi::c_int) << (*s).bi_valid)
                             as crate::zutil_h::ush;
@@ -4682,8 +4701,7 @@ unsafe fn send_tree(
                         (*s).bi_valid += len_6 - crate::src::deflate::Buf_size;
                     } else {
                         (*s).bi_buf = ((*s).bi_buf as ::core::ffi::c_int
-                            | ((count - 11 as ::core::ffi::c_int) as crate::zutil_h::ush
-                                as ::core::ffi::c_int)
+                            | (extra_value as crate::zutil_h::ush as ::core::ffi::c_int)
                                 << (*s).bi_valid)
                             as crate::zutil_h::ush;
                         (*s).bi_valid += len_6;
@@ -5436,8 +5454,8 @@ mod tests {
         supplemental_tree_node, symbol_buffer_is_full, symbol_triplet_cursors,
         tally_match_tree_indices, tally_symbol_bytes, tally_tree_update, tree_bit_length_cost,
         tree_bit_length_totals_after_node, tree_next_cursor, tree_parent_depth, tree_run_continues,
-        tree_run_limits, BlockEncoding, HeapChild, ScanTreeAction, TallyTreeUpdate,
-        BL_CODE_ORDER_LEN, END_BLOCK, MAX_BITS,
+        tree_run_extra_bits, tree_run_limits, BlockEncoding, HeapChild, ScanTreeAction,
+        TallyTreeUpdate, BL_CODE_ORDER_LEN, END_BLOCK, MAX_BITS,
     };
 
     fn ltree_with_frequency(
@@ -5582,6 +5600,48 @@ mod tests {
         assert_eq!(
             classify_tree_run(11, 3, 0, -1),
             ScanTreeAction::RepeatZeroLong
+        );
+    }
+
+    #[test]
+    fn tree_run_extra_bits_match_deflate_repeat_ranges() {
+        assert_eq!(
+            tree_run_extra_bits(ScanTreeAction::LiteralCount(2), 2),
+            None
+        );
+        assert_eq!(
+            tree_run_extra_bits(
+                ScanTreeAction::RepeatLength {
+                    emit_length_once: false
+                },
+                3
+            ),
+            Some((0, 2))
+        );
+        assert_eq!(
+            tree_run_extra_bits(
+                ScanTreeAction::RepeatLength {
+                    emit_length_once: true
+                },
+                6
+            ),
+            Some((3, 2))
+        );
+        assert_eq!(
+            tree_run_extra_bits(ScanTreeAction::RepeatZeroShort, 3),
+            Some((0, 3))
+        );
+        assert_eq!(
+            tree_run_extra_bits(ScanTreeAction::RepeatZeroShort, 10),
+            Some((7, 3))
+        );
+        assert_eq!(
+            tree_run_extra_bits(ScanTreeAction::RepeatZeroLong, 11),
+            Some((0, 7))
+        );
+        assert_eq!(
+            tree_run_extra_bits(ScanTreeAction::RepeatZeroLong, 138),
+            Some((127, 7))
         );
     }
 
