@@ -189,7 +189,6 @@ pub use crate::src::crc32::crc32_z;
 pub use crate::src::trees::_dist_code;
 pub use crate::src::trees::_length_code;
 pub use crate::src::trees::_tr_flush_block;
-pub use crate::src::trees::_tr_stored_block;
 pub use crate::src::trees::tr_init;
 pub use crate::src::zutil::z_errmsg;
 pub use crate::src::zutil::zcalloc;
@@ -2831,9 +2830,26 @@ pub unsafe extern "C" fn deflate(
                     crate::src::trees::BitOutputAction::Align,
                 );
             } else if flush != crate::zlib_h::Z_BLOCK {
-                crate::src::trees::_tr_stored_block(
-                    s as *mut crate::src::deflate::internal_state,
-                    ::core::ptr::null_mut::<crate::stdlib::charf>(),
+                // This flush emits the same empty stored block as
+                // `_tr_stored_block()`, but the dispatcher already has the
+                // opaque state and can pass its one bounded pending view
+                // directly to the slice-based tree core.  In particular,
+                // keep the zero-length input as a real empty slice rather
+                // than reconstructing the C null cursor accepted by the ABI
+                // adapter.
+                let pending_buf = ::core::slice::from_raw_parts_mut(
+                    s.pending_buf
+                        .expect("initialized pending buffer")
+                        .as_ptr(),
+                    s.pending_buf_size as usize,
+                );
+                crate::src::trees::stored_block_bytes(
+                    pending_buf,
+                    &mut s.pending,
+                    &mut s.bi_buf,
+                    &mut s.bi_valid,
+                    &mut s.bi_used,
+                    &[],
                     0 as crate::zutil_h::ulg,
                     0 as ::core::ffi::c_int,
                 );

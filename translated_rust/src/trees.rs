@@ -3235,16 +3235,17 @@ pub(crate) fn stored_block_bytes(
     *pending = pending.wrapping_add(stored_len);
 }
 
-pub unsafe extern "C" fn _tr_stored_block(
+#[export_name = "_tr_stored_block"]
+
+pub unsafe extern "C" fn _tr_stored_block_ffi(
     mut s: *mut crate::src::deflate::deflate_state,
     mut buf: *mut crate::stdlib::charf,
     mut stored_len: crate::zutil_h::ulg,
     mut last: ::core::ffi::c_int,
 ) {
+    // This is the ABI conversion boundary: a null payload is valid only for
+    // an empty block. The core itself receives ordinary bounded slices.
     let state = &mut *s;
-    // `pending_buf_size` is the allocation capacity established by
-    // `deflateInit2_()` and `deflateCopy()`.  The payload is present only
-    // for a nonzero stored block, matching zlib's null-with-zero rule.
     let pending_buf = ::core::slice::from_raw_parts_mut(
         state
             .pending_buf
@@ -3267,16 +3268,6 @@ pub unsafe extern "C" fn _tr_stored_block(
         stored_len,
         last,
     );
-}
-#[export_name = "_tr_stored_block"]
-
-pub unsafe extern "C" fn _tr_stored_block_ffi(
-    mut s: *mut crate::src::deflate::deflate_state,
-    mut buf: *mut crate::stdlib::charf,
-    mut stored_len: crate::zutil_h::ulg,
-    mut last: ::core::ffi::c_int,
-) {
-    _tr_stored_block(s, buf, stored_len, last)
 }
 #[export_name = "_tr_flush_bits"]
 
