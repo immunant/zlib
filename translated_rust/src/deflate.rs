@@ -942,33 +942,55 @@ pub unsafe extern "C" fn deflateResetKeep_ffi(
 ) -> ::core::ffi::c_int {
     deflateResetKeep(strm)
 }
+fn lm_init_state(
+    s: &mut crate::src::deflate::deflate_state,
+    head: &mut [crate::src::deflate::Posf],
+) -> bool {
+    let Ok(hash_size) = usize::try_from(s.hash_size) else {
+        return false;
+    };
+    let Some(config) = configuration_table.get(s.level as usize) else {
+        return false;
+    };
+    if head.len() != hash_size {
+        return false;
+    }
+
+    s.window_size = (2 as ::core::ffi::c_long as crate::zutil_h::ulg)
+        .wrapping_mul(s.w_size as crate::zutil_h::ulg);
+    head.fill(NIL as crate::src::deflate::Posf);
+    s.slid = 0 as ::core::ffi::c_int;
+    s.max_lazy_match = config.max_lazy as crate::stdlib::uInt;
+    s.good_match = config.good_length as crate::stdlib::uInt;
+    s.nice_match = config.nice_length as ::core::ffi::c_int;
+    s.max_chain_length = config.max_chain as crate::stdlib::uInt;
+    s.strstart = 0 as crate::stdlib::uInt;
+    s.block_start = 0 as ::core::ffi::c_long;
+    s.lookahead = 0 as crate::stdlib::uInt;
+    s.insert = 0 as crate::stdlib::uInt;
+    s.prev_length = (crate::zutil_h::MIN_MATCH - 1 as ::core::ffi::c_int) as crate::stdlib::uInt;
+    s.match_length = s.prev_length;
+    s.match_available = 0 as ::core::ffi::c_int;
+    s.ins_h = 0 as crate::stdlib::uInt;
+    true
+}
+
 unsafe extern "C" fn lm_init(mut s: *mut crate::src::deflate::deflate_state) {
-    (*s).window_size = (2 as ::core::ffi::c_long as crate::zutil_h::ulg)
-        .wrapping_mul((*s).w_size as crate::zutil_h::ulg);
-    *(*s)
-        .head
-        .offset((*s).hash_size.wrapping_sub(1 as crate::stdlib::uInt) as isize) =
-        NIL as crate::src::deflate::Posf;
-    crate::stdlib::memset(
-        (*s).head as *mut ::core::ffi::c_void,
-        0 as ::core::ffi::c_int,
-        ((*s).hash_size.wrapping_sub(1 as crate::stdlib::uInt) as crate::__stddef_size_t_h::size_t)
-            .wrapping_mul(::core::mem::size_of::<crate::src::deflate::Posf>()),
-    );
-    (*s).slid = 0 as ::core::ffi::c_int;
-    (*s).max_lazy_match = configuration_table[(*s).level as usize].max_lazy as crate::stdlib::uInt;
-    (*s).good_match = configuration_table[(*s).level as usize].good_length as crate::stdlib::uInt;
-    (*s).nice_match = configuration_table[(*s).level as usize].nice_length as ::core::ffi::c_int;
-    (*s).max_chain_length =
-        configuration_table[(*s).level as usize].max_chain as crate::stdlib::uInt;
-    (*s).strstart = 0 as crate::stdlib::uInt;
-    (*s).block_start = 0 as ::core::ffi::c_long;
-    (*s).lookahead = 0 as crate::stdlib::uInt;
-    (*s).insert = 0 as crate::stdlib::uInt;
-    (*s).prev_length = (crate::zutil_h::MIN_MATCH - 1 as ::core::ffi::c_int) as crate::stdlib::uInt;
-    (*s).match_length = (*s).prev_length;
-    (*s).match_available = 0 as ::core::ffi::c_int;
-    (*s).ins_h = 0 as crate::stdlib::uInt;
+    if s.is_null() {
+        return;
+    }
+    let Ok(head_len) = usize::try_from((*s).hash_size) else {
+        return;
+    };
+    if head_len != 0 && (*s).head.is_null() {
+        return;
+    }
+    let head = if head_len == 0 {
+        &mut []
+    } else {
+        ::core::slice::from_raw_parts_mut((*s).head, head_len)
+    };
+    let _ = lm_init_state(&mut *s, head);
 }
 pub unsafe extern "C" fn deflateReset(mut strm: crate::zlib_h::z_streamp) -> ::core::ffi::c_int {
     let mut ret: ::core::ffi::c_int = 0;
