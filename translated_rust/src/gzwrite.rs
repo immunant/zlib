@@ -535,10 +535,6 @@ fn gz_zero_impl(compressor: &mut GzCompressor<'_>) -> ::core::ffi::c_int {
     return 0 as ::core::ffi::c_int;
 }
 
-unsafe fn gz_zero(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
-    gz_zero_impl(&mut GzCompressor { state })
-}
-
 impl GzCompressor<'_> {
 fn write(&mut self, input: &[u8]) -> crate::stdlib::z_size_t {
     let state = &mut *self.state;
