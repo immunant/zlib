@@ -275,6 +275,30 @@ fn gz_write_is_empty(len: crate::stdlib::z_size_t) -> bool {
     len == 0
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum GzWritePreparation {
+    Empty,
+    Initialize,
+    ZeroSkip,
+    Ready,
+}
+
+fn gz_write_preparation(
+    len: crate::stdlib::z_size_t,
+    size: ::core::ffi::c_uint,
+    skip: crate::stdlib::off64_t,
+) -> GzWritePreparation {
+    if gz_write_is_empty(len) {
+        GzWritePreparation::Empty
+    } else if !gz_buffer_is_initialized(size) {
+        GzWritePreparation::Initialize
+    } else if gz_has_pending_skip(skip) {
+        GzWritePreparation::ZeroSkip
+    } else {
+        GzWritePreparation::Ready
+    }
+}
+
 fn gz_has_pending_input(avail_in: crate::stdlib::uInt) -> bool {
     avail_in != 0
 }
@@ -986,15 +1010,20 @@ unsafe fn gz_write(
     mut len: crate::stdlib::z_size_t,
 ) -> crate::stdlib::z_size_t {
     let put: crate::stdlib::z_size_t = len;
-    if gz_write_is_empty(len) {
-        return 0 as crate::stdlib::z_size_t;
-    }
     let state = &mut *state;
-    if !gz_buffer_is_initialized(state.size) && gz_init(state) == -1 as ::core::ffi::c_int {
-        return 0 as crate::stdlib::z_size_t;
-    }
-    if gz_has_pending_skip(state.skip) && gz_zero(state) == -1 as ::core::ffi::c_int {
-        return 0 as crate::stdlib::z_size_t;
+    match gz_write_preparation(len, state.size, state.skip) {
+        GzWritePreparation::Empty => return 0 as crate::stdlib::z_size_t,
+        GzWritePreparation::Initialize => {
+            if gz_init(state) == -1 as ::core::ffi::c_int {
+                return 0 as crate::stdlib::z_size_t;
+            }
+        }
+        GzWritePreparation::ZeroSkip => {
+            if gz_zero(state) == -1 as ::core::ffi::c_int {
+                return 0 as crate::stdlib::z_size_t;
+            }
+        }
+        GzWritePreparation::Ready => {}
     }
     if gz_write_uses_buffered_path(len, state.size) {
         loop {
@@ -1415,7 +1444,7 @@ mod tests {
         gz_write_advanced_pos, gz_write_apply_chunk_progress, gz_write_apply_direct_progress,
         gz_write_buffered_copy_len, gz_write_buffered_input_action, gz_write_buffered_progress,
         gz_write_chunk_len, gz_write_consumed, gz_write_direct_action, gz_write_errno_is_retryable,
-        gz_write_error_result, gz_write_is_empty, gz_write_progress,
+        gz_write_error_result, gz_write_is_empty, gz_write_preparation, gz_write_progress,
         gz_write_remaining_after_consumption, gz_write_state_is_usable,
         gz_write_uses_buffered_path, gz_zero_action, gz_zero_apply_progress, gz_zero_chunk_len,
         gz_zero_chunk_step, gz_zero_initial_step, gz_zero_needs_initialization,
@@ -1426,7 +1455,7 @@ mod tests {
         GzCloseBufferAction, GzCompDeflateAction, GzCompOutputBufferAction, GzCompResetAction,
         GzCompWriteFailure, GzCompWriteResult, GzFlushAction, GzInitAllocationPlan, GzInitMode,
         GzPutcWriteAction, GzSetParamsBufferAction, GzWriteBufferedInputAction,
-        GzWriteDirectAction, GzZeroAction, GzZeroStep,
+        GzWriteDirectAction, GzWritePreparation, GzZeroAction, GzZeroStep,
     };
 
     #[test]
@@ -2244,6 +2273,17 @@ mod tests {
         assert!(gz_write_is_empty(0));
         assert!(!gz_write_is_empty(1));
         assert!(!gz_write_is_empty(crate::stdlib::z_size_t::MAX));
+    }
+
+    #[test]
+    fn gz_write_preparation_preserves_initialization_and_skip_order() {
+        assert_eq!(gz_write_preparation(0, 0, 1), GzWritePreparation::Empty);
+        assert_eq!(
+            gz_write_preparation(1, 0, 1),
+            GzWritePreparation::Initialize
+        );
+        assert_eq!(gz_write_preparation(1, 1, 1), GzWritePreparation::ZeroSkip);
+        assert_eq!(gz_write_preparation(1, 1, 0), GzWritePreparation::Ready);
     }
 
     #[test]
