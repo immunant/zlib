@@ -204,6 +204,55 @@ pub struct inflate_state {
     pub back: ::core::ffi::c_int,
     pub was: ::core::ffi::c_uint,
 }
+
+// State allocations come from zlib's configurable allocator and are therefore
+// initially uninitialized. Construct the exact field-wise zero value before
+// exposing such an allocation as `inflate_state`, rather than relying on C's
+// bytewise initialization after allocation.
+fn inflate_state_zero_value() -> inflate_state {
+    let zero_code = crate::src::inftrees::code {
+        op: 0,
+        bits: 0,
+        val: 0,
+    };
+    inflate_state {
+        strm: ::core::ptr::null_mut(),
+        mode: 0,
+        last: 0,
+        wrap: 0,
+        havedict: 0,
+        flags: 0,
+        dmax: 0,
+        check: 0,
+        total: 0,
+        head: ::core::ptr::null_mut(),
+        wbits: 0,
+        wsize: 0,
+        whave: 0,
+        wnext: 0,
+        window: ::core::ptr::null_mut(),
+        hold: 0,
+        bits: 0,
+        length: 0,
+        offset: 0,
+        extra: 0,
+        lencode: ::core::ptr::null(),
+        distcode: ::core::ptr::null(),
+        lenbits: 0,
+        distbits: 0,
+        ncode: 0,
+        nlen: 0,
+        ndist: 0,
+        have: 0,
+        next: ::core::ptr::null_mut(),
+        lens: [0; 320],
+        work: [0; 288],
+        codes: [zero_code; 1444],
+        sane: 0,
+        back: 0,
+        was: 0,
+    }
+}
 pub use crate::__stddef_size_t_h::size_t;
 
 pub use crate::src::deflate::internal_state;
@@ -572,22 +621,18 @@ pub(crate) fn inflateInit2_(
         return crate::zlib_h::Z_MEM_ERROR;
     }
     // SAFETY: the allocator returned a non-null allocation large enough for
-    // one `inflate_state`; C zlib initializes that allocation bytewise.
-    unsafe {
-        crate::stdlib::memset(
-            state as *mut ::core::ffi::c_void,
-            0 as ::core::ffi::c_int,
-            ::core::mem::size_of::<crate::src::inflate::inflate_state>(),
-        );
-    }
-    strm.state = state as *mut crate::src::deflate::internal_state;
-    // SAFETY: `state` is the live non-null allocation initialized above and
-    // remains owned by this stream until the matching release below.
-    let ret = unsafe {
-        let state = &mut *state;
-        state.strm = strm;
-        inflate_initialize_state(strm, state, windowBits)
+    // one `inflate_state`. Bind it as uninitialized storage only long enough
+    // to write the complete safe zero value, then retain the initialized
+    // reference for the rest of this function.
+    let state_ref = unsafe {
+        (&mut *state.cast::<::core::mem::MaybeUninit<crate::src::inflate::inflate_state>>())
+            .write(inflate_state_zero_value())
     };
+    strm.state = state as *mut crate::src::deflate::internal_state;
+    // The allocator returned a non-null `inflate_state` above. It is owned by
+    // this stream until the matching release below.
+    state_ref.strm = strm;
+    let ret = inflate_initialize_state(strm, state_ref, windowBits);
     if ret != crate::zlib_h::Z_OK {
         // SAFETY: this is the still-owned allocation returned by the
         // stream's matching allocator. No state reference spans the callback.
