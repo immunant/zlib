@@ -71,7 +71,9 @@ pub struct internal_state {
     pub status: ::core::ffi::c_int,
     pub pending_buf: *mut crate::stdlib::Bytef,
     pub pending_buf_size: crate::zutil_h::ulg,
-    pub pending_out: *mut crate::stdlib::Bytef,
+    // Cursor within `pending_buf`.  Keep this as an offset so copying/resetting a
+    // stream never retains an interior raw pointer into the allocation.
+    pub pending_out: usize,
     pub pending: crate::zutil_h::ulg,
     pub wrap: ::core::ffi::c_int,
     pub gzhead: crate::zlib_h::gz_headerp,
@@ -903,7 +905,7 @@ pub unsafe extern "C" fn deflateResetKeep(
     (*strm).data_type = crate::zlib_h::Z_UNKNOWN;
     s = (*strm).state as *mut crate::src::deflate::deflate_state;
     (*s).pending = 0 as crate::zutil_h::ulg;
-    (*s).pending_out = (*s).pending_buf;
+    (*s).pending_out = 0;
     if (*s).wrap < 0 as ::core::ffi::c_int {
         (*s).wrap = -(*s).wrap;
     }
@@ -1056,11 +1058,10 @@ pub unsafe extern "C" fn deflatePrime(
     s = (*strm).state as *mut crate::src::deflate::deflate_state;
     if bits < 0 as ::core::ffi::c_int
         || bits > 16 as ::core::ffi::c_int
-        || (*s).sym_buf
-            < (*s).pending_out.offset(
-                (crate::src::deflate::Buf_size + 7 as ::core::ffi::c_int >> 3 as ::core::ffi::c_int)
-                    as isize,
-            )
+        || (*s).pending_out.wrapping_add(
+            (crate::src::deflate::Buf_size + 7 as ::core::ffi::c_int >> 3 as ::core::ffi::c_int)
+                as usize,
+        ) > (*s).lit_bufsize as usize
     {
         return crate::zlib_h::Z_BUF_ERROR;
     }
@@ -1381,16 +1382,16 @@ unsafe extern "C" fn flush_pending(mut strm: crate::zlib_h::z_streamp) {
     }
     crate::stdlib::memcpy(
         (*strm).next_out as *mut ::core::ffi::c_void,
-        (*s).pending_out as *const ::core::ffi::c_void,
+        (*s).pending_buf.offset((*s).pending_out as isize) as *const ::core::ffi::c_void,
         len as crate::__stddef_size_t_h::size_t,
     );
     (*strm).next_out = (*strm).next_out.offset(len as isize);
-    (*s).pending_out = (*s).pending_out.offset(len as isize);
+    (*s).pending_out = (*s).pending_out.wrapping_add(len as usize);
     (*strm).total_out = (*strm).total_out.wrapping_add(len as crate::stdlib::uLong);
     (*strm).avail_out = (*strm).avail_out.wrapping_sub(len);
     (*s).pending = (*s).pending.wrapping_sub(len as crate::zutil_h::ulg);
     if (*s).pending == 0 as crate::zutil_h::ulg {
-        (*s).pending_out = (*s).pending_buf;
+        (*s).pending_out = 0;
     }
 }
 pub unsafe extern "C" fn deflate(
@@ -2123,12 +2124,10 @@ pub unsafe extern "C" fn deflateCopy(
         ((*ds).hash_size as crate::__stddef_size_t_h::size_t)
             .wrapping_mul(::core::mem::size_of::<crate::src::deflate::Pos>()),
     );
-    (*ds).pending_out = (*ds)
-        .pending_buf
-        .offset((*ss).pending_out.offset_from((*ss).pending_buf) as isize);
+    (*ds).pending_out = (*ss).pending_out;
     crate::stdlib::memcpy(
-        (*ds).pending_out as *mut ::core::ffi::c_void,
-        (*ss).pending_out as *const ::core::ffi::c_void,
+        (*ds).pending_buf.offset((*ds).pending_out as isize) as *mut ::core::ffi::c_void,
+        (*ss).pending_buf.offset((*ss).pending_out as isize) as *const ::core::ffi::c_void,
         (*ss).pending as crate::__stddef_size_t_h::size_t,
     );
     (*ds).sym_buf =
