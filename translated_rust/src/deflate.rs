@@ -2753,16 +2753,86 @@ fn stored_block_size(
     ))
 }
 
+// This private adapter binds the deflater allocations and caller cursors once.
+// The stored-block algorithm below uses only those bounded views.
 unsafe fn deflate_stored(
-    mut s: *mut crate::src::deflate::deflate_state,
-    mut flush: ::core::ffi::c_int,
+    s: *mut crate::src::deflate::deflate_state,
+    flush: ::core::ffi::c_int,
 ) -> block_state {
     let state = &mut *s;
-    // The compression-function dispatcher has already validated this state
-    // and its stream. Bind that stream once at this internal raw boundary so
-    // stored-block accounting below remains ordinary reference work.
-    let stream_ptr = state.strm;
-    let stream = &mut *stream_ptr;
+    let stream = &mut *state.strm;
+    let window = ::core::slice::from_raw_parts_mut(state.window, state.window_size as usize);
+    let pending =
+        ::core::slice::from_raw_parts_mut(state.pending_buf, state.pending_buf_size as usize);
+    let input = if stream.avail_in == 0 {
+        &[]
+    } else {
+        ::core::slice::from_raw_parts(stream.next_in, stream.avail_in as usize)
+    };
+    let output = if stream.avail_out == 0 {
+        &mut []
+    } else {
+        ::core::slice::from_raw_parts_mut(stream.next_out, stream.avail_out as usize)
+    };
+    deflate_stored_impl(state, stream, window, pending, input, output, flush)
+}
+
+fn flush_pending_stored(
+    state: &mut crate::src::deflate::deflate_state,
+    stream: &mut crate::zlib_h::z_stream,
+    pending: &mut [crate::zutil_h::uch],
+    output: &mut [crate::stdlib::Bytef],
+    output_used: &mut usize,
+) {
+    let available = stream.avail_out as usize;
+    if available == 0 {
+        flush_pending_bound(state, stream, pending, None);
+        return;
+    }
+    let start = *output_used;
+    flush_pending_bound(
+        state,
+        stream,
+        pending,
+        Some(&mut output[start..start + available]),
+    );
+    *output_used += available - stream.avail_out as usize;
+}
+
+fn read_stored_input(
+    stream: &mut crate::zlib_h::z_stream,
+    output: &mut [crate::stdlib::Bytef],
+    output_used: &mut usize,
+    input: &[crate::stdlib::Bytef],
+    input_used: &mut usize,
+    len: usize,
+    wrap: ::core::ffi::c_int,
+) -> ::core::ffi::c_uint {
+    let copied = read_buf_bytes(
+        stream,
+        &mut output[*output_used..*output_used + len],
+        &input[*input_used..*input_used + len],
+        wrap,
+    );
+    *input_used += copied as usize;
+    *output_used += copied as usize;
+    stream.next_in = stream.next_in.wrapping_add(copied as usize);
+    stream.next_out = stream.next_out.wrapping_add(copied as usize);
+    stored_output_progress(stream, copied);
+    copied
+}
+
+fn deflate_stored_impl(
+    state: &mut crate::src::deflate::deflate_state,
+    stream: &mut crate::zlib_h::z_stream,
+    window: &mut [crate::stdlib::Bytef],
+    pending: &mut [crate::zutil_h::uch],
+    input: &[crate::stdlib::Bytef],
+    output: &mut [crate::stdlib::Bytef],
+    flush: ::core::ffi::c_int,
+) -> block_state {
+    let mut input_used = 0usize;
+    let mut output_used = 0usize;
     let mut min_block: ::core::ffi::c_uint =
         (if state.pending_buf_size.wrapping_sub(5 as crate::zutil_h::ulg)
             > state.w_size as crate::zutil_h::ulg
@@ -2790,39 +2860,40 @@ unsafe fn deflate_stored(
         };
         len = block_len;
         last = is_last;
-        let pending = ::core::slice::from_raw_parts_mut(
-            state.pending_buf,
-            state.pending_buf_size as usize,
-        );
         crate::src::trees::tr_stored_block(state, pending, &[], last);
         let header_start = state.pending.wrapping_sub(4 as crate::zutil_h::ulg) as usize;
         stored_block_length_bytes(&mut pending[header_start..header_start + 4], len);
-        flush_pending(stream_ptr);
+        flush_pending_stored(state, stream, pending, output, &mut output_used);
         if left != 0 {
             if left > len {
                 left = len;
             }
-            let window = ::core::slice::from_raw_parts(state.window, state.window_size as usize);
-            let output = ::core::slice::from_raw_parts_mut(stream.next_out, left as usize);
-            if let Some(copied) = copy_stored_window(output, window, state.block_start, left) {
+            if let Some(copied) = copy_stored_window(
+                &mut output[output_used..output_used + left as usize],
+                window,
+                state.block_start,
+                left,
+            ) {
                 // `copied` is bounded by the output slice above. Wrapping
                 // arithmetic keeps the valid zero-length null cursor case
                 // without requiring `offset`'s in-bounds unsafe operation.
                 stream.next_out = stream.next_out.wrapping_add(copied as usize);
                 stored_output_progress(stream, copied);
+                output_used += copied as usize;
                 state.block_start += copied as ::core::ffi::c_long;
                 len = len.wrapping_sub(copied);
             }
         }
         if len != 0 {
-            let input = ::core::slice::from_raw_parts(stream.next_in, len as usize);
-            let output = ::core::slice::from_raw_parts_mut(stream.next_out, len as usize);
-            let copied = read_buf_bytes(stream, output, input, state.wrap);
-            // Both cursors advance by a count bounded by the slices passed
-            // to `read_buf_bytes()`, including its possible zero-byte case.
-            stream.next_in = stream.next_in.wrapping_add(copied as usize);
-            stream.next_out = stream.next_out.wrapping_add(copied as usize);
-            stored_output_progress(stream, copied);
+            read_stored_input(
+                stream,
+                output,
+                &mut output_used,
+                input,
+                &mut input_used,
+                len as usize,
+                state.wrap,
+            );
         }
         if last != 0 as ::core::ffi::c_int {
             break;
@@ -2830,15 +2901,7 @@ unsafe fn deflate_stored(
     }
     used = used.wrapping_sub(stream.avail_in as ::core::ffi::c_uint);
     if used != 0 {
-        let window = ::core::slice::from_raw_parts_mut(state.window, state.window_size as usize);
-        let input = ::core::slice::from_raw_parts(
-            // `used` is the amount consumed from `next_in` in this call, so
-            // wrapping subtraction recovers that bounded input range without
-            // relying on `offset`'s unsafe provenance requirement.
-            stream.next_in.wrapping_sub(used as usize),
-            used as usize,
-        );
-        update_stored_window(state, window, input);
+        update_stored_window(state, window, &input[..used as usize]);
         state.block_start = state.strstart as ::core::ffi::c_long;
     }
     if state.high_water < state.strstart as crate::zutil_h::ulg {
@@ -2861,7 +2924,6 @@ unsafe fn deflate_stored(
     if stream.avail_in > have && state.block_start >= state.w_size as ::core::ffi::c_long {
         state.block_start -= state.w_size as ::core::ffi::c_long;
         state.strstart = state.strstart.wrapping_sub(state.w_size);
-        let window = ::core::slice::from_raw_parts_mut(state.window, state.window_size as usize);
         window.copy_within(
             state.w_size as usize..state.w_size.wrapping_add(state.strstart) as usize,
             0,
@@ -2878,17 +2940,14 @@ unsafe fn deflate_stored(
         have = stream.avail_in as ::core::ffi::c_uint;
     }
     if have != 0 {
-        let input = ::core::slice::from_raw_parts(stream.next_in, have as usize);
-        let window = ::core::slice::from_raw_parts_mut(state.window, state.window_size as usize);
         let output_start = state.strstart as usize;
         let copied = read_buf_bytes(
             stream,
             &mut window[output_start..output_start + have as usize],
-            input,
+            &input[input_used..input_used + have as usize],
             state.wrap,
         );
-        // `copied` is bounded by `input`, and wrapping arithmetic preserves
-        // the zero-byte/null-cursor behavior of the C implementation.
+        input_used += copied as usize;
         stream.next_in = stream.next_in.wrapping_add(copied as usize);
         state.strstart = state.strstart.wrapping_add(copied);
         state.insert = state
@@ -2936,15 +2995,10 @@ unsafe fn deflate_stored(
         } else {
             0 as ::core::ffi::c_int
         };
-        let window = ::core::slice::from_raw_parts(state.window, state.window_size as usize);
         if let Some(block) = stored_window_bytes(window, state.block_start, len) {
-            let pending = ::core::slice::from_raw_parts_mut(
-                state.pending_buf,
-                state.pending_buf_size as usize,
-            );
             crate::src::trees::tr_stored_block(state, pending, block, last);
             state.block_start += len as ::core::ffi::c_long;
-            flush_pending(stream_ptr);
+            flush_pending_stored(state, stream, pending, output, &mut output_used);
         }
     }
     if last != 0 {
