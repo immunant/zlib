@@ -1198,7 +1198,9 @@ pub unsafe extern "C" fn deflateReset_ffi(
     }
     deflateReset(&mut *strm)
 }
-fn deflate_set_header(
+// The named implementation stays entirely reference-bound. The public ABI
+// adapter below is limited to binding its two optional foreign pointers.
+fn deflateSetHeader(
     strm: &mut crate::zlib_h::z_stream,
     head: Option<&mut crate::zlib_h::gz_header>,
 ) -> ::core::ffi::c_int {
@@ -1235,7 +1237,7 @@ pub unsafe extern "C" fn deflateSetHeader_ffi(
     } else {
         Some(&mut *head)
     };
-    deflate_set_header(&mut *strm, head)
+    deflateSetHeader(&mut *strm, head)
 }
 fn deflate_pending(
     state: &crate::src::deflate::deflate_state,
