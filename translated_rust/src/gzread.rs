@@ -150,36 +150,6 @@ macro_rules! gz_inflate_reset_for_look {
     }};
 }
 
-macro_rules! gz_read_with_boundary_resets {
-    ($state:expr, $output:expr) => {{
-        let state: &mut crate::gzguts_h::gz_state = &mut *$state;
-        let output: &mut [crate::stdlib::Bytef] = $output;
-        let mut total = 0usize;
-        let mut status = GzReadStatus::Ok;
-        while total < output.len() {
-            let outcome = gz_read(state, &mut output[total..]);
-            total = total.wrapping_add(outcome.got as usize);
-            match outcome.status {
-                GzReadStatus::Ok => {
-                    status = GzReadStatus::Ok;
-                    break;
-                }
-                GzReadStatus::Error => {
-                    status = GzReadStatus::Error;
-                    break;
-                }
-                GzReadStatus::NeedInflateReset { junk } => {
-                    gz_inflate_reset_for_look!(state, junk);
-                }
-            }
-        }
-        GzReadOutcome {
-            got: total as crate::stdlib::z_size_t,
-            status,
-        }
-    }};
-}
-
 fn gz_last_os_errno() -> ::core::ffi::c_int {
     ::std::io::Error::last_os_error()
         .raw_os_error()
@@ -327,12 +297,30 @@ fn gz_is_gzip_header(header: [crate::stdlib::Bytef; 4]) -> bool {
 enum GzReadStatus {
     Ok,
     Error,
-    NeedInflateReset { junk: ::core::ffi::c_int },
+    NeedInflateReset {
+        junk: ::core::ffi::c_int,
+    },
+    NeedInflate {
+        had: crate::stdlib::uInt,
+        target: GzInflateTarget,
+    },
 }
 
 struct GzReadOutcome {
     got: crate::stdlib::z_size_t,
     status: GzReadStatus,
+}
+
+#[derive(Copy, Clone)]
+enum GzInflateTarget {
+    BufferedOutput,
+    DirectOutput,
+}
+
+#[derive(Copy, Clone)]
+enum GzDecompStatus {
+    Done(::core::ffi::c_int),
+    NeedInflate { had: crate::stdlib::uInt },
 }
 
 fn gz_prepare_fetch_output(state: &mut crate::gzguts_h::gz_state) {
@@ -388,9 +376,17 @@ fn gz_look(state: &mut crate::gzguts_h::gz_state) -> GzReadStatus {
     unreachable!()
 }
 
-fn gz_decomp(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
+fn gz_decomp(state: &mut crate::gzguts_h::gz_state) -> GzDecompStatus {
     let mut ret: ::core::ffi::c_int = crate::zlib_h::Z_OK;
     let had: ::core::ffi::c_uint = state.strm.avail_out as ::core::ffi::c_uint;
+    gz_decomp_continue(state, had, ret)
+}
+
+fn gz_decomp_continue(
+    state: &mut crate::gzguts_h::gz_state,
+    had: crate::stdlib::uInt,
+    mut ret: ::core::ffi::c_int,
+) -> GzDecompStatus {
     loop {
         if state.strm.avail_in == 0 as crate::stdlib::uInt
             && gz_avail(state) == -1 as ::core::ffi::c_int
@@ -407,62 +403,61 @@ fn gz_decomp(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
             }
             break;
         } else {
-            ret = unsafe {
-                crate::src::inflate::inflate_ffi(
-                    &raw mut state.strm as *mut _ as *mut crate::zlib_h::z_stream_s,
-                    crate::zlib_h::Z_NO_FLUSH,
-                )
-            };
-            if state.strm.avail_out < had {
-                state.junk = 0 as ::core::ffi::c_int;
-            }
-            if gz_inflate_stream_corrupt(ret) {
-                crate::src::gzlib::gz_error_static(
-                    state,
-                    crate::zlib_h::Z_STREAM_ERROR,
-                    b"internal error: inflate stream corrupt\0",
-                );
-                break;
-            } else if ret == crate::zlib_h::Z_MEM_ERROR {
-                crate::src::gzlib::gz_error_static(
-                    state,
-                    crate::zlib_h::Z_MEM_ERROR,
-                    b"out of memory\0",
-                );
-                break;
-            } else if ret == crate::zlib_h::Z_DATA_ERROR {
-                match gz_decomp_data_error_action(state.junk, state.strm.msg.is_null()) {
-                    GzDecompDataErrorAction::TreatTrailingJunkAsEof => {
-                        state.strm.avail_in = 0 as crate::stdlib::uInt;
-                        state.eof = 1 as ::core::ffi::c_int;
-                        state.how = crate::gzguts_h::LOOK;
-                        ret = crate::zlib_h::Z_OK;
-                        break;
-                    }
-                    GzDecompDataErrorAction::Report { use_default_msg } => {
-                        if use_default_msg {
-                            crate::src::gzlib::gz_error_static(
-                                state,
-                                crate::zlib_h::Z_DATA_ERROR,
-                                b"compressed data error\0",
-                            );
-                        } else {
-                            let msg = crate::src::inflate::inflate_stream_message(&state.strm)
-                                .unwrap_or(b"compressed data error\0");
-                            crate::src::gzlib::gz_error_static(
-                                state,
-                                crate::zlib_h::Z_DATA_ERROR,
-                                msg,
-                            );
-                        }
-                        break;
-                    }
-                }
-            } else if !gz_decomp_should_continue(state.strm.avail_out, ret) {
-                break;
-            }
+            return GzDecompStatus::NeedInflate { had };
         }
     }
+    GzDecompStatus::Done(gz_decomp_finish(state, had, ret))
+}
+
+fn gz_decomp_after_inflate(
+    state: &mut crate::gzguts_h::gz_state,
+    had: crate::stdlib::uInt,
+    mut ret: ::core::ffi::c_int,
+) -> GzDecompStatus {
+    if state.strm.avail_out < had {
+        state.junk = 0 as ::core::ffi::c_int;
+    }
+    if gz_inflate_stream_corrupt(ret) {
+        crate::src::gzlib::gz_error_static(
+            state,
+            crate::zlib_h::Z_STREAM_ERROR,
+            b"internal error: inflate stream corrupt\0",
+        );
+    } else if ret == crate::zlib_h::Z_MEM_ERROR {
+        crate::src::gzlib::gz_error_static(state, crate::zlib_h::Z_MEM_ERROR, b"out of memory\0");
+    } else if ret == crate::zlib_h::Z_DATA_ERROR {
+        match gz_decomp_data_error_action(state.junk, state.strm.msg.is_null()) {
+            GzDecompDataErrorAction::TreatTrailingJunkAsEof => {
+                state.strm.avail_in = 0 as crate::stdlib::uInt;
+                state.eof = 1 as ::core::ffi::c_int;
+                state.how = crate::gzguts_h::LOOK;
+                ret = crate::zlib_h::Z_OK;
+            }
+            GzDecompDataErrorAction::Report { use_default_msg } => {
+                if use_default_msg {
+                    crate::src::gzlib::gz_error_static(
+                        state,
+                        crate::zlib_h::Z_DATA_ERROR,
+                        b"compressed data error\0",
+                    );
+                } else {
+                    let msg = crate::src::inflate::inflate_stream_message(&state.strm)
+                        .unwrap_or(b"compressed data error\0");
+                    crate::src::gzlib::gz_error_static(state, crate::zlib_h::Z_DATA_ERROR, msg);
+                }
+            }
+        }
+    } else if gz_decomp_should_continue(state.strm.avail_out, ret) {
+        return gz_decomp_continue(state, had, ret);
+    }
+    GzDecompStatus::Done(gz_decomp_finish(state, had, ret))
+}
+
+fn gz_decomp_finish(
+    state: &mut crate::gzguts_h::gz_state,
+    had: crate::stdlib::uInt,
+    ret: ::core::ffi::c_int,
+) -> ::core::ffi::c_int {
     state.x.have = gz_decompressed_output_have(had, state.strm.avail_out);
     state.x.next = state.strm.next_out.wrapping_sub(state.x.have as usize);
     if ret == crate::zlib_h::Z_STREAM_END {
@@ -505,8 +500,18 @@ fn gz_fetch(state: &mut crate::gzguts_h::gz_state) -> GzReadStatus {
             }
             crate::gzguts_h::GZIP => {
                 gz_prepare_fetch_output(state);
-                if gz_decomp(state) == -1 as ::core::ffi::c_int {
-                    return GzReadStatus::Error;
+                match gz_decomp(state) {
+                    GzDecompStatus::Done(ret) => {
+                        if ret == -1 as ::core::ffi::c_int {
+                            return GzReadStatus::Error;
+                        }
+                    }
+                    GzDecompStatus::NeedInflate { had } => {
+                        return GzReadStatus::NeedInflate {
+                            had,
+                            target: GzInflateTarget::BufferedOutput,
+                        };
+                    }
                 }
             }
             _ => {
@@ -609,6 +614,9 @@ fn gz_read(
                     status @ GzReadStatus::NeedInflateReset { .. } => {
                         return GzReadOutcome { got, status };
                     }
+                    status @ GzReadStatus::NeedInflate { .. } => {
+                        return GzReadOutcome { got, status };
+                    }
                 }
                 step = GzReadStep::NeedMoreInput;
             } else {
@@ -618,9 +626,22 @@ fn gz_read(
                 } else {
                     state.strm.avail_out = n as crate::stdlib::uInt;
                     state.strm.next_out = output[output_pos..].as_mut_ptr();
-                    err = gz_decomp(state);
-                    n = state.x.have;
-                    state.x.have = 0 as ::core::ffi::c_uint;
+                    match gz_decomp(state) {
+                        GzDecompStatus::Done(ret) => {
+                            err = ret;
+                            n = state.x.have;
+                            state.x.have = 0 as ::core::ffi::c_uint;
+                        }
+                        GzDecompStatus::NeedInflate { had } => {
+                            return GzReadOutcome {
+                                got,
+                                status: GzReadStatus::NeedInflate {
+                                    had,
+                                    target: GzInflateTarget::DirectOutput,
+                                },
+                            };
+                        }
+                    }
                 }
                 step = GzReadStep::ProducedOutput;
             }
@@ -915,7 +936,56 @@ macro_rules! gzgetc_body {
             None
         };
         let read = if buffered.is_none() {
-            gz_read_with_boundary_resets!(state, &mut buf[..])
+            let output = &mut buf[..];
+            let mut total = 0usize;
+            let mut status = GzReadStatus::Ok;
+            while total < output.len() {
+                let outcome = gz_read(state, &mut output[total..]);
+                total = total.wrapping_add(outcome.got as usize);
+                match outcome.status {
+                    GzReadStatus::Ok => {
+                        status = GzReadStatus::Ok;
+                        break;
+                    }
+                    GzReadStatus::Error => {
+                        status = GzReadStatus::Error;
+                        break;
+                    }
+                    GzReadStatus::NeedInflateReset { junk } => {
+                        gz_inflate_reset_for_look!(state, junk);
+                    }
+                    GzReadStatus::NeedInflate { had, target } => {
+                        let mut decomp = GzDecompStatus::NeedInflate { had };
+                        let ret = loop {
+                            match decomp {
+                                GzDecompStatus::Done(ret) => break ret,
+                                GzDecompStatus::NeedInflate { had } => {
+                                    let ret = crate::src::inflate::inflate_ffi(
+                                        &raw mut state.strm as *mut _
+                                            as *mut crate::zlib_h::z_stream_s,
+                                        crate::zlib_h::Z_NO_FLUSH,
+                                    );
+                                    decomp = gz_decomp_after_inflate(state, had, ret);
+                                }
+                            }
+                        };
+                        if let GzInflateTarget::DirectOutput = target {
+                            let produced = state.x.have;
+                            state.x.have = 0 as ::core::ffi::c_uint;
+                            total = total.wrapping_add(produced as usize);
+                            state.x.pos += produced as crate::stdlib::off64_t;
+                        }
+                        if ret == -1 as ::core::ffi::c_int {
+                            status = GzReadStatus::Error;
+                            break;
+                        }
+                    }
+                }
+            }
+            GzReadOutcome {
+                got: total as crate::stdlib::z_size_t,
+                status,
+            }
         } else {
             GzReadOutcome {
                 got: 0 as crate::stdlib::z_size_t,
@@ -960,7 +1030,54 @@ pub unsafe extern "C" fn gzread_ffi(
     } else {
         ::core::slice::from_raw_parts_mut(buf as *mut crate::stdlib::Bytef, len as usize)
     };
-    let read = gz_read_with_boundary_resets!(state, output);
+    let mut total = 0usize;
+    let mut status = GzReadStatus::Ok;
+    while total < output.len() {
+        let outcome = gz_read(state, &mut output[total..]);
+        total = total.wrapping_add(outcome.got as usize);
+        match outcome.status {
+            GzReadStatus::Ok => {
+                status = GzReadStatus::Ok;
+                break;
+            }
+            GzReadStatus::Error => {
+                status = GzReadStatus::Error;
+                break;
+            }
+            GzReadStatus::NeedInflateReset { junk } => {
+                gz_inflate_reset_for_look!(state, junk);
+            }
+            GzReadStatus::NeedInflate { had, target } => {
+                let mut decomp = GzDecompStatus::NeedInflate { had };
+                let ret = loop {
+                    match decomp {
+                        GzDecompStatus::Done(ret) => break ret,
+                        GzDecompStatus::NeedInflate { had } => {
+                            let ret = crate::src::inflate::inflate_ffi(
+                                &raw mut state.strm as *mut _ as *mut crate::zlib_h::z_stream_s,
+                                crate::zlib_h::Z_NO_FLUSH,
+                            );
+                            decomp = gz_decomp_after_inflate(state, had, ret);
+                        }
+                    }
+                };
+                if let GzInflateTarget::DirectOutput = target {
+                    let produced = state.x.have;
+                    state.x.have = 0 as ::core::ffi::c_uint;
+                    total = total.wrapping_add(produced as usize);
+                    state.x.pos += produced as crate::stdlib::off64_t;
+                }
+                if ret == -1 as ::core::ffi::c_int {
+                    status = GzReadStatus::Error;
+                    break;
+                }
+            }
+        }
+    }
+    let read = GzReadOutcome {
+        got: total as crate::stdlib::z_size_t,
+        status,
+    };
     len = read.got as ::core::ffi::c_uint;
     if len == 0 as ::core::ffi::c_uint {
         match gzread_zero_result(state.err, state.again) {
@@ -1008,7 +1125,42 @@ pub unsafe extern "C" fn gzfread_ffi(
             return 0 as crate::stdlib::z_size_t;
         }
         let output = ::core::slice::from_raw_parts_mut(buf as *mut crate::stdlib::Bytef, len);
-        gz_read_with_boundary_resets!(state, output).got
+        let mut total = 0usize;
+        while total < output.len() {
+            let outcome = gz_read(state, &mut output[total..]);
+            total = total.wrapping_add(outcome.got as usize);
+            match outcome.status {
+                GzReadStatus::Ok | GzReadStatus::Error => break,
+                GzReadStatus::NeedInflateReset { junk } => {
+                    gz_inflate_reset_for_look!(state, junk);
+                }
+                GzReadStatus::NeedInflate { had, target } => {
+                    let mut decomp = GzDecompStatus::NeedInflate { had };
+                    let ret = loop {
+                        match decomp {
+                            GzDecompStatus::Done(ret) => break ret,
+                            GzDecompStatus::NeedInflate { had } => {
+                                let ret = crate::src::inflate::inflate_ffi(
+                                    &raw mut state.strm as *mut _ as *mut crate::zlib_h::z_stream_s,
+                                    crate::zlib_h::Z_NO_FLUSH,
+                                );
+                                decomp = gz_decomp_after_inflate(state, had, ret);
+                            }
+                        }
+                    };
+                    if let GzInflateTarget::DirectOutput = target {
+                        let produced = state.x.have;
+                        state.x.have = 0 as ::core::ffi::c_uint;
+                        total = total.wrapping_add(produced as usize);
+                        state.x.pos += produced as crate::stdlib::off64_t;
+                    }
+                    if ret == -1 as ::core::ffi::c_int {
+                        break;
+                    }
+                }
+            }
+        }
+        total as crate::stdlib::z_size_t
     } else {
         0 as crate::stdlib::z_size_t
     };
@@ -1049,6 +1201,7 @@ pub unsafe extern "C" fn gzungetc_ffi(
                     gz_inflate_reset_for_look!(state, junk);
                     break;
                 }
+                GzReadStatus::NeedInflate { .. } => unreachable!(),
             }
         }
     }
@@ -1062,6 +1215,24 @@ pub unsafe extern "C" fn gzungetc_ffi(
             GzReadStatus::Error => return -1 as ::core::ffi::c_int,
             GzReadStatus::NeedInflateReset { junk } => {
                 gz_inflate_reset_for_look!(state, junk);
+            }
+            GzReadStatus::NeedInflate { had, .. } => {
+                let mut decomp = GzDecompStatus::NeedInflate { had };
+                let ret = loop {
+                    match decomp {
+                        GzDecompStatus::Done(ret) => break ret,
+                        GzDecompStatus::NeedInflate { had } => {
+                            let ret = crate::src::inflate::inflate_ffi(
+                                &raw mut state.strm as *mut _ as *mut crate::zlib_h::z_stream_s,
+                                crate::zlib_h::Z_NO_FLUSH,
+                            );
+                            decomp = gz_decomp_after_inflate(state, had, ret);
+                        }
+                    }
+                };
+                if ret == -1 as ::core::ffi::c_int {
+                    return -1 as ::core::ffi::c_int;
+                }
             }
         }
     }
@@ -1108,6 +1279,24 @@ pub unsafe extern "C" fn gzgets_ffi(
             GzReadStatus::NeedInflateReset { junk } => {
                 gz_inflate_reset_for_look!(state, junk);
             }
+            GzReadStatus::NeedInflate { had, .. } => {
+                let mut decomp = GzDecompStatus::NeedInflate { had };
+                let ret = loop {
+                    match decomp {
+                        GzDecompStatus::Done(ret) => break ret,
+                        GzDecompStatus::NeedInflate { had } => {
+                            let ret = crate::src::inflate::inflate_ffi(
+                                &raw mut state.strm as *mut _ as *mut crate::zlib_h::z_stream_s,
+                                crate::zlib_h::Z_NO_FLUSH,
+                            );
+                            decomp = gz_decomp_after_inflate(state, had, ret);
+                        }
+                    }
+                };
+                if ret == -1 as ::core::ffi::c_int {
+                    return ::core::ptr::null_mut::<::core::ffi::c_char>();
+                }
+            }
         }
     }
     let str = buf;
@@ -1122,6 +1311,26 @@ pub unsafe extern "C" fn gzgets_ffi(
                     GzReadStatus::Error => break,
                     GzReadStatus::NeedInflateReset { junk } => {
                         gz_inflate_reset_for_look!(state, junk);
+                        continue;
+                    }
+                    GzReadStatus::NeedInflate { had, .. } => {
+                        let mut decomp = GzDecompStatus::NeedInflate { had };
+                        let ret = loop {
+                            match decomp {
+                                GzDecompStatus::Done(ret) => break ret,
+                                GzDecompStatus::NeedInflate { had } => {
+                                    let ret = crate::src::inflate::inflate_ffi(
+                                        &raw mut state.strm as *mut _
+                                            as *mut crate::zlib_h::z_stream_s,
+                                        crate::zlib_h::Z_NO_FLUSH,
+                                    );
+                                    decomp = gz_decomp_after_inflate(state, had, ret);
+                                }
+                            }
+                        };
+                        if ret == -1 as ::core::ffi::c_int {
+                            break;
+                        }
                         continue;
                     }
                 }
@@ -1181,6 +1390,7 @@ pub unsafe extern "C" fn gzdirect_ffi(mut file: crate::zlib_h::gzFile) -> ::core
             GzReadStatus::NeedInflateReset { junk } => {
                 gz_inflate_reset_for_look!(state, junk);
             }
+            GzReadStatus::NeedInflate { .. } => unreachable!(),
         }
     }
     gzdirect(state)
