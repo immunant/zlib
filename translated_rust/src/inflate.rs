@@ -874,6 +874,64 @@ fn inflate_fast_commit(
     })
 }
 
+/// Scalar state published when one ordinary `inflate()` call leaves its
+/// legacy cursor loop.  Keeping these calculations independent of ABI
+/// records makes the exit boundary responsible only for cursor lending,
+/// checksum input, and field commits.
+#[derive(Copy, Clone)]
+struct InflateExitProgress {
+    input_used: ::core::ffi::c_uint,
+    output_used: ::core::ffi::c_uint,
+    update_window: bool,
+    data_type: ::core::ffi::c_int,
+}
+
+/// Preserve ordinary inflate's exit accounting without looking through the
+/// compatibility stream or state records.  The decoder only decrements the
+/// two availability counters, so wrapping subtraction retains the translated
+/// ABI behavior even if a malformed caller supplied unusual scalar values.
+fn inflate_exit_progress(
+    initial_input: ::core::ffi::c_uint,
+    remaining_input: ::core::ffi::c_uint,
+    initial_output: ::core::ffi::c_uint,
+    remaining_output: ::core::ffi::c_uint,
+    wsize: ::core::ffi::c_uint,
+    mode: inflate_mode,
+    flush: ::core::ffi::c_int,
+    bits: ::core::ffi::c_uint,
+    last: ::core::ffi::c_int,
+) -> InflateExitProgress {
+    let input_used = initial_input.wrapping_sub(remaining_input);
+    let output_used = initial_output.wrapping_sub(remaining_output);
+    let mode_value = mode as ::core::ffi::c_uint;
+    let update_window = wsize != 0
+        || output_used != 0
+            && mode_value < crate::src::inflate::BAD as ::core::ffi::c_int as ::core::ffi::c_uint
+            && (mode_value
+                < crate::src::inflate::CHECK as ::core::ffi::c_int as ::core::ffi::c_uint
+                || flush != crate::zlib_h::Z_FINISH);
+    let data_type = bits as ::core::ffi::c_int
+        + if last != 0 { 64 } else { 0 }
+        + if mode_value == crate::src::inflate::TYPE as ::core::ffi::c_int as ::core::ffi::c_uint {
+            128
+        } else {
+            0
+        }
+        + if mode_value == crate::src::inflate::LEN_ as ::core::ffi::c_int as ::core::ffi::c_uint
+            || mode_value == crate::src::inflate::COPY_ as ::core::ffi::c_int as ::core::ffi::c_uint
+        {
+            256
+        } else {
+            0
+        };
+    InflateExitProgress {
+        input_used,
+        output_used,
+        update_window,
+        data_type,
+    }
+}
+
 unsafe fn updatewindow(
     strm: &mut crate::zlib_h::z_stream,
     state: &mut crate::src::inflate::inflate_state,
@@ -2785,19 +2843,23 @@ pub unsafe fn inflate(
         strm_ref.avail_in = have as crate::stdlib::uInt;
         state_ref.hold = hold;
         state_ref.bits = bits;
-        if state_ref.wsize != 0
-            || out != strm_ref.avail_out
-                && (state_ref.mode as ::core::ffi::c_uint)
-                    < crate::src::inflate::BAD as ::core::ffi::c_int as ::core::ffi::c_uint
-                && ((state_ref.mode as ::core::ffi::c_uint)
-                    < crate::src::inflate::CHECK as ::core::ffi::c_int as ::core::ffi::c_uint
-                    || flush != crate::zlib_h::Z_FINISH)
-        {
+        let exit = inflate_exit_progress(
+            in_0,
+            strm_ref.avail_in as ::core::ffi::c_uint,
+            out,
+            strm_ref.avail_out as ::core::ffi::c_uint,
+            state_ref.wsize,
+            state_ref.mode,
+            flush,
+            state_ref.bits,
+            state_ref.last,
+        );
+        if exit.update_window {
             updatewindow(
                 strm_ref,
                 state_ref,
                 strm_ref.next_out as *const crate::stdlib::Bytef,
-                out.wrapping_sub(strm_ref.avail_out as ::core::ffi::c_uint),
+                exit.output_used,
             ) != 0
         } else {
             false
@@ -2811,15 +2873,32 @@ pub unsafe fn inflate(
     {
         let strm_ref = &mut *strm;
         let state_ref = &mut *state;
-        in_0 = in_0.wrapping_sub(strm_ref.avail_in as ::core::ffi::c_uint);
-        out = out.wrapping_sub(strm_ref.avail_out as ::core::ffi::c_uint);
-        strm_ref.total_in = strm_ref.total_in.wrapping_add(in_0 as crate::stdlib::uLong);
-        strm_ref.total_out = strm_ref.total_out.wrapping_add(out as crate::stdlib::uLong);
-        state_ref.total = state_ref.total.wrapping_add(out as ::core::ffi::c_ulong);
-        if state_ref.wrap & 4 as ::core::ffi::c_int != 0 && out != 0 {
+        let exit = inflate_exit_progress(
+            in_0,
+            strm_ref.avail_in as ::core::ffi::c_uint,
+            out,
+            strm_ref.avail_out as ::core::ffi::c_uint,
+            state_ref.wsize,
+            state_ref.mode,
+            flush,
+            state_ref.bits,
+            state_ref.last,
+        );
+        in_0 = exit.input_used;
+        out = exit.output_used;
+        strm_ref.total_in = strm_ref
+            .total_in
+            .wrapping_add(exit.input_used as crate::stdlib::uLong);
+        strm_ref.total_out = strm_ref
+            .total_out
+            .wrapping_add(exit.output_used as crate::stdlib::uLong);
+        state_ref.total = state_ref
+            .total
+            .wrapping_add(exit.output_used as ::core::ffi::c_ulong);
+        if state_ref.wrap & 4 as ::core::ffi::c_int != 0 && exit.output_used != 0 {
             let output = core::slice::from_raw_parts(
-                strm_ref.next_out.wrapping_sub(out as usize),
-                out as usize,
+                strm_ref.next_out.wrapping_sub(exit.output_used as usize),
+                exit.output_used as usize,
             );
             state_ref.check = inflate_output_checksum(
                 state_ref.check as crate::stdlib::uLong,
@@ -2828,28 +2907,7 @@ pub unsafe fn inflate(
             );
             strm_ref.adler = state_ref.check as crate::stdlib::uLong;
         }
-        strm_ref.data_type = state_ref.bits as ::core::ffi::c_int
-            + if state_ref.last != 0 {
-                64 as ::core::ffi::c_int
-            } else {
-                0 as ::core::ffi::c_int
-            }
-            + if state_ref.mode as ::core::ffi::c_uint
-                == crate::src::inflate::TYPE as ::core::ffi::c_int as ::core::ffi::c_uint
-            {
-                128 as ::core::ffi::c_int
-            } else {
-                0 as ::core::ffi::c_int
-            }
-            + if state_ref.mode as ::core::ffi::c_uint
-                == crate::src::inflate::LEN_ as ::core::ffi::c_int as ::core::ffi::c_uint
-                || state_ref.mode as ::core::ffi::c_uint
-                    == crate::src::inflate::COPY_ as ::core::ffi::c_int as ::core::ffi::c_uint
-            {
-                256 as ::core::ffi::c_int
-            } else {
-                0 as ::core::ffi::c_int
-            };
+        strm_ref.data_type = exit.data_type;
     }
     if (in_0 == 0 as ::core::ffi::c_uint && out == 0 as ::core::ffi::c_uint
         || flush == crate::zlib_h::Z_FINISH)
