@@ -1009,11 +1009,16 @@ pub unsafe fn gzclose_r(mut owned: Box<crate::gzguts_h::gz_state>) -> ::core::ff
             crate::zlib_h::Z_OK
         };
         crate::src::gzlib::gz_error_state(state, crate::zlib_h::Z_OK, None);
-        let ret = match state.fd.take() {
-            Some(fd) => crate::stdlib::close(std::os::fd::IntoRawFd::into_raw_fd(fd)),
-            None => -1,
+        let close_failed = match state.fd.take() {
+            // The state owns this descriptor, so dropping the owner closes it
+            // exactly once without transferring it back into a raw handle.
+            Some(fd) => {
+                drop(fd);
+                false
+            }
+            None => true,
         };
-        if ret != 0 {
+        if close_failed {
             crate::zlib_h::Z_ERRNO
         } else {
             err
