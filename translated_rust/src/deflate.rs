@@ -392,6 +392,21 @@ fn slide_hash_entry(position: ::core::ffi::c_uint, window_size: crate::stdlib::u
     }) as crate::src::deflate::Pos as Posf
 }
 
+fn slide_hash_entries(entries: &mut [Posf], window_size: crate::stdlib::uInt) {
+    for entry in entries {
+        *entry = slide_hash_entry(*entry as ::core::ffi::c_uint, window_size);
+    }
+}
+
+fn slide_hash_core(
+    head: &mut [Posf],
+    prev: &mut [Posf],
+    window_size: crate::stdlib::uInt,
+) {
+    slide_hash_entries(head, window_size);
+    slide_hash_entries(prev, window_size);
+}
+
 fn clamped_copy_len(
     available: crate::zutil_h::ulg,
     requested: crate::zutil_h::ulg,
@@ -741,26 +756,9 @@ fn deflate_slow_can_search_match(
 
 unsafe fn slide_hash(mut s: *mut crate::src::deflate::deflate_state) {
     let state = &mut *s;
-    let mut head = state.head;
-    let mut head_left = state.hash_size;
-    loop {
-        *head = slide_hash_entry(*head as ::core::ffi::c_uint, state.w_size);
-        head = head.wrapping_add(1);
-        head_left = head_left.wrapping_sub(1);
-        if head_left == 0 {
-            break;
-        }
-    }
-    let mut prev = state.prev;
-    let mut prev_left = state.w_size;
-    loop {
-        *prev = slide_hash_entry(*prev as ::core::ffi::c_uint, state.w_size);
-        prev = prev.wrapping_add(1);
-        prev_left = prev_left.wrapping_sub(1);
-        if prev_left == 0 {
-            break;
-        }
-    }
+    let head = &mut *::core::ptr::slice_from_raw_parts_mut(state.head, state.hash_size as usize);
+    let prev = &mut *::core::ptr::slice_from_raw_parts_mut(state.prev, state.w_size as usize);
+    slide_hash_core(head, prev, state.w_size);
     state.slid = 1;
 }
 
@@ -4405,7 +4403,7 @@ mod tests {
         longest_match_search_parameters, normalize_deflate_params, pending_buffer_needs_flush,
         pending_output_len, pending_short_cursors, read_buf_checksum,
         read_buf_input_progress_after_copy, read_buf_len, read_buf_total_in_after_copy,
-        short_msb_bytes, slide_hash_entry, stored_block_available_output,
+        short_msb_bytes, slide_hash_core, slide_hash_entry, stored_block_available_output,
         stored_block_buffered_len, stored_block_can_emit, stored_block_copy_lengths,
         stored_block_header_bytes, stored_block_is_last, stored_block_length_bytes,
         stored_block_min_size, stored_block_payload_len, stored_block_should_wait,
@@ -5267,6 +5265,26 @@ mod tests {
             entries.map(|entry| slide_hash_entry(entry as ::core::ffi::c_uint, window_size));
 
         assert_eq!(rebased, [0, 0, 0, 15]);
+    }
+
+    #[test]
+    fn slide_hash_core_rebases_both_hash_tables() {
+        let window_size = 32 as crate::stdlib::uInt;
+        let mut head: [crate::src::deflate::Posf; 4] = [0, 31, 32, 47];
+        let mut prev: [crate::src::deflate::Posf; 3] = [33, 63, 64];
+
+        slide_hash_core(&mut head, &mut prev, window_size);
+
+        assert_eq!(head, [0, 0, 0, 15]);
+        assert_eq!(prev, [1, 31, 32]);
+    }
+
+    #[test]
+    fn slide_hash_core_accepts_empty_tables() {
+        let mut head: [crate::src::deflate::Posf; 0] = [];
+        let mut prev: [crate::src::deflate::Posf; 0] = [];
+
+        slide_hash_core(&mut head, &mut prev, 32);
     }
 
     #[test]
