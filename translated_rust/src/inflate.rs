@@ -601,16 +601,13 @@ unsafe extern "C" fn updatewindow(
     let produced = if copy_len == 0 {
         &[]
     } else {
-        let Ok(copy_offset) = isize::try_from(copy_len) else {
-            return 1 as ::core::ffi::c_int;
-        };
         if end.is_null() {
             return 1 as ::core::ffi::c_int;
         }
         // Preserve the translated cursor movement without making pointer
         // arithmetic itself an unsafe operation. The boundary still lends a
         // `copy_len` span only after validating the source pointer above.
-        ::core::slice::from_raw_parts(end.wrapping_offset(-copy_offset), copy_len)
+        ::core::slice::from_raw_parts(end.wrapping_sub(copy_len), copy_len)
     };
     if inflate_window_copy(window, produced, plan).is_none() {
         return 1 as ::core::ffi::c_int;
