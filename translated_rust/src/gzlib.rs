@@ -693,6 +693,15 @@ pub(crate) struct GzCodecOutput {
     available: crate::stdlib::uInt,
 }
 
+// A completed codec pass describes its output using the owned buffer's
+// checked index and byte count.  Keep this separate from the ABI pointer so
+// the decompression transition never needs to retain `strm.next_out` after
+// the codec call returns.
+pub(crate) struct GzCodecOutputCursor {
+    start: usize,
+    have: crate::stdlib::uInt,
+}
+
 impl GzCodecOutput {
     pub(crate) fn new(capacity: usize) -> Option<Self> {
         let capacity = crate::stdlib::uInt::try_from(capacity).ok()?;
@@ -716,6 +725,23 @@ impl GzCodecOutput {
 
     pub(crate) fn written(&self) -> crate::stdlib::uInt {
         self.capacity.wrapping_sub(self.available)
+    }
+
+    fn completed_cursor(&self) -> GzCodecOutputCursor {
+        GzCodecOutputCursor {
+            start: 0,
+            have: self.written(),
+        }
+    }
+}
+
+impl GzCodecOutputCursor {
+    pub(crate) fn start(&self) -> usize {
+        self.start
+    }
+
+    pub(crate) fn have(&self) -> crate::stdlib::uInt {
+        self.have
     }
 }
 
@@ -746,7 +772,7 @@ pub(crate) struct GzDecompStep {
 pub(crate) struct GzDecompFinish {
     pub(crate) result: ::core::ffi::c_int,
     pub(crate) input: GzCodecInput,
-    pub(crate) written: crate::stdlib::uInt,
+    pub(crate) output: GzCodecOutputCursor,
     pub(crate) junk: ::core::ffi::c_int,
     pub(crate) eof: ::core::ffi::c_int,
     pub(crate) how: ::core::ffi::c_int,
@@ -833,7 +859,7 @@ impl GzDecompState {
             GzDecompFinish {
                 result: 0,
                 input: self.input,
-                written: self.output.written(),
+                output: self.output.completed_cursor(),
                 junk: self.junk,
                 eof: self.eof,
                 how: self.how,
@@ -842,7 +868,7 @@ impl GzDecompState {
             GzDecompFinish {
                 result: -1,
                 input: self.input,
-                written: self.output.written(),
+                output: self.output.completed_cursor(),
                 junk: self.junk,
                 eof: self.eof,
                 how: self.how,
@@ -851,7 +877,7 @@ impl GzDecompState {
             GzDecompFinish {
                 result: 0,
                 input: self.input,
-                written: self.output.written(),
+                output: self.output.completed_cursor(),
                 junk: self.junk,
                 eof: self.eof,
                 how: self.how,

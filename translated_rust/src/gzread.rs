@@ -828,10 +828,6 @@ unsafe fn gz_decomp(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int
     };
     state.strm.avail_out = decomp.output_available();
     state.strm.next_out = next_out;
-    // `inflate()` advances `next_out`, but gzip's buffered cursor must point
-    // at the beginning of this output span. Retain that boundary value rather
-    // than recovering it later with raw-pointer arithmetic.
-    let output_start = state.strm.next_out;
     let finish = {
         // The stream itself is embedded in the state we already exclusively
         // own. Its cursor projection and the unsafe codec call stay in this
@@ -888,7 +884,17 @@ unsafe fn gz_decomp(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int
             },
         )
     };
-    state.x.have = finish.written as ::core::ffi::c_uint;
+    // The core transition returns the checked start of its owned output span,
+    // not the ABI cursor that `inflate()` advanced. Rebuild that cursor only
+    // while publishing the completed result back to the handle.
+    let Some(output_start) = state.buffers.output.as_deref_mut().and_then(|buffer| {
+        buffer
+            .get_mut(finish.output.start()..)
+            .map(|output| output.as_mut_ptr())
+    }) else {
+        return -1 as ::core::ffi::c_int;
+    };
+    state.x.have = finish.output.have();
     state.x.next = output_start;
     state.buffers.input_cursor = Some(finish.input);
     let Some(buffer) = state.buffers.input.as_deref_mut() else {
