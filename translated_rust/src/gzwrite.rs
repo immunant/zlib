@@ -104,15 +104,14 @@ unsafe extern "C" fn gz_init(mut state: crate::gzguts_h::gz_statep) -> ::core::f
     return 0 as ::core::ffi::c_int;
 }
 
-unsafe extern "C" fn gz_comp(
-    mut state: crate::gzguts_h::gz_statep,
+unsafe fn gz_comp(
+    state: &mut crate::gzguts_h::gz_state,
     mut flush: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
     let mut ret: ::core::ffi::c_int = 0;
     let mut writ: ::core::ffi::c_int = 0;
     let mut have: ::core::ffi::c_uint = 0;
     let mut put: ::core::ffi::c_uint = 0;
-    let state = &mut *state;
     if crate::src::gzlib::gz_write_needs_init(state)
         && gz_init(state) == -1 as ::core::ffi::c_int
     {
