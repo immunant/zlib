@@ -89,9 +89,23 @@ pub mod __stddef_null_h {
     pub const NULL: *mut ::core::ffi::c_void = ::core::ptr::null_mut::<::core::ffi::c_void>();
 }
 pub mod zlib_h {
-    pub const ZLIB_VERSION: [::core::ffi::c_char; 15] = unsafe {
-        ::core::mem::transmute::<[u8; 15], [::core::ffi::c_char; 15]>(*b"1.3.2.1-motley\0")
-    };
+    pub const ZLIB_VERSION: [::core::ffi::c_char; 15] = [
+        b'1' as ::core::ffi::c_char,
+        b'.' as ::core::ffi::c_char,
+        b'3' as ::core::ffi::c_char,
+        b'.' as ::core::ffi::c_char,
+        b'2' as ::core::ffi::c_char,
+        b'.' as ::core::ffi::c_char,
+        b'1' as ::core::ffi::c_char,
+        b'-' as ::core::ffi::c_char,
+        b'm' as ::core::ffi::c_char,
+        b'o' as ::core::ffi::c_char,
+        b't' as ::core::ffi::c_char,
+        b'l' as ::core::ffi::c_char,
+        b'e' as ::core::ffi::c_char,
+        b'y' as ::core::ffi::c_char,
+        0,
+    ];
 
     pub type alloc_func = Option<
         unsafe extern "C" fn(
