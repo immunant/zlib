@@ -2247,7 +2247,12 @@ pub unsafe fn inflate(
                                             }
                                             continue '_inf_leave;
                                         } else {
-                                            (*state).back = 0 as ::core::ffi::c_int;
+                                            // This slow-path fallback is still inside the
+                                            // short-lived boundary borrow established for the
+                                            // fast dispatch.  Keep scalar state updates on that
+                                            // borrow instead of re-traversing the raw state
+                                            // pointer.
+                                            state_ref.back = 0 as ::core::ffi::c_int;
                                             loop {
                                                 here = *(*state).lencode.wrapping_add(
                                                     (hold as ::core::ffi::c_uint
