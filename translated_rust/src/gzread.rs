@@ -76,6 +76,19 @@ fn gz_load_core(
     }
 }
 
+fn gz_load_read_len(
+    len: ::core::ffi::c_uint,
+    have: ::core::ffi::c_uint,
+    max: ::core::ffi::c_uint,
+) -> ::core::ffi::c_uint {
+    let get = len.wrapping_sub(have);
+    if get > max {
+        max
+    } else {
+        get
+    }
+}
+
 fn gz_fread_request_len(
     size: crate::stdlib::z_size_t,
     nitems: crate::stdlib::z_size_t,
@@ -223,10 +236,7 @@ unsafe extern "C" fn gz_load(
     *crate::stdlib::__errno_location() = 0 as ::core::ffi::c_int;
     *have = 0 as ::core::ffi::c_uint;
     loop {
-        let mut get = len.wrapping_sub(*have);
-        if get > max {
-            get = max;
-        }
+        let get = gz_load_read_len(len, *have, max);
         let ret = crate::stdlib::read(
             (*state).fd,
             buf.offset(*have as isize) as *mut ::core::ffi::c_void,
@@ -570,6 +580,22 @@ unsafe extern "C" fn gz_skip(mut state: crate::gzguts_h::gz_statep) -> ::core::f
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn gz_load_read_len_uses_remaining_bytes_below_cap() {
+        assert_eq!(gz_load_read_len(10, 4, 8), 6);
+    }
+
+    #[test]
+    fn gz_load_read_len_caps_large_requests() {
+        assert_eq!(gz_load_read_len(20, 4, 8), 8);
+        assert_eq!(gz_load_read_len(12, 4, 8), 8);
+    }
+
+    #[test]
+    fn gz_load_read_len_preserves_unsigned_wrapping_before_capping() {
+        assert_eq!(gz_load_read_len(0, 1, 8), 8);
+    }
 
     #[test]
     fn gz_fread_request_len_handles_zero_operands() {

@@ -126,6 +126,13 @@ fn gz_write_chunk_len(remaining: crate::stdlib::z_size_t) -> ::core::ffi::c_uint
     }
 }
 
+fn gz_write_chunk_consumed_len(
+    chunk_len: ::core::ffi::c_uint,
+    remaining_avail_in: crate::stdlib::uInt,
+) -> ::core::ffi::c_uint {
+    chunk_len.wrapping_sub(remaining_avail_in as ::core::ffi::c_uint)
+}
+
 fn gzputs_result(
     requested: crate::stdlib::z_size_t,
     written: crate::stdlib::z_size_t,
@@ -410,7 +417,7 @@ unsafe extern "C" fn gz_write(
             let mut n = gz_write_chunk_len(len);
             (*state).strm.avail_in = n as crate::stdlib::uInt;
             ret = gz_comp(state, crate::zlib_h::Z_NO_FLUSH);
-            n = n.wrapping_sub((*state).strm.avail_in as ::core::ffi::c_uint);
+            n = gz_write_chunk_consumed_len(n, (*state).strm.avail_in);
             (*state).x.pos += n as crate::stdlib::off64_t;
             len = len.wrapping_sub(n as crate::stdlib::z_size_t);
             if ret == -1 as ::core::ffi::c_int {
@@ -748,9 +755,10 @@ pub unsafe extern "C" fn gzclose_w_ffi(mut file: crate::zlib_h::gzFile) -> ::cor
 #[cfg(test)]
 mod tests {
     use super::{
-        gz_write_buffered_copy_len, gz_write_chunk_len, gz_write_error_result,
-        gz_write_uses_buffered_path, gz_zero_chunk_len, gzflush_mode_is_valid, gzfwrite_len,
-        gzputs_len_fits_int, gzputs_result, gzwrite_len_fits_int,
+        gz_write_buffered_copy_len, gz_write_chunk_consumed_len, gz_write_chunk_len,
+        gz_write_error_result, gz_write_uses_buffered_path, gz_zero_chunk_len,
+        gzflush_mode_is_valid, gzfwrite_len, gzputs_len_fits_int, gzputs_result,
+        gzwrite_len_fits_int,
     };
 
     #[test]
@@ -899,5 +907,16 @@ mod tests {
                 ::core::ffi::c_uint::MAX
             );
         }
+    }
+
+    #[test]
+    fn gz_write_chunk_consumed_len_subtracts_unconsumed_input() {
+        assert_eq!(gz_write_chunk_consumed_len(1024, 24), 1000);
+        assert_eq!(gz_write_chunk_consumed_len(1024, 1024), 0);
+    }
+
+    #[test]
+    fn gz_write_chunk_consumed_len_preserves_wrapping_accounting() {
+        assert_eq!(gz_write_chunk_consumed_len(0, 1), ::core::ffi::c_uint::MAX);
     }
 }

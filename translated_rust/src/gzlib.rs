@@ -87,32 +87,61 @@ fn gzclearerr_core(
     true
 }
 
-fn gz_reset_fields(state: &mut crate::gzguts_h::gz_state) {
-    state.x.have = 0;
-    if state.mode == crate::gzguts_h::GZ_READ {
-        gz_clear_read_flags(&mut state.eof, &mut state.past);
-        state.how = crate::gzguts_h::LOOK;
-        state.junk = -1;
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct GzResetFields {
+    mode: ::core::ffi::c_int,
+    have: crate::stdlib::uInt,
+    eof: ::core::ffi::c_int,
+    past: ::core::ffi::c_int,
+    how: ::core::ffi::c_int,
+    junk: ::core::ffi::c_int,
+    reset: ::core::ffi::c_int,
+    again: ::core::ffi::c_int,
+    skip: crate::stdlib::off64_t,
+    pos: crate::stdlib::off64_t,
+    avail_in: crate::stdlib::uInt,
+}
+
+fn gz_reset_core(fields: &mut GzResetFields) {
+    fields.have = 0;
+    if fields.mode == crate::gzguts_h::GZ_READ {
+        gz_clear_read_flags(&mut fields.eof, &mut fields.past);
+        fields.how = crate::gzguts_h::LOOK;
+        fields.junk = -1;
     } else {
-        state.reset = 0;
+        fields.reset = 0;
     }
-    state.again = 0;
-    state.skip = 0;
+    fields.again = 0;
+    fields.skip = 0;
+    fields.pos = 0;
+    fields.avail_in = 0;
 }
 
-fn gz_reset_core(state: &mut crate::gzguts_h::gz_state) {
-    gz_reset_fields(state);
-    state.x.pos = 0;
-    state.strm.avail_in = 0;
-}
-
-unsafe extern "C" fn gz_reset(state: crate::gzguts_h::gz_statep) {
-    gz_reset_core(&mut *state);
-    gz_error(
-        state,
-        crate::zlib_h::Z_OK,
-        ::core::ptr::null::<::core::ffi::c_char>(),
-    );
+fn gz_reset_state(state: &mut crate::gzguts_h::gz_state) {
+    let mut fields = GzResetFields {
+        mode: state.mode,
+        have: state.x.have,
+        eof: state.eof,
+        past: state.past,
+        how: state.how,
+        junk: state.junk,
+        reset: state.reset,
+        again: state.again,
+        skip: state.skip,
+        pos: state.x.pos,
+        avail_in: state.strm.avail_in,
+    };
+    gz_reset_core(&mut fields);
+    state.x.have = fields.have;
+    state.eof = fields.eof;
+    state.past = fields.past;
+    state.how = fields.how;
+    state.junk = fields.junk;
+    state.reset = fields.reset;
+    state.again = fields.again;
+    state.skip = fields.skip;
+    state.x.pos = fields.pos;
+    state.strm.avail_in = fields.avail_in;
 }
 
 fn gz_open_defaults(state: &mut crate::gzguts_h::gz_state) {
@@ -328,6 +357,11 @@ fn gz_apply_post_open_metadata(
     }
 }
 
+fn gz_finish_open(state: &mut crate::gzguts_h::gz_state, current_offset: crate::stdlib::off64_t) {
+    gz_apply_post_open_metadata(state, current_offset);
+    gz_reset_state(state);
+}
+
 unsafe extern "C" fn gz_open(
     mut path: *const ::core::ffi::c_void,
     mut fd: ::core::ffi::c_int,
@@ -416,8 +450,12 @@ unsafe extern "C" fn gz_open(
     } else {
         0
     };
-    gz_apply_post_open_metadata(&mut *state, current_offset);
-    gz_reset(state);
+    gz_finish_open(&mut *state, current_offset);
+    gz_error(
+        state,
+        crate::zlib_h::Z_OK,
+        ::core::ptr::null::<::core::ffi::c_char>(),
+    );
     return state as crate::zlib_h::gzFile;
 }
 pub unsafe extern "C" fn gzopen(
@@ -534,18 +572,26 @@ pub unsafe extern "C" fn gzrewind(mut file: crate::zlib_h::gzFile) -> ::core::ff
         return -1 as ::core::ffi::c_int;
     }
     state = file as crate::gzguts_h::gz_statep;
-    if !gzrewind_request_is_valid((*state).mode, (*state).err) {
-        return -1 as ::core::ffi::c_int;
-    }
-    if crate::stdlib::lseek64(
-        (*state).fd,
-        (*state).start as crate::stdlib::__off64_t,
-        crate::stdlib::SEEK_SET,
-    ) == -1 as ::core::ffi::c_int as crate::stdlib::__off64_t
     {
-        return -1 as ::core::ffi::c_int;
+        let state_ref = &mut *state;
+        if !gzrewind_request_is_valid(state_ref.mode, state_ref.err) {
+            return -1 as ::core::ffi::c_int;
+        }
+        if crate::stdlib::lseek64(
+            state_ref.fd,
+            state_ref.start as crate::stdlib::__off64_t,
+            crate::stdlib::SEEK_SET,
+        ) == -1 as ::core::ffi::c_int as crate::stdlib::__off64_t
+        {
+            return -1 as ::core::ffi::c_int;
+        }
+        gz_reset_state(state_ref);
     }
-    gz_reset(state);
+    gz_error(
+        state,
+        crate::zlib_h::Z_OK,
+        ::core::ptr::null::<::core::ffi::c_char>(),
+    );
     return 0 as ::core::ffi::c_int;
 }
 #[export_name = "gzrewind"]
@@ -899,9 +945,10 @@ pub unsafe extern "C" fn gz_intmax_ffi() -> ::core::ffi::c_uint {
 mod tests {
     use super::{
         gz_clear_read_flags, gz_is_read_or_write_mode, gz_parse_open_mode, gz_post_open_metadata,
-        gz_prepare_open, gzclearerr_core, gzerror_core, gzoffset64_adjust_for_buffered_read,
-        gzrewind_request_is_valid, gzseek_adjust_offset, gzseek_can_fast_forward,
-        gzseek_read_buffer_consumed, gzseek_request_is_valid, gztell64_core, GzErrorMessage,
+        gz_prepare_open, gz_reset_core, gzclearerr_core, gzerror_core,
+        gzoffset64_adjust_for_buffered_read, gzrewind_request_is_valid, gzseek_adjust_offset,
+        gzseek_can_fast_forward, gzseek_read_buffer_consumed, gzseek_request_is_valid,
+        gztell64_core, GzErrorMessage, GzResetFields,
     };
 
     #[test]
@@ -910,6 +957,58 @@ mod tests {
         let mut past = 1;
         gz_clear_read_flags(&mut eof, &mut past);
         assert_eq!((eof, past), (0, 0));
+    }
+
+    #[test]
+    fn gz_reset_core_resets_read_state_without_touching_write_reset() {
+        let mut fields = GzResetFields {
+            mode: crate::gzguts_h::GZ_READ,
+            have: 1,
+            eof: 1,
+            past: 1,
+            how: crate::gzguts_h::COPY,
+            junk: 0,
+            reset: 1,
+            again: 1,
+            skip: 1,
+            pos: 1,
+            avail_in: 1,
+        };
+
+        gz_reset_core(&mut fields);
+
+        assert_eq!(fields.have, 0);
+        assert_eq!((fields.eof, fields.past), (0, 0));
+        assert_eq!((fields.how, fields.junk), (crate::gzguts_h::LOOK, -1));
+        assert_eq!(fields.reset, 1);
+        assert_eq!((fields.again, fields.skip), (0, 0));
+        assert_eq!((fields.pos, fields.avail_in), (0, 0));
+    }
+
+    #[test]
+    fn gz_reset_core_resets_write_state_without_touching_read_fields() {
+        let mut fields = GzResetFields {
+            mode: crate::gzguts_h::GZ_WRITE,
+            have: 1,
+            eof: 1,
+            past: 1,
+            how: crate::gzguts_h::COPY,
+            junk: 0,
+            reset: 1,
+            again: 1,
+            skip: 1,
+            pos: 1,
+            avail_in: 1,
+        };
+
+        gz_reset_core(&mut fields);
+
+        assert_eq!(fields.have, 0);
+        assert_eq!((fields.eof, fields.past), (1, 1));
+        assert_eq!((fields.how, fields.junk), (crate::gzguts_h::COPY, 0));
+        assert_eq!(fields.reset, 0);
+        assert_eq!((fields.again, fields.skip), (0, 0));
+        assert_eq!((fields.pos, fields.avail_in), (0, 0));
     }
 
     #[test]
