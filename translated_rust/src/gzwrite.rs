@@ -539,19 +539,17 @@ pub unsafe extern "C" fn gzwrite_ffi(
     mut buf: crate::stdlib::voidpc,
     mut len: ::core::ffi::c_uint,
 ) -> ::core::ffi::c_int {
-    let mut state: crate::gzguts_h::gz_statep =
-        ::core::ptr::null_mut::<crate::gzguts_h::gz_state>();
     if file.is_null() {
         return 0 as ::core::ffi::c_int;
     }
-    state = file as crate::gzguts_h::gz_statep;
-    if !gz_write_state_ready(&*state) {
+    let state = &mut *(file as crate::gzguts_h::gz_statep);
+    if !gz_write_state_ready(state) {
         return 0 as ::core::ffi::c_int;
     }
-    crate::src::gzlib::gz_error_clear(&mut *state, crate::zlib_h::Z_OK);
+    crate::src::gzlib::gz_error_clear(state, crate::zlib_h::Z_OK);
     if !gzwrite_len_fits_int(len) {
         crate::src::gzlib::gz_error_static(
-            &mut *state,
+            state,
             crate::zlib_h::Z_DATA_ERROR,
             b"requested length does not fit in int\0",
         );
@@ -562,7 +560,7 @@ pub unsafe extern "C" fn gzwrite_ffi(
     } else {
         ::core::slice::from_raw_parts(buf as *const crate::stdlib::Bytef, len as usize)
     };
-    return gz_write(&mut *state, input) as ::core::ffi::c_int;
+    return gz_write(state, input) as ::core::ffi::c_int;
 }
 #[export_name = "gzfwrite"]
 

@@ -923,13 +923,11 @@ pub unsafe extern "C" fn inflateReset2_ffi(
     mut strm: crate::zlib_h::z_streamp,
     mut windowBits: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
-    let mut state: *mut crate::src::inflate::inflate_state =
-        ::core::ptr::null_mut::<crate::src::inflate::inflate_state>();
     if inflate_state_check_raw!(strm) != 0 {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    state = (*strm).state as *mut crate::src::inflate::inflate_state;
-    let state_ref = &mut *state;
+    let strm_ref = &mut *strm;
+    let state_ref = &mut *(strm_ref.state as *mut crate::src::inflate::inflate_state);
     let Some(config) = inflate_reset2_config(windowBits) else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
@@ -938,16 +936,15 @@ pub unsafe extern "C" fn inflateReset2_ffi(
         state_ref.wbits,
         config.window_bits,
     ) {
-        Some((*strm).zfree.expect("non-null function pointer")).expect("non-null function pointer")(
-            (*strm).opaque,
-            state_ref.window as crate::stdlib::voidpf,
-        );
+        let zfree = Some(strm_ref.zfree.expect("non-null function pointer"))
+            .expect("non-null function pointer");
+        zfree(strm_ref.opaque, state_ref.window as crate::stdlib::voidpf);
         state_ref.window = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
     }
     state_ref.wrap = config.wrap;
     state_ref.wbits = config.window_bits as ::core::ffi::c_uint;
     inflate_reset_window_state(state_ref);
-    return inflate_reset_keep_state(&mut *strm, state_ref);
+    return inflate_reset_keep_state(strm_ref, state_ref);
 }
 macro_rules! inflate_init2_body {
     ($strm:expr, $windowBits:expr, $version:expr, $stream_size:expr $(,)?) => {{

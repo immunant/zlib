@@ -829,44 +829,37 @@ pub unsafe extern "C" fn gzread_ffi(
     mut buf: crate::stdlib::voidp,
     mut len: ::core::ffi::c_uint,
 ) -> ::core::ffi::c_int {
-    let mut state: crate::gzguts_h::gz_statep =
-        ::core::ptr::null_mut::<crate::gzguts_h::gz_state>();
     if file.is_null() {
         return -1 as ::core::ffi::c_int;
     }
-    state = file as crate::gzguts_h::gz_statep;
-    if !gz_read_state_ready(&*state) {
+    let state = &mut *(file as crate::gzguts_h::gz_statep);
+    if !gz_read_state_ready(state) {
         return -1 as ::core::ffi::c_int;
     }
-    crate::src::gzlib::gz_error_clear(&mut *state, crate::zlib_h::Z_OK);
+    crate::src::gzlib::gz_error_clear(state, crate::zlib_h::Z_OK);
     if !gzread_len_fits_int(len) {
         crate::src::gzlib::gz_error_static(
-            &mut *state,
+            state,
             crate::zlib_h::Z_STREAM_ERROR,
             b"request does not fit in an int\0",
         );
         return -1 as ::core::ffi::c_int;
     }
-    let state_ref = &mut *state;
     let output: &mut [crate::stdlib::Bytef] = if len == 0 {
         &mut []
     } else {
         ::core::slice::from_raw_parts_mut(buf as *mut crate::stdlib::Bytef, len as usize)
     };
-    len = gz_read(state_ref, output) as ::core::ffi::c_uint;
+    len = gz_read(state, output) as ::core::ffi::c_uint;
     if len == 0 as ::core::ffi::c_uint {
-        match gzread_zero_result(state_ref.err, state_ref.again) {
+        match gzread_zero_result(state.err, state.again) {
             GzReadZeroResult::Ok => {}
             GzReadZeroResult::Error => {
                 return -1 as ::core::ffi::c_int;
             }
             GzReadZeroResult::Errno => {
                 let errno = gz_last_os_errno();
-                crate::src::gzlib::gz_error_with_os_error(
-                    &mut *state,
-                    crate::zlib_h::Z_ERRNO,
-                    errno,
-                );
+                crate::src::gzlib::gz_error_with_os_error(state, crate::zlib_h::Z_ERRNO, errno);
                 return -1 as ::core::ffi::c_int;
             }
         }

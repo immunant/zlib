@@ -1233,39 +1233,38 @@ pub unsafe extern "C" fn deflateParams_ffi(
     mut level: ::core::ffi::c_int,
     mut strategy: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
-    let mut s: *mut crate::src::deflate::deflate_state =
-        ::core::ptr::null_mut::<crate::src::deflate::deflate_state>();
     if deflate_state_check_raw!(strm) != 0 {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    s = (*strm).state as *mut crate::src::deflate::deflate_state;
+    let state_ptr = (*strm).state as *mut crate::src::deflate::deflate_state;
     level = deflate_params_level(level);
     if !deflate_params_valid(level, strategy) {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    if deflate_params_needs_flush(&*s, level, strategy) {
+    if deflate_params_needs_flush(&*state_ptr, level, strategy) {
         let mut err: ::core::ffi::c_int = deflate_ffi(strm, crate::zlib_h::Z_BLOCK);
         if err == crate::zlib_h::Z_STREAM_ERROR {
             return err;
         }
-        if !deflate_params_drained(&*s, (*strm).avail_in) {
+        if !deflate_params_drained(&*state_ptr, (*strm).avail_in) {
             return crate::zlib_h::Z_BUF_ERROR;
         }
     }
-    if (*s).level != level {
-        if (*s).level == 0 as ::core::ffi::c_int && (*s).matches != 0 as crate::stdlib::uInt {
-            if (*s).matches == 1 as crate::stdlib::uInt {
-                slide_hash(&mut *s);
+    let state = &mut *state_ptr;
+    if state.level != level {
+        if state.level == 0 as ::core::ffi::c_int && state.matches != 0 as crate::stdlib::uInt {
+            if state.matches == 1 as crate::stdlib::uInt {
+                slide_hash(state);
             } else {
-                let head = ::core::slice::from_raw_parts_mut((*s).head, (*s).hash_size as usize);
+                let head = ::core::slice::from_raw_parts_mut(state.head, state.hash_size as usize);
                 deflate_clear_hash_head(head);
-                (*s).slid = 0 as ::core::ffi::c_int;
+                state.slid = 0 as ::core::ffi::c_int;
             }
-            (*s).matches = 0 as crate::stdlib::uInt;
+            state.matches = 0 as crate::stdlib::uInt;
         }
-        deflate_params_apply_config(&mut *s, level);
+        deflate_params_apply_config(state, level);
     }
-    (*s).strategy = strategy;
+    state.strategy = strategy;
     return crate::zlib_h::Z_OK;
 }
 pub fn deflateTune(
