@@ -117,7 +117,10 @@ pub struct internal_state {
     pub heap_len: ::core::ffi::c_int,
     pub heap_max: ::core::ffi::c_int,
     pub depth: [crate::zutil_h::uch; 573],
-    pub sym_buf: *mut crate::zutil_h::uchf,
+    // Offset of the symbol region within `pending_buf`.  The C translation
+    // retained this as an interior pointer; keeping an offset prevents a
+    // copied/reset state from carrying a pointer into another allocation.
+    pub sym_buf_start: usize,
     pub lit_bufsize: crate::stdlib::uInt,
     pub sym_next: crate::stdlib::uInt,
     pub sym_end: crate::stdlib::uInt,
@@ -705,7 +708,7 @@ pub unsafe extern "C" fn deflateInit2_(
         deflateEnd(strm);
         return crate::zlib_h::Z_MEM_ERROR;
     }
-    (*s).sym_buf = (*s).pending_buf.offset((*s).lit_bufsize as isize) as *mut crate::zutil_h::uchf;
+    (*s).sym_buf_start = (*s).lit_bufsize as usize;
     (*s).sym_end = (*s)
         .lit_bufsize
         .wrapping_sub(1 as crate::stdlib::uInt)
@@ -1302,10 +1305,9 @@ fn deflate_bound_impl(
         2 => {
             wraplen = 18 as crate::stdlib::z_size_t;
             if let Some(extra_len) = state.gzip_extra_len {
-                wraplen = wraplen.wrapping_add(
-                    (2 as crate::stdlib::uInt).wrapping_add(extra_len)
-                        as crate::stdlib::z_size_t,
-                );
+                wraplen = wraplen
+                    .wrapping_add((2 as crate::stdlib::uInt).wrapping_add(extra_len)
+                        as crate::stdlib::z_size_t);
             }
             if let Some(name_len) = state.gzip_name_len {
                 wraplen = wraplen.wrapping_add(name_len);
@@ -1371,7 +1373,9 @@ pub unsafe extern "C" fn deflateBound_z(
             }
             if !header.name.is_null() {
                 gzip_name_len = Some(
-                    ::std::ffi::CStr::from_ptr(header.name.cast()).to_bytes_with_nul().len(),
+                    ::std::ffi::CStr::from_ptr(header.name.cast())
+                        .to_bytes_with_nul()
+                        .len(),
                 );
             }
             if !header.comment.is_null() {
@@ -1505,10 +1509,8 @@ unsafe extern "C" fn flush_pending(mut strm: crate::zlib_h::z_streamp) {
         return;
     }
     let output = ::core::slice::from_raw_parts_mut((*strm).next_out, len as usize);
-    let pending_buf = ::core::slice::from_raw_parts(
-        (*s).pending_buf,
-        (*s).pending_buf_size as usize,
-    );
+    let pending_buf =
+        ::core::slice::from_raw_parts((*s).pending_buf, (*s).pending_buf_size as usize);
     let len = flush_pending_bytes(
         output,
         pending_buf,
@@ -2042,10 +2044,8 @@ pub unsafe extern "C" fn deflate(
         // The final gzip trailer has a fixed eight-byte representation.  The
         // pending allocation has exactly `pending_buf_size` bytes, established
         // by `deflateInit2_()` or `deflateCopy()`.
-        let pending_buf = ::core::slice::from_raw_parts_mut(
-            (*s).pending_buf,
-            (*s).pending_buf_size as usize,
-        );
+        let pending_buf =
+            ::core::slice::from_raw_parts_mut((*s).pending_buf, (*s).pending_buf_size as usize);
         append_pending_bytes(
             pending_buf,
             &mut (*s).pending,
@@ -2238,11 +2238,9 @@ pub unsafe extern "C" fn deflateCopy(
         (*ss).pending_buf.offset((*ss).pending_out as isize) as *const ::core::ffi::c_void,
         (*ss).pending as crate::__stddef_size_t_h::size_t,
     );
-    (*ds).sym_buf =
-        (*ds).pending_buf.offset((*ds).lit_bufsize as isize) as *mut crate::zutil_h::uchf;
     crate::stdlib::memcpy(
-        (*ds).sym_buf as *mut ::core::ffi::c_void,
-        (*ss).sym_buf as *const ::core::ffi::c_void,
+        (*ds).pending_buf.offset((*ds).sym_buf_start as isize) as *mut ::core::ffi::c_void,
+        (*ss).pending_buf.offset((*ss).sym_buf_start as isize) as *const ::core::ffi::c_void,
         (*ss).sym_next as crate::__stddef_size_t_h::size_t,
     );
     return crate::zlib_h::Z_OK;
@@ -2638,6 +2636,12 @@ unsafe extern "C" fn deflate_fast(
 ) -> block_state {
     let mut hash_head: crate::src::deflate::IPos = 0;
     let mut bflush: ::core::ffi::c_int = 0;
+    let sym_buf_start = (*s).sym_buf_start;
+    let sym_buf_len = ((*s).pending_buf_size as usize).wrapping_sub(sym_buf_start);
+    let sym_buf = ::core::slice::from_raw_parts_mut(
+        (*s).pending_buf.wrapping_add(sym_buf_start),
+        sym_buf_len,
+    );
     loop {
         if (*s).lookahead < crate::src::deflate::MIN_LOOKAHEAD as crate::stdlib::uInt {
             fill_window(s);
@@ -2679,16 +2683,15 @@ unsafe extern "C" fn deflate_fast(
                 (*s).strstart.wrapping_sub((*s).match_start) as crate::zutil_h::ush;
             let c2rust_fresh44 = (*s).sym_next;
             (*s).sym_next = (*s).sym_next.wrapping_add(1);
-            *(*s).sym_buf.offset(c2rust_fresh44 as isize) =
-                dist as crate::zutil_h::uch as crate::zutil_h::uchf;
+            sym_buf[c2rust_fresh44 as usize] = dist as crate::zutil_h::uch as crate::zutil_h::uchf;
             let c2rust_fresh45 = (*s).sym_next;
             (*s).sym_next = (*s).sym_next.wrapping_add(1);
-            *(*s).sym_buf.offset(c2rust_fresh45 as isize) =
+            sym_buf[c2rust_fresh45 as usize] =
                 (dist as ::core::ffi::c_int >> 8 as ::core::ffi::c_int) as crate::zutil_h::uch
                     as crate::zutil_h::uchf;
             let c2rust_fresh46 = (*s).sym_next;
             (*s).sym_next = (*s).sym_next.wrapping_add(1);
-            *(*s).sym_buf.offset(c2rust_fresh46 as isize) = len as crate::zutil_h::uchf;
+            sym_buf[c2rust_fresh46 as usize] = len as crate::zutil_h::uchf;
             dist = dist.wrapping_sub(1);
             (*s).dyn_ltree[(*(&raw const crate::src::trees::_length_code
                 as *const crate::zutil_h::uch)
@@ -2766,13 +2769,13 @@ unsafe extern "C" fn deflate_fast(
                 *(*s).window.offset((*s).strstart as isize) as crate::zutil_h::uch;
             let c2rust_fresh47 = (*s).sym_next;
             (*s).sym_next = (*s).sym_next.wrapping_add(1);
-            *(*s).sym_buf.offset(c2rust_fresh47 as isize) = 0 as crate::zutil_h::uchf;
+            sym_buf[c2rust_fresh47 as usize] = 0 as crate::zutil_h::uchf;
             let c2rust_fresh48 = (*s).sym_next;
             (*s).sym_next = (*s).sym_next.wrapping_add(1);
-            *(*s).sym_buf.offset(c2rust_fresh48 as isize) = 0 as crate::zutil_h::uchf;
+            sym_buf[c2rust_fresh48 as usize] = 0 as crate::zutil_h::uchf;
             let c2rust_fresh49 = (*s).sym_next;
             (*s).sym_next = (*s).sym_next.wrapping_add(1);
-            *(*s).sym_buf.offset(c2rust_fresh49 as isize) = cc as crate::zutil_h::uchf;
+            sym_buf[c2rust_fresh49 as usize] = cc as crate::zutil_h::uchf;
             (*s).dyn_ltree[cc as usize].fc = (*s).dyn_ltree[cc as usize].fc.wrapping_add(1);
             bflush = ((*s).sym_next == (*s).sym_end) as ::core::ffi::c_int;
             (*s).lookahead = (*s).lookahead.wrapping_sub(1);
@@ -2865,6 +2868,12 @@ unsafe extern "C" fn deflate_slow(
 ) -> block_state {
     let mut hash_head: crate::src::deflate::IPos = 0;
     let mut bflush: ::core::ffi::c_int = 0;
+    let sym_buf_start = (*s).sym_buf_start;
+    let sym_buf_len = ((*s).pending_buf_size as usize).wrapping_sub(sym_buf_start);
+    let sym_buf = ::core::slice::from_raw_parts_mut(
+        (*s).pending_buf.wrapping_add(sym_buf_start),
+        sym_buf_len,
+    );
     loop {
         if (*s).lookahead < crate::src::deflate::MIN_LOOKAHEAD as crate::stdlib::uInt {
             fill_window(s);
@@ -2928,16 +2937,15 @@ unsafe extern "C" fn deflate_slow(
                 as crate::zutil_h::ush;
             let c2rust_fresh35 = (*s).sym_next;
             (*s).sym_next = (*s).sym_next.wrapping_add(1);
-            *(*s).sym_buf.offset(c2rust_fresh35 as isize) =
-                dist as crate::zutil_h::uch as crate::zutil_h::uchf;
+            sym_buf[c2rust_fresh35 as usize] = dist as crate::zutil_h::uch as crate::zutil_h::uchf;
             let c2rust_fresh36 = (*s).sym_next;
             (*s).sym_next = (*s).sym_next.wrapping_add(1);
-            *(*s).sym_buf.offset(c2rust_fresh36 as isize) =
+            sym_buf[c2rust_fresh36 as usize] =
                 (dist as ::core::ffi::c_int >> 8 as ::core::ffi::c_int) as crate::zutil_h::uch
                     as crate::zutil_h::uchf;
             let c2rust_fresh37 = (*s).sym_next;
             (*s).sym_next = (*s).sym_next.wrapping_add(1);
-            *(*s).sym_buf.offset(c2rust_fresh37 as isize) = len as crate::zutil_h::uchf;
+            sym_buf[c2rust_fresh37 as usize] = len as crate::zutil_h::uchf;
             dist = dist.wrapping_sub(1);
             (*s).dyn_ltree[(*(&raw const crate::src::trees::_length_code
                 as *const crate::zutil_h::uch)
@@ -3034,13 +3042,13 @@ unsafe extern "C" fn deflate_slow(
                 as crate::zutil_h::uch;
             let c2rust_fresh38 = (*s).sym_next;
             (*s).sym_next = (*s).sym_next.wrapping_add(1);
-            *(*s).sym_buf.offset(c2rust_fresh38 as isize) = 0 as crate::zutil_h::uchf;
+            sym_buf[c2rust_fresh38 as usize] = 0 as crate::zutil_h::uchf;
             let c2rust_fresh39 = (*s).sym_next;
             (*s).sym_next = (*s).sym_next.wrapping_add(1);
-            *(*s).sym_buf.offset(c2rust_fresh39 as isize) = 0 as crate::zutil_h::uchf;
+            sym_buf[c2rust_fresh39 as usize] = 0 as crate::zutil_h::uchf;
             let c2rust_fresh40 = (*s).sym_next;
             (*s).sym_next = (*s).sym_next.wrapping_add(1);
-            *(*s).sym_buf.offset(c2rust_fresh40 as isize) = cc as crate::zutil_h::uchf;
+            sym_buf[c2rust_fresh40 as usize] = cc as crate::zutil_h::uchf;
             (*s).dyn_ltree[cc as usize].fc = (*s).dyn_ltree[cc as usize].fc.wrapping_add(1);
             bflush = ((*s).sym_next == (*s).sym_end) as ::core::ffi::c_int;
             if bflush != 0 {
@@ -3078,13 +3086,13 @@ unsafe extern "C" fn deflate_slow(
             as crate::zutil_h::uch;
         let c2rust_fresh41 = (*s).sym_next;
         (*s).sym_next = (*s).sym_next.wrapping_add(1);
-        *(*s).sym_buf.offset(c2rust_fresh41 as isize) = 0 as crate::zutil_h::uchf;
+        sym_buf[c2rust_fresh41 as usize] = 0 as crate::zutil_h::uchf;
         let c2rust_fresh42 = (*s).sym_next;
         (*s).sym_next = (*s).sym_next.wrapping_add(1);
-        *(*s).sym_buf.offset(c2rust_fresh42 as isize) = 0 as crate::zutil_h::uchf;
+        sym_buf[c2rust_fresh42 as usize] = 0 as crate::zutil_h::uchf;
         let c2rust_fresh43 = (*s).sym_next;
         (*s).sym_next = (*s).sym_next.wrapping_add(1);
-        *(*s).sym_buf.offset(c2rust_fresh43 as isize) = cc_0 as crate::zutil_h::uchf;
+        sym_buf[c2rust_fresh43 as usize] = cc_0 as crate::zutil_h::uchf;
         (*s).dyn_ltree[cc_0 as usize].fc = (*s).dyn_ltree[cc_0 as usize].fc.wrapping_add(1);
         bflush = ((*s).sym_next == (*s).sym_end) as ::core::ffi::c_int;
         (*s).match_available = 0 as ::core::ffi::c_int;
@@ -3154,6 +3162,12 @@ unsafe extern "C" fn deflate_rle(
     let mut prev: crate::stdlib::uInt = 0;
     let mut scan: *mut crate::stdlib::Bytef = ::core::ptr::null_mut::<crate::stdlib::Bytef>();
     let mut strend: *mut crate::stdlib::Bytef = ::core::ptr::null_mut::<crate::stdlib::Bytef>();
+    let sym_buf_start = (*s).sym_buf_start;
+    let sym_buf_len = ((*s).pending_buf_size as usize).wrapping_sub(sym_buf_start);
+    let sym_buf = ::core::slice::from_raw_parts_mut(
+        (*s).pending_buf.wrapping_add(sym_buf_start),
+        sym_buf_len,
+    );
     loop {
         if (*s).lookahead <= crate::zutil_h::MAX_MATCH as crate::stdlib::uInt {
             fill_window(s);
@@ -3239,16 +3253,15 @@ unsafe extern "C" fn deflate_rle(
             let mut dist: crate::zutil_h::ush = 1 as ::core::ffi::c_int as crate::zutil_h::ush;
             let c2rust_fresh50 = (*s).sym_next;
             (*s).sym_next = (*s).sym_next.wrapping_add(1);
-            *(*s).sym_buf.offset(c2rust_fresh50 as isize) =
-                dist as crate::zutil_h::uch as crate::zutil_h::uchf;
+            sym_buf[c2rust_fresh50 as usize] = dist as crate::zutil_h::uch as crate::zutil_h::uchf;
             let c2rust_fresh51 = (*s).sym_next;
             (*s).sym_next = (*s).sym_next.wrapping_add(1);
-            *(*s).sym_buf.offset(c2rust_fresh51 as isize) =
+            sym_buf[c2rust_fresh51 as usize] =
                 (dist as ::core::ffi::c_int >> 8 as ::core::ffi::c_int) as crate::zutil_h::uch
                     as crate::zutil_h::uchf;
             let c2rust_fresh52 = (*s).sym_next;
             (*s).sym_next = (*s).sym_next.wrapping_add(1);
-            *(*s).sym_buf.offset(c2rust_fresh52 as isize) = len as crate::zutil_h::uchf;
+            sym_buf[c2rust_fresh52 as usize] = len as crate::zutil_h::uchf;
             dist = dist.wrapping_sub(1);
             (*s).dyn_ltree[(*(&raw const crate::src::trees::_length_code
                 as *const crate::zutil_h::uch)
@@ -3293,13 +3306,13 @@ unsafe extern "C" fn deflate_rle(
                 *(*s).window.offset((*s).strstart as isize) as crate::zutil_h::uch;
             let c2rust_fresh53 = (*s).sym_next;
             (*s).sym_next = (*s).sym_next.wrapping_add(1);
-            *(*s).sym_buf.offset(c2rust_fresh53 as isize) = 0 as crate::zutil_h::uchf;
+            sym_buf[c2rust_fresh53 as usize] = 0 as crate::zutil_h::uchf;
             let c2rust_fresh54 = (*s).sym_next;
             (*s).sym_next = (*s).sym_next.wrapping_add(1);
-            *(*s).sym_buf.offset(c2rust_fresh54 as isize) = 0 as crate::zutil_h::uchf;
+            sym_buf[c2rust_fresh54 as usize] = 0 as crate::zutil_h::uchf;
             let c2rust_fresh55 = (*s).sym_next;
             (*s).sym_next = (*s).sym_next.wrapping_add(1);
-            *(*s).sym_buf.offset(c2rust_fresh55 as isize) = cc as crate::zutil_h::uchf;
+            sym_buf[c2rust_fresh55 as usize] = cc as crate::zutil_h::uchf;
             (*s).dyn_ltree[cc as usize].fc = (*s).dyn_ltree[cc as usize].fc.wrapping_add(1);
             bflush = ((*s).sym_next == (*s).sym_end) as ::core::ffi::c_int;
             (*s).lookahead = (*s).lookahead.wrapping_sub(1);
@@ -3385,6 +3398,12 @@ unsafe extern "C" fn deflate_huff(
     mut flush: ::core::ffi::c_int,
 ) -> block_state {
     let mut bflush: ::core::ffi::c_int = 0;
+    let sym_buf_start = (*s).sym_buf_start;
+    let sym_buf_len = ((*s).pending_buf_size as usize).wrapping_sub(sym_buf_start);
+    let sym_buf = ::core::slice::from_raw_parts_mut(
+        (*s).pending_buf.wrapping_add(sym_buf_start),
+        sym_buf_len,
+    );
     loop {
         if (*s).lookahead == 0 as crate::stdlib::uInt {
             fill_window(s);
@@ -3400,13 +3419,13 @@ unsafe extern "C" fn deflate_huff(
             *(*s).window.offset((*s).strstart as isize) as crate::zutil_h::uch;
         let c2rust_fresh56 = (*s).sym_next;
         (*s).sym_next = (*s).sym_next.wrapping_add(1);
-        *(*s).sym_buf.offset(c2rust_fresh56 as isize) = 0 as crate::zutil_h::uchf;
+        sym_buf[c2rust_fresh56 as usize] = 0 as crate::zutil_h::uchf;
         let c2rust_fresh57 = (*s).sym_next;
         (*s).sym_next = (*s).sym_next.wrapping_add(1);
-        *(*s).sym_buf.offset(c2rust_fresh57 as isize) = 0 as crate::zutil_h::uchf;
+        sym_buf[c2rust_fresh57 as usize] = 0 as crate::zutil_h::uchf;
         let c2rust_fresh58 = (*s).sym_next;
         (*s).sym_next = (*s).sym_next.wrapping_add(1);
-        *(*s).sym_buf.offset(c2rust_fresh58 as isize) = cc as crate::zutil_h::uchf;
+        sym_buf[c2rust_fresh58 as usize] = cc as crate::zutil_h::uchf;
         (*s).dyn_ltree[cc as usize].fc = (*s).dyn_ltree[cc as usize].fc.wrapping_add(1);
         bflush = ((*s).sym_next == (*s).sym_end) as ::core::ffi::c_int;
         (*s).lookahead = (*s).lookahead.wrapping_sub(1);

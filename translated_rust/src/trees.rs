@@ -2333,10 +2333,7 @@ fn static_desc(kind: &crate::src::deflate::TreeKind) -> &'static static_tree_des
     }
 }
 
-fn bi_reverse(
-    mut code: ::core::ffi::c_uint,
-    mut len: ::core::ffi::c_int,
-) -> ::core::ffi::c_uint {
+fn bi_reverse(mut code: ::core::ffi::c_uint, mut len: ::core::ffi::c_int) -> ::core::ffi::c_uint {
     let mut res: ::core::ffi::c_uint = 0 as ::core::ffi::c_uint;
     loop {
         res |= code & 1 as ::core::ffi::c_uint;
@@ -2358,10 +2355,10 @@ fn bi_flush_bytes(
 ) {
     if *bi_valid == 16 as ::core::ffi::c_int {
         let start = *pending as usize;
-        pending_buf[start] = (*bi_buf as ::core::ffi::c_int & 0xff as ::core::ffi::c_int)
-            as crate::zutil_h::uch;
-        pending_buf[start + 1] = (*bi_buf as ::core::ffi::c_int >> 8 as ::core::ffi::c_int)
-            as crate::zutil_h::uch;
+        pending_buf[start] =
+            (*bi_buf as ::core::ffi::c_int & 0xff as ::core::ffi::c_int) as crate::zutil_h::uch;
+        pending_buf[start + 1] =
+            (*bi_buf as ::core::ffi::c_int >> 8 as ::core::ffi::c_int) as crate::zutil_h::uch;
         *pending = pending.wrapping_add(2);
         *bi_buf = 0 as crate::zutil_h::ush;
         *bi_valid = 0 as ::core::ffi::c_int;
@@ -2383,18 +2380,18 @@ fn bi_windup_bytes(
 ) {
     if *bi_valid > 8 as ::core::ffi::c_int {
         let start = *pending as usize;
-        pending_buf[start] = (*bi_buf as ::core::ffi::c_int & 0xff as ::core::ffi::c_int)
-            as crate::zutil_h::uch;
-        pending_buf[start + 1] = (*bi_buf as ::core::ffi::c_int >> 8 as ::core::ffi::c_int)
-            as crate::zutil_h::uch;
+        pending_buf[start] =
+            (*bi_buf as ::core::ffi::c_int & 0xff as ::core::ffi::c_int) as crate::zutil_h::uch;
+        pending_buf[start + 1] =
+            (*bi_buf as ::core::ffi::c_int >> 8 as ::core::ffi::c_int) as crate::zutil_h::uch;
         *pending = pending.wrapping_add(2);
     } else if *bi_valid > 0 as ::core::ffi::c_int {
         let start = *pending as usize;
         pending_buf[start] = *bi_buf as crate::stdlib::Byte;
         *pending = pending.wrapping_add(1);
     }
-    *bi_used = (*bi_valid - 1 as ::core::ffi::c_int & 7 as ::core::ffi::c_int)
-        + 1 as ::core::ffi::c_int;
+    *bi_used =
+        (*bi_valid - 1 as ::core::ffi::c_int & 7 as ::core::ffi::c_int) + 1 as ::core::ffi::c_int;
     *bi_buf = 0 as crate::zutil_h::ush;
     *bi_valid = 0 as ::core::ffi::c_int;
 }
@@ -2436,7 +2433,7 @@ fn gen_codes(
     bits = 1 as ::core::ffi::c_int;
     while bits <= crate::src::deflate::MAX_BITS {
         code = code.wrapping_add(
-            bl_count[(bits - 1 as ::core::ffi::c_int) as usize] as ::core::ffi::c_uint
+            bl_count[(bits - 1 as ::core::ffi::c_int) as usize] as ::core::ffi::c_uint,
         ) << 1 as ::core::ffi::c_int;
         next_code[bits as usize] = code as crate::zutil_h::ush;
         bits += 1;
@@ -2795,8 +2792,7 @@ fn scan_tree_lengths(
         count += 1;
         if !(count < max_count && curlen == nextlen) {
             if count < min_count {
-                bl_tree[curlen as usize].fc = (bl_tree[curlen as usize].fc
-                    as ::core::ffi::c_int
+                bl_tree[curlen as usize].fc = (bl_tree[curlen as usize].fc as ::core::ffi::c_int
                     + count as crate::zutil_h::ush as ::core::ffi::c_int)
                     as crate::zutil_h::ush;
             } else if curlen != 0 as ::core::ffi::c_int {
@@ -3273,10 +3269,8 @@ pub unsafe extern "C" fn _tr_stored_block(
     // `pending_buf_size` is the allocation capacity established by
     // `deflateInit2_()` and `deflateCopy()`.  The header bytes are emitted
     // before `bi_windup()` can append to the same buffer.
-    let pending_buf = ::core::slice::from_raw_parts_mut(
-        state.pending_buf,
-        state.pending_buf_size as usize,
-    );
+    let pending_buf =
+        ::core::slice::from_raw_parts_mut(state.pending_buf, state.pending_buf_size as usize);
     if state.bi_valid > crate::src::deflate::Buf_size - len {
         let mut val: ::core::ffi::c_int =
             ((0 as ::core::ffi::c_int) << 1 as ::core::ffi::c_int) + last;
@@ -3285,8 +3279,9 @@ pub unsafe extern "C" fn _tr_stored_block(
             as crate::zutil_h::ush;
         let c2rust_fresh49 = state.pending;
         state.pending = state.pending.wrapping_add(1);
-        pending_buf[c2rust_fresh49 as usize] =
-            (state.bi_buf as ::core::ffi::c_int & 0xff as ::core::ffi::c_int) as crate::zutil_h::uch;
+        pending_buf[c2rust_fresh49 as usize] = (state.bi_buf as ::core::ffi::c_int
+            & 0xff as ::core::ffi::c_int)
+            as crate::zutil_h::uch;
         let c2rust_fresh50 = state.pending;
         state.pending = state.pending.wrapping_add(1);
         pending_buf[c2rust_fresh50 as usize] =
@@ -3303,20 +3298,18 @@ pub unsafe extern "C" fn _tr_stored_block(
         state.bi_valid += len;
     }
     bi_windup(s);
-    let pending_buf = ::core::slice::from_raw_parts_mut(
-        state.pending_buf,
-        state.pending_buf_size as usize,
-    );
+    let pending_buf =
+        ::core::slice::from_raw_parts_mut(state.pending_buf, state.pending_buf_size as usize);
     let c2rust_fresh51 = state.pending;
     state.pending = state.pending.wrapping_add(1);
-    pending_buf[c2rust_fresh51 as usize] =
-        (stored_len as crate::zutil_h::ush as ::core::ffi::c_int & 0xff as ::core::ffi::c_int)
-            as crate::zutil_h::uch;
+    pending_buf[c2rust_fresh51 as usize] = (stored_len as crate::zutil_h::ush as ::core::ffi::c_int
+        & 0xff as ::core::ffi::c_int)
+        as crate::zutil_h::uch;
     let c2rust_fresh52 = state.pending;
     state.pending = state.pending.wrapping_add(1);
-    pending_buf[c2rust_fresh52 as usize] =
-        (stored_len as crate::zutil_h::ush as ::core::ffi::c_int >> 8 as ::core::ffi::c_int)
-            as crate::zutil_h::uch;
+    pending_buf[c2rust_fresh52 as usize] = (stored_len as crate::zutil_h::ush as ::core::ffi::c_int
+        >> 8 as ::core::ffi::c_int)
+        as crate::zutil_h::uch;
     let c2rust_fresh53 = state.pending;
     state.pending = state.pending.wrapping_add(1);
     pending_buf[c2rust_fresh53 as usize] =
@@ -3330,7 +3323,8 @@ pub unsafe extern "C" fn _tr_stored_block(
     if stored_len != 0 {
         let start = state.pending as usize;
         let end = start + stored_len as usize;
-        let input = ::core::slice::from_raw_parts(buf as *const crate::stdlib::Bytef, stored_len as usize);
+        let input =
+            ::core::slice::from_raw_parts(buf as *const crate::stdlib::Bytef, stored_len as usize);
         pending_buf[start..end].copy_from_slice(input);
     }
     state.pending = state.pending.wrapping_add(stored_len);
@@ -3420,22 +3414,26 @@ unsafe extern "C" fn compress_block(
     let mut sx: ::core::ffi::c_uint = 0 as ::core::ffi::c_uint;
     let mut code: ::core::ffi::c_uint = 0;
     let mut extra: ::core::ffi::c_int = 0;
+    let sym_buf_start = (*s).sym_buf_start;
+    let sym_buf_len = ((*s).pending_buf_size as usize).wrapping_sub(sym_buf_start);
+    let sym_buf =
+        ::core::slice::from_raw_parts((*s).pending_buf.wrapping_add(sym_buf_start), sym_buf_len);
     if (*s).sym_next != 0 as crate::stdlib::uInt {
         loop {
             let c2rust_fresh10 = sx;
             sx = sx.wrapping_add(1);
-            dist = (*(*s).sym_buf.offset(c2rust_fresh10 as isize) as ::core::ffi::c_int
+            dist = (sym_buf[c2rust_fresh10 as usize] as ::core::ffi::c_int
                 & 0xff as ::core::ffi::c_int) as ::core::ffi::c_uint;
             let c2rust_fresh11 = sx;
             sx = sx.wrapping_add(1);
             dist = dist.wrapping_add(
-                ((*(*s).sym_buf.offset(c2rust_fresh11 as isize) as ::core::ffi::c_int
+                ((sym_buf[c2rust_fresh11 as usize] as ::core::ffi::c_int
                     & 0xff as ::core::ffi::c_int) as ::core::ffi::c_uint)
                     << 8 as ::core::ffi::c_int,
             );
             let c2rust_fresh12 = sx;
             sx = sx.wrapping_add(1);
-            lc = *(*s).sym_buf.offset(c2rust_fresh12 as isize) as ::core::ffi::c_int;
+            lc = sym_buf[c2rust_fresh12 as usize] as ::core::ffi::c_int;
             if dist == 0 as ::core::ffi::c_uint {
                 let mut len: ::core::ffi::c_int =
                     (*ltree.offset(lc as isize)).dl as ::core::ffi::c_int;
@@ -3856,11 +3854,13 @@ pub unsafe extern "C" fn _tr_tally(
     mut lc: ::core::ffi::c_uint,
 ) -> ::core::ffi::c_int {
     let state = &mut *s;
-    // `sym_buf` starts after the literal portion of the `pending_buf`
-    // allocation. Its remaining capacity is three bytes per literal slot.
+    // The symbol region starts after the literal portion of `pending_buf`.
+    // Its remaining capacity is three bytes per literal slot.
     let sym_buf = ::core::slice::from_raw_parts_mut(
-        state.sym_buf,
-        state.pending_buf_size.wrapping_sub(state.lit_bufsize as crate::zutil_h::ulg) as usize,
+        state.pending_buf.wrapping_add(state.sym_buf_start),
+        state
+            .pending_buf_size
+            .wrapping_sub(state.sym_buf_start as crate::zutil_h::ulg) as usize,
     );
     tally_symbol(
         sym_buf,
