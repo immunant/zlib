@@ -442,6 +442,15 @@ pub fn gz_io_chunk_limit() -> ::core::ffi::c_uint {
         .wrapping_add(1 as ::core::ffi::c_uint)
 }
 
+pub fn gz_io_chunk_len(len: ::core::ffi::c_uint) -> ::core::ffi::c_uint {
+    let max = gz_io_chunk_limit();
+    if len > max {
+        max
+    } else {
+        len
+    }
+}
+
 pub fn gz_z_size_to_uInt_chunk(len: crate::stdlib::z_size_t) -> ::core::ffi::c_uint {
     let max = -1 as ::core::ffi::c_int as ::core::ffi::c_uint;
     if max as crate::stdlib::z_size_t > len {

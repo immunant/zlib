@@ -445,140 +445,67 @@ pub unsafe extern "C" fn inflateBack_ffi(
                                 (*state).have = (*state).have.wrapping_add(1);
                                 (*state).lens[c2rust_fresh7 as usize] = here.val;
                             } else {
-                                if here.val as ::core::ffi::c_int == 16 as ::core::ffi::c_int {
-                                    while bits
-                                        < (here.bits as ::core::ffi::c_int
-                                            + 2 as ::core::ffi::c_int)
-                                            as ::core::ffi::c_uint
-                                    {
-                                        if have == 0 as ::core::ffi::c_uint {
-                                            have = in_0.expect("non-null function pointer")(
-                                                in_desc,
-                                                &raw mut next,
-                                            );
-                                            if have == 0 as ::core::ffi::c_uint {
-                                                next =
-                                                    ::core::ptr::null_mut::<::core::ffi::c_uchar>();
-                                                ret = crate::zlib_h::Z_BUF_ERROR;
-                                                break 's_69;
-                                            }
-                                        }
-                                        have = have.wrapping_sub(1);
-                                        let c2rust_fresh8 = next;
-                                        next = next.offset(1);
-                                        hold = hold.wrapping_add(
-                                            (*c2rust_fresh8 as ::core::ffi::c_ulong) << bits,
+                                let repeat_code = here.val as ::core::ffi::c_uint;
+                                let repeat_extra =
+                                    crate::src::inflate::inflate_code_length_repeat_extra_bits(
+                                        repeat_code,
+                                    );
+                                while bits
+                                    < (here.bits as ::core::ffi::c_uint).wrapping_add(repeat_extra)
+                                {
+                                    if have == 0 as ::core::ffi::c_uint {
+                                        have = in_0.expect("non-null function pointer")(
+                                            in_desc,
+                                            &raw mut next,
                                         );
-                                        bits = bits.wrapping_add(8 as ::core::ffi::c_uint);
+                                        if have == 0 as ::core::ffi::c_uint {
+                                            next = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
+                                            ret = crate::zlib_h::Z_BUF_ERROR;
+                                            break 's_69;
+                                        }
                                     }
-                                    hold >>= here.bits as ::core::ffi::c_int;
-                                    bits = bits.wrapping_sub(here.bits as ::core::ffi::c_uint);
+                                    have = have.wrapping_sub(1);
+                                    let c2rust_fresh8 = next;
+                                    next = next.offset(1);
+                                    hold = hold.wrapping_add(
+                                        (*c2rust_fresh8 as ::core::ffi::c_ulong) << bits,
+                                    );
+                                    bits = bits.wrapping_add(8 as ::core::ffi::c_uint);
+                                }
+                                hold >>= here.bits as ::core::ffi::c_int;
+                                bits = bits.wrapping_sub(here.bits as ::core::ffi::c_uint);
+                                let previous_len = if repeat_code == 16 as ::core::ffi::c_uint {
                                     if (*state).have == 0 as ::core::ffi::c_uint {
                                         (*strm).msg = b"invalid bit length repeat\0".as_ptr()
                                             as *const ::core::ffi::c_char
                                             as *mut ::core::ffi::c_char;
                                         (*state).mode = crate::src::inflate::BAD;
                                         break;
-                                    } else {
-                                        len = (*state).lens[(*state)
-                                            .have
-                                            .wrapping_sub(1 as ::core::ffi::c_uint)
-                                            as usize]
-                                            as ::core::ffi::c_uint;
-                                        copy = (3 as ::core::ffi::c_uint).wrapping_add(
-                                            hold as ::core::ffi::c_uint
-                                                & ((1 as ::core::ffi::c_uint)
-                                                    << 2 as ::core::ffi::c_int)
-                                                    .wrapping_sub(1 as ::core::ffi::c_uint),
-                                        );
-                                        hold >>= 2 as ::core::ffi::c_int;
-                                        bits = bits.wrapping_sub(
-                                            2 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                                        );
                                     }
-                                } else if here.val as ::core::ffi::c_int == 17 as ::core::ffi::c_int
-                                {
-                                    while bits
-                                        < (here.bits as ::core::ffi::c_int
-                                            + 3 as ::core::ffi::c_int)
-                                            as ::core::ffi::c_uint
-                                    {
-                                        if have == 0 as ::core::ffi::c_uint {
-                                            have = in_0.expect("non-null function pointer")(
-                                                in_desc,
-                                                &raw mut next,
-                                            );
-                                            if have == 0 as ::core::ffi::c_uint {
-                                                next =
-                                                    ::core::ptr::null_mut::<::core::ffi::c_uchar>();
-                                                ret = crate::zlib_h::Z_BUF_ERROR;
-                                                break 's_69;
-                                            }
-                                        }
-                                        have = have.wrapping_sub(1);
-                                        let c2rust_fresh9 = next;
-                                        next = next.offset(1);
-                                        hold = hold.wrapping_add(
-                                            (*c2rust_fresh9 as ::core::ffi::c_ulong) << bits,
-                                        );
-                                        bits = bits.wrapping_add(8 as ::core::ffi::c_uint);
-                                    }
-                                    hold >>= here.bits as ::core::ffi::c_int;
-                                    bits = bits.wrapping_sub(here.bits as ::core::ffi::c_uint);
-                                    len = 0 as ::core::ffi::c_uint;
-                                    copy = (3 as ::core::ffi::c_uint).wrapping_add(
-                                        hold as ::core::ffi::c_uint
-                                            & ((1 as ::core::ffi::c_uint)
-                                                << 3 as ::core::ffi::c_int)
-                                                .wrapping_sub(1 as ::core::ffi::c_uint),
-                                    );
-                                    hold >>= 3 as ::core::ffi::c_int;
-                                    bits = bits.wrapping_sub(
-                                        3 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                                    );
+                                    (*state).lens[(*state)
+                                        .have
+                                        .wrapping_sub(1 as ::core::ffi::c_uint)
+                                        as usize]
+                                        as ::core::ffi::c_uint
                                 } else {
-                                    while bits
-                                        < (here.bits as ::core::ffi::c_int
-                                            + 7 as ::core::ffi::c_int)
-                                            as ::core::ffi::c_uint
-                                    {
-                                        if have == 0 as ::core::ffi::c_uint {
-                                            have = in_0.expect("non-null function pointer")(
-                                                in_desc,
-                                                &raw mut next,
-                                            );
-                                            if have == 0 as ::core::ffi::c_uint {
-                                                next =
-                                                    ::core::ptr::null_mut::<::core::ffi::c_uchar>();
-                                                ret = crate::zlib_h::Z_BUF_ERROR;
-                                                break 's_69;
-                                            }
-                                        }
-                                        have = have.wrapping_sub(1);
-                                        let c2rust_fresh10 = next;
-                                        next = next.offset(1);
-                                        hold = hold.wrapping_add(
-                                            (*c2rust_fresh10 as ::core::ffi::c_ulong) << bits,
-                                        );
-                                        bits = bits.wrapping_add(8 as ::core::ffi::c_uint);
-                                    }
-                                    hold >>= here.bits as ::core::ffi::c_int;
-                                    bits = bits.wrapping_sub(here.bits as ::core::ffi::c_uint);
-                                    len = 0 as ::core::ffi::c_uint;
-                                    copy = (11 as ::core::ffi::c_uint).wrapping_add(
-                                        hold as ::core::ffi::c_uint
-                                            & ((1 as ::core::ffi::c_uint)
-                                                << 7 as ::core::ffi::c_int)
-                                                .wrapping_sub(1 as ::core::ffi::c_uint),
-                                    );
-                                    hold >>= 7 as ::core::ffi::c_int;
-                                    bits = bits.wrapping_sub(
-                                        7 as ::core::ffi::c_int as ::core::ffi::c_uint,
-                                    );
-                                }
-                                if (*state).have.wrapping_add(copy)
-                                    > (*state).nlen.wrapping_add((*state).ndist)
-                                {
+                                    0 as ::core::ffi::c_uint
+                                };
+                                let repeat = crate::src::inflate::inflate_code_length_repeat(
+                                    repeat_code,
+                                    previous_len,
+                                    hold,
+                                    bits,
+                                );
+                                len = repeat.len;
+                                copy = repeat.copy;
+                                hold = repeat.hold;
+                                bits = repeat.bits;
+                                if !crate::src::inflate::inflate_code_length_repeat_fits(
+                                    (*state).have,
+                                    copy,
+                                    (*state).nlen,
+                                    (*state).ndist,
+                                ) {
                                     (*strm).msg = b"invalid bit length repeat\0".as_ptr()
                                         as *const ::core::ffi::c_char
                                         as *mut ::core::ffi::c_char;

@@ -9,7 +9,7 @@ pub use crate::gzguts_h::LOOK;
 pub use crate::src::gzlib::gz_consume_buffered_read_cursor;
 pub use crate::src::gzlib::gz_errno_is_retryable;
 pub use crate::src::gzlib::gz_error;
-pub use crate::src::gzlib::gz_io_chunk_limit;
+pub use crate::src::gzlib::gz_io_chunk_len;
 pub use crate::src::gzlib::gz_z_size_to_uInt_chunk;
 
 pub use crate::stdlib::EAGAIN;
@@ -60,15 +60,11 @@ unsafe fn gz_load(
 ) -> ::core::ffi::c_int {
     let mut ret: ::core::ffi::c_int = 0;
     let mut get: ::core::ffi::c_uint = 0;
-    let mut max: ::core::ffi::c_uint = gz_io_chunk_limit();
     state.again = 0 as ::core::ffi::c_int;
     *crate::stdlib::__errno_location() = 0 as ::core::ffi::c_int;
     *have = 0 as ::core::ffi::c_uint;
     loop {
-        get = len.wrapping_sub(*have);
-        if get > max {
-            get = max;
-        }
+        get = gz_io_chunk_len(len.wrapping_sub(*have));
         ret = crate::stdlib::read(
             state.fd,
             buf.wrapping_add(*have as usize) as *mut ::core::ffi::c_void,

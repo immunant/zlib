@@ -6,6 +6,7 @@ pub use crate::gzguts_h::GZ_WRITE;
 pub use crate::src::gzlib::gz_clamped_uint;
 pub use crate::src::gzlib::gz_errno_is_retryable;
 pub use crate::src::gzlib::gz_error;
+pub use crate::src::gzlib::gz_io_chunk_len;
 pub use crate::src::gzlib::gz_io_chunk_limit;
 pub use crate::src::gzlib::gz_z_size_to_uInt_chunk;
 
@@ -125,11 +126,7 @@ unsafe extern "C" fn gz_comp(
         while (*strm).avail_in != 0 {
             *crate::stdlib::__errno_location() = 0 as ::core::ffi::c_int;
             (*state).again = 0 as ::core::ffi::c_int;
-            put = if (*strm).avail_in > max {
-                max
-            } else {
-                (*strm).avail_in as ::core::ffi::c_uint
-            };
+            put = gz_io_chunk_len((*strm).avail_in);
             writ = crate::stdlib::write(
                 (*state).fd,
                 (*strm).next_in as *const ::core::ffi::c_void,
