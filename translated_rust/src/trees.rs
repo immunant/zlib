@@ -2399,10 +2399,10 @@ unsafe extern "C" fn bi_windup(mut s: *mut crate::src::deflate::deflate_state) {
     (*s).bi_valid = 0 as ::core::ffi::c_int;
 }
 
-unsafe extern "C" fn gen_codes(
-    mut tree: *mut crate::src::deflate::ct_data,
-    mut max_code: ::core::ffi::c_int,
-    mut bl_count: *mut crate::zutil_h::ushf,
+fn gen_codes(
+    tree: &mut [crate::src::deflate::ct_data],
+    max_code: ::core::ffi::c_int,
+    bl_count: &[crate::zutil_h::ush; 16],
 ) {
     let mut next_code: [crate::zutil_h::ush; 16] = [0; 16];
     let mut code: ::core::ffi::c_uint = 0 as ::core::ffi::c_uint;
@@ -2410,19 +2410,20 @@ unsafe extern "C" fn gen_codes(
     let mut n: ::core::ffi::c_int = 0;
     bits = 1 as ::core::ffi::c_int;
     while bits <= crate::src::deflate::MAX_BITS {
-        code = code.wrapping_add(
-            *bl_count.offset((bits - 1 as ::core::ffi::c_int) as isize) as ::core::ffi::c_uint
-        ) << 1 as ::core::ffi::c_int;
+        code = code
+            .wrapping_add(bl_count[(bits - 1 as ::core::ffi::c_int) as usize] as ::core::ffi::c_uint)
+            << 1 as ::core::ffi::c_int;
         next_code[bits as usize] = code as crate::zutil_h::ush;
         bits += 1;
     }
     n = 0 as ::core::ffi::c_int;
     while n <= max_code {
-        let mut len: ::core::ffi::c_int = (*tree.offset(n as isize)).dad as ::core::ffi::c_int;
+        let node = &mut tree[n as usize];
+        let len: ::core::ffi::c_int = node.dad as ::core::ffi::c_int;
         if !(len == 0 as ::core::ffi::c_int) {
             let c2rust_fresh58 = next_code[len as usize];
             next_code[len as usize] = next_code[len as usize].wrapping_add(1);
-            (*tree.offset(n as isize)).freq =
+            node.freq =
                 bi_reverse(c2rust_fresh58 as ::core::ffi::c_uint, len) as crate::zutil_h::ush;
         }
         n += 1;
@@ -2613,8 +2614,9 @@ unsafe extern "C" fn build_tree(
     mut desc: *mut crate::src::deflate::tree_desc,
 ) {
     let mut tree: *mut crate::src::deflate::ct_data = (*desc).dyn_tree;
-    let stat_desc = static_desc((*desc).stat_desc_kind);
-    let stree = static_tree((*desc).stat_desc_kind);
+    let desc_kind = (*desc).stat_desc_kind;
+    let stat_desc = static_desc(desc_kind);
+    let stree = static_tree(desc_kind);
     let mut elems: ::core::ffi::c_int = stat_desc.elems;
     let mut n: ::core::ffi::c_int = 0;
     let mut m: ::core::ffi::c_int = 0;
@@ -2694,11 +2696,12 @@ unsafe extern "C" fn build_tree(
     (*s).heap_max -= 1;
     (*s).heap[(*s).heap_max as usize] = (*s).heap[SMALLEST as usize];
     gen_bitlen(s, desc);
-    gen_codes(
-        tree,
-        max_code,
-        &raw mut (*s).bl_count as *mut crate::zutil_h::ushf,
-    );
+    let state = &mut *s;
+    match desc_kind {
+        STATIC_L_DESC_KIND => gen_codes(&mut state.dyn_ltree, max_code, &state.bl_count),
+        STATIC_D_DESC_KIND => gen_codes(&mut state.dyn_dtree, max_code, &state.bl_count),
+        _ => gen_codes(&mut state.bl_tree, max_code, &state.bl_count),
+    }
 }
 
 unsafe extern "C" fn scan_tree(

@@ -151,6 +151,13 @@ fn gz_set_gzip_mode(state: &mut crate::gzguts_h::gz_state, junk: ::core::ffi::c_
     state.direct = 0 as ::core::ffi::c_int;
 }
 
+fn gz_is_gzip_header(header: [crate::stdlib::Bytef; 4]) -> bool {
+    header[0] as ::core::ffi::c_int == 31 as ::core::ffi::c_int
+        && header[1] as ::core::ffi::c_int == 139 as ::core::ffi::c_int
+        && header[2] as ::core::ffi::c_int == 8 as ::core::ffi::c_int
+        && (header[3] as ::core::ffi::c_int) < 32 as ::core::ffi::c_int
+}
+
 unsafe extern "C" fn gz_look(mut state: crate::gzguts_h::gz_statep) -> ::core::ffi::c_int {
     let mut strm: crate::zlib_h::z_streamp = &raw mut (*state).strm;
     if (*state).size == 0 as ::core::ffi::c_uint {
@@ -207,19 +214,18 @@ unsafe extern "C" fn gz_look(mut state: crate::gzguts_h::gz_statep) -> ::core::f
     {
         return 0 as ::core::ffi::c_int;
     }
-    if (*strm).avail_in > 3 as crate::stdlib::uInt
-        && *(*strm).next_in.offset(0 as ::core::ffi::c_int as isize) as ::core::ffi::c_int
-            == 31 as ::core::ffi::c_int
-        && *(*strm).next_in.offset(1 as ::core::ffi::c_int as isize) as ::core::ffi::c_int
-            == 139 as ::core::ffi::c_int
-        && *(*strm).next_in.offset(2 as ::core::ffi::c_int as isize) as ::core::ffi::c_int
-            == 8 as ::core::ffi::c_int
-        && (*(*strm).next_in.offset(3 as ::core::ffi::c_int as isize) as ::core::ffi::c_int)
-            < 32 as ::core::ffi::c_int
-    {
-        crate::src::inflate::inflateReset_ffi(strm as *mut crate::zlib_h::z_stream_s);
-        gz_set_gzip_mode(&mut *state, 1 as ::core::ffi::c_int);
-        return 0 as ::core::ffi::c_int;
+    if (*strm).avail_in > 3 as crate::stdlib::uInt {
+        let header = [
+            *(*strm).next_in.offset(0 as ::core::ffi::c_int as isize),
+            *(*strm).next_in.offset(1 as ::core::ffi::c_int as isize),
+            *(*strm).next_in.offset(2 as ::core::ffi::c_int as isize),
+            *(*strm).next_in.offset(3 as ::core::ffi::c_int as isize),
+        ];
+        if gz_is_gzip_header(header) {
+            crate::src::inflate::inflateReset_ffi(strm as *mut crate::zlib_h::z_stream_s);
+            gz_set_gzip_mode(&mut *state, 1 as ::core::ffi::c_int);
+            return 0 as ::core::ffi::c_int;
+        }
     }
     (*state).x.next = (*state).out;
     crate::stdlib::memcpy(
