@@ -2571,36 +2571,43 @@ fn emit_stored_window_block_state(
     true
 }
 
-/// Flush pending output and return the stream's post-flush output capacity.
+#[derive(Clone, Copy)]
+enum FlushPendingMark {
+    Never,
+    OutputFull,
+    PendingRemains,
+}
+
+/// Flush pending output and return its post-flush progress.
 ///
-/// The stream is adopted once here, so callers that need the capacity do not
-/// need to dereference its raw compatibility pointer a second time.
+/// The stream is adopted once here, so callers can use its returned capacity
+/// and pending balance without a second raw compatibility-state dereference.
 fn flush_pending(
     mut strm: crate::zlib_h::z_streamp,
-    mark_last_flush_if_output_full: bool,
-) -> crate::stdlib::uInt {
+    mark_last_flush: FlushPendingMark,
+) -> (crate::stdlib::uInt, Option<crate::zutil_h::ulg>) {
     // Raw ABI stream/state adoption and the temporary cursor lends are the
     // only unsafe part of this adapter.  Keep that boundary explicit so
     // callers do not inherit an unsafe-function requirement merely to flush
     // already-validated pending bytes.
     unsafe {
         if strm.is_null() {
-            return 0;
+            return (0, None);
         }
         let strm = &mut *strm;
         let state = strm.state as *mut crate::src::deflate::deflate_state;
         if state.is_null() {
-            return strm.avail_out;
+            return (strm.avail_out, None);
         }
         let s = &mut *state;
         // Tree construction keeps this derived value in opaque state.  Publish
         // it while this existing ABI stream/state boundary is already active.
         strm.data_type = s.data_type;
         let Ok(pending_len) = usize::try_from(s.pending_buf_size) else {
-            return strm.avail_out;
+            return (strm.avail_out, Some(s.pending));
         };
         if pending_len != 0 && s.pending_buf.is_null() {
-            return strm.avail_out;
+            return (strm.avail_out, Some(s.pending));
         }
         let pending_buf = if pending_len == 0 {
             &mut []
@@ -2611,38 +2618,38 @@ fn flush_pending(
         let Some((len, reset_pending_out)) =
             flush_pending_state(s.pending_buf_size, &mut s.pending, strm.avail_out)
         else {
-            return strm.avail_out;
+            return (strm.avail_out, Some(s.pending));
         };
         if len == 0 {
-            return strm.avail_out;
+            return (strm.avail_out, Some(s.pending));
         }
         let Ok(len) = usize::try_from(len) else {
-            return strm.avail_out;
+            return (strm.avail_out, Some(s.pending));
         };
         if strm.next_out.is_null() || len > strm.avail_out as usize {
-            return strm.avail_out;
+            return (strm.avail_out, Some(s.pending));
         }
         // `memcpy` required raw cursors even after their bounds had been
         // validated.  Keep the ABI lends here, reject aliasing just as C
         // `memcpy` requires, then perform the actual copy in the slice core.
         let Some(pending_end) = s.pending_out.checked_add(len) else {
-            return strm.avail_out;
+            return (strm.avail_out, Some(s.pending));
         };
         if pending_end > pending_buf.len() {
-            return strm.avail_out;
+            return (strm.avail_out, Some(s.pending));
         }
         let Some(pending_address) = (s.pending_buf as usize).checked_add(s.pending_out) else {
-            return strm.avail_out;
+            return (strm.avail_out, Some(s.pending));
         };
         if !deflate_spans_are_disjoint(strm.next_out as usize, len, pending_address, len) {
-            return strm.avail_out;
+            return (strm.avail_out, Some(s.pending));
         }
         let Some(pending) = pending_buf.get(s.pending_out..pending_end) else {
-            return strm.avail_out;
+            return (strm.avail_out, Some(s.pending));
         };
         let output = ::core::slice::from_raw_parts_mut(strm.next_out, len);
         if !flush_pending_copy_state(output, pending) {
-            return strm.avail_out;
+            return (strm.avail_out, Some(s.pending));
         }
         // The copied length is bounded by the validated output and pending
         // spans above. Preserve zlib's cursor advance without an unsafe pointer
@@ -2658,10 +2665,12 @@ fn flush_pending(
         // marker immediately after a full output span.  Keep that scalar
         // state commit in the existing stream/state boundary so its caller
         // does not need to re-adopt the raw state record after flushing.
-        if mark_last_flush_if_output_full && strm.avail_out == 0 {
+        if matches!(mark_last_flush, FlushPendingMark::OutputFull) && strm.avail_out == 0
+            || matches!(mark_last_flush, FlushPendingMark::PendingRemains) && s.pending != 0
+        {
             s.last_flush = -1 as ::core::ffi::c_int;
         }
-        strm.avail_out
+        (strm.avail_out, Some(s.pending))
     }
 }
 
@@ -2850,8 +2859,11 @@ pub fn deflate(
             (state_ptr, state.pending != 0, stream.avail_in)
         };
         if pending {
-            if flush_pending(strm_ref as *mut crate::zlib_h::z_stream, true)
-                == 0 as crate::stdlib::uInt
+            if flush_pending(
+                strm_ref as *mut crate::zlib_h::z_stream,
+                FlushPendingMark::OutputFull,
+            )
+            .0 == 0 as crate::stdlib::uInt
             {
                 return crate::zlib_h::Z_OK;
             }
@@ -2939,17 +2951,16 @@ pub fn deflate(
             state.pending != 0
         };
         if zlib_header_is_pending {
-            flush_pending(strm_ref as *mut crate::zlib_h::z_stream, false);
-            let pending_remains = {
-                let state = &mut *s;
-                if state.pending != 0 as crate::zutil_h::ulg {
-                    state.last_flush = -1 as ::core::ffi::c_int;
-                    true
-                } else {
-                    false
-                }
-            };
-            if pending_remains {
+            // A partial pending flush can only leave pending bytes when the
+            // output cursor is full. Have the existing flush boundary commit
+            // `last_flush` for that condition, then use its returned pending
+            // balance instead of re-adopting the raw state record to inspect it.
+            if flush_pending(
+                strm_ref as *mut crate::zlib_h::z_stream,
+                FlushPendingMark::PendingRemains,
+            )
+            .1 != Some(0)
+            {
                 return crate::zlib_h::Z_OK;
             }
         }
@@ -3010,10 +3021,12 @@ pub fn deflate(
                 plan
             };
             if fixed_header_plan.flush_now {
-                flush_pending(strm_ref as *mut crate::zlib_h::z_stream, false);
-                let state = &mut *s;
-                if state.pending != 0 as crate::zutil_h::ulg {
-                    state.last_flush = -1 as ::core::ffi::c_int;
+                if flush_pending(
+                    strm_ref as *mut crate::zlib_h::z_stream,
+                    FlushPendingMark::PendingRemains,
+                )
+                .1 != Some(0)
+                {
                     return crate::zlib_h::Z_OK;
                 }
             }
@@ -3067,10 +3080,12 @@ pub fn deflate(
                         if state.pending != state.pending_buf_size {
                             return crate::zlib_h::Z_STREAM_ERROR;
                         }
-                        flush_pending(strm_ref as *mut crate::zlib_h::z_stream, false);
-                        let state = &mut *s;
-                        if state.pending != 0 as crate::zutil_h::ulg {
-                            state.last_flush = -1 as ::core::ffi::c_int;
+                        if flush_pending(
+                            strm_ref as *mut crate::zlib_h::z_stream,
+                            FlushPendingMark::PendingRemains,
+                        )
+                        .1 != Some(0)
+                        {
                             return crate::zlib_h::Z_OK;
                         }
                     }
@@ -3125,10 +3140,12 @@ pub fn deflate(
                         if state.pending != state.pending_buf_size {
                             return crate::zlib_h::Z_STREAM_ERROR;
                         }
-                        flush_pending(strm_ref as *mut crate::zlib_h::z_stream, false);
-                        let state = &mut *s;
-                        if state.pending != 0 as crate::zutil_h::ulg {
-                            state.last_flush = -1 as ::core::ffi::c_int;
+                        if flush_pending(
+                            strm_ref as *mut crate::zlib_h::z_stream,
+                            FlushPendingMark::PendingRemains,
+                        )
+                        .1 != Some(0)
+                        {
                             return crate::zlib_h::Z_OK;
                         }
                     }
@@ -3181,10 +3198,12 @@ pub fn deflate(
                         if state.pending != state.pending_buf_size {
                             return crate::zlib_h::Z_STREAM_ERROR;
                         }
-                        flush_pending(strm_ref as *mut crate::zlib_h::z_stream, false);
-                        let state = &mut *s;
-                        if state.pending != 0 as crate::zutil_h::ulg {
-                            state.last_flush = -1 as ::core::ffi::c_int;
+                        if flush_pending(
+                            strm_ref as *mut crate::zlib_h::z_stream,
+                            FlushPendingMark::PendingRemains,
+                        )
+                        .1 != Some(0)
+                        {
                             return crate::zlib_h::Z_OK;
                         }
                     }
@@ -3221,10 +3240,12 @@ pub fn deflate(
             };
             if hcrc_plan.emit {
                 if hcrc_plan.flush_before_emit {
-                    flush_pending(strm_ref as *mut crate::zlib_h::z_stream, false);
-                    let state = &mut *s;
-                    if state.pending != 0 as crate::zutil_h::ulg {
-                        state.last_flush = -1 as ::core::ffi::c_int;
+                    if flush_pending(
+                        strm_ref as *mut crate::zlib_h::z_stream,
+                        FlushPendingMark::PendingRemains,
+                    )
+                    .1 != Some(0)
+                    {
                         return crate::zlib_h::Z_OK;
                     }
                 }
@@ -3252,10 +3273,12 @@ pub fn deflate(
             }
             let state = &mut *s;
             state.status = crate::src::deflate::BUSY_STATE;
-            flush_pending(strm_ref as *mut crate::zlib_h::z_stream, false);
-            let state = &mut *s;
-            if state.pending != 0 as crate::zutil_h::ulg {
-                state.last_flush = -1 as ::core::ffi::c_int;
+            if flush_pending(
+                strm_ref as *mut crate::zlib_h::z_stream,
+                FlushPendingMark::PendingRemains,
+            )
+            .1 != Some(0)
+            {
                 return crate::zlib_h::Z_OK;
             }
         }
@@ -3380,14 +3403,12 @@ pub fn deflate(
                         }
                     }
                 }
-                flush_pending(strm_ref as *mut crate::zlib_h::z_stream, false);
-                let output_is_full = {
-                    let stream = &*strm_ref;
-                    stream.avail_out == 0 as crate::stdlib::uInt
-                };
-                if output_is_full {
-                    let state = &mut *s;
-                    state.last_flush = -1 as ::core::ffi::c_int;
+                if flush_pending(
+                    strm_ref as *mut crate::zlib_h::z_stream,
+                    FlushPendingMark::OutputFull,
+                )
+                .0 == 0 as crate::stdlib::uInt
+                {
                     return crate::zlib_h::Z_OK;
                 }
             }
@@ -3433,7 +3454,10 @@ pub fn deflate(
                 return crate::zlib_h::Z_STREAM_ERROR;
             }
         };
-        flush_pending(strm_ref as *mut crate::zlib_h::z_stream, false);
+        flush_pending(
+            strm_ref as *mut crate::zlib_h::z_stream,
+            FlushPendingMark::Never,
+        );
         let pending_after_flush = {
             let state = &mut *s;
             if state.wrap > 0 as ::core::ffi::c_int {
@@ -4281,7 +4305,7 @@ fn deflate_stored(
             if !emit_stored_direct_header_state(s, pending_buf, len, last) {
                 return need_more;
             }
-            flush_pending(s.strm, false);
+            flush_pending(s.strm, FlushPendingMark::Never);
             if left != 0 || len != 0 {
                 let Ok(output_len) = usize::try_from(strm.avail_out) else {
                     return need_more;
@@ -4463,7 +4487,7 @@ fn deflate_stored(
                 if !emit_stored_window_block_state(s, pending_buf, stored, last) {
                     return need_more;
                 }
-                flush_pending(s.strm, false);
+                flush_pending(s.strm, FlushPendingMark::Never);
             }
         }
         return (if last != 0 {
@@ -4655,7 +4679,7 @@ fn deflate_fast(
                     let avail_out = {
                         state.block_start = state.strstart as ::core::ffi::c_long;
                         let strm = state.strm;
-                        flush_pending(strm, false)
+                        flush_pending(strm, FlushPendingMark::Never).0
                     };
                     if let Some(result) = deflate_post_flush_result(avail_out, false) {
                         return result;
@@ -4684,7 +4708,7 @@ fn deflate_fast(
                     let avail_out = {
                         state.block_start = state.strstart as ::core::ffi::c_long;
                         let strm = state.strm;
-                        flush_pending(strm, false)
+                        flush_pending(strm, FlushPendingMark::Never).0
                     };
                     if let Some(result) = deflate_post_flush_result(avail_out, false) {
                         return result;
@@ -4746,7 +4770,7 @@ fn deflate_fast(
                 let state: &mut crate::src::deflate::deflate_state = s;
                 state.block_start = state.strstart as ::core::ffi::c_long;
                 let strm = state.strm;
-                flush_pending(strm, false)
+                flush_pending(strm, FlushPendingMark::Never).0
             };
             if let Some(result) = deflate_post_flush_result(avail_out, last) {
                 return result;
@@ -4983,7 +5007,7 @@ fn deflate_slow(
             if bflush != 0 {
                 let avail_out = {
                     let strm = s.strm;
-                    flush_pending(strm, false)
+                    flush_pending(strm, FlushPendingMark::Never).0
                 };
                 if let Some(result) = deflate_post_flush_result(avail_out, false) {
                     return result;
@@ -5084,7 +5108,7 @@ fn deflate_slow(
             let avail_out = {
                 s.block_start = s.strstart as ::core::ffi::c_long;
                 let strm = s.strm;
-                flush_pending(strm, false)
+                flush_pending(strm, FlushPendingMark::Never).0
             };
             if let Some(result) = deflate_post_flush_result(avail_out, last) {
                 return result;
@@ -5471,7 +5495,7 @@ fn deflate_rle(
                     let avail_out = {
                         state.block_start = state.strstart as ::core::ffi::c_long;
                         let strm = state.strm;
-                        flush_pending(strm, false)
+                        flush_pending(strm, FlushPendingMark::Never).0
                     };
                     if let Some(result) = deflate_post_flush_result(avail_out, true) {
                         return result;
@@ -5483,7 +5507,7 @@ fn deflate_rle(
                     let avail_out = {
                         state.block_start = state.strstart as ::core::ffi::c_long;
                         let strm = state.strm;
-                        flush_pending(strm, false)
+                        flush_pending(strm, FlushPendingMark::Never).0
                     };
                     if let Some(result) = deflate_post_flush_result(avail_out, false) {
                         return result;
@@ -5515,7 +5539,7 @@ fn deflate_rle(
                 let avail_out = {
                     state.block_start = state.strstart as ::core::ffi::c_long;
                     let strm = state.strm;
-                    flush_pending(strm, false)
+                    flush_pending(strm, FlushPendingMark::Never).0
                 };
                 if let Some(result) = deflate_post_flush_result(avail_out, false) {
                     return result;
@@ -5578,7 +5602,7 @@ fn deflate_huff(
                     let avail_out = {
                         state.block_start = state.strstart as ::core::ffi::c_long;
                         let strm = state.strm;
-                        flush_pending(strm, false)
+                        flush_pending(strm, FlushPendingMark::Never).0
                     };
                     if let Some(result) = deflate_post_flush_result(avail_out, true) {
                         return result;
@@ -5590,7 +5614,7 @@ fn deflate_huff(
                     let avail_out = {
                         state.block_start = state.strstart as ::core::ffi::c_long;
                         let strm = state.strm;
-                        flush_pending(strm, false)
+                        flush_pending(strm, FlushPendingMark::Never).0
                     };
                     if let Some(result) = deflate_post_flush_result(avail_out, false) {
                         return result;
@@ -5624,7 +5648,7 @@ fn deflate_huff(
                 let avail_out = {
                     state.block_start = state.strstart as ::core::ffi::c_long;
                     let strm = state.strm;
-                    flush_pending(strm, false)
+                    flush_pending(strm, FlushPendingMark::Never).0
                 };
                 if let Some(result) = deflate_post_flush_result(avail_out, false) {
                     return result;
