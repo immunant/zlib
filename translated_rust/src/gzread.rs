@@ -874,133 +874,146 @@ fn gz_skip(state: &mut crate::gzguts_h::gz_state) -> Result<GzSkipStep, ()> {
     }
 }
 
-unsafe fn gz_read(
-    state_ref: &mut crate::gzguts_h::gz_state,
-    destination: &mut [u8],
-) -> crate::stdlib::z_size_t {
-    let mut got: crate::stdlib::z_size_t = 0;
-    let mut n: ::core::ffi::c_uint = 0;
-    let mut err: ::core::ffi::c_int = 0;
-    let mut len = destination.len() as crate::stdlib::z_size_t;
-    if len == 0 as crate::stdlib::z_size_t {
-        return 0 as crate::stdlib::z_size_t;
-    }
-    while state_ref.skip != 0 {
-        match gz_skip(state_ref) {
-            Ok(GzSkipStep::Complete) => break,
-            Ok(GzSkipStep::NeedFetch) => {
-                if gz_fetch(state_ref) == -1 as ::core::ffi::c_int {
-                    return 0 as crate::stdlib::z_size_t;
+// The only remaining codec calls in this read loop are deliberately expanded
+// in exported read entry points.  Keeping the validated state and caller
+// slice at that ABI boundary avoids a private unsafe forwarding adapter.
+macro_rules! gz_read_at_boundary {
+    ($state_ref:expr, $destination:expr) => {{
+        let state_ref = &mut *$state_ref;
+        let destination = &mut *$destination;
+        'gz_read_result: {
+            let mut got: crate::stdlib::z_size_t = 0;
+            let mut n: ::core::ffi::c_uint = 0;
+            let mut err: ::core::ffi::c_int = 0;
+            let mut len = destination.len() as crate::stdlib::z_size_t;
+            if len == 0 as crate::stdlib::z_size_t {
+                break 'gz_read_result 0 as crate::stdlib::z_size_t;
+            }
+            while state_ref.skip != 0 {
+                match gz_skip(state_ref) {
+                    Ok(GzSkipStep::Complete) => break,
+                    Ok(GzSkipStep::NeedFetch) => {
+                        if gz_fetch(state_ref) == -1 as ::core::ffi::c_int {
+                            break 'gz_read_result 0 as crate::stdlib::z_size_t;
+                        }
+                    }
+                    Ok(GzSkipStep::Advance { consumed, complete }) => {
+                        state_ref.x.next = state_ref.x.next.wrapping_add(consumed as usize);
+                        if complete {
+                            break;
+                        }
+                    }
+                    Err(()) => break 'gz_read_result 0 as crate::stdlib::z_size_t,
                 }
             }
-            Ok(GzSkipStep::Advance { consumed, complete }) => {
-                state_ref.x.next = state_ref.x.next.wrapping_add(consumed as usize);
-                if complete {
+            got = 0 as crate::stdlib::z_size_t;
+            err = 0 as ::core::ffi::c_int;
+            's_140: loop {
+                n = -1 as ::core::ffi::c_int as ::core::ffi::c_uint;
+                if n as crate::stdlib::z_size_t > len {
+                    n = len as ::core::ffi::c_uint;
+                }
+                's_28: {
+                    if state_ref.x.have != 0 {
+                        let Some(buffered) = state_ref
+                            .buffers
+                            .as_ref()
+                            .and_then(|buffers| buffers.output.as_ref())
+                        else {
+                            break 'gz_read_result got;
+                        };
+                        let Some(next_index) = gz_owned_buffer_index(
+                            buffered.as_ptr() as usize,
+                            buffered.len(),
+                            state_ref.x.next as usize,
+                        ) else {
+                            break 'gz_read_result got;
+                        };
+                        let Some(destination) = destination
+                            .get_mut(got..)
+                            .and_then(|destination| destination.get_mut(..n as usize))
+                        else {
+                            break 'gz_read_result got;
+                        };
+                        let Some(copied) = gz_read_buffered_copy(
+                            destination,
+                            buffered,
+                            next_index,
+                            n,
+                            state_ref.x.have,
+                        ) else {
+                            break 'gz_read_result got;
+                        };
+                        n = copied;
+                        state_ref.x.next = buffered.as_ptr().wrapping_add(next_index + n as usize)
+                            as *mut ::core::ffi::c_uchar;
+                        if !gz_read_buffer_copy_commit_state(state_ref, n) {
+                            break 'gz_read_result got;
+                        }
+                        if state_ref.err != crate::zlib_h::Z_OK {
+                            err = -1 as ::core::ffi::c_int;
+                        }
+                    } else {
+                        if state_ref.eof != 0 && state_ref.strm.avail_in == 0 as crate::stdlib::uInt
+                        {
+                            break 's_140;
+                        }
+                        if state_ref.how == crate::gzguts_h::LOOK
+                            || n < state_ref.size << 1 as ::core::ffi::c_int
+                        {
+                            if gz_fetch(state_ref) == -1 as ::core::ffi::c_int
+                                && state_ref.x.have == 0 as ::core::ffi::c_uint
+                            {
+                                err = -1 as ::core::ffi::c_int;
+                            }
+                            break 's_28;
+                        } else if state_ref.how == crate::gzguts_h::COPY {
+                            let Some(destination) = destination
+                                .get_mut(got..)
+                                .and_then(|destination| destination.get_mut(..n as usize))
+                            else {
+                                break 'gz_read_result got;
+                            };
+                            let result = match state_ref.file.as_mut() {
+                                Some(file) => gz_load(file, destination),
+                                None => GzLoad::Error(0),
+                            };
+                            n = match gz_load_commit(state_ref, result) {
+                                Ok(have) => have,
+                                Err(()) => 0,
+                            };
+                            if state_ref.err != crate::zlib_h::Z_OK {
+                                err = -1;
+                            }
+                        } else {
+                            let Some(destination) = destination
+                                .get_mut(got..)
+                                .and_then(|destination| destination.get_mut(..n as usize))
+                            else {
+                                break 'gz_read_result got;
+                            };
+                            state_ref.strm.avail_out = n as crate::stdlib::uInt;
+                            state_ref.strm.next_out =
+                                destination.as_mut_ptr() as *mut crate::stdlib::Bytef;
+                            state_ref.x.next = state_ref.strm.next_out as *mut ::core::ffi::c_uchar;
+                            err = gz_decomp(state_ref);
+                            n = state_ref.x.have;
+                            state_ref.x.have = 0 as ::core::ffi::c_uint;
+                        }
+                    }
+                    (len, got, state_ref.x.pos) =
+                        gz_read_progress_state(len, got, state_ref.x.pos, n);
+                }
+                if !(len != 0 && err == 0) {
                     break;
                 }
             }
-            Err(()) => return 0 as crate::stdlib::z_size_t,
-        }
-    }
-    got = 0 as crate::stdlib::z_size_t;
-    err = 0 as ::core::ffi::c_int;
-    's_140: loop {
-        n = -1 as ::core::ffi::c_int as ::core::ffi::c_uint;
-        if n as crate::stdlib::z_size_t > len {
-            n = len as ::core::ffi::c_uint;
-        }
-        's_28: {
-            if state_ref.x.have != 0 {
-                let Some(buffered) = state_ref
-                    .buffers
-                    .as_ref()
-                    .and_then(|buffers| buffers.output.as_ref())
-                else {
-                    return got;
-                };
-                let Some(next_index) = gz_owned_buffer_index(
-                    buffered.as_ptr() as usize,
-                    buffered.len(),
-                    state_ref.x.next as usize,
-                ) else {
-                    return got;
-                };
-                let Some(destination) = destination
-                    .get_mut(got..)
-                    .and_then(|destination| destination.get_mut(..n as usize))
-                else {
-                    return got;
-                };
-                let Some(copied) =
-                    gz_read_buffered_copy(destination, buffered, next_index, n, state_ref.x.have)
-                else {
-                    return got;
-                };
-                n = copied;
-                state_ref.x.next = buffered.as_ptr().wrapping_add(next_index + n as usize)
-                    as *mut ::core::ffi::c_uchar;
-                if !gz_read_buffer_copy_commit_state(state_ref, n) {
-                    return got;
-                }
-                if state_ref.err != crate::zlib_h::Z_OK {
-                    err = -1 as ::core::ffi::c_int;
-                }
-            } else {
-                if state_ref.eof != 0 && state_ref.strm.avail_in == 0 as crate::stdlib::uInt {
-                    break 's_140;
-                }
-                if state_ref.how == crate::gzguts_h::LOOK
-                    || n < state_ref.size << 1 as ::core::ffi::c_int
-                {
-                    if gz_fetch(state_ref) == -1 as ::core::ffi::c_int
-                        && state_ref.x.have == 0 as ::core::ffi::c_uint
-                    {
-                        err = -1 as ::core::ffi::c_int;
-                    }
-                    break 's_28;
-                } else if state_ref.how == crate::gzguts_h::COPY {
-                    let Some(destination) = destination
-                        .get_mut(got..)
-                        .and_then(|destination| destination.get_mut(..n as usize))
-                    else {
-                        return got;
-                    };
-                    let result = match state_ref.file.as_mut() {
-                        Some(file) => gz_load(file, destination),
-                        None => GzLoad::Error(0),
-                    };
-                    n = match gz_load_commit(state_ref, result) {
-                        Ok(have) => have,
-                        Err(()) => 0,
-                    };
-                    if state_ref.err != crate::zlib_h::Z_OK {
-                        err = -1;
-                    }
-                } else {
-                    let Some(destination) = destination
-                        .get_mut(got..)
-                        .and_then(|destination| destination.get_mut(..n as usize))
-                    else {
-                        return got;
-                    };
-                    state_ref.strm.avail_out = n as crate::stdlib::uInt;
-                    state_ref.strm.next_out = destination.as_mut_ptr() as *mut crate::stdlib::Bytef;
-                    state_ref.x.next = state_ref.strm.next_out as *mut ::core::ffi::c_uchar;
-                    err = gz_decomp(state_ref);
-                    n = state_ref.x.have;
-                    state_ref.x.have = 0 as ::core::ffi::c_uint;
-                }
+            if len != 0 && state_ref.eof != 0 {
+                state_ref.past = 1 as ::core::ffi::c_int;
             }
-            (len, got, state_ref.x.pos) = gz_read_progress_state(len, got, state_ref.x.pos, n);
+            got
         }
-        if !(len != 0 && err == 0) {
-            break;
-        }
-    }
-    if len != 0 && state_ref.eof != 0 {
-        state_ref.past = 1 as ::core::ffi::c_int;
-    }
-    return got;
+    }};
 }
 #[export_name = "gzread"]
 pub unsafe extern "C" fn gzread_ffi(
@@ -1032,7 +1045,7 @@ pub unsafe extern "C" fn gzread_ffi(
     } else {
         ::core::slice::from_raw_parts_mut(buf as *mut u8, len as usize)
     };
-    len = gz_read(state, destination) as ::core::ffi::c_uint;
+    len = gz_read_at_boundary!(state, destination) as ::core::ffi::c_uint;
     if len == 0 as ::core::ffi::c_uint {
         if state.err != crate::zlib_h::Z_OK && state.err != crate::zlib_h::Z_BUF_ERROR {
             return -1 as ::core::ffi::c_int;
@@ -1081,7 +1094,7 @@ pub unsafe extern "C" fn gzfread_ffi(
     } else {
         ::core::slice::from_raw_parts_mut(buf as *mut u8, len)
     };
-    return gzfread_completed_items(len, size, gz_read(state, destination));
+    return gzfread_completed_items(len, size, gz_read_at_boundary!(state, destination));
 }
 #[export_name = "gzgetc"]
 
@@ -1096,7 +1109,7 @@ pub unsafe extern "C" fn gzgetc_ffi(mut file: crate::zlib_h::gzFile) -> ::core::
     }
     crate::src::gzlib::gz_error_clear(state);
     gzgetc_buffered_or_return!(state);
-    if gz_read(state, &mut buf) < 1 as crate::stdlib::z_size_t {
+    if gz_read_at_boundary!(state, &mut buf) < 1 as crate::stdlib::z_size_t {
         -1 as ::core::ffi::c_int
     } else {
         buf[0 as ::core::ffi::c_int as usize] as ::core::ffi::c_int
@@ -1115,7 +1128,7 @@ pub unsafe extern "C" fn gzgetc__ffi(mut file: crate::zlib_h::gzFile) -> ::core:
     }
     crate::src::gzlib::gz_error_clear(state);
     gzgetc_buffered_or_return!(state);
-    if gz_read(state, &mut buf) < 1 as crate::stdlib::z_size_t {
+    if gz_read_at_boundary!(state, &mut buf) < 1 as crate::stdlib::z_size_t {
         -1 as ::core::ffi::c_int
     } else {
         buf[0 as ::core::ffi::c_int as usize] as ::core::ffi::c_int
