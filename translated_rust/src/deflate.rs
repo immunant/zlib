@@ -2431,6 +2431,15 @@ struct DeflateCopyLayout {
     pending: Option<PendingRegions>,
 }
 
+// Keep every scalar-derived decision for a deep copy in one pointer-free
+// value.  The callback-owned allocation handles still cross the ABI boundary,
+// but a future allocation broker can consume this plan without recovering
+// either allocation geometry or copy ranges from raw storage.
+struct DeflateCopyPlan {
+    storage: DeflateStorageLayout,
+    layout: DeflateCopyLayout,
+}
+
 // The tree bookkeeping is independent of the callback-owned state and buffer
 // allocations.  Keep its deep-copy operation in a pointer-free value so the
 // copy path can eventually hand only the allocation handles to the boundary
@@ -2528,6 +2537,34 @@ fn deflate_copy_layout(
             .expect("validated hash-table allocation geometry"),
         pending: PendingRegions::new(pending_out, pending_len, sym_buf_start, sym_next),
     }
+}
+
+fn deflate_copy_plan(
+    w_size: crate::stdlib::uInt,
+    hash_size: crate::stdlib::uInt,
+    lit_bufsize: crate::stdlib::uInt,
+    high_water: crate::zutil_h::ulg,
+    slid: ::core::ffi::c_int,
+    strstart: crate::stdlib::uInt,
+    insert: crate::stdlib::uInt,
+    pending_out: usize,
+    pending_len: usize,
+    sym_buf_start: usize,
+    sym_next: usize,
+) -> DeflateCopyPlan {
+    let storage = DeflateStorageLayout::new(w_size, hash_size, lit_bufsize);
+    let layout = deflate_copy_layout(
+        high_water,
+        slid,
+        strstart,
+        insert,
+        &storage,
+        pending_out,
+        pending_len,
+        sym_buf_start,
+        sym_next,
+    );
+    DeflateCopyPlan { storage, layout }
 }
 
 impl PendingRegions {
@@ -3443,7 +3480,22 @@ pub unsafe extern "C" fn deflateCopy(
         },
     );
     let ds = &mut *ds;
-    let storage = DeflateStorageLayout::new(ds.w_size, ds.hash_size, ds.lit_bufsize);
+    let DeflateCopyPlan {
+        storage,
+        layout: copy_layout,
+    } = deflate_copy_plan(
+        ds.w_size,
+        ds.hash_size,
+        ds.lit_bufsize,
+        ss.high_water,
+        ss.slid,
+        ss.strstart,
+        ss.insert,
+        ss.pending_out,
+        ss.pending as usize,
+        ss.sym_buf_start,
+        ss.sym_next as usize,
+    );
     ds.window = ::core::ptr::NonNull::new(Some(dest.zalloc.expect("non-null function pointer"))
         .expect("non-null function pointer")(
         dest.opaque, storage.window.items, storage.window.size
@@ -3468,17 +3520,6 @@ pub unsafe extern "C" fn deflateCopy(
         deflateEnd(dest as *mut crate::zlib_h::z_stream_s);
         return crate::zlib_h::Z_MEM_ERROR;
     }
-    let copy_layout = deflate_copy_layout(
-        ss.high_water,
-        ss.slid,
-        ss.strstart,
-        ss.insert,
-        &storage,
-        ss.pending_out,
-        ss.pending as usize,
-        ss.sym_buf_start,
-        ss.sym_next as usize,
-    );
     ::core::ptr::copy_nonoverlapping(
         ss.window.expect("initialized window").as_ptr(),
         ds.window.expect("initialized window").as_ptr(),
