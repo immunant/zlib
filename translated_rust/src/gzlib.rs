@@ -430,87 +430,91 @@ pub unsafe extern "C" fn gzseek64(
     mut offset: crate::stdlib::off64_t,
     mut whence: ::core::ffi::c_int,
 ) -> crate::stdlib::off64_t {
-    let mut n: ::core::ffi::c_uint = 0;
     let mut ret: crate::stdlib::off64_t = 0;
-    let mut state: crate::gzguts_h::gz_statep =
-        ::core::ptr::null_mut::<crate::gzguts_h::gz_state>();
     if file.is_null() {
         return -1 as crate::stdlib::off64_t;
     }
-    state = file as crate::gzguts_h::gz_statep;
-    if (*state).mode != crate::gzguts_h::GZ_READ && (*state).mode != crate::gzguts_h::GZ_WRITE {
-        return -1 as crate::stdlib::off64_t;
-    }
-    if (*state).err != crate::zlib_h::Z_OK && (*state).err != crate::zlib_h::Z_BUF_ERROR {
-        return -1 as crate::stdlib::off64_t;
-    }
-    if whence != crate::stdlib::SEEK_SET && whence != crate::stdlib::SEEK_CUR {
-        return -1 as crate::stdlib::off64_t;
-    }
-    if whence == crate::stdlib::SEEK_SET {
-        offset -= (*state).x.pos;
-    } else {
-        offset += if (*state).past != 0 {
-            0 as crate::stdlib::off64_t
+    let rewind = {
+        let state = &mut *(file as crate::gzguts_h::gz_statep);
+        if state.mode != crate::gzguts_h::GZ_READ && state.mode != crate::gzguts_h::GZ_WRITE {
+            return -1 as crate::stdlib::off64_t;
+        }
+        if state.err != crate::zlib_h::Z_OK && state.err != crate::zlib_h::Z_BUF_ERROR {
+            return -1 as crate::stdlib::off64_t;
+        }
+        if whence != crate::stdlib::SEEK_SET && whence != crate::stdlib::SEEK_CUR {
+            return -1 as crate::stdlib::off64_t;
+        }
+        if whence == crate::stdlib::SEEK_SET {
+            offset -= state.x.pos;
         } else {
-            (*state).skip
-        };
-        (*state).skip = 0 as crate::stdlib::off64_t;
-    }
-    if (*state).mode == crate::gzguts_h::GZ_READ
-        && (*state).how == crate::gzguts_h::COPY
-        && (*state).x.pos + offset >= 0 as crate::stdlib::off64_t
-    {
-        ret = crate::stdlib::lseek64(
-            (*state).fd,
-            offset as crate::stdlib::__off64_t - (*state).x.have as crate::stdlib::__off64_t,
-            crate::stdlib::SEEK_CUR,
-        ) as crate::stdlib::off64_t;
-        if ret == -1 as crate::stdlib::off64_t {
-            return -1 as crate::stdlib::off64_t;
+            offset += if state.past != 0 {
+                0 as crate::stdlib::off64_t
+            } else {
+                state.skip
+            };
+            state.skip = 0 as crate::stdlib::off64_t;
         }
-        (*state).x.have = 0 as ::core::ffi::c_uint;
-        (*state).eof = 0 as ::core::ffi::c_int;
-        (*state).past = 0 as ::core::ffi::c_int;
-        (*state).skip = 0 as crate::stdlib::off64_t;
-        gz_error(
-            state,
-            crate::zlib_h::Z_OK,
-            ::core::ptr::null::<::core::ffi::c_char>(),
-        );
-        (*state).strm.avail_in = 0 as crate::stdlib::uInt;
-        (*state).x.pos += offset;
-        return (*state).x.pos;
-    }
-    if offset < 0 as crate::stdlib::off64_t {
-        if (*state).mode != crate::gzguts_h::GZ_READ {
-            return -1 as crate::stdlib::off64_t;
+        if state.mode == crate::gzguts_h::GZ_READ
+            && state.how == crate::gzguts_h::COPY
+            && state.x.pos + offset >= 0 as crate::stdlib::off64_t
+        {
+            ret = crate::stdlib::lseek64(
+                state.fd,
+                offset as crate::stdlib::__off64_t - state.x.have as crate::stdlib::__off64_t,
+                crate::stdlib::SEEK_CUR,
+            ) as crate::stdlib::off64_t;
+            if ret == -1 as crate::stdlib::off64_t {
+                return -1 as crate::stdlib::off64_t;
+            }
+            state.x.have = 0 as ::core::ffi::c_uint;
+            state.eof = 0 as ::core::ffi::c_int;
+            state.past = 0 as ::core::ffi::c_int;
+            state.skip = 0 as crate::stdlib::off64_t;
+            gz_error(
+                state as *mut crate::gzguts_h::gz_state,
+                crate::zlib_h::Z_OK,
+                ::core::ptr::null::<::core::ffi::c_char>(),
+            );
+            state.strm.avail_in = 0 as crate::stdlib::uInt;
+            state.x.pos += offset;
+            return state.x.pos;
         }
-        offset += (*state).x.pos;
         if offset < 0 as crate::stdlib::off64_t {
-            return -1 as crate::stdlib::off64_t;
+            if state.mode != crate::gzguts_h::GZ_READ {
+                return -1 as crate::stdlib::off64_t;
+            }
+            offset += state.x.pos;
+            if offset < 0 as crate::stdlib::off64_t {
+                return -1 as crate::stdlib::off64_t;
+            }
+            true
+        } else {
+            false
         }
-        if gzrewind(file) == -1 as ::core::ffi::c_int {
-            return -1 as crate::stdlib::off64_t;
-        }
+    };
+    if rewind && gzrewind(file) == -1 as ::core::ffi::c_int {
+        return -1 as crate::stdlib::off64_t;
     }
-    if (*state).mode == crate::gzguts_h::GZ_READ {
+    let state = &mut *(file as crate::gzguts_h::gz_statep);
+    let mut n: ::core::ffi::c_uint = 0;
+    if state.mode == crate::gzguts_h::GZ_READ {
         n = if ::core::mem::size_of::<::core::ffi::c_int>()
             == ::core::mem::size_of::<crate::stdlib::off64_t>()
-            && (*state).x.have > gz_intmax()
-            || (*state).x.have as crate::stdlib::off64_t > offset
+            && state.x.have > gz_intmax()
+            || state.x.have as crate::stdlib::off64_t > offset
         {
             offset as ::core::ffi::c_uint
         } else {
-            (*state).x.have
+            state.x.have
         };
-        (*state).x.have = (*state).x.have.wrapping_sub(n);
-        (*state).x.next = (*state).x.next.offset(n as isize);
-        (*state).x.pos += n as crate::stdlib::off64_t;
+        state.x.have = state.x.have.wrapping_sub(n);
+        state.x.next = state.x.next.offset(n as isize);
+        state.x.pos += n as crate::stdlib::off64_t;
         offset -= n as crate::stdlib::off64_t;
     }
-    (*state).skip = offset;
-    return (*state).x.pos + offset;
+    state.skip = offset;
+    state.x.pos + offset
 }
 #[export_name = "gzseek64"]
 
@@ -611,14 +615,17 @@ pub unsafe extern "C" fn gzoffset(mut file: crate::zlib_h::gzFile) -> crate::std
 pub unsafe extern "C" fn gzoffset_ffi(mut file: crate::zlib_h::gzFile) -> crate::stdlib::off_t {
     gzoffset(file)
 }
-#[export_name = "gzeof"]
-
-pub unsafe extern "C" fn gzeof_ffi(mut file: crate::zlib_h::gzFile) -> ::core::ffi::c_int {
+pub unsafe extern "C" fn gzeof(mut file: crate::zlib_h::gzFile) -> ::core::ffi::c_int {
     if file.is_null() {
         return 0 as ::core::ffi::c_int;
     }
     let state = &*(file as crate::gzguts_h::gz_statep);
     gzeof_impl(state.mode, state.past)
+}
+#[export_name = "gzeof"]
+
+pub unsafe extern "C" fn gzeof_ffi(mut file: crate::zlib_h::gzFile) -> ::core::ffi::c_int {
+    gzeof(file)
 }
 pub unsafe extern "C" fn gzerror(
     mut file: crate::zlib_h::gzFile,
