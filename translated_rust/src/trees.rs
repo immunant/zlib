@@ -3319,9 +3319,15 @@ pub unsafe extern "C" fn _tr_stored_block(
                 << state.bi_valid) as crate::zutil_h::ush;
         state.bi_valid += len;
     }
-    bi_flush_or_windup(s, true);
     let pending_buf =
         ::core::slice::from_raw_parts_mut(state.pending_buf, state.pending_buf_size as usize);
+    bi_windup_bytes(
+        pending_buf,
+        &mut state.pending,
+        &mut state.bi_buf,
+        &mut state.bi_valid,
+        &mut state.bi_used,
+    );
     let c2rust_fresh51 = state.pending;
     state.pending = state.pending.wrapping_add(1);
     pending_buf[c2rust_fresh51 as usize] = (stored_len as crate::zutil_h::ush as ::core::ffi::c_int
