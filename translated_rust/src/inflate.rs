@@ -332,7 +332,7 @@ pub(crate) fn inflate_has_end_of_block_code(lens: &[::core::ffi::c_ushort]) -> b
         != 0 as ::core::ffi::c_ushort
 }
 
-enum InflateDynamicTables {
+pub(crate) enum InflateDynamicTables {
     Built {
         lens_used: usize,
         total_used: usize,
@@ -349,7 +349,7 @@ enum InflateDynamicTables {
     },
 }
 
-fn inflate_build_dynamic_tables(
+pub(crate) fn inflate_build_dynamic_tables(
     lens: &[::core::ffi::c_ushort],
     nlen: ::core::ffi::c_uint,
     ndist: ::core::ffi::c_uint,

@@ -290,7 +290,7 @@ fn gz_write(
             let mut have: ::core::ffi::c_uint = 0;
             let mut copy: ::core::ffi::c_uint = 0;
             if state.strm.avail_in == 0 as crate::stdlib::uInt {
-                state.strm.next_in = state.in_0 as *mut crate::stdlib::Bytef;
+                state.strm.next_in = input_buf.as_mut_ptr();
             }
             have = gz_buffered_input_used(state);
             copy = gz_buffered_write_copy_len(state.size, have, len);
@@ -511,7 +511,7 @@ fn gzputc_buffered(
         return None;
     }
     if state.strm.avail_in == 0 as crate::stdlib::uInt {
-        state.strm.next_in = state.in_0 as *mut crate::stdlib::Bytef;
+        state.strm.next_in = buf.as_mut_ptr();
     }
     let have = gz_buffered_input_used(state);
     if have < state.size {
