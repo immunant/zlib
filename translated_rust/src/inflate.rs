@@ -2834,7 +2834,12 @@ pub unsafe fn inflate(
     // Keep the decoder loop's raw cursors local to that loop.  The exit
     // commit adopts each ABI record once, so cursor publication, history
     // planning, totals, and checksum state use ordinary field access.
-    let window_error = {
+    // Compute one checked exit plan before history maintenance.  Updating the
+    // circular window may change history cursors, but it does not change the
+    // decoded input/output progress, mode, or bit state this call publishes.
+    // Reusing this plan keeps the history decision and final ABI accounting
+    // tied to the same scalar snapshot.
+    let (exit, window_error) = {
         let strm_ref = &mut *strm;
         let state_ref = &mut *state;
         strm_ref.next_out = put as *mut crate::stdlib::Bytef;
@@ -2854,7 +2859,7 @@ pub unsafe fn inflate(
             state_ref.bits,
             state_ref.last,
         );
-        if exit.update_window {
+        let window_error = if exit.update_window {
             updatewindow(
                 strm_ref,
                 state_ref,
@@ -2863,7 +2868,8 @@ pub unsafe fn inflate(
             ) != 0
         } else {
             false
-        }
+        };
+        (exit, window_error)
     };
     if window_error {
         let state_ref = &mut *state;
@@ -2873,17 +2879,6 @@ pub unsafe fn inflate(
     {
         let strm_ref = &mut *strm;
         let state_ref = &mut *state;
-        let exit = inflate_exit_progress(
-            in_0,
-            strm_ref.avail_in as ::core::ffi::c_uint,
-            out,
-            strm_ref.avail_out as ::core::ffi::c_uint,
-            state_ref.wsize,
-            state_ref.mode,
-            flush,
-            state_ref.bits,
-            state_ref.last,
-        );
         in_0 = exit.input_used;
         out = exit.output_used;
         strm_ref.total_in = strm_ref
