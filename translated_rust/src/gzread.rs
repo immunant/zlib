@@ -543,11 +543,10 @@ pub extern "C" fn gzread(
         return -1 as ::core::ffi::c_int;
     }
     len = gz_read(state, buf, len as crate::stdlib::z_size_t) as ::core::ffi::c_uint;
-    if len == 0 as ::core::ffi::c_uint {
-        if state.err != crate::zlib_h::Z_OK && state.err != crate::zlib_h::Z_BUF_ERROR {
-            return -1 as ::core::ffi::c_int;
-        }
-        if state.again != 0 {
+    match crate::src::gzlib::gz_read_result(len, state.err, state.again) {
+        crate::src::gzlib::GzReadResult::Count => {}
+        crate::src::gzlib::GzReadResult::Error => return -1 as ::core::ffi::c_int,
+        crate::src::gzlib::GzReadResult::WouldBlock => {
             // SAFETY: the errno slot and strerror result are used only to
             // record this would-block error immediately in the bound state.
             unsafe {

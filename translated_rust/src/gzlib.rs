@@ -909,6 +909,32 @@ pub(crate) fn gz_read_mark_past(state: &mut crate::gzguts_h::gz_state, remaining
     }
 }
 
+// Once a read has completed, only its scalar count and the bound state's
+// error flags determine whether the ABI wrapper returns the count, reports
+// the existing error, or records a would-block error.  Keep that choice out
+// of the wrapper's errno/C-string boundary.
+pub(crate) enum GzReadResult {
+    Count,
+    Error,
+    WouldBlock,
+}
+
+pub(crate) fn gz_read_result(
+    count: ::core::ffi::c_uint,
+    error: ::core::ffi::c_int,
+    again: ::core::ffi::c_int,
+) -> GzReadResult {
+    if count != 0 {
+        GzReadResult::Count
+    } else if error != crate::zlib_h::Z_OK && error != crate::zlib_h::Z_BUF_ERROR {
+        GzReadResult::Error
+    } else if again != 0 {
+        GzReadResult::WouldBlock
+    } else {
+        GzReadResult::Count
+    }
+}
+
 // A deferred seek needs another fetch only after its buffered output is
 // exhausted and the input has not reached EOF.  Keep this state-only decision
 // separate from `gz_fetch()`, which owns the descriptor and buffer work.
