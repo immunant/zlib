@@ -3485,30 +3485,33 @@ fn deflate_stored_impl(
 
 // `deflate_fast` is the established configuration-table target for fast
 // compression. Reuse the common window/hash/input binder used by the stored
-// strategy, leaving this dispatcher to bind only its pending, symbol, and
-// caller-output ranges.
+// strategy and the pending/output binder used by stored blocks. The symbol
+// overlay is the one additional allocation view this dispatcher needs.
 fn deflate_fast(
     state: &mut crate::src::deflate::deflate_state,
     stream: &mut crate::zlib_h::z_stream,
     flush: ::core::ffi::c_int,
 ) -> block_state {
-    // SAFETY: the validated compression dispatch supplies one live deflater
-    // and its bounded pending/symbol allocations plus caller output cursor.
-    // `fill_window()` binds the remaining validated state and input ranges.
-    unsafe {
-        let pending =
-            ::core::slice::from_raw_parts_mut(state.pending_buf, state.pending_buf_size as usize);
+    // SAFETY: `sym_buf` is the configured symbol overlay within the validated
+    // deflater's pending allocation. `flush_pending()` binds that allocation
+    // and the caller output cursor for the bounded strategy dispatch below.
+    let symbols = unsafe {
         let symbols = ::core::slice::from_raw_parts_mut(
             state.sym_buf,
             state.lit_bufsize.wrapping_mul(3) as usize,
         );
-        let output = if stream.avail_out == 0 {
-            &mut []
-        } else {
-            ::core::slice::from_raw_parts_mut(stream.next_out, stream.avail_out as usize)
-        };
-        deflate_fast_bound(state, stream, pending, symbols, output, flush)
-    }
+        symbols
+    };
+    flush_pending(state, stream, true, |state, stream, pending, output| {
+        deflate_fast_bound(
+            state,
+            stream,
+            pending,
+            symbols,
+            output.unwrap_or(&mut []),
+            flush,
+        )
+    })
 }
 
 // Strategy selection and compression operate only on the views already bound
