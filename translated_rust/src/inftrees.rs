@@ -3197,32 +3197,31 @@ pub fn inflate_table(
     (0 as ::core::ffi::c_int, used as usize)
 }
 
-pub(crate) unsafe fn inflate_table_raw(
+fn build_inflate_table(
     type_0: crate::src::inftrees::codetype,
-    lens: *mut ::core::ffi::c_ushort,
-    codes: ::core::ffi::c_uint,
-    table: *mut *mut crate::src::inftrees::code,
-    bits: *mut ::core::ffi::c_uint,
-    work: *mut ::core::ffi::c_ushort,
-) -> ::core::ffi::c_int {
+    lens: &[::core::ffi::c_ushort],
+    bits: &mut ::core::ffi::c_uint,
+    work: &mut [::core::ffi::c_ushort],
+) -> (
+    ::core::ffi::c_int,
+    usize,
+    [crate::src::inftrees::code; crate::src::inftrees::ENOUGH_LENS as usize],
+) {
+    let mut built = [const {
+        crate::src::inftrees::code {
+            op: 0,
+            bits: 0,
+            val: 0,
+        }
+    }; crate::src::inftrees::ENOUGH_LENS as usize];
     let table_capacity = match type_0 {
         crate::src::inftrees::CODES => 128,
         crate::src::inftrees::LENS => crate::src::inftrees::ENOUGH_LENS as usize,
         crate::src::inftrees::DISTS => crate::src::inftrees::ENOUGH_DISTS as usize,
-        _ => return 1,
+        _ => return (1, 0, built),
     };
-    let lens = unsafe { ::core::slice::from_raw_parts(lens, codes as usize) };
-    let work = unsafe { ::core::slice::from_raw_parts_mut(work, codes as usize) };
-    let table_start = unsafe { *table };
-    // The pointer may already be advanced within the caller's combined table.
-    // A type-specific maximum is the only range the ABI promises remains valid.
-    let table_slice = unsafe { ::core::slice::from_raw_parts_mut(table_start, table_capacity) };
-    let bits = unsafe { &mut *bits };
-    let (status, used) = inflate_table(type_0, lens, table_slice, bits, work);
-    if status == 0 {
-        unsafe { *table = table_start.add(used) };
-    }
-    status
+    let (status, used) = inflate_table(type_0, lens, &mut built[..table_capacity], bits, work);
+    (status, used, built)
 }
 
 #[export_name = "inflate_table"]
@@ -3235,7 +3234,21 @@ pub unsafe extern "C" fn inflate_table_ffi(
     mut bits: *mut ::core::ffi::c_uint,
     mut work: *mut ::core::ffi::c_ushort,
 ) -> ::core::ffi::c_int {
-    inflate_table_raw(type_0, lens, codes, table, bits, work)
+    let lens = unsafe { ::core::slice::from_raw_parts(lens, codes as usize) };
+    let work = unsafe { ::core::slice::from_raw_parts_mut(work, codes as usize) };
+    let table_start = unsafe { *table };
+    let bits = unsafe { &mut *bits };
+    let (status, used, built) = build_inflate_table(type_0, lens, bits, work);
+    if status == 0 {
+        // The table cursor may point into a combined caller allocation.  Copy
+        // only the extent built for this invocation, never the type maximum.
+        let output = unsafe { ::core::slice::from_raw_parts_mut(table_start, used) };
+        for (output, built) in output.iter_mut().zip(&built[..used]) {
+            *output = crate::src::inftrees::code::copied_from(built);
+        }
+        unsafe { *table = table_start.add(used) };
+    }
+    status
 }
 struct FixedTables {
     len: &'static [crate::src::inftrees::code; 512],
