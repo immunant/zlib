@@ -4796,18 +4796,20 @@ fn deflate_slow(
                 state.lookahead >= crate::zutil_h::MIN_MATCH as crate::stdlib::uInt
             };
             let mut handled_previous_match = false;
-            if has_min_match {
+            // Both slow-parser outcomes inspect the same window and may tally
+            // into the same pending allocation.  Lend them once for this
+            // no-refill transition, then end the lends before `flush_pending()`
+            // can revisit the ABI output cursor.
+            {
                 let state = &mut *s;
-                let (Ok(window_len), Ok(head_len), Ok(prev_len)) = (
+                let (Ok(window_len), Ok(pending_len)) = (
                     usize::try_from(state.window_size),
-                    usize::try_from(state.hash_size),
-                    usize::try_from(state.w_size),
+                    usize::try_from(state.pending_buf_size),
                 ) else {
                     return need_more;
                 };
                 if (window_len != 0 && state.window.is_null())
-                    || (head_len != 0 && state.head.is_null())
-                    || (prev_len != 0 && state.prev.is_null())
+                    || (pending_len != 0 && state.pending_buf.is_null())
                 {
                     return need_more;
                 }
@@ -4816,22 +4818,6 @@ fn deflate_slow(
                 } else {
                     ::core::slice::from_raw_parts(state.window, window_len)
                 };
-                let head = if head_len == 0 {
-                    &mut []
-                } else {
-                    ::core::slice::from_raw_parts_mut(state.head, head_len)
-                };
-                let prev = if prev_len == 0 {
-                    &mut []
-                } else {
-                    ::core::slice::from_raw_parts_mut(state.prev, prev_len)
-                };
-                let Ok(pending_len) = usize::try_from(state.pending_buf_size) else {
-                    return need_more;
-                };
-                if pending_len != 0 && state.pending_buf.is_null() {
-                    return need_more;
-                }
                 // `sym_buf` is the literal-buffer offset within this pending
                 // allocation. Keep the existing no-refill window/hash lends
                 // through a possible tree flush instead of rebuilding either
@@ -4841,147 +4827,131 @@ fn deflate_slow(
                 } else {
                     ::core::slice::from_raw_parts_mut(state.pending_buf, pending_len)
                 };
-                let Some(previous) = insert_string_state(
-                    window,
-                    head,
-                    prev,
-                    state.strstart,
-                    &mut state.ins_h,
-                    state.hash_shift,
-                    state.hash_mask,
-                    state.w_mask,
-                ) else {
-                    return need_more;
-                };
-                hash_head = previous;
-                if lazy_hash_match_is_usable(
-                    state.strstart as crate::src::deflate::IPos,
-                    hash_head,
-                    state.prev_length,
-                    state.max_lazy_match,
-                    state.w_size,
-                ) {
-                    state.match_length =
-                        longest_match_state(state, window, prev, hash_head).unwrap_or(0);
-                    state.match_length = filtered_match_length(
-                        state.match_length,
-                        state.strategy,
-                        state.strstart,
-                        state.match_start,
-                    );
-                }
-                let use_previous_match = state.prev_length
-                    >= crate::zutil_h::MIN_MATCH as crate::stdlib::uInt
-                    && state.match_length <= state.prev_length;
-                if use_previous_match {
-                    let max_insert = state
-                        .strstart
-                        .wrapping_add(state.lookahead)
-                        .wrapping_sub(crate::zutil_h::MIN_MATCH as crate::stdlib::uInt);
-                    let len = state.prev_length.wrapping_sub(3 as crate::stdlib::uInt)
-                        as crate::zutil_h::uch;
-                    let dist = (state.strstart as crate::src::deflate::IPos)
-                        .wrapping_sub(1 as crate::src::deflate::IPos)
-                        .wrapping_sub(state.prev_match)
-                        as crate::zutil_h::ush;
-                    let Ok(symbol_start) = usize::try_from(state.lit_bufsize) else {
+                if has_min_match {
+                    let (Ok(head_len), Ok(prev_len)) = (
+                        usize::try_from(state.hash_size),
+                        usize::try_from(state.w_size),
+                    ) else {
                         return need_more;
                     };
-                    let Ok(symbol_len) = usize::try_from(state.sym_end) else {
-                        return need_more;
-                    };
-                    let Some(symbol_end) = symbol_start.checked_add(symbol_len) else {
-                        return need_more;
-                    };
-                    let Some(symbols) = pending_and_symbols.get_mut(symbol_start..symbol_end)
-                    else {
-                        return need_more;
-                    };
-                    let Some(flush_now) =
-                        tally_symbol_state(state, symbols, dist.into(), len.into())
-                    else {
-                        return need_more;
-                    };
-                    bflush = flush_now as ::core::ffi::c_int;
-                    state.lookahead = state
-                        .lookahead
-                        .wrapping_sub(state.prev_length.wrapping_sub(1 as crate::stdlib::uInt));
-                    state.prev_length = state.prev_length.wrapping_sub(2 as crate::stdlib::uInt);
-                    loop {
-                        state.strstart = state.strstart.wrapping_add(1);
-                        if state.strstart <= max_insert {
-                            let Some(previous) = insert_string_state(
-                                window,
-                                head,
-                                prev,
-                                state.strstart,
-                                &mut state.ins_h,
-                                state.hash_shift,
-                                state.hash_mask,
-                                state.w_mask,
-                            ) else {
-                                return need_more;
-                            };
-                            hash_head = previous;
-                        }
-                        state.prev_length = state.prev_length.wrapping_sub(1);
-                        if state.prev_length == 0 as crate::stdlib::uInt {
-                            break;
-                        }
-                    }
-                    state.match_available = 0 as ::core::ffi::c_int;
-                    state.match_length = (crate::zutil_h::MIN_MATCH - 1 as ::core::ffi::c_int)
-                        as crate::stdlib::uInt;
-                    state.strstart = state.strstart.wrapping_add(1);
-                    handled_previous_match = true;
-                    if bflush != 0 {
-                        flush_tree_window_block_state(state, pending_and_symbols, window, 0);
-                    }
-                }
-            }
-            if handled_previous_match {
-                if bflush != 0 {
-                    let avail_out = {
-                        let state = &mut *s;
-                        state.block_start = state.strstart as ::core::ffi::c_long;
-                        let strm = state.strm;
-                        flush_pending(strm)
-                    };
-                    if let Some(result) = deflate_post_flush_result(avail_out, false) {
-                        return result;
-                    }
-                }
-            } else if {
-                let state = &mut *s;
-                state.match_available != 0
-            } {
-                let flush_now = {
-                    let state = &mut *s;
-                    let Ok(window_len) = usize::try_from(state.window_size) else {
-                        return need_more;
-                    };
-                    let Ok(pending_len) = usize::try_from(state.pending_buf_size) else {
-                        return need_more;
-                    };
-                    let Ok(symbol_len) = usize::try_from(state.sym_end) else {
-                        return need_more;
-                    };
-                    if (window_len != 0 && state.window.is_null())
-                        || (pending_len != 0 && state.pending_buf.is_null())
+                    if (head_len != 0 && state.head.is_null())
+                        || (prev_len != 0 && state.prev.is_null())
                     {
                         return need_more;
                     }
-                    let window = if window_len == 0 {
-                        &[]
-                    } else {
-                        ::core::slice::from_raw_parts(state.window, window_len)
-                    };
-                    let pending_and_symbols = if pending_len == 0 {
+                    let head = if head_len == 0 {
                         &mut []
                     } else {
-                        ::core::slice::from_raw_parts_mut(state.pending_buf, pending_len)
+                        ::core::slice::from_raw_parts_mut(state.head, head_len)
                     };
+                    let prev = if prev_len == 0 {
+                        &mut []
+                    } else {
+                        ::core::slice::from_raw_parts_mut(state.prev, prev_len)
+                    };
+                    let Some(previous) = insert_string_state(
+                        window,
+                        head,
+                        prev,
+                        state.strstart,
+                        &mut state.ins_h,
+                        state.hash_shift,
+                        state.hash_mask,
+                        state.w_mask,
+                    ) else {
+                        return need_more;
+                    };
+                    hash_head = previous;
+                    if lazy_hash_match_is_usable(
+                        state.strstart as crate::src::deflate::IPos,
+                        hash_head,
+                        state.prev_length,
+                        state.max_lazy_match,
+                        state.w_size,
+                    ) {
+                        state.match_length =
+                            longest_match_state(state, window, prev, hash_head).unwrap_or(0);
+                        state.match_length = filtered_match_length(
+                            state.match_length,
+                            state.strategy,
+                            state.strstart,
+                            state.match_start,
+                        );
+                    }
+                    let use_previous_match = state.prev_length
+                        >= crate::zutil_h::MIN_MATCH as crate::stdlib::uInt
+                        && state.match_length <= state.prev_length;
+                    if use_previous_match {
+                        let max_insert = state
+                            .strstart
+                            .wrapping_add(state.lookahead)
+                            .wrapping_sub(crate::zutil_h::MIN_MATCH as crate::stdlib::uInt);
+                        let len = state.prev_length.wrapping_sub(3 as crate::stdlib::uInt)
+                            as crate::zutil_h::uch;
+                        let dist = (state.strstart as crate::src::deflate::IPos)
+                            .wrapping_sub(1 as crate::src::deflate::IPos)
+                            .wrapping_sub(state.prev_match)
+                            as crate::zutil_h::ush;
+                        let Ok(symbol_start) = usize::try_from(state.lit_bufsize) else {
+                            return need_more;
+                        };
+                        let Ok(symbol_len) = usize::try_from(state.sym_end) else {
+                            return need_more;
+                        };
+                        let Some(symbol_end) = symbol_start.checked_add(symbol_len) else {
+                            return need_more;
+                        };
+                        let Some(symbols) = pending_and_symbols.get_mut(symbol_start..symbol_end)
+                        else {
+                            return need_more;
+                        };
+                        let Some(flush_now) =
+                            tally_symbol_state(state, symbols, dist.into(), len.into())
+                        else {
+                            return need_more;
+                        };
+                        bflush = flush_now as ::core::ffi::c_int;
+                        state.lookahead = state.lookahead.wrapping_sub(
+                            state.prev_length.wrapping_sub(1 as crate::stdlib::uInt),
+                        );
+                        state.prev_length = state.prev_length.wrapping_sub(2 as crate::stdlib::uInt);
+                        loop {
+                            state.strstart = state.strstart.wrapping_add(1);
+                            if state.strstart <= max_insert {
+                                let Some(previous) = insert_string_state(
+                                    window,
+                                    head,
+                                    prev,
+                                    state.strstart,
+                                    &mut state.ins_h,
+                                    state.hash_shift,
+                                    state.hash_mask,
+                                    state.w_mask,
+                                ) else {
+                                    return need_more;
+                                };
+                                hash_head = previous;
+                            }
+                            state.prev_length = state.prev_length.wrapping_sub(1);
+                            if state.prev_length == 0 as crate::stdlib::uInt {
+                                break;
+                            }
+                        }
+                        state.match_available = 0 as ::core::ffi::c_int;
+                        state.match_length = (crate::zutil_h::MIN_MATCH - 1 as ::core::ffi::c_int)
+                            as crate::stdlib::uInt;
+                        state.strstart = state.strstart.wrapping_add(1);
+                        handled_previous_match = true;
+                        if bflush != 0 {
+                            flush_tree_window_block_state(state, pending_and_symbols, window, 0);
+                        }
+                    }
+                }
+                if !handled_previous_match && state.match_available != 0 {
                     let Ok(symbol_start) = usize::try_from(state.lit_bufsize) else {
+                        return need_more;
+                    };
+                    let Ok(symbol_len) = usize::try_from(state.sym_end) else {
                         return need_more;
                     };
                     let Some(symbol_end) = symbol_start.checked_add(symbol_len) else {
@@ -4998,34 +4968,36 @@ fn deflate_slow(
                     if flush_now {
                         flush_tree_window_block_state(state, pending_and_symbols, window, 0);
                     }
-                    flush_now
-                };
-                bflush = flush_now as ::core::ffi::c_int;
-                let avail_out = if bflush != 0 {
-                    let state = &mut *s;
-                    state.block_start = state.strstart as ::core::ffi::c_long;
-                    let strm = state.strm;
-                    flush_pending(strm)
-                } else {
-                    // `deflate()` rejects a zero-capacity output stream on entry,
-                    // and every earlier flush in this loop returns immediately
-                    // when it exhausts that capacity. Without a flush here the
-                    // capacity is therefore still nonzero.
-                    1
-                };
-                {
-                    let state = &mut *s;
+                    bflush = flush_now as ::core::ffi::c_int;
+                    if bflush != 0 {
+                        state.block_start = state.strstart as ::core::ffi::c_long;
+                    }
                     state.strstart = state.strstart.wrapping_add(1);
                     state.lookahead = state.lookahead.wrapping_sub(1);
+                } else if !handled_previous_match {
+                    state.match_available = 1 as ::core::ffi::c_int;
+                    state.strstart = state.strstart.wrapping_add(1);
+                    state.lookahead = state.lookahead.wrapping_sub(1);
+                } else if bflush != 0 {
+                    state.block_start = state.strstart as ::core::ffi::c_long;
+                }
+            }
+            if bflush != 0 {
+                let avail_out = {
+                    let state = &mut *s;
+                    let strm = state.strm;
+                    flush_pending(strm)
+                };
+                if let Some(result) = deflate_post_flush_result(avail_out, false) {
+                    return result;
                 }
                 if avail_out == 0 as crate::stdlib::uInt {
                     return need_more;
                 }
-            } else {
-                let state = &mut *s;
-                state.match_available = 1 as ::core::ffi::c_int;
-                state.strstart = state.strstart.wrapping_add(1);
-                state.lookahead = state.lookahead.wrapping_sub(1);
+                // The legacy branches consumed this flag at their individual
+                // flush sites. The shared post-transition flush needs the
+                // equivalent reset before the next parser iteration.
+                bflush = 0;
             }
         }
         // At end of input the deferred literal, final block, and ordinary
