@@ -49,8 +49,10 @@ pub struct C2Rust_Unnamed_1 {
 }
 #[derive(Copy, Clone)]
 #[repr(C)]
-pub union C2Rust_Unnamed_0 {
-    pub dad: crate::zutil_h::ush,
+pub struct C2Rust_Unnamed_0 {
+    // The Huffman builder uses this one `ush` slot first for parent links and
+    // later for code lengths.  The phases do not overlap, so one safe field
+    // preserves the C union's storage semantics.
     pub len: crate::zutil_h::ush,
 }
 

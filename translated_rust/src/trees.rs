@@ -783,7 +783,7 @@ pub mod trees_h {
                 freq: 12 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 8 as crate::zutil_h::ush,
+                len: 8 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -791,7 +791,7 @@ pub mod trees_h {
                 freq: 140 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 8 as crate::zutil_h::ush,
+                len: 8 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -799,7 +799,7 @@ pub mod trees_h {
                 freq: 76 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 8 as crate::zutil_h::ush,
+                len: 8 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -807,7 +807,7 @@ pub mod trees_h {
                 freq: 204 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 8 as crate::zutil_h::ush,
+                len: 8 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -815,7 +815,7 @@ pub mod trees_h {
                 freq: 44 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 8 as crate::zutil_h::ush,
+                len: 8 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -823,7 +823,7 @@ pub mod trees_h {
                 freq: 172 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 8 as crate::zutil_h::ush,
+                len: 8 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -831,7 +831,7 @@ pub mod trees_h {
                 freq: 108 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 8 as crate::zutil_h::ush,
+                len: 8 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -839,7 +839,7 @@ pub mod trees_h {
                 freq: 236 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 8 as crate::zutil_h::ush,
+                len: 8 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -847,7 +847,7 @@ pub mod trees_h {
                 freq: 28 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 8 as crate::zutil_h::ush,
+                len: 8 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -855,7 +855,7 @@ pub mod trees_h {
                 freq: 156 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 8 as crate::zutil_h::ush,
+                len: 8 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -863,7 +863,7 @@ pub mod trees_h {
                 freq: 92 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 8 as crate::zutil_h::ush,
+                len: 8 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -871,7 +871,7 @@ pub mod trees_h {
                 freq: 220 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 8 as crate::zutil_h::ush,
+                len: 8 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -879,7 +879,7 @@ pub mod trees_h {
                 freq: 60 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 8 as crate::zutil_h::ush,
+                len: 8 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -887,7 +887,7 @@ pub mod trees_h {
                 freq: 188 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 8 as crate::zutil_h::ush,
+                len: 8 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -895,7 +895,7 @@ pub mod trees_h {
                 freq: 124 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 8 as crate::zutil_h::ush,
+                len: 8 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -903,7 +903,7 @@ pub mod trees_h {
                 freq: 252 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 8 as crate::zutil_h::ush,
+                len: 8 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -911,7 +911,7 @@ pub mod trees_h {
                 freq: 2 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 8 as crate::zutil_h::ush,
+                len: 8 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -919,7 +919,7 @@ pub mod trees_h {
                 freq: 130 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 8 as crate::zutil_h::ush,
+                len: 8 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -927,7 +927,7 @@ pub mod trees_h {
                 freq: 66 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 8 as crate::zutil_h::ush,
+                len: 8 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -935,7 +935,7 @@ pub mod trees_h {
                 freq: 194 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 8 as crate::zutil_h::ush,
+                len: 8 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -943,7 +943,7 @@ pub mod trees_h {
                 freq: 34 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 8 as crate::zutil_h::ush,
+                len: 8 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -951,7 +951,7 @@ pub mod trees_h {
                 freq: 162 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 8 as crate::zutil_h::ush,
+                len: 8 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -959,7 +959,7 @@ pub mod trees_h {
                 freq: 98 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 8 as crate::zutil_h::ush,
+                len: 8 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -967,7 +967,7 @@ pub mod trees_h {
                 freq: 226 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 8 as crate::zutil_h::ush,
+                len: 8 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -975,7 +975,7 @@ pub mod trees_h {
                 freq: 18 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 8 as crate::zutil_h::ush,
+                len: 8 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -983,7 +983,7 @@ pub mod trees_h {
                 freq: 146 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 8 as crate::zutil_h::ush,
+                len: 8 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -991,7 +991,7 @@ pub mod trees_h {
                 freq: 82 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 8 as crate::zutil_h::ush,
+                len: 8 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -999,7 +999,7 @@ pub mod trees_h {
                 freq: 210 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 8 as crate::zutil_h::ush,
+                len: 8 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -1007,7 +1007,7 @@ pub mod trees_h {
                 freq: 50 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 8 as crate::zutil_h::ush,
+                len: 8 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -1015,7 +1015,7 @@ pub mod trees_h {
                 freq: 178 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 8 as crate::zutil_h::ush,
+                len: 8 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -1023,7 +1023,7 @@ pub mod trees_h {
                 freq: 114 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 8 as crate::zutil_h::ush,
+                len: 8 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -1031,7 +1031,7 @@ pub mod trees_h {
                 freq: 242 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 8 as crate::zutil_h::ush,
+                len: 8 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -1039,7 +1039,7 @@ pub mod trees_h {
                 freq: 10 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 8 as crate::zutil_h::ush,
+                len: 8 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -1047,7 +1047,7 @@ pub mod trees_h {
                 freq: 138 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 8 as crate::zutil_h::ush,
+                len: 8 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -1055,7 +1055,7 @@ pub mod trees_h {
                 freq: 74 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 8 as crate::zutil_h::ush,
+                len: 8 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -1063,7 +1063,7 @@ pub mod trees_h {
                 freq: 202 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 8 as crate::zutil_h::ush,
+                len: 8 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -1071,7 +1071,7 @@ pub mod trees_h {
                 freq: 42 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 8 as crate::zutil_h::ush,
+                len: 8 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -1079,7 +1079,7 @@ pub mod trees_h {
                 freq: 170 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 8 as crate::zutil_h::ush,
+                len: 8 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -1087,7 +1087,7 @@ pub mod trees_h {
                 freq: 106 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 8 as crate::zutil_h::ush,
+                len: 8 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -1095,7 +1095,7 @@ pub mod trees_h {
                 freq: 234 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 8 as crate::zutil_h::ush,
+                len: 8 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -1103,7 +1103,7 @@ pub mod trees_h {
                 freq: 26 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 8 as crate::zutil_h::ush,
+                len: 8 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -1111,7 +1111,7 @@ pub mod trees_h {
                 freq: 154 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 8 as crate::zutil_h::ush,
+                len: 8 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -1119,7 +1119,7 @@ pub mod trees_h {
                 freq: 90 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 8 as crate::zutil_h::ush,
+                len: 8 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -1127,7 +1127,7 @@ pub mod trees_h {
                 freq: 218 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 8 as crate::zutil_h::ush,
+                len: 8 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -1135,7 +1135,7 @@ pub mod trees_h {
                 freq: 58 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 8 as crate::zutil_h::ush,
+                len: 8 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -1143,7 +1143,7 @@ pub mod trees_h {
                 freq: 186 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 8 as crate::zutil_h::ush,
+                len: 8 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -1151,7 +1151,7 @@ pub mod trees_h {
                 freq: 122 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 8 as crate::zutil_h::ush,
+                len: 8 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -1159,7 +1159,7 @@ pub mod trees_h {
                 freq: 250 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 8 as crate::zutil_h::ush,
+                len: 8 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -1167,7 +1167,7 @@ pub mod trees_h {
                 freq: 6 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 8 as crate::zutil_h::ush,
+                len: 8 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -1175,7 +1175,7 @@ pub mod trees_h {
                 freq: 134 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 8 as crate::zutil_h::ush,
+                len: 8 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -1183,7 +1183,7 @@ pub mod trees_h {
                 freq: 70 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 8 as crate::zutil_h::ush,
+                len: 8 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -1191,7 +1191,7 @@ pub mod trees_h {
                 freq: 198 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 8 as crate::zutil_h::ush,
+                len: 8 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -1199,7 +1199,7 @@ pub mod trees_h {
                 freq: 38 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 8 as crate::zutil_h::ush,
+                len: 8 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -1207,7 +1207,7 @@ pub mod trees_h {
                 freq: 166 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 8 as crate::zutil_h::ush,
+                len: 8 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -1215,7 +1215,7 @@ pub mod trees_h {
                 freq: 102 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 8 as crate::zutil_h::ush,
+                len: 8 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -1223,7 +1223,7 @@ pub mod trees_h {
                 freq: 230 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 8 as crate::zutil_h::ush,
+                len: 8 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -1231,7 +1231,7 @@ pub mod trees_h {
                 freq: 22 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 8 as crate::zutil_h::ush,
+                len: 8 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -1239,7 +1239,7 @@ pub mod trees_h {
                 freq: 150 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 8 as crate::zutil_h::ush,
+                len: 8 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -1247,7 +1247,7 @@ pub mod trees_h {
                 freq: 86 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 8 as crate::zutil_h::ush,
+                len: 8 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -1255,7 +1255,7 @@ pub mod trees_h {
                 freq: 214 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 8 as crate::zutil_h::ush,
+                len: 8 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -1263,7 +1263,7 @@ pub mod trees_h {
                 freq: 54 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 8 as crate::zutil_h::ush,
+                len: 8 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -1271,7 +1271,7 @@ pub mod trees_h {
                 freq: 182 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 8 as crate::zutil_h::ush,
+                len: 8 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -1279,7 +1279,7 @@ pub mod trees_h {
                 freq: 118 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 8 as crate::zutil_h::ush,
+                len: 8 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -1287,7 +1287,7 @@ pub mod trees_h {
                 freq: 246 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 8 as crate::zutil_h::ush,
+                len: 8 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -1295,7 +1295,7 @@ pub mod trees_h {
                 freq: 14 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 8 as crate::zutil_h::ush,
+                len: 8 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -1303,7 +1303,7 @@ pub mod trees_h {
                 freq: 142 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 8 as crate::zutil_h::ush,
+                len: 8 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -1311,7 +1311,7 @@ pub mod trees_h {
                 freq: 78 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 8 as crate::zutil_h::ush,
+                len: 8 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -1319,7 +1319,7 @@ pub mod trees_h {
                 freq: 206 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 8 as crate::zutil_h::ush,
+                len: 8 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -1327,7 +1327,7 @@ pub mod trees_h {
                 freq: 46 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 8 as crate::zutil_h::ush,
+                len: 8 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -1335,7 +1335,7 @@ pub mod trees_h {
                 freq: 174 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 8 as crate::zutil_h::ush,
+                len: 8 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -1343,7 +1343,7 @@ pub mod trees_h {
                 freq: 110 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 8 as crate::zutil_h::ush,
+                len: 8 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -1351,7 +1351,7 @@ pub mod trees_h {
                 freq: 238 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 8 as crate::zutil_h::ush,
+                len: 8 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -1359,7 +1359,7 @@ pub mod trees_h {
                 freq: 30 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 8 as crate::zutil_h::ush,
+                len: 8 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -1367,7 +1367,7 @@ pub mod trees_h {
                 freq: 158 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 8 as crate::zutil_h::ush,
+                len: 8 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -1375,7 +1375,7 @@ pub mod trees_h {
                 freq: 94 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 8 as crate::zutil_h::ush,
+                len: 8 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -1383,7 +1383,7 @@ pub mod trees_h {
                 freq: 222 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 8 as crate::zutil_h::ush,
+                len: 8 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -1391,7 +1391,7 @@ pub mod trees_h {
                 freq: 62 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 8 as crate::zutil_h::ush,
+                len: 8 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -1399,7 +1399,7 @@ pub mod trees_h {
                 freq: 190 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 8 as crate::zutil_h::ush,
+                len: 8 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -1407,7 +1407,7 @@ pub mod trees_h {
                 freq: 126 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 8 as crate::zutil_h::ush,
+                len: 8 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -1415,7 +1415,7 @@ pub mod trees_h {
                 freq: 254 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 8 as crate::zutil_h::ush,
+                len: 8 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -1423,7 +1423,7 @@ pub mod trees_h {
                 freq: 1 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 8 as crate::zutil_h::ush,
+                len: 8 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -1431,7 +1431,7 @@ pub mod trees_h {
                 freq: 129 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 8 as crate::zutil_h::ush,
+                len: 8 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -1439,7 +1439,7 @@ pub mod trees_h {
                 freq: 65 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 8 as crate::zutil_h::ush,
+                len: 8 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -1447,7 +1447,7 @@ pub mod trees_h {
                 freq: 193 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 8 as crate::zutil_h::ush,
+                len: 8 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -1455,7 +1455,7 @@ pub mod trees_h {
                 freq: 33 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 8 as crate::zutil_h::ush,
+                len: 8 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -1463,7 +1463,7 @@ pub mod trees_h {
                 freq: 161 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 8 as crate::zutil_h::ush,
+                len: 8 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -1471,7 +1471,7 @@ pub mod trees_h {
                 freq: 97 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 8 as crate::zutil_h::ush,
+                len: 8 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -1479,7 +1479,7 @@ pub mod trees_h {
                 freq: 225 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 8 as crate::zutil_h::ush,
+                len: 8 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -1487,7 +1487,7 @@ pub mod trees_h {
                 freq: 17 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 8 as crate::zutil_h::ush,
+                len: 8 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -1495,7 +1495,7 @@ pub mod trees_h {
                 freq: 145 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 8 as crate::zutil_h::ush,
+                len: 8 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -1503,7 +1503,7 @@ pub mod trees_h {
                 freq: 81 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 8 as crate::zutil_h::ush,
+                len: 8 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -1511,7 +1511,7 @@ pub mod trees_h {
                 freq: 209 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 8 as crate::zutil_h::ush,
+                len: 8 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -1519,7 +1519,7 @@ pub mod trees_h {
                 freq: 49 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 8 as crate::zutil_h::ush,
+                len: 8 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -1527,7 +1527,7 @@ pub mod trees_h {
                 freq: 177 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 8 as crate::zutil_h::ush,
+                len: 8 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -1535,7 +1535,7 @@ pub mod trees_h {
                 freq: 113 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 8 as crate::zutil_h::ush,
+                len: 8 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -1543,7 +1543,7 @@ pub mod trees_h {
                 freq: 241 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 8 as crate::zutil_h::ush,
+                len: 8 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -1551,7 +1551,7 @@ pub mod trees_h {
                 freq: 9 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 8 as crate::zutil_h::ush,
+                len: 8 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -1559,7 +1559,7 @@ pub mod trees_h {
                 freq: 137 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 8 as crate::zutil_h::ush,
+                len: 8 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -1567,7 +1567,7 @@ pub mod trees_h {
                 freq: 73 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 8 as crate::zutil_h::ush,
+                len: 8 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -1575,7 +1575,7 @@ pub mod trees_h {
                 freq: 201 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 8 as crate::zutil_h::ush,
+                len: 8 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -1583,7 +1583,7 @@ pub mod trees_h {
                 freq: 41 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 8 as crate::zutil_h::ush,
+                len: 8 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -1591,7 +1591,7 @@ pub mod trees_h {
                 freq: 169 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 8 as crate::zutil_h::ush,
+                len: 8 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -1599,7 +1599,7 @@ pub mod trees_h {
                 freq: 105 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 8 as crate::zutil_h::ush,
+                len: 8 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -1607,7 +1607,7 @@ pub mod trees_h {
                 freq: 233 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 8 as crate::zutil_h::ush,
+                len: 8 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -1615,7 +1615,7 @@ pub mod trees_h {
                 freq: 25 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 8 as crate::zutil_h::ush,
+                len: 8 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -1623,7 +1623,7 @@ pub mod trees_h {
                 freq: 153 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 8 as crate::zutil_h::ush,
+                len: 8 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -1631,7 +1631,7 @@ pub mod trees_h {
                 freq: 89 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 8 as crate::zutil_h::ush,
+                len: 8 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -1639,7 +1639,7 @@ pub mod trees_h {
                 freq: 217 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 8 as crate::zutil_h::ush,
+                len: 8 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -1647,7 +1647,7 @@ pub mod trees_h {
                 freq: 57 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 8 as crate::zutil_h::ush,
+                len: 8 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -1655,7 +1655,7 @@ pub mod trees_h {
                 freq: 185 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 8 as crate::zutil_h::ush,
+                len: 8 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -1663,7 +1663,7 @@ pub mod trees_h {
                 freq: 121 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 8 as crate::zutil_h::ush,
+                len: 8 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -1671,7 +1671,7 @@ pub mod trees_h {
                 freq: 249 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 8 as crate::zutil_h::ush,
+                len: 8 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -1679,7 +1679,7 @@ pub mod trees_h {
                 freq: 5 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 8 as crate::zutil_h::ush,
+                len: 8 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -1687,7 +1687,7 @@ pub mod trees_h {
                 freq: 133 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 8 as crate::zutil_h::ush,
+                len: 8 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -1695,7 +1695,7 @@ pub mod trees_h {
                 freq: 69 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 8 as crate::zutil_h::ush,
+                len: 8 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -1703,7 +1703,7 @@ pub mod trees_h {
                 freq: 197 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 8 as crate::zutil_h::ush,
+                len: 8 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -1711,7 +1711,7 @@ pub mod trees_h {
                 freq: 37 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 8 as crate::zutil_h::ush,
+                len: 8 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -1719,7 +1719,7 @@ pub mod trees_h {
                 freq: 165 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 8 as crate::zutil_h::ush,
+                len: 8 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -1727,7 +1727,7 @@ pub mod trees_h {
                 freq: 101 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 8 as crate::zutil_h::ush,
+                len: 8 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -1735,7 +1735,7 @@ pub mod trees_h {
                 freq: 229 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 8 as crate::zutil_h::ush,
+                len: 8 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -1743,7 +1743,7 @@ pub mod trees_h {
                 freq: 21 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 8 as crate::zutil_h::ush,
+                len: 8 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -1751,7 +1751,7 @@ pub mod trees_h {
                 freq: 149 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 8 as crate::zutil_h::ush,
+                len: 8 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -1759,7 +1759,7 @@ pub mod trees_h {
                 freq: 85 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 8 as crate::zutil_h::ush,
+                len: 8 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -1767,7 +1767,7 @@ pub mod trees_h {
                 freq: 213 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 8 as crate::zutil_h::ush,
+                len: 8 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -1775,7 +1775,7 @@ pub mod trees_h {
                 freq: 53 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 8 as crate::zutil_h::ush,
+                len: 8 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -1783,7 +1783,7 @@ pub mod trees_h {
                 freq: 181 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 8 as crate::zutil_h::ush,
+                len: 8 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -1791,7 +1791,7 @@ pub mod trees_h {
                 freq: 117 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 8 as crate::zutil_h::ush,
+                len: 8 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -1799,7 +1799,7 @@ pub mod trees_h {
                 freq: 245 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 8 as crate::zutil_h::ush,
+                len: 8 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -1807,7 +1807,7 @@ pub mod trees_h {
                 freq: 13 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 8 as crate::zutil_h::ush,
+                len: 8 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -1815,7 +1815,7 @@ pub mod trees_h {
                 freq: 141 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 8 as crate::zutil_h::ush,
+                len: 8 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -1823,7 +1823,7 @@ pub mod trees_h {
                 freq: 77 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 8 as crate::zutil_h::ush,
+                len: 8 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -1831,7 +1831,7 @@ pub mod trees_h {
                 freq: 205 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 8 as crate::zutil_h::ush,
+                len: 8 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -1839,7 +1839,7 @@ pub mod trees_h {
                 freq: 45 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 8 as crate::zutil_h::ush,
+                len: 8 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -1847,7 +1847,7 @@ pub mod trees_h {
                 freq: 173 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 8 as crate::zutil_h::ush,
+                len: 8 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -1855,7 +1855,7 @@ pub mod trees_h {
                 freq: 109 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 8 as crate::zutil_h::ush,
+                len: 8 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -1863,7 +1863,7 @@ pub mod trees_h {
                 freq: 237 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 8 as crate::zutil_h::ush,
+                len: 8 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -1871,7 +1871,7 @@ pub mod trees_h {
                 freq: 29 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 8 as crate::zutil_h::ush,
+                len: 8 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -1879,7 +1879,7 @@ pub mod trees_h {
                 freq: 157 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 8 as crate::zutil_h::ush,
+                len: 8 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -1887,7 +1887,7 @@ pub mod trees_h {
                 freq: 93 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 8 as crate::zutil_h::ush,
+                len: 8 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -1895,7 +1895,7 @@ pub mod trees_h {
                 freq: 221 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 8 as crate::zutil_h::ush,
+                len: 8 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -1903,7 +1903,7 @@ pub mod trees_h {
                 freq: 61 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 8 as crate::zutil_h::ush,
+                len: 8 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -1911,7 +1911,7 @@ pub mod trees_h {
                 freq: 189 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 8 as crate::zutil_h::ush,
+                len: 8 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -1919,7 +1919,7 @@ pub mod trees_h {
                 freq: 125 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 8 as crate::zutil_h::ush,
+                len: 8 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -1927,7 +1927,7 @@ pub mod trees_h {
                 freq: 253 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 8 as crate::zutil_h::ush,
+                len: 8 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -1935,7 +1935,7 @@ pub mod trees_h {
                 freq: 19 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 9 as crate::zutil_h::ush,
+                len: 9 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -1943,7 +1943,7 @@ pub mod trees_h {
                 freq: 275 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 9 as crate::zutil_h::ush,
+                len: 9 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -1951,7 +1951,7 @@ pub mod trees_h {
                 freq: 147 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 9 as crate::zutil_h::ush,
+                len: 9 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -1959,7 +1959,7 @@ pub mod trees_h {
                 freq: 403 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 9 as crate::zutil_h::ush,
+                len: 9 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -1967,7 +1967,7 @@ pub mod trees_h {
                 freq: 83 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 9 as crate::zutil_h::ush,
+                len: 9 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -1975,7 +1975,7 @@ pub mod trees_h {
                 freq: 339 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 9 as crate::zutil_h::ush,
+                len: 9 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -1983,7 +1983,7 @@ pub mod trees_h {
                 freq: 211 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 9 as crate::zutil_h::ush,
+                len: 9 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -1991,7 +1991,7 @@ pub mod trees_h {
                 freq: 467 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 9 as crate::zutil_h::ush,
+                len: 9 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -1999,7 +1999,7 @@ pub mod trees_h {
                 freq: 51 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 9 as crate::zutil_h::ush,
+                len: 9 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -2007,7 +2007,7 @@ pub mod trees_h {
                 freq: 307 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 9 as crate::zutil_h::ush,
+                len: 9 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -2015,7 +2015,7 @@ pub mod trees_h {
                 freq: 179 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 9 as crate::zutil_h::ush,
+                len: 9 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -2023,7 +2023,7 @@ pub mod trees_h {
                 freq: 435 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 9 as crate::zutil_h::ush,
+                len: 9 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -2031,7 +2031,7 @@ pub mod trees_h {
                 freq: 115 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 9 as crate::zutil_h::ush,
+                len: 9 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -2039,7 +2039,7 @@ pub mod trees_h {
                 freq: 371 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 9 as crate::zutil_h::ush,
+                len: 9 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -2047,7 +2047,7 @@ pub mod trees_h {
                 freq: 243 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 9 as crate::zutil_h::ush,
+                len: 9 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -2055,7 +2055,7 @@ pub mod trees_h {
                 freq: 499 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 9 as crate::zutil_h::ush,
+                len: 9 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -2063,7 +2063,7 @@ pub mod trees_h {
                 freq: 11 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 9 as crate::zutil_h::ush,
+                len: 9 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -2071,7 +2071,7 @@ pub mod trees_h {
                 freq: 267 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 9 as crate::zutil_h::ush,
+                len: 9 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -2079,7 +2079,7 @@ pub mod trees_h {
                 freq: 139 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 9 as crate::zutil_h::ush,
+                len: 9 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -2087,7 +2087,7 @@ pub mod trees_h {
                 freq: 395 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 9 as crate::zutil_h::ush,
+                len: 9 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -2095,7 +2095,7 @@ pub mod trees_h {
                 freq: 75 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 9 as crate::zutil_h::ush,
+                len: 9 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -2103,7 +2103,7 @@ pub mod trees_h {
                 freq: 331 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 9 as crate::zutil_h::ush,
+                len: 9 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -2111,7 +2111,7 @@ pub mod trees_h {
                 freq: 203 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 9 as crate::zutil_h::ush,
+                len: 9 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -2119,7 +2119,7 @@ pub mod trees_h {
                 freq: 459 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 9 as crate::zutil_h::ush,
+                len: 9 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -2127,7 +2127,7 @@ pub mod trees_h {
                 freq: 43 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 9 as crate::zutil_h::ush,
+                len: 9 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -2135,7 +2135,7 @@ pub mod trees_h {
                 freq: 299 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 9 as crate::zutil_h::ush,
+                len: 9 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -2143,7 +2143,7 @@ pub mod trees_h {
                 freq: 171 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 9 as crate::zutil_h::ush,
+                len: 9 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -2151,7 +2151,7 @@ pub mod trees_h {
                 freq: 427 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 9 as crate::zutil_h::ush,
+                len: 9 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -2159,7 +2159,7 @@ pub mod trees_h {
                 freq: 107 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 9 as crate::zutil_h::ush,
+                len: 9 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -2167,7 +2167,7 @@ pub mod trees_h {
                 freq: 363 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 9 as crate::zutil_h::ush,
+                len: 9 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -2175,7 +2175,7 @@ pub mod trees_h {
                 freq: 235 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 9 as crate::zutil_h::ush,
+                len: 9 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -2183,7 +2183,7 @@ pub mod trees_h {
                 freq: 491 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 9 as crate::zutil_h::ush,
+                len: 9 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -2191,7 +2191,7 @@ pub mod trees_h {
                 freq: 27 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 9 as crate::zutil_h::ush,
+                len: 9 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -2199,7 +2199,7 @@ pub mod trees_h {
                 freq: 283 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 9 as crate::zutil_h::ush,
+                len: 9 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -2207,7 +2207,7 @@ pub mod trees_h {
                 freq: 155 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 9 as crate::zutil_h::ush,
+                len: 9 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -2215,7 +2215,7 @@ pub mod trees_h {
                 freq: 411 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 9 as crate::zutil_h::ush,
+                len: 9 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -2223,7 +2223,7 @@ pub mod trees_h {
                 freq: 91 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 9 as crate::zutil_h::ush,
+                len: 9 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -2231,7 +2231,7 @@ pub mod trees_h {
                 freq: 347 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 9 as crate::zutil_h::ush,
+                len: 9 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -2239,7 +2239,7 @@ pub mod trees_h {
                 freq: 219 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 9 as crate::zutil_h::ush,
+                len: 9 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -2247,7 +2247,7 @@ pub mod trees_h {
                 freq: 475 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 9 as crate::zutil_h::ush,
+                len: 9 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -2255,7 +2255,7 @@ pub mod trees_h {
                 freq: 59 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 9 as crate::zutil_h::ush,
+                len: 9 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -2263,7 +2263,7 @@ pub mod trees_h {
                 freq: 315 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 9 as crate::zutil_h::ush,
+                len: 9 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -2271,7 +2271,7 @@ pub mod trees_h {
                 freq: 187 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 9 as crate::zutil_h::ush,
+                len: 9 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -2279,7 +2279,7 @@ pub mod trees_h {
                 freq: 443 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 9 as crate::zutil_h::ush,
+                len: 9 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -2287,7 +2287,7 @@ pub mod trees_h {
                 freq: 123 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 9 as crate::zutil_h::ush,
+                len: 9 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -2295,7 +2295,7 @@ pub mod trees_h {
                 freq: 379 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 9 as crate::zutil_h::ush,
+                len: 9 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -2303,7 +2303,7 @@ pub mod trees_h {
                 freq: 251 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 9 as crate::zutil_h::ush,
+                len: 9 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -2311,7 +2311,7 @@ pub mod trees_h {
                 freq: 507 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 9 as crate::zutil_h::ush,
+                len: 9 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -2319,7 +2319,7 @@ pub mod trees_h {
                 freq: 7 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 9 as crate::zutil_h::ush,
+                len: 9 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -2327,7 +2327,7 @@ pub mod trees_h {
                 freq: 263 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 9 as crate::zutil_h::ush,
+                len: 9 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -2335,7 +2335,7 @@ pub mod trees_h {
                 freq: 135 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 9 as crate::zutil_h::ush,
+                len: 9 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -2343,7 +2343,7 @@ pub mod trees_h {
                 freq: 391 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 9 as crate::zutil_h::ush,
+                len: 9 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -2351,7 +2351,7 @@ pub mod trees_h {
                 freq: 71 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 9 as crate::zutil_h::ush,
+                len: 9 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -2359,7 +2359,7 @@ pub mod trees_h {
                 freq: 327 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 9 as crate::zutil_h::ush,
+                len: 9 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -2367,7 +2367,7 @@ pub mod trees_h {
                 freq: 199 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 9 as crate::zutil_h::ush,
+                len: 9 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -2375,7 +2375,7 @@ pub mod trees_h {
                 freq: 455 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 9 as crate::zutil_h::ush,
+                len: 9 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -2383,7 +2383,7 @@ pub mod trees_h {
                 freq: 39 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 9 as crate::zutil_h::ush,
+                len: 9 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -2391,7 +2391,7 @@ pub mod trees_h {
                 freq: 295 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 9 as crate::zutil_h::ush,
+                len: 9 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -2399,7 +2399,7 @@ pub mod trees_h {
                 freq: 167 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 9 as crate::zutil_h::ush,
+                len: 9 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -2407,7 +2407,7 @@ pub mod trees_h {
                 freq: 423 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 9 as crate::zutil_h::ush,
+                len: 9 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -2415,7 +2415,7 @@ pub mod trees_h {
                 freq: 103 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 9 as crate::zutil_h::ush,
+                len: 9 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -2423,7 +2423,7 @@ pub mod trees_h {
                 freq: 359 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 9 as crate::zutil_h::ush,
+                len: 9 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -2431,7 +2431,7 @@ pub mod trees_h {
                 freq: 231 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 9 as crate::zutil_h::ush,
+                len: 9 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -2439,7 +2439,7 @@ pub mod trees_h {
                 freq: 487 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 9 as crate::zutil_h::ush,
+                len: 9 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -2447,7 +2447,7 @@ pub mod trees_h {
                 freq: 23 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 9 as crate::zutil_h::ush,
+                len: 9 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -2455,7 +2455,7 @@ pub mod trees_h {
                 freq: 279 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 9 as crate::zutil_h::ush,
+                len: 9 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -2463,7 +2463,7 @@ pub mod trees_h {
                 freq: 151 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 9 as crate::zutil_h::ush,
+                len: 9 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -2471,7 +2471,7 @@ pub mod trees_h {
                 freq: 407 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 9 as crate::zutil_h::ush,
+                len: 9 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -2479,7 +2479,7 @@ pub mod trees_h {
                 freq: 87 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 9 as crate::zutil_h::ush,
+                len: 9 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -2487,7 +2487,7 @@ pub mod trees_h {
                 freq: 343 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 9 as crate::zutil_h::ush,
+                len: 9 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -2495,7 +2495,7 @@ pub mod trees_h {
                 freq: 215 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 9 as crate::zutil_h::ush,
+                len: 9 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -2503,7 +2503,7 @@ pub mod trees_h {
                 freq: 471 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 9 as crate::zutil_h::ush,
+                len: 9 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -2511,7 +2511,7 @@ pub mod trees_h {
                 freq: 55 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 9 as crate::zutil_h::ush,
+                len: 9 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -2519,7 +2519,7 @@ pub mod trees_h {
                 freq: 311 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 9 as crate::zutil_h::ush,
+                len: 9 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -2527,7 +2527,7 @@ pub mod trees_h {
                 freq: 183 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 9 as crate::zutil_h::ush,
+                len: 9 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -2535,7 +2535,7 @@ pub mod trees_h {
                 freq: 439 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 9 as crate::zutil_h::ush,
+                len: 9 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -2543,7 +2543,7 @@ pub mod trees_h {
                 freq: 119 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 9 as crate::zutil_h::ush,
+                len: 9 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -2551,7 +2551,7 @@ pub mod trees_h {
                 freq: 375 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 9 as crate::zutil_h::ush,
+                len: 9 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -2559,7 +2559,7 @@ pub mod trees_h {
                 freq: 247 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 9 as crate::zutil_h::ush,
+                len: 9 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -2567,7 +2567,7 @@ pub mod trees_h {
                 freq: 503 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 9 as crate::zutil_h::ush,
+                len: 9 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -2575,7 +2575,7 @@ pub mod trees_h {
                 freq: 15 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 9 as crate::zutil_h::ush,
+                len: 9 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -2583,7 +2583,7 @@ pub mod trees_h {
                 freq: 271 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 9 as crate::zutil_h::ush,
+                len: 9 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -2591,7 +2591,7 @@ pub mod trees_h {
                 freq: 143 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 9 as crate::zutil_h::ush,
+                len: 9 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -2599,7 +2599,7 @@ pub mod trees_h {
                 freq: 399 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 9 as crate::zutil_h::ush,
+                len: 9 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -2607,7 +2607,7 @@ pub mod trees_h {
                 freq: 79 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 9 as crate::zutil_h::ush,
+                len: 9 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -2615,7 +2615,7 @@ pub mod trees_h {
                 freq: 335 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 9 as crate::zutil_h::ush,
+                len: 9 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -2623,7 +2623,7 @@ pub mod trees_h {
                 freq: 207 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 9 as crate::zutil_h::ush,
+                len: 9 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -2631,7 +2631,7 @@ pub mod trees_h {
                 freq: 463 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 9 as crate::zutil_h::ush,
+                len: 9 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -2639,7 +2639,7 @@ pub mod trees_h {
                 freq: 47 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 9 as crate::zutil_h::ush,
+                len: 9 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -2647,7 +2647,7 @@ pub mod trees_h {
                 freq: 303 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 9 as crate::zutil_h::ush,
+                len: 9 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -2655,7 +2655,7 @@ pub mod trees_h {
                 freq: 175 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 9 as crate::zutil_h::ush,
+                len: 9 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -2663,7 +2663,7 @@ pub mod trees_h {
                 freq: 431 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 9 as crate::zutil_h::ush,
+                len: 9 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -2671,7 +2671,7 @@ pub mod trees_h {
                 freq: 111 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 9 as crate::zutil_h::ush,
+                len: 9 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -2679,7 +2679,7 @@ pub mod trees_h {
                 freq: 367 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 9 as crate::zutil_h::ush,
+                len: 9 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -2687,7 +2687,7 @@ pub mod trees_h {
                 freq: 239 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 9 as crate::zutil_h::ush,
+                len: 9 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -2695,7 +2695,7 @@ pub mod trees_h {
                 freq: 495 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 9 as crate::zutil_h::ush,
+                len: 9 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -2703,7 +2703,7 @@ pub mod trees_h {
                 freq: 31 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 9 as crate::zutil_h::ush,
+                len: 9 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -2711,7 +2711,7 @@ pub mod trees_h {
                 freq: 287 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 9 as crate::zutil_h::ush,
+                len: 9 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -2719,7 +2719,7 @@ pub mod trees_h {
                 freq: 159 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 9 as crate::zutil_h::ush,
+                len: 9 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -2727,7 +2727,7 @@ pub mod trees_h {
                 freq: 415 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 9 as crate::zutil_h::ush,
+                len: 9 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -2735,7 +2735,7 @@ pub mod trees_h {
                 freq: 95 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 9 as crate::zutil_h::ush,
+                len: 9 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -2743,7 +2743,7 @@ pub mod trees_h {
                 freq: 351 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 9 as crate::zutil_h::ush,
+                len: 9 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -2751,7 +2751,7 @@ pub mod trees_h {
                 freq: 223 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 9 as crate::zutil_h::ush,
+                len: 9 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -2759,7 +2759,7 @@ pub mod trees_h {
                 freq: 479 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 9 as crate::zutil_h::ush,
+                len: 9 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -2767,7 +2767,7 @@ pub mod trees_h {
                 freq: 63 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 9 as crate::zutil_h::ush,
+                len: 9 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -2775,7 +2775,7 @@ pub mod trees_h {
                 freq: 319 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 9 as crate::zutil_h::ush,
+                len: 9 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -2783,7 +2783,7 @@ pub mod trees_h {
                 freq: 191 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 9 as crate::zutil_h::ush,
+                len: 9 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -2791,7 +2791,7 @@ pub mod trees_h {
                 freq: 447 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 9 as crate::zutil_h::ush,
+                len: 9 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -2799,7 +2799,7 @@ pub mod trees_h {
                 freq: 127 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 9 as crate::zutil_h::ush,
+                len: 9 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -2807,7 +2807,7 @@ pub mod trees_h {
                 freq: 383 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 9 as crate::zutil_h::ush,
+                len: 9 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -2815,7 +2815,7 @@ pub mod trees_h {
                 freq: 255 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 9 as crate::zutil_h::ush,
+                len: 9 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -2823,7 +2823,7 @@ pub mod trees_h {
                 freq: 511 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 9 as crate::zutil_h::ush,
+                len: 9 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -2831,7 +2831,7 @@ pub mod trees_h {
                 freq: 0 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 7 as crate::zutil_h::ush,
+                len: 7 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -2839,7 +2839,7 @@ pub mod trees_h {
                 freq: 64 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 7 as crate::zutil_h::ush,
+                len: 7 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -2847,7 +2847,7 @@ pub mod trees_h {
                 freq: 32 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 7 as crate::zutil_h::ush,
+                len: 7 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -2855,7 +2855,7 @@ pub mod trees_h {
                 freq: 96 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 7 as crate::zutil_h::ush,
+                len: 7 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -2863,7 +2863,7 @@ pub mod trees_h {
                 freq: 16 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 7 as crate::zutil_h::ush,
+                len: 7 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -2871,7 +2871,7 @@ pub mod trees_h {
                 freq: 80 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 7 as crate::zutil_h::ush,
+                len: 7 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -2879,7 +2879,7 @@ pub mod trees_h {
                 freq: 48 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 7 as crate::zutil_h::ush,
+                len: 7 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -2887,7 +2887,7 @@ pub mod trees_h {
                 freq: 112 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 7 as crate::zutil_h::ush,
+                len: 7 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -2895,7 +2895,7 @@ pub mod trees_h {
                 freq: 8 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 7 as crate::zutil_h::ush,
+                len: 7 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -2903,7 +2903,7 @@ pub mod trees_h {
                 freq: 72 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 7 as crate::zutil_h::ush,
+                len: 7 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -2911,7 +2911,7 @@ pub mod trees_h {
                 freq: 40 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 7 as crate::zutil_h::ush,
+                len: 7 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -2919,7 +2919,7 @@ pub mod trees_h {
                 freq: 104 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 7 as crate::zutil_h::ush,
+                len: 7 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -2927,7 +2927,7 @@ pub mod trees_h {
                 freq: 24 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 7 as crate::zutil_h::ush,
+                len: 7 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -2935,7 +2935,7 @@ pub mod trees_h {
                 freq: 88 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 7 as crate::zutil_h::ush,
+                len: 7 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -2943,7 +2943,7 @@ pub mod trees_h {
                 freq: 56 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 7 as crate::zutil_h::ush,
+                len: 7 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -2951,7 +2951,7 @@ pub mod trees_h {
                 freq: 120 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 7 as crate::zutil_h::ush,
+                len: 7 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -2959,7 +2959,7 @@ pub mod trees_h {
                 freq: 4 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 7 as crate::zutil_h::ush,
+                len: 7 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -2967,7 +2967,7 @@ pub mod trees_h {
                 freq: 68 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 7 as crate::zutil_h::ush,
+                len: 7 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -2975,7 +2975,7 @@ pub mod trees_h {
                 freq: 36 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 7 as crate::zutil_h::ush,
+                len: 7 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -2983,7 +2983,7 @@ pub mod trees_h {
                 freq: 100 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 7 as crate::zutil_h::ush,
+                len: 7 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -2991,7 +2991,7 @@ pub mod trees_h {
                 freq: 20 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 7 as crate::zutil_h::ush,
+                len: 7 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -2999,7 +2999,7 @@ pub mod trees_h {
                 freq: 84 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 7 as crate::zutil_h::ush,
+                len: 7 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -3007,7 +3007,7 @@ pub mod trees_h {
                 freq: 52 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 7 as crate::zutil_h::ush,
+                len: 7 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -3015,7 +3015,7 @@ pub mod trees_h {
                 freq: 116 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 7 as crate::zutil_h::ush,
+                len: 7 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -3023,7 +3023,7 @@ pub mod trees_h {
                 freq: 3 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 8 as crate::zutil_h::ush,
+                len: 8 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -3031,7 +3031,7 @@ pub mod trees_h {
                 freq: 131 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 8 as crate::zutil_h::ush,
+                len: 8 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -3039,7 +3039,7 @@ pub mod trees_h {
                 freq: 67 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 8 as crate::zutil_h::ush,
+                len: 8 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -3047,7 +3047,7 @@ pub mod trees_h {
                 freq: 195 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 8 as crate::zutil_h::ush,
+                len: 8 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -3055,7 +3055,7 @@ pub mod trees_h {
                 freq: 35 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 8 as crate::zutil_h::ush,
+                len: 8 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -3063,7 +3063,7 @@ pub mod trees_h {
                 freq: 163 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 8 as crate::zutil_h::ush,
+                len: 8 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -3071,7 +3071,7 @@ pub mod trees_h {
                 freq: 99 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 8 as crate::zutil_h::ush,
+                len: 8 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -3079,7 +3079,7 @@ pub mod trees_h {
                 freq: 227 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 8 as crate::zutil_h::ush,
+                len: 8 as crate::zutil_h::ush,
             },
         },
     ];
@@ -3090,7 +3090,7 @@ pub mod trees_h {
                 freq: 0 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 5 as crate::zutil_h::ush,
+                len: 5 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -3098,7 +3098,7 @@ pub mod trees_h {
                 freq: 16 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 5 as crate::zutil_h::ush,
+                len: 5 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -3106,7 +3106,7 @@ pub mod trees_h {
                 freq: 8 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 5 as crate::zutil_h::ush,
+                len: 5 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -3114,7 +3114,7 @@ pub mod trees_h {
                 freq: 24 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 5 as crate::zutil_h::ush,
+                len: 5 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -3122,7 +3122,7 @@ pub mod trees_h {
                 freq: 4 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 5 as crate::zutil_h::ush,
+                len: 5 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -3130,7 +3130,7 @@ pub mod trees_h {
                 freq: 20 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 5 as crate::zutil_h::ush,
+                len: 5 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -3138,7 +3138,7 @@ pub mod trees_h {
                 freq: 12 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 5 as crate::zutil_h::ush,
+                len: 5 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -3146,7 +3146,7 @@ pub mod trees_h {
                 freq: 28 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 5 as crate::zutil_h::ush,
+                len: 5 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -3154,7 +3154,7 @@ pub mod trees_h {
                 freq: 2 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 5 as crate::zutil_h::ush,
+                len: 5 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -3162,7 +3162,7 @@ pub mod trees_h {
                 freq: 18 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 5 as crate::zutil_h::ush,
+                len: 5 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -3170,7 +3170,7 @@ pub mod trees_h {
                 freq: 10 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 5 as crate::zutil_h::ush,
+                len: 5 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -3178,7 +3178,7 @@ pub mod trees_h {
                 freq: 26 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 5 as crate::zutil_h::ush,
+                len: 5 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -3186,7 +3186,7 @@ pub mod trees_h {
                 freq: 6 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 5 as crate::zutil_h::ush,
+                len: 5 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -3194,7 +3194,7 @@ pub mod trees_h {
                 freq: 22 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 5 as crate::zutil_h::ush,
+                len: 5 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -3202,7 +3202,7 @@ pub mod trees_h {
                 freq: 14 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 5 as crate::zutil_h::ush,
+                len: 5 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -3210,7 +3210,7 @@ pub mod trees_h {
                 freq: 30 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 5 as crate::zutil_h::ush,
+                len: 5 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -3218,7 +3218,7 @@ pub mod trees_h {
                 freq: 1 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 5 as crate::zutil_h::ush,
+                len: 5 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -3226,7 +3226,7 @@ pub mod trees_h {
                 freq: 17 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 5 as crate::zutil_h::ush,
+                len: 5 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -3234,7 +3234,7 @@ pub mod trees_h {
                 freq: 9 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 5 as crate::zutil_h::ush,
+                len: 5 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -3242,7 +3242,7 @@ pub mod trees_h {
                 freq: 25 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 5 as crate::zutil_h::ush,
+                len: 5 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -3250,7 +3250,7 @@ pub mod trees_h {
                 freq: 5 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 5 as crate::zutil_h::ush,
+                len: 5 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -3258,7 +3258,7 @@ pub mod trees_h {
                 freq: 21 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 5 as crate::zutil_h::ush,
+                len: 5 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -3266,7 +3266,7 @@ pub mod trees_h {
                 freq: 13 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 5 as crate::zutil_h::ush,
+                len: 5 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -3274,7 +3274,7 @@ pub mod trees_h {
                 freq: 29 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 5 as crate::zutil_h::ush,
+                len: 5 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -3282,7 +3282,7 @@ pub mod trees_h {
                 freq: 3 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 5 as crate::zutil_h::ush,
+                len: 5 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -3290,7 +3290,7 @@ pub mod trees_h {
                 freq: 19 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 5 as crate::zutil_h::ush,
+                len: 5 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -3298,7 +3298,7 @@ pub mod trees_h {
                 freq: 11 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 5 as crate::zutil_h::ush,
+                len: 5 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -3306,7 +3306,7 @@ pub mod trees_h {
                 freq: 27 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 5 as crate::zutil_h::ush,
+                len: 5 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -3314,7 +3314,7 @@ pub mod trees_h {
                 freq: 7 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 5 as crate::zutil_h::ush,
+                len: 5 as crate::zutil_h::ush,
             },
         },
         crate::src::deflate::ct_data_s {
@@ -3322,7 +3322,7 @@ pub mod trees_h {
                 freq: 23 as crate::zutil_h::ush,
             },
             dl: crate::src::deflate::C2Rust_Unnamed_0 {
-                dad: 5 as crate::zutil_h::ush,
+                len: 5 as crate::zutil_h::ush,
             },
         },
     ];
@@ -3813,7 +3813,7 @@ unsafe extern "C" fn gen_bitlen(
     h = (*s).heap_max + 1 as ::core::ffi::c_int;
     while h < crate::src::deflate::HEAP_SIZE {
         n = (*s).heap[h as usize];
-        bits = (*tree.offset((*tree.offset(n as isize)).dl.dad as isize))
+        bits = (*tree.offset((*tree.offset(n as isize)).dl.len as isize))
             .dl
             .len as ::core::ffi::c_int
             + 1 as ::core::ffi::c_int;
@@ -3962,8 +3962,8 @@ unsafe extern "C" fn build_tree(
         } else {
             (*s).depth[m as usize] as ::core::ffi::c_int
         }) + 1 as ::core::ffi::c_int) as crate::zutil_h::uch;
-        (*tree.offset(m as isize)).dl.dad = node as crate::zutil_h::ush;
-        (*tree.offset(n as isize)).dl.dad = (*tree.offset(m as isize)).dl.dad;
+        (*tree.offset(m as isize)).dl.len = node as crate::zutil_h::ush;
+        (*tree.offset(n as isize)).dl.len = (*tree.offset(m as isize)).dl.len;
         let c2rust_fresh56 = node;
         node = node + 1;
         (*s).heap[SMALLEST as usize] = c2rust_fresh56;
