@@ -48,6 +48,14 @@ fn gz_write_error(state: &mut crate::gzguts_h::gz_state, error: rustix::io::Errn
     crate::src::gzlib::gz_error_state(state, crate::zlib_h::Z_ERRNO, message.as_deref());
 }
 
+fn gz_set_errno(error: rustix::io::Errno) {
+    errno::set_errno(errno::Errno(error.raw_os_error()));
+}
+
+fn gz_clear_errno() {
+    errno::set_errno(errno::Errno(0));
+}
+
 fn gz_init(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
     let mut ret: ::core::ffi::c_int = 0;
     let strm = &mut state.strm;
@@ -137,12 +145,12 @@ unsafe fn gz_comp(
         if state.fd < 0 {
             state.again = 0 as ::core::ffi::c_int;
             gz_write_error(state, rustix::io::Errno::BADF);
-            *crate::stdlib::__errno_location() = rustix::io::Errno::BADF.raw_os_error();
+            gz_set_errno(rustix::io::Errno::BADF);
             return -1 as ::core::ffi::c_int;
         }
         let fd = BorrowedFd::borrow_raw(state.fd);
         while strm.avail_in != 0 {
-            *crate::stdlib::__errno_location() = 0 as ::core::ffi::c_int;
+            gz_clear_errno();
             state.again = 0 as ::core::ffi::c_int;
             put = if strm.avail_in > max {
                 max
@@ -159,7 +167,7 @@ unsafe fn gz_comp(
                         state.again = 1 as ::core::ffi::c_int;
                     }
                     gz_write_error(state, error);
-                    *crate::stdlib::__errno_location() = error.raw_os_error();
+                    gz_set_errno(error);
                     return -1 as ::core::ffi::c_int;
                 }
             };
@@ -179,7 +187,7 @@ unsafe fn gz_comp(
     if state.fd < 0 {
         state.again = 0 as ::core::ffi::c_int;
         gz_write_error(state, rustix::io::Errno::BADF);
-        *crate::stdlib::__errno_location() = rustix::io::Errno::BADF.raw_os_error();
+        gz_set_errno(rustix::io::Errno::BADF);
         return -1 as ::core::ffi::c_int;
     }
     let fd = BorrowedFd::borrow_raw(state.fd);
@@ -189,7 +197,7 @@ unsafe fn gz_comp(
                 && (flush != crate::zlib_h::Z_FINISH || ret == crate::zlib_h::Z_STREAM_END)
         {
             while strm.next_out > state.x.next {
-                *crate::stdlib::__errno_location() = 0 as ::core::ffi::c_int;
+                gz_clear_errno();
                 state.again = 0 as ::core::ffi::c_int;
                 put = if strm.next_out.offset_from(state.x.next)
                     > max as ::core::ffi::c_int as isize
@@ -208,7 +216,7 @@ unsafe fn gz_comp(
                             state.again = 1 as ::core::ffi::c_int;
                         }
                         gz_write_error(state, error);
-                        *crate::stdlib::__errno_location() = error.raw_os_error();
+                        gz_set_errno(error);
                         return -1 as ::core::ffi::c_int;
                     }
                 };
