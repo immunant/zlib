@@ -76,6 +76,11 @@ fn append_input_byte(
     )
 }
 
+fn subtable_offset(entry: code, hold: ::core::ffi::c_ulong) -> isize {
+    entry.val as ::core::ffi::c_int as isize
+        + (hold & bit_mask(entry.op as ::core::ffi::c_uint) as ::core::ffi::c_ulong) as isize
+}
+
 fn unread_bit_state(
     hold: ::core::ffi::c_ulong,
     bits: ::core::ffi::c_uint,
@@ -183,9 +188,7 @@ pub unsafe extern "C" fn inflate_fast(
                 c2rust_current_block_141 = 3217834059723038609;
                 break;
             } else if op & 64 as ::core::ffi::c_uint == 0 as ::core::ffi::c_uint {
-                here = lcode
-                    .offset((*here).val as ::core::ffi::c_int as isize)
-                    .offset((hold & bit_mask(op) as ::core::ffi::c_ulong) as isize);
+                here = lcode.offset(subtable_offset(*here, hold));
             } else if op & 32 as ::core::ffi::c_uint != 0 {
                 c2rust_current_block_141 = 13505557363059842426;
                 break;
@@ -224,9 +227,7 @@ pub unsafe extern "C" fn inflate_fast(
                             break;
                         }
                     } else if op & 64 as ::core::ffi::c_uint == 0 as ::core::ffi::c_uint {
-                        here = dcode
-                            .offset((*here).val as ::core::ffi::c_int as isize)
-                            .offset((hold & bit_mask(op) as ::core::ffi::c_ulong) as isize);
+                        here = dcode.offset(subtable_offset(*here, hold));
                     } else {
                         (*strm).msg = b"invalid distance code\0".as_ptr()
                             as *const ::core::ffi::c_char
@@ -435,7 +436,10 @@ pub unsafe extern "C" fn inflate_fast_ffi(
 
 #[cfg(test)]
 mod tests {
-    use super::{append_input_byte, bit_mask, consume_bits, low_bits, unread_bit_state};
+    use super::{
+        append_input_byte, bit_mask, code, consume_bits, low_bits, subtable_offset,
+        unread_bit_state,
+    };
 
     #[test]
     fn bit_mask_selects_requested_low_bits() {
@@ -473,6 +477,16 @@ mod tests {
     #[test]
     fn append_input_byte_preserves_existing_bits() {
         assert_eq!(append_input_byte(0b101, 3, 0b11), (0b1_1101, 11));
+    }
+
+    #[test]
+    fn subtable_offset_combines_base_and_low_bit_index() {
+        let entry = code {
+            op: 5,
+            bits: 0,
+            val: 96,
+        };
+        assert_eq!(subtable_offset(entry, 0b1_1011), 123);
     }
 
     #[test]

@@ -458,7 +458,7 @@ unsafe extern "C" fn read_buf(
         (*strm).adler =
             crate::src::crc32::crc32_ffi((*strm).adler, buf, len as crate::stdlib::uInt);
     }
-    (*strm).next_in = (*strm).next_in.offset(len as isize);
+    (*strm).next_in = (*strm).next_in.wrapping_add(len as usize);
     (*strm).total_in = (*strm).total_in.wrapping_add(len as crate::stdlib::uLong);
     return len;
 }
@@ -1527,8 +1527,8 @@ unsafe extern "C" fn flush_pending(mut strm: crate::zlib_h::z_streamp) {
         (*s).pending_out as *const ::core::ffi::c_void,
         len as crate::__stddef_size_t_h::size_t,
     );
-    (*strm).next_out = (*strm).next_out.offset(len as isize);
-    (*s).pending_out = (*s).pending_out.offset(len as isize);
+    (*strm).next_out = (*strm).next_out.wrapping_add(len as usize);
+    (*s).pending_out = (*s).pending_out.wrapping_add(len as usize);
     (*strm).total_out = (*strm).total_out.wrapping_add(len as crate::stdlib::uLong);
     (*strm).avail_out = (*strm).avail_out.wrapping_sub(len);
     (*s).pending = (*s).pending.wrapping_sub(len as crate::zutil_h::ulg);

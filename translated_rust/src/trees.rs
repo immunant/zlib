@@ -3696,11 +3696,12 @@ fn bi_windup_core(
 unsafe extern "C" fn bi_windup(mut s: *mut crate::src::deflate::deflate_state) {
     let (used, count, bytes) = bi_windup_core(&mut (*s).bi_buf, &mut (*s).bi_valid);
     (*s).bi_used = used;
-    for byte in bytes.into_iter().take(count) {
-        let pending = (*s).pending;
-        (*s).pending = (*s).pending.wrapping_add(1);
-        *(*s).pending_buf.offset(pending as isize) = byte;
+    let pending = (*s).pending;
+    for (index, byte) in bytes.into_iter().take(count).enumerate() {
+        let cursor = pending.wrapping_add(index as crate::zutil_h::ulg);
+        *(*s).pending_buf.wrapping_add(cursor as usize) = byte;
     }
+    (*s).pending = pending_cursor_after_bytes(pending, count);
 }
 
 fn next_codes(bl_count: &[crate::zutil_h::ush; 16]) -> [crate::zutil_h::ush; 16] {
