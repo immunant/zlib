@@ -2991,16 +2991,21 @@ pub unsafe extern "C" fn deflate(
             strm.adler = adler;
             result as ::core::ffi::c_uint
         } else if s.strategy == crate::zlib_h::Z_HUFFMAN_ONLY {
-            deflate_huff(s, strm, flush) as ::core::ffi::c_uint
+            deflate_match_from_abi(s, strm, flush, deflate_huff_from_views)
+                as ::core::ffi::c_uint
         } else if s.strategy == crate::zlib_h::Z_RLE {
-            deflate_rle(s, strm, flush) as ::core::ffi::c_uint
+            deflate_match_from_abi(s, strm, flush, deflate_rle_from_views)
+                as ::core::ffi::c_uint
         } else {
-            let func = match configuration_table[s.level as usize].algorithm {
+            (match configuration_table[s.level as usize].algorithm {
                 DeflateAlgorithm::Stored => unreachable!("level zero is handled above"),
-                DeflateAlgorithm::Fast => deflate_fast,
-                DeflateAlgorithm::Slow => deflate_slow,
-            };
-            func(s, strm, flush) as ::core::ffi::c_uint
+                DeflateAlgorithm::Fast => {
+                    deflate_match_from_abi(s, strm, flush, deflate_fast_from_views)
+                }
+                DeflateAlgorithm::Slow => {
+                    deflate_match_from_abi(s, strm, flush, deflate_slow_from_views)
+                }
+            }) as ::core::ffi::c_uint
         }) as block_state;
         if bstate as ::core::ffi::c_uint
             == finish_started as ::core::ffi::c_int as ::core::ffi::c_uint
@@ -4296,17 +4301,6 @@ fn deflate_fast_from_views(
     return block_done;
 }
 
-unsafe extern "C" fn deflate_fast(
-    state: &mut crate::src::deflate::deflate_state,
-    stream: &mut crate::zlib_h::z_stream_s,
-    flush: ::core::ffi::c_int,
-) -> block_state {
-    // Fast, RLE, and Huffman modes share the same bounded ABI projection.
-    // Keep it in the one adapter rather than reconstructing identical raw
-    // input, output, and state-buffer views for the fast path.
-    deflate_match_from_abi(state, stream, flush, deflate_fast_from_views)
-}
-
 fn deflate_slow_from_views(
     state: &mut DeflateFastState<'_>,
     stream: &mut DeflateFastStream<'_>,
@@ -4693,17 +4687,6 @@ fn deflate_slow_from_views(
     return block_done;
 }
 
-// The lazy parser has the same bounded-storage requirements as the RLE and
-// Huffman parsers.  Reuse their ABI adapter so the parsing loop above stays
-// entirely on slices and scalar cursors.
-unsafe extern "C" fn deflate_slow(
-    state: &mut crate::src::deflate::deflate_state,
-    stream: &mut crate::zlib_h::z_stream_s,
-    flush: ::core::ffi::c_int,
-) -> block_state {
-    deflate_match_from_abi(state, stream, flush, deflate_slow_from_views)
-}
-
 // Find a repeated-byte match using offsets into the fully allocated sliding
 // window. The bounded refill maintains the initialized extent for this
 // slice-based kernel.
@@ -4989,20 +4972,4 @@ unsafe fn deflate_match_from_abi(
     state.slid = matched.slid;
     state.high_water = matched.high_water;
     result
-}
-
-unsafe fn deflate_rle(
-    state: &mut crate::src::deflate::deflate_state,
-    stream: &mut crate::zlib_h::z_stream_s,
-    flush: ::core::ffi::c_int,
-) -> block_state {
-    deflate_match_from_abi(state, stream, flush, deflate_rle_from_views)
-}
-
-unsafe fn deflate_huff(
-    state: &mut crate::src::deflate::deflate_state,
-    stream: &mut crate::zlib_h::z_stream_s,
-    flush: ::core::ffi::c_int,
-) -> block_state {
-    deflate_match_from_abi(state, stream, flush, deflate_huff_from_views)
 }
