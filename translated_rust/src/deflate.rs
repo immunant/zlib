@@ -4555,104 +4555,77 @@ fn deflate_fast(
                     state.match_length =
                         longest_match_state(state, window, prev, hash_head).unwrap_or(0);
                 }
-            }
-            let has_match = {
-                let state = &mut *s;
-                state.match_length >= crate::zutil_h::MIN_MATCH as crate::stdlib::uInt
-            };
-            if has_match {
-                let state = &mut *s;
-                let Ok(symbol_len) = usize::try_from(state.sym_end) else {
-                    return need_more;
-                };
-                if symbol_len != 0 && state.sym_buf.is_null() {
-                    return need_more;
-                }
-                let symbols = if symbol_len == 0 {
-                    &mut []
-                } else {
-                    ::core::slice::from_raw_parts_mut(state.sym_buf, symbol_len)
-                };
-                let Some((flush_now, length)) = fast_tally_match_state(state, symbols) else {
-                    return need_more;
-                };
-                bflush = flush_now as ::core::ffi::c_int;
-                if length <= state.max_lazy_match
-                    && state.lookahead >= crate::zutil_h::MIN_MATCH as crate::stdlib::uInt
-                {
-                    state.match_length = length.wrapping_sub(1);
-                    loop {
-                        state.strstart = state.strstart.wrapping_add(1);
-                        let (Ok(window_len), Ok(head_len), Ok(prev_len)) = (
-                            usize::try_from(state.window_size),
-                            usize::try_from(state.hash_size),
-                            usize::try_from(state.w_size),
-                        ) else {
-                            return need_more;
-                        };
-                        if (window_len != 0 && state.window.is_null())
-                            || (head_len != 0 && state.head.is_null())
-                            || (prev_len != 0 && state.prev.is_null())
-                        {
-                            return need_more;
+                if state.match_length >= crate::zutil_h::MIN_MATCH as crate::stdlib::uInt {
+                    let Ok(symbol_len) = usize::try_from(state.sym_end) else {
+                        return need_more;
+                    };
+                    if symbol_len != 0 && state.sym_buf.is_null() {
+                        return need_more;
+                    }
+                    let symbols = if symbol_len == 0 {
+                        &mut []
+                    } else {
+                        ::core::slice::from_raw_parts_mut(state.sym_buf, symbol_len)
+                    };
+                    let Some((flush_now, length)) = fast_tally_match_state(state, symbols) else {
+                        return need_more;
+                    };
+                    bflush = flush_now as ::core::ffi::c_int;
+                    if length <= state.max_lazy_match
+                        && state.lookahead >= crate::zutil_h::MIN_MATCH as crate::stdlib::uInt
+                    {
+                        state.match_length = length.wrapping_sub(1);
+                        loop {
+                            state.strstart = state.strstart.wrapping_add(1);
+                            let Some(previous) = insert_string_state(
+                                window,
+                                head,
+                                prev,
+                                state.strstart,
+                                &mut state.ins_h,
+                                state.hash_shift,
+                                state.hash_mask,
+                                state.w_mask,
+                            ) else {
+                                return need_more;
+                            };
+                            hash_head = previous;
+                            state.match_length = state.match_length.wrapping_sub(1);
+                            if state.match_length == 0 as crate::stdlib::uInt {
+                                break;
+                            }
                         }
-                        let window = if window_len == 0 {
-                            &[]
-                        } else {
-                            ::core::slice::from_raw_parts(state.window, window_len)
-                        };
-                        let head = if head_len == 0 {
-                            &mut []
-                        } else {
-                            ::core::slice::from_raw_parts_mut(state.head, head_len)
-                        };
-                        let prev = if prev_len == 0 {
-                            &mut []
-                        } else {
-                            ::core::slice::from_raw_parts_mut(state.prev, prev_len)
-                        };
-                        let Some(previous) = insert_string_state(
+                        state.strstart = state.strstart.wrapping_add(1);
+                    } else {
+                        state.strstart = state.strstart.wrapping_add(state.match_length);
+                        state.match_length = 0 as crate::stdlib::uInt;
+                        let Some(ins_h) = initialize_hash_state(
                             window,
-                            head,
-                            prev,
                             state.strstart,
-                            &mut state.ins_h,
                             state.hash_shift,
                             state.hash_mask,
-                            state.w_mask,
                         ) else {
                             return need_more;
                         };
-                        hash_head = previous;
-                        state.match_length = state.match_length.wrapping_sub(1);
-                        if state.match_length == 0 as crate::stdlib::uInt {
-                            break;
-                        }
+                        state.ins_h = ins_h;
                     }
-                    state.strstart = state.strstart.wrapping_add(1);
                 } else {
-                    state.strstart = state.strstart.wrapping_add(state.match_length);
-                    state.match_length = 0 as crate::stdlib::uInt;
-                    let Ok(window_len) = usize::try_from(state.window_size) else {
+                    let Ok(symbol_len) = usize::try_from(state.sym_end) else {
                         return need_more;
                     };
-                    if window_len != 0 && state.window.is_null() {
+                    if symbol_len != 0 && state.sym_buf.is_null() {
                         return need_more;
                     }
-                    let window = if window_len == 0 {
-                        &[]
+                    let symbols = if symbol_len == 0 {
+                        &mut []
                     } else {
-                        ::core::slice::from_raw_parts(state.window, window_len)
+                        ::core::slice::from_raw_parts_mut(state.sym_buf, symbol_len)
                     };
-                    let Some(ins_h) = initialize_hash_state(
-                        window,
-                        state.strstart,
-                        state.hash_shift,
-                        state.hash_mask,
-                    ) else {
+                    let Some(flush_now) = tally_current_literal_state(state, window, symbols)
+                    else {
                         return need_more;
                     };
-                    state.ins_h = ins_h;
+                    bflush = flush_now as ::core::ffi::c_int;
                 }
             } else {
                 let state = &mut *s;
