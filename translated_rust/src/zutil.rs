@@ -8,6 +8,57 @@ pub use crate::stdlib::uInt;
 pub use crate::stdlib::uLong;
 pub use crate::stdlib::voidpf;
 pub use crate::zlib_h::ZLIB_VERSION;
+
+fn zlib_version() -> &'static [::core::ffi::c_char; 15] {
+    &crate::zlib_h::ZLIB_VERSION
+}
+
+fn zlib_compile_flags() -> crate::stdlib::uLong {
+    let mut flags = 0;
+
+    flags |= match ::core::mem::size_of::<crate::stdlib::uInt>() {
+        2 => 0,
+        4 => 1,
+        8 => 2,
+        _ => 3,
+    };
+    flags |= match ::core::mem::size_of::<crate::stdlib::uLong>() {
+        2 => 0,
+        4 => 1 << 2,
+        8 => 2 << 2,
+        _ => 3 << 2,
+    };
+    flags |= match ::core::mem::size_of::<crate::stdlib::voidpf>() {
+        2 => 0,
+        4 => 1 << 4,
+        8 => 2 << 4,
+        _ => 3 << 4,
+    };
+    flags |= match ::core::mem::size_of::<crate::stdlib::off_t>() {
+        2 => 0,
+        4 => 1 << 6,
+        8 => 2 << 6,
+        _ => 3 << 6,
+    };
+
+    flags
+}
+
+fn z_error_index(err: ::core::ffi::c_int) -> usize {
+    match err {
+        2 => 0,
+        1 => 1,
+        0 => 2,
+        -1 => 3,
+        -2 => 4,
+        -3 => 5,
+        -4 => 6,
+        -5 => 7,
+        -6 => 8,
+        _ => 9,
+    }
+}
+
 #[no_mangle]
 
 pub static mut z_errmsg: [*mut ::core::ffi::c_char; 10] = [
@@ -22,101 +73,17 @@ pub static mut z_errmsg: [*mut ::core::ffi::c_char; 10] = [
     b"incompatible version\0".as_ptr() as *const ::core::ffi::c_char as *mut ::core::ffi::c_char,
     b"\0".as_ptr() as *const ::core::ffi::c_char as *mut ::core::ffi::c_char,
 ];
-pub unsafe extern "C" fn zlibVersion() -> *const ::core::ffi::c_char {
-    return crate::zlib_h::ZLIB_VERSION.as_ptr();
-}
 #[export_name = "zlibVersion"]
-
 pub unsafe extern "C" fn zlibVersion_ffi() -> *const ::core::ffi::c_char {
-    zlibVersion()
-}
-pub unsafe extern "C" fn zlibCompileFlags() -> crate::stdlib::uLong {
-    let mut flags: crate::stdlib::uLong = 0;
-    flags = 0 as crate::stdlib::uLong;
-    match ::core::mem::size_of::<crate::stdlib::uInt>() as ::core::ffi::c_int {
-        2 => {}
-        4 => {
-            flags = flags.wrapping_add(1 as crate::stdlib::uLong);
-        }
-        8 => {
-            flags = flags.wrapping_add(2 as crate::stdlib::uLong);
-        }
-        _ => {
-            flags = flags.wrapping_add(3 as crate::stdlib::uLong);
-        }
-    }
-    match ::core::mem::size_of::<crate::stdlib::uLong>() as ::core::ffi::c_int {
-        2 => {}
-        4 => {
-            flags = flags.wrapping_add(
-                ((1 as ::core::ffi::c_int) << 2 as ::core::ffi::c_int) as crate::stdlib::uLong,
-            );
-        }
-        8 => {
-            flags = flags.wrapping_add(
-                ((2 as ::core::ffi::c_int) << 2 as ::core::ffi::c_int) as crate::stdlib::uLong,
-            );
-        }
-        _ => {
-            flags = flags.wrapping_add(
-                ((3 as ::core::ffi::c_int) << 2 as ::core::ffi::c_int) as crate::stdlib::uLong,
-            );
-        }
-    }
-    match ::core::mem::size_of::<crate::stdlib::voidpf>() as ::core::ffi::c_int {
-        2 => {}
-        4 => {
-            flags = flags.wrapping_add(
-                ((1 as ::core::ffi::c_int) << 4 as ::core::ffi::c_int) as crate::stdlib::uLong,
-            );
-        }
-        8 => {
-            flags = flags.wrapping_add(
-                ((2 as ::core::ffi::c_int) << 4 as ::core::ffi::c_int) as crate::stdlib::uLong,
-            );
-        }
-        _ => {
-            flags = flags.wrapping_add(
-                ((3 as ::core::ffi::c_int) << 4 as ::core::ffi::c_int) as crate::stdlib::uLong,
-            );
-        }
-    }
-    match ::core::mem::size_of::<crate::stdlib::off_t>() as ::core::ffi::c_int {
-        2 => {}
-        4 => {
-            flags = flags.wrapping_add(
-                ((1 as ::core::ffi::c_int) << 6 as ::core::ffi::c_int) as crate::stdlib::uLong,
-            );
-        }
-        8 => {
-            flags = flags.wrapping_add(
-                ((2 as ::core::ffi::c_int) << 6 as ::core::ffi::c_int) as crate::stdlib::uLong,
-            );
-        }
-        _ => {
-            flags = flags.wrapping_add(
-                ((3 as ::core::ffi::c_int) << 6 as ::core::ffi::c_int) as crate::stdlib::uLong,
-            );
-        }
-    }
-    return flags;
+    zlib_version().as_ptr()
 }
 #[export_name = "zlibCompileFlags"]
-
 pub unsafe extern "C" fn zlibCompileFlags_ffi() -> crate::stdlib::uLong {
-    zlibCompileFlags()
-}
-pub unsafe extern "C" fn zError(mut err: ::core::ffi::c_int) -> *const ::core::ffi::c_char {
-    return z_errmsg[(if err < -6 as ::core::ffi::c_int || err > 2 as ::core::ffi::c_int {
-        9 as ::core::ffi::c_int
-    } else {
-        2 as ::core::ffi::c_int - err
-    }) as usize];
+    zlib_compile_flags()
 }
 #[export_name = "zError"]
-
-pub unsafe extern "C" fn zError_ffi(mut err: ::core::ffi::c_int) -> *const ::core::ffi::c_char {
-    zError(err)
+pub unsafe extern "C" fn zError_ffi(err: ::core::ffi::c_int) -> *const ::core::ffi::c_char {
+    z_errmsg[z_error_index(err)].cast_const()
 }
 pub unsafe extern "C" fn zcalloc(
     mut _opaque: crate::stdlib::voidpf,
