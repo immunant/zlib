@@ -1950,8 +1950,22 @@ struct GzOwnedBuffers {
     output: Vec<::core::ffi::c_uchar>,
 }
 
+// Write-side buffers have the same lifetime as a gzip state, but unlike read
+// buffers they are allocated on the first write.  Keep their Vec backing
+// separate from the read registry: a direct write has no output buffer, and
+// write operations must not borrow either allocation while `gz_comp()` can
+// re-enter the deflater.
+struct GzOwnedWriteBuffers {
+    input: Vec<::core::ffi::c_uchar>,
+    output: Option<Vec<::core::ffi::c_uchar>>,
+}
+
 static GZ_OWNED_BUFFERS: ::std::sync::OnceLock<
     ::std::sync::Mutex<Vec<(usize, GzOwnedBuffers)>>,
+> = ::std::sync::OnceLock::new();
+
+static GZ_OWNED_WRITE_BUFFERS: ::std::sync::OnceLock<
+    ::std::sync::Mutex<Vec<(usize, GzOwnedWriteBuffers)>>,
 > = ::std::sync::OnceLock::new();
 
 fn gz_state_key(state: &crate::gzguts_h::gz_state) -> usize {
@@ -1974,10 +1988,13 @@ fn gz_owned_buffers() -> &'static ::std::sync::Mutex<Vec<(usize, GzOwnedBuffers)
     GZ_OWNED_BUFFERS.get_or_init(|| ::std::sync::Mutex::new(Vec::new()))
 }
 
+fn gz_owned_write_buffers() -> &'static ::std::sync::Mutex<Vec<(usize, GzOwnedWriteBuffers)>> {
+    GZ_OWNED_WRITE_BUFFERS.get_or_init(|| ::std::sync::Mutex::new(Vec::new()))
+}
+
 // Allocate a zero-filled C-compatible buffer without publishing it through
 // the state until the paired input/output setup has succeeded.
-pub(crate) fn gz_owned_buffer(len: ::core::ffi::c_uint) -> Option<Vec<::core::ffi::c_uchar>> {
-    let len = usize::try_from(len).ok()?;
+pub(crate) fn gz_owned_buffer(len: usize) -> Option<Vec<::core::ffi::c_uchar>> {
     let mut buffer = Vec::new();
     buffer.try_reserve_exact(len).ok()?;
     buffer.resize(len, 0);
@@ -2046,6 +2063,55 @@ pub(crate) fn gz_with_owned_read_buffers<R>(
 // the registry entry releases both lazy arrays before the opaque state box.
 pub(crate) fn gz_release_owned_buffers(state: &crate::gzguts_h::gz_state) {
     let mut buffers = gz_owned_buffers().lock().expect("gzip buffer registry poisoned");
+    if let Some(index) = buffers
+        .iter()
+        .position(|(key, _)| *key == gz_state_key(state))
+    {
+        buffers.swap_remove(index);
+    }
+}
+
+// Publish write buffers before the deflater starts using their C cursors.
+// The allocation remains owned by the registry until write close, and callers
+// borrow it only for short copy/fill operations outside deflater calls.
+pub(crate) fn gz_register_owned_write_buffers(
+    state: &mut crate::gzguts_h::gz_state,
+    mut input: Vec<::core::ffi::c_uchar>,
+    mut output: Option<Vec<::core::ffi::c_uchar>>,
+) -> bool {
+    let mut buffers = gz_owned_write_buffers()
+        .lock()
+        .expect("gzip write buffer registry poisoned");
+    if buffers.try_reserve(1).is_err() {
+        return false;
+    }
+    state.in_0 = input.as_mut_ptr();
+    state.out = match output.as_mut() {
+        Some(buffer) => buffer.as_mut_ptr(),
+        None => ::core::ptr::null_mut(),
+    };
+    buffers.push((
+        gz_state_key(state),
+        GzOwnedWriteBuffers { input, output },
+    ));
+    true
+}
+
+pub(crate) fn gz_with_owned_write_input_buffer<R>(
+    state_key: usize,
+    operation: impl FnOnce(&mut [::core::ffi::c_uchar]) -> R,
+) -> Option<R> {
+    let mut buffers = gz_owned_write_buffers()
+        .lock()
+        .expect("gzip write buffer registry poisoned");
+    let (_, buffers) = buffers.iter_mut().find(|(key, _)| *key == state_key)?;
+    Some(operation(&mut buffers.input))
+}
+
+pub(crate) fn gz_release_owned_write_buffers(state: &crate::gzguts_h::gz_state) {
+    let mut buffers = gz_owned_write_buffers()
+        .lock()
+        .expect("gzip write buffer registry poisoned");
     if let Some(index) = buffers
         .iter()
         .position(|(key, _)| *key == gz_state_key(state))

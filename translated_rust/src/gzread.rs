@@ -221,7 +221,7 @@ fn gz_look(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
         // Keep both zero-filled buffers local until the inflater and their
         // registry ownership are ready. This preserves C's allocation order
         // while avoiding a partially-published state across setup.
-        let Some(input) = crate::src::gzlib::gz_owned_buffer(state.want) else {
+        let Some(input) = crate::src::gzlib::gz_owned_buffer(state.want as usize) else {
             crate::src::gzlib::gz_error(
                 state,
                 crate::zlib_h::Z_MEM_ERROR,
@@ -229,7 +229,7 @@ fn gz_look(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
             );
             return -1 as ::core::ffi::c_int;
         };
-        let Some(output) = crate::src::gzlib::gz_owned_buffer(state.want.wrapping_shl(1)) else {
+        let Some(output) = crate::src::gzlib::gz_owned_buffer(state.want.wrapping_shl(1) as usize) else {
             crate::src::gzlib::gz_error(
                 state,
                 crate::zlib_h::Z_MEM_ERROR,

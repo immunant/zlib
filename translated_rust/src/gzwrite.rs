@@ -88,26 +88,12 @@ fn gz_init(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
             ..
         } => Some((output_len, level, strategy)),
     };
-    // Keep successful allocations local until deflater construction has
-    // completed.  `gz_init()` does not expose either buffer before then, so
-    // this avoids publishing a temporary allocation across that callback
-    // boundary while preserving zlib's allocation and cleanup order.
-    let Some(input) =
-        ::core::ptr::NonNull::new(crate::stdlib::malloc(input_len).cast::<::core::ffi::c_uchar>())
-    else {
+    let Some(input) = crate::src::gzlib::gz_owned_buffer(input_len) else {
         crate::src::gzlib::gz_error(state, crate::zlib_h::Z_MEM_ERROR, Some(b"out of memory\0"));
         return -1 as ::core::ffi::c_int;
     };
-    if let Some((output_len, level, strategy)) = deflate {
-        let Some(output) = ::core::ptr::NonNull::new(
-            crate::stdlib::malloc(output_len).cast::<::core::ffi::c_uchar>(),
-        ) else {
-            // This input allocation uses zlib's default allocator, so its
-            // matching safe default deallocator can release it here.
-            crate::src::zutil::zcfree(
-                ::core::ptr::null_mut(),
-                input.as_ptr() as crate::stdlib::voidpf,
-            );
+    let output = if let Some((output_len, _, _)) = deflate {
+        let Some(output) = crate::src::gzlib::gz_owned_buffer(output_len) else {
             crate::src::gzlib::gz_error(
                 state,
                 crate::zlib_h::Z_MEM_ERROR,
@@ -115,6 +101,28 @@ fn gz_init(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
             );
             return -1 as ::core::ffi::c_int;
         };
+        Some(output)
+    } else {
+        None
+    };
+    // The registry owns the backing Vecs for the entire initialized write
+    // state. Publish them before installing C-facing cursors, then never
+    // borrow one across a deflater call.
+    if !crate::src::gzlib::gz_register_owned_write_buffers(state, input, output) {
+        crate::src::gzlib::gz_error(state, crate::zlib_h::Z_MEM_ERROR, Some(b"out of memory\0"));
+        return -1 as ::core::ffi::c_int;
+    }
+    if let Some((_, level, strategy)) = deflate {
+        if state.out.is_null() {
+            crate::src::gzlib::gz_release_owned_write_buffers(state);
+            state.in_0 = ::core::ptr::null_mut();
+            crate::src::gzlib::gz_error(
+                state,
+                crate::zlib_h::Z_MEM_ERROR,
+                Some(b"out of memory\0"),
+            );
+            return -1 as ::core::ffi::c_int;
+        }
         gz_init_prepare_deflater(state);
         ret = crate::src::deflate::deflateInit2_(
             Some(&mut state.strm),
@@ -127,16 +135,9 @@ fn gz_init(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
             ::core::mem::size_of::<crate::zlib_h::z_stream>() as ::core::ffi::c_int,
         );
         if ret != crate::zlib_h::Z_OK {
-            // Failed initialization has not transferred either default
-            // allocation, so release exactly those two buffers in C order.
-            crate::src::zutil::zcfree(
-                ::core::ptr::null_mut(),
-                output.as_ptr() as crate::stdlib::voidpf,
-            );
-            crate::src::zutil::zcfree(
-                ::core::ptr::null_mut(),
-                input.as_ptr() as crate::stdlib::voidpf,
-            );
+            crate::src::gzlib::gz_release_owned_write_buffers(state);
+            state.in_0 = ::core::ptr::null_mut();
+            state.out = ::core::ptr::null_mut();
             crate::src::gzlib::gz_error(
                 state,
                 crate::zlib_h::Z_MEM_ERROR,
@@ -144,11 +145,7 @@ fn gz_init(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
             );
             return -1 as ::core::ffi::c_int;
         }
-        state.in_0 = input.as_ptr();
-        state.out = output.as_ptr();
         state.strm.next_in = ::core::ptr::null_mut::<crate::stdlib::Bytef>();
-    } else {
-        state.in_0 = input.as_ptr();
     }
     gz_init_finish(state);
     return 0 as ::core::ffi::c_int;
@@ -273,12 +270,22 @@ fn gz_zero(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
     loop {
         n = crate::src::gzlib::gz_skip_chunk(state.size, state.skip);
         if first != 0 {
-            // SAFETY: `gz_init` allocated `in_0` with at least `size` bytes,
-            // and this first sparse-write chunk is bounded by that size.
-            // `write_bytes` does not form references to malloc's still-
-            // uninitialized storage.
-            unsafe {
-                ::core::ptr::write_bytes(state.in_0, 0, n as usize);
+            let state_key = crate::src::gzlib::gz_owned_buffer_key(state);
+            let zeroed = crate::src::gzlib::gz_with_owned_write_input_buffer(
+                state_key,
+                |input| {
+                    for byte in &mut input[..n as usize] {
+                        *byte = 0;
+                    }
+                },
+            );
+            if zeroed.is_none() {
+                crate::src::gzlib::gz_error(
+                    state,
+                    crate::zlib_h::Z_STREAM_ERROR,
+                    Some(b"internal error: gzip write buffer missing\0"),
+                );
+                return -1 as ::core::ffi::c_int;
             }
             first = 0 as ::core::ffi::c_int;
         }
@@ -330,17 +337,26 @@ fn gz_write(
     if buffered {
         loop {
             let plan = crate::src::gzlib::gz_buffered_copy_plan(state, len);
-            // SAFETY: the plan limits this range to free bytes in the
-            // initialized gzip input allocation, and the FFI caller supplied
-            // at least the remaining source bytes. Bind that allocation once;
-            // the copy itself can then stay in safe Rust.
-            let destination = unsafe {
-                ::core::slice::from_raw_parts_mut(
-                    state.in_0.wrapping_add(plan.offset as usize),
-                    plan.len as usize,
-                )
-            };
-            destination.copy_from_slice(&source[..plan.len as usize]);
+            let state_key = crate::src::gzlib::gz_owned_buffer_key(state);
+            let copied = crate::src::gzlib::gz_with_owned_write_input_buffer(
+                state_key,
+                |input| {
+                    let end = plan.offset as usize + plan.len as usize;
+                    let Some(destination) = input.get_mut(plan.offset as usize..end) else {
+                        return false;
+                    };
+                    destination.copy_from_slice(&source[..plan.len as usize]);
+                    true
+                },
+            );
+            if copied != Some(true) {
+                crate::src::gzlib::gz_error(
+                    state,
+                    crate::zlib_h::Z_STREAM_ERROR,
+                    Some(b"internal error: gzip write buffer missing\0"),
+                );
+                return 0 as crate::stdlib::z_size_t;
+            }
             crate::src::gzlib::gz_buffered_copy_progress(state, &mut len, plan.len);
             source = &source[plan.len as usize..];
             if len == 0 as crate::stdlib::z_size_t {
@@ -832,13 +848,12 @@ pub fn gzclose_w(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
     match cleanup {
         crate::src::gzlib::GzWriteCloseCleanup::DeflaterAndBuffers => {
             crate::src::deflate::deflate_end_default_bound(&mut state.strm);
-            crate::src::zutil::zcfree(::core::ptr::null_mut(), state.out as crate::stdlib::voidpf);
         }
         crate::src::gzlib::GzWriteCloseCleanup::None
         | crate::src::gzlib::GzWriteCloseCleanup::Input => {}
     }
     if !matches!(cleanup, crate::src::gzlib::GzWriteCloseCleanup::None) {
-        crate::src::zutil::zcfree(::core::ptr::null_mut(), state.in_0 as crate::stdlib::voidpf);
+        crate::src::gzlib::gz_release_owned_write_buffers(state);
     }
     crate::src::gzlib::gzclearerr(state);
     let fd = state.fd;
