@@ -235,7 +235,10 @@ unsafe fn inflate_back_pull_byte(
     }
     *have = have.wrapping_sub(1);
     let byte = **next;
-    *next = next.offset(1);
+    // The byte above was read only after `have` proved this cursor valid.
+    // Retain zlib's one-past-end cursor publication without making the
+    // arithmetic itself an additional unsafe operation.
+    *next = next.wrapping_add(1);
     Some(byte)
 }
 
