@@ -42,10 +42,7 @@ pub use crate::zlib_h::Z_OK;
 pub use crate::zlib_h::Z_STREAM_END;
 pub use crate::zlib_h::Z_STREAM_ERROR;
 
-fn gz_write_fd(
-    fd: &std::os::fd::OwnedFd,
-    buffer: &[u8],
-) -> Result<usize, rustix::io::Errno> {
+fn gz_write_fd(fd: &std::os::fd::OwnedFd, buffer: &[u8]) -> Result<usize, rustix::io::Errno> {
     rustix::io::write(fd, buffer)
 }
 
@@ -56,6 +53,18 @@ fn gz_write_fd(
 enum GzCompInput<'a> {
     Buffered,
     External(&'a [u8]),
+}
+
+/// The only operations in gzip writing that still need access to the legacy
+/// deflate stream.  Keeping initialization and a single compression step here
+/// means the buffered I/O loop can remain concerned only with its safe
+/// `Vec`-backed input and output buffers.
+enum GzDeflateOperation {
+    Initialize,
+    Run {
+        flush: ::core::ffi::c_int,
+        reset: bool,
+    },
 }
 
 fn gz_save_direct_input(state: &mut crate::gzguts_h::gz_state, input: &[u8]) -> bool {
@@ -74,72 +83,92 @@ fn gz_save_direct_input(state: &mut crate::gzguts_h::gz_state, input: &[u8]) -> 
     true
 }
 
-unsafe fn gz_init(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
+unsafe fn gz_init(
+    state: &mut crate::gzguts_h::gz_state,
+    operation: GzDeflateOperation,
+) -> ::core::ffi::c_int {
+    let run = matches!(&operation, GzDeflateOperation::Run { .. });
     let mut ret: ::core::ffi::c_int = 0;
     let strm: &mut crate::zlib_h::z_stream = &mut state.strm;
-    let Some(input_len) = (state.want as usize).checked_mul(2) else {
-        crate::src::gzlib::gz_error_state(
-            state,
-            crate::zlib_h::Z_MEM_ERROR,
-            Some(c"out of memory"),
-        );
-        return -1 as ::core::ffi::c_int;
+    if state.size == 0 {
+        let Some(input_len) = (state.want as usize).checked_mul(2) else {
+            crate::src::gzlib::gz_error_state(
+                state,
+                crate::zlib_h::Z_MEM_ERROR,
+                Some(c"out of memory"),
+            );
+            return -1 as ::core::ffi::c_int;
+        };
+        if state.in_0.try_reserve_exact(input_len).is_err() {
+            crate::src::gzlib::gz_error_state(
+                state,
+                crate::zlib_h::Z_MEM_ERROR,
+                Some(c"out of memory"),
+            );
+            return -1 as ::core::ffi::c_int;
+        }
+        state.in_0.resize(input_len, 0);
+        if state.direct == 0 {
+            let output_len = state.want as usize;
+            if state.out.try_reserve_exact(output_len).is_ok() {
+                state.out.resize(output_len, 0);
+            }
+            if state.out.len() != output_len {
+                state.in_0.clear();
+                crate::src::gzlib::gz_error_state(
+                    state,
+                    crate::zlib_h::Z_MEM_ERROR,
+                    Some(c"out of memory"),
+                );
+                return -1 as ::core::ffi::c_int;
+            }
+            strm.zalloc = None;
+            strm.zfree = None;
+            strm.opaque = ::core::ptr::null_mut::<::core::ffi::c_void>();
+            ret = crate::src::deflate::deflateInit2_(
+                Some(strm),
+                state.level,
+                8 as ::core::ffi::c_int,
+                15 as ::core::ffi::c_int + 16 as ::core::ffi::c_int,
+                8 as ::core::ffi::c_int,
+                state.strategy,
+                Some(crate::zlib_h::ZLIB_VERSION[0]),
+                ::core::mem::size_of::<crate::zlib_h::z_stream>() as ::core::ffi::c_int,
+            );
+            if ret != crate::zlib_h::Z_OK {
+                state.in_0.clear();
+                state.out.clear();
+                crate::src::gzlib::gz_error_state(
+                    state,
+                    crate::zlib_h::Z_MEM_ERROR,
+                    Some(c"out of memory"),
+                );
+                return -1 as ::core::ffi::c_int;
+            }
+            strm.next_in = ::core::ptr::null_mut::<crate::stdlib::Bytef>();
+        }
+        state.size = state.want;
+        if state.direct == 0 {
+            strm.avail_out = state.size as crate::stdlib::uInt;
+            strm.next_out = state.out.as_mut_ptr();
+            state.x.next = strm.next_out as *mut ::core::ffi::c_uchar;
+        }
+    }
+    if !run {
+        return 0;
+    }
+    if state.direct != 0 {
+        return crate::zlib_h::Z_OK;
+    }
+
+    let GzDeflateOperation::Run { flush, reset } = operation else {
+        unreachable!("the initialization operation returned above");
     };
-    if state.in_0.try_reserve_exact(input_len).is_err() {
-        crate::src::gzlib::gz_error_state(
-            state,
-            crate::zlib_h::Z_MEM_ERROR,
-            Some(c"out of memory"),
-        );
-        return -1 as ::core::ffi::c_int;
+    if reset {
+        crate::src::deflate::deflateReset(strm);
+        state.reset = 0;
     }
-    state.in_0.resize(input_len, 0);
-    if state.direct == 0 {
-        let output_len = state.want as usize;
-        if state.out.try_reserve_exact(output_len).is_ok() {
-            state.out.resize(output_len, 0);
-        }
-        if state.out.len() != output_len {
-            state.in_0.clear();
-            crate::src::gzlib::gz_error_state(
-                state,
-                crate::zlib_h::Z_MEM_ERROR,
-                Some(c"out of memory"),
-            );
-            return -1 as ::core::ffi::c_int;
-        }
-        strm.zalloc = None;
-        strm.zfree = None;
-        strm.opaque = ::core::ptr::null_mut::<::core::ffi::c_void>();
-        ret = crate::src::deflate::deflateInit2_(
-            Some(strm),
-            state.level,
-            8 as ::core::ffi::c_int,
-            15 as ::core::ffi::c_int + 16 as ::core::ffi::c_int,
-            8 as ::core::ffi::c_int,
-            state.strategy,
-            Some(crate::zlib_h::ZLIB_VERSION[0]),
-            ::core::mem::size_of::<crate::zlib_h::z_stream>() as ::core::ffi::c_int,
-        );
-        if ret != crate::zlib_h::Z_OK {
-            state.in_0.clear();
-            state.out.clear();
-            crate::src::gzlib::gz_error_state(
-                state,
-                crate::zlib_h::Z_MEM_ERROR,
-                Some(c"out of memory"),
-            );
-            return -1 as ::core::ffi::c_int;
-        }
-        strm.next_in = ::core::ptr::null_mut::<crate::stdlib::Bytef>();
-    }
-    state.size = state.want;
-    if state.direct == 0 {
-        strm.avail_out = state.size as crate::stdlib::uInt;
-        strm.next_out = state.out.as_mut_ptr();
-        state.x.next = strm.next_out as *mut ::core::ffi::c_uchar;
-    }
-    return 0 as ::core::ffi::c_int;
+    crate::src::deflate::deflate(strm, flush)
 }
 
 unsafe fn gz_comp(
@@ -147,16 +176,32 @@ unsafe fn gz_comp(
     flush: ::core::ffi::c_int,
     direct_input: Option<GzCompInput<'_>>,
 ) -> ::core::ffi::c_int {
-    let mut ret: ::core::ffi::c_int = 0;
     let mut have: ::core::ffi::c_uint = 0;
     let mut put: ::core::ffi::c_uint = 0;
     let mut max: ::core::ffi::c_uint = (-1 as ::core::ffi::c_int as ::core::ffi::c_uint
         >> 2 as ::core::ffi::c_int)
         .wrapping_add(1 as ::core::ffi::c_uint);
-    if state.size == 0 as ::core::ffi::c_uint && gz_init(state) == -1 as ::core::ffi::c_int {
-        return -1 as ::core::ffi::c_int;
-    }
     if state.direct != 0 {
+        if state.size == 0 {
+            let Some(input_len) = (state.want as usize).checked_mul(2) else {
+                crate::src::gzlib::gz_error_state(
+                    state,
+                    crate::zlib_h::Z_MEM_ERROR,
+                    Some(c"out of memory"),
+                );
+                return -1;
+            };
+            if state.in_0.try_reserve_exact(input_len).is_err() {
+                crate::src::gzlib::gz_error_state(
+                    state,
+                    crate::zlib_h::Z_MEM_ERROR,
+                    Some(c"out of memory"),
+                );
+                return -1;
+            }
+            state.in_0.resize(input_len, 0);
+            state.size = state.want;
+        }
         if state.strm.avail_in == 0 {
             return 0 as ::core::ffi::c_int;
         }
@@ -235,9 +280,7 @@ unsafe fn gz_comp(
                             return -1;
                         }
                     }
-                    if error == rustix::io::Errno::AGAIN
-                        || error == rustix::io::Errno::WOULDBLOCK
-                    {
+                    if error == rustix::io::Errno::AGAIN || error == rustix::io::Errno::WOULDBLOCK {
                         state.again = 1 as ::core::ffi::c_int;
                     }
                     let error = std::io::Error::from_raw_os_error(error.raw_os_error());
@@ -259,18 +302,22 @@ unsafe fn gz_comp(
         }
         return 0 as ::core::ffi::c_int;
     }
-    if state.reset != 0 {
+    let mut reset = state.reset != 0;
+    if reset {
         if state.strm.avail_in == 0 as crate::stdlib::uInt && flush == crate::zlib_h::Z_NO_FLUSH {
             return 0 as ::core::ffi::c_int;
         }
-        crate::src::deflate::deflateReset(&mut state.strm);
-        state.reset = 0 as ::core::ffi::c_int;
     }
-    ret = crate::zlib_h::Z_OK;
+    let mut ret = crate::zlib_h::Z_OK;
+    // On the first compressed call, `gz_init` below establishes the output
+    // cursor.  Subsequent calls must drain that cursor before another deflate
+    // step, exactly as before.
+    let mut buffers_ready = state.size != 0;
     loop {
-        if state.strm.avail_out == 0 as crate::stdlib::uInt
-            || flush != crate::zlib_h::Z_NO_FLUSH
-                && (flush != crate::zlib_h::Z_FINISH || ret == crate::zlib_h::Z_STREAM_END)
+        if buffers_ready
+            && (state.strm.avail_out == 0 as crate::stdlib::uInt
+                || flush != crate::zlib_h::Z_NO_FLUSH
+                    && (flush != crate::zlib_h::Z_FINISH || ret == crate::zlib_h::Z_STREAM_END))
         {
             while state.strm.next_out > state.x.next {
                 state.again = 0 as ::core::ffi::c_int;
@@ -323,7 +370,12 @@ unsafe fn gz_comp(
             }
         }
         have = state.strm.avail_out as ::core::ffi::c_uint;
-        ret = crate::src::deflate::deflate(&mut state.strm, flush);
+        ret = gz_init(state, GzDeflateOperation::Run { flush, reset });
+        buffers_ready = true;
+        reset = false;
+        if ret == -1 {
+            return -1;
+        }
         if ret == crate::zlib_h::Z_STREAM_ERROR {
             crate::src::gzlib::gz_error_state(
                 state,
@@ -393,17 +445,16 @@ unsafe fn gz_zero(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
     return 0 as ::core::ffi::c_int;
 }
 
-unsafe fn gz_write(
-    state: &mut crate::gzguts_h::gz_state,
-    input: &[u8],
-) -> crate::stdlib::z_size_t {
+unsafe fn gz_write(state: &mut crate::gzguts_h::gz_state, input: &[u8]) -> crate::stdlib::z_size_t {
     let len = input.len();
     let mut put: crate::stdlib::z_size_t = len;
     let mut ret: ::core::ffi::c_int = 0;
     if len == 0 as crate::stdlib::z_size_t {
         return 0 as crate::stdlib::z_size_t;
     }
-    if state.size == 0 as ::core::ffi::c_uint && gz_init(state) == -1 as ::core::ffi::c_int {
+    if state.size == 0 as ::core::ffi::c_uint
+        && gz_init(state, GzDeflateOperation::Initialize) == -1 as ::core::ffi::c_int
+    {
         return 0 as crate::stdlib::z_size_t;
     }
     if state.skip != 0 && gz_zero(state) == -1 as ::core::ffi::c_int {
@@ -479,7 +530,9 @@ unsafe fn gz_write(
                 state,
                 crate::zlib_h::Z_NO_FLUSH,
                 if state.direct != 0 {
-                    Some(GzCompInput::External(&input[consumed..consumed + n as usize]))
+                    Some(GzCompInput::External(
+                        &input[consumed..consumed + n as usize],
+                    ))
                 } else {
                     Some(GzCompInput::Buffered)
                 },
@@ -614,10 +667,7 @@ pub unsafe extern "C" fn gzputc_ffi(
     };
     gzputc(state, c)
 }
-unsafe fn gzputs(
-    state: &mut crate::gzguts_h::gz_state,
-    input: &[u8],
-) -> ::core::ffi::c_int {
+unsafe fn gzputs(state: &mut crate::gzguts_h::gz_state, input: &[u8]) -> ::core::ffi::c_int {
     if state.mode != crate::gzguts_h::GZ_WRITE
         || state.err != crate::zlib_h::Z_OK && state.again == 0
     {
@@ -773,9 +823,7 @@ pub unsafe extern "C" fn gzsetparams_ffi(
 }
 /// Finish the write stream before releasing the already-owned gzip state.
 /// The opaque-handle conversion is confined to the exported boundary.
-pub unsafe fn gzclose_w(
-    mut owned: Box<crate::gzguts_h::gz_state>,
-) -> ::core::ffi::c_int {
+pub unsafe fn gzclose_w(mut owned: Box<crate::gzguts_h::gz_state>) -> ::core::ffi::c_int {
     let ret = {
         let state: &mut crate::gzguts_h::gz_state = owned.as_mut();
         let mut ret: ::core::ffi::c_int = crate::zlib_h::Z_OK;
