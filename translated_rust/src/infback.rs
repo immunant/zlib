@@ -67,6 +67,17 @@ pub use crate::zlib_h::Z_OK;
 pub use crate::zlib_h::Z_STREAM_END;
 pub use crate::zlib_h::Z_STREAM_ERROR;
 pub use crate::zlib_h::Z_VERSION_ERROR;
+fn initialize_inflate_back_state(
+    state: &mut crate::src::inflate::inflate_state,
+    window_bits: ::core::ffi::c_int,
+) {
+    state.dmax = 32768 as ::core::ffi::c_uint;
+    state.wbits = window_bits as crate::stdlib::uInt as ::core::ffi::c_uint;
+    state.wsize = (1 as ::core::ffi::c_uint) << window_bits;
+    state.wnext = 0 as ::core::ffi::c_uint;
+    state.whave = 0 as ::core::ffi::c_uint;
+    state.sane = 1 as ::core::ffi::c_int;
+}
 pub unsafe extern "C" fn inflateBackInit_(
     mut strm: crate::zlib_h::z_streamp,
     mut windowBits: ::core::ffi::c_int,
@@ -77,7 +88,7 @@ pub unsafe extern "C" fn inflateBackInit_(
     let mut state: *mut crate::src::inflate::inflate_state =
         ::core::ptr::null_mut::<crate::src::inflate::inflate_state>();
     if version.is_null()
-        || *version.offset(0 as ::core::ffi::c_int as isize) as ::core::ffi::c_int
+        || *version as ::core::ffi::c_int
             != crate::zlib_h::ZLIB_VERSION[0 as ::core::ffi::c_int as usize] as ::core::ffi::c_int
         || stream_size != ::core::mem::size_of::<crate::zlib_h::z_stream>() as ::core::ffi::c_int
     {
@@ -118,13 +129,9 @@ pub unsafe extern "C" fn inflateBackInit_(
         return crate::zlib_h::Z_MEM_ERROR;
     }
     (*strm).state = state as *mut crate::src::deflate::internal_state;
-    (*state).dmax = 32768 as ::core::ffi::c_uint;
-    (*state).wbits = windowBits as crate::stdlib::uInt as ::core::ffi::c_uint;
-    (*state).wsize = (1 as ::core::ffi::c_uint) << windowBits;
-    (*state).window = window;
-    (*state).wnext = 0 as ::core::ffi::c_uint;
-    (*state).whave = 0 as ::core::ffi::c_uint;
-    (*state).sane = 1 as ::core::ffi::c_int;
+    let state = &mut *state;
+    initialize_inflate_back_state(state, windowBits);
+    state.window = window;
     return crate::zlib_h::Z_OK;
 }
 #[export_name = "inflateBackInit_"]
