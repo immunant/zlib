@@ -603,7 +603,7 @@ fn inflate_state_fields_are_valid(state: &crate::src::inflate::inflate_state) ->
     inflate_mode_is_valid(state.mode)
 }
 
-unsafe extern "C" fn inflateStateCheck(mut strm: crate::zlib_h::z_streamp) -> ::core::ffi::c_int {
+unsafe fn inflateStateCheck(mut strm: crate::zlib_h::z_streamp) -> ::core::ffi::c_int {
     if strm.is_null() {
         return 1 as ::core::ffi::c_int;
     }
@@ -708,6 +708,14 @@ fn inflate_reset2_config(mut window_bits: ::core::ffi::c_int) -> Option<InflateR
     Some(InflateReset2Config { wrap, window_bits })
 }
 
+fn inflate_reset2_should_free_window(
+    window_is_null: bool,
+    current_wbits: ::core::ffi::c_uint,
+    new_window_bits: ::core::ffi::c_int,
+) -> bool {
+    !window_is_null && current_wbits != new_window_bits as ::core::ffi::c_uint
+}
+
 #[export_name = "inflateReset2"]
 
 pub unsafe extern "C" fn inflateReset2_ffi(
@@ -723,7 +731,11 @@ pub unsafe extern "C" fn inflateReset2_ffi(
     let Some(config) = inflate_reset2_config(windowBits) else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
-    if !(*state).window.is_null() && (*state).wbits != config.window_bits as ::core::ffi::c_uint {
+    if inflate_reset2_should_free_window(
+        (*state).window.is_null(),
+        (*state).wbits,
+        config.window_bits,
+    ) {
         Some((*strm).zfree.expect("non-null function pointer")).expect("non-null function pointer")(
             (*strm).opaque,
             (*state).window as crate::stdlib::voidpf,
@@ -853,7 +865,7 @@ pub unsafe extern "C" fn inflatePrime_ffi(
     let state = &mut *((*strm).state as *mut crate::src::inflate::inflate_state);
     inflatePrime(state, bits, value)
 }
-unsafe extern "C" fn updatewindow(
+unsafe fn updatewindow(
     mut strm: crate::zlib_h::z_streamp,
     mut end: *const crate::stdlib::Bytef,
     mut copy: ::core::ffi::c_uint,

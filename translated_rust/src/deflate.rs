@@ -205,12 +205,8 @@ pub const finish_started: block_state = 2;
 
 pub const need_more: block_state = 0;
 
-pub type compress_func = Option<
-    unsafe extern "C" fn(
-        *mut crate::src::deflate::deflate_state,
-        ::core::ffi::c_int,
-    ) -> block_state,
->;
+pub type compress_func =
+    Option<unsafe fn(*mut crate::src::deflate::deflate_state, ::core::ffi::c_int) -> block_state>;
 
 pub type config = config_s;
 #[derive(Copy, Clone)]
@@ -238,130 +234,70 @@ static configuration_table: [config; 10] = [
         max_lazy: 0 as crate::zutil_h::ush,
         nice_length: 0 as crate::zutil_h::ush,
         max_chain: 0 as crate::zutil_h::ush,
-        func: Some(
-            deflate_stored
-                as unsafe extern "C" fn(
-                    *mut crate::src::deflate::deflate_state,
-                    ::core::ffi::c_int,
-                ) -> block_state,
-        ),
+        func: Some(deflate_stored),
     },
     config_s {
         good_length: 4 as crate::zutil_h::ush,
         max_lazy: 4 as crate::zutil_h::ush,
         nice_length: 8 as crate::zutil_h::ush,
         max_chain: 4 as crate::zutil_h::ush,
-        func: Some(
-            deflate_fast
-                as unsafe extern "C" fn(
-                    *mut crate::src::deflate::deflate_state,
-                    ::core::ffi::c_int,
-                ) -> block_state,
-        ),
+        func: Some(deflate_fast),
     },
     config_s {
         good_length: 4 as crate::zutil_h::ush,
         max_lazy: 5 as crate::zutil_h::ush,
         nice_length: 16 as crate::zutil_h::ush,
         max_chain: 8 as crate::zutil_h::ush,
-        func: Some(
-            deflate_fast
-                as unsafe extern "C" fn(
-                    *mut crate::src::deflate::deflate_state,
-                    ::core::ffi::c_int,
-                ) -> block_state,
-        ),
+        func: Some(deflate_fast),
     },
     config_s {
         good_length: 4 as crate::zutil_h::ush,
         max_lazy: 6 as crate::zutil_h::ush,
         nice_length: 32 as crate::zutil_h::ush,
         max_chain: 32 as crate::zutil_h::ush,
-        func: Some(
-            deflate_fast
-                as unsafe extern "C" fn(
-                    *mut crate::src::deflate::deflate_state,
-                    ::core::ffi::c_int,
-                ) -> block_state,
-        ),
+        func: Some(deflate_fast),
     },
     config_s {
         good_length: 4 as crate::zutil_h::ush,
         max_lazy: 4 as crate::zutil_h::ush,
         nice_length: 16 as crate::zutil_h::ush,
         max_chain: 16 as crate::zutil_h::ush,
-        func: Some(
-            deflate_slow
-                as unsafe extern "C" fn(
-                    *mut crate::src::deflate::deflate_state,
-                    ::core::ffi::c_int,
-                ) -> block_state,
-        ),
+        func: Some(deflate_slow),
     },
     config_s {
         good_length: 8 as crate::zutil_h::ush,
         max_lazy: 16 as crate::zutil_h::ush,
         nice_length: 32 as crate::zutil_h::ush,
         max_chain: 32 as crate::zutil_h::ush,
-        func: Some(
-            deflate_slow
-                as unsafe extern "C" fn(
-                    *mut crate::src::deflate::deflate_state,
-                    ::core::ffi::c_int,
-                ) -> block_state,
-        ),
+        func: Some(deflate_slow),
     },
     config_s {
         good_length: 8 as crate::zutil_h::ush,
         max_lazy: 16 as crate::zutil_h::ush,
         nice_length: 128 as crate::zutil_h::ush,
         max_chain: 128 as crate::zutil_h::ush,
-        func: Some(
-            deflate_slow
-                as unsafe extern "C" fn(
-                    *mut crate::src::deflate::deflate_state,
-                    ::core::ffi::c_int,
-                ) -> block_state,
-        ),
+        func: Some(deflate_slow),
     },
     config_s {
         good_length: 8 as crate::zutil_h::ush,
         max_lazy: 32 as crate::zutil_h::ush,
         nice_length: 128 as crate::zutil_h::ush,
         max_chain: 256 as crate::zutil_h::ush,
-        func: Some(
-            deflate_slow
-                as unsafe extern "C" fn(
-                    *mut crate::src::deflate::deflate_state,
-                    ::core::ffi::c_int,
-                ) -> block_state,
-        ),
+        func: Some(deflate_slow),
     },
     config_s {
         good_length: 32 as crate::zutil_h::ush,
         max_lazy: 128 as crate::zutil_h::ush,
         nice_length: 258 as crate::zutil_h::ush,
         max_chain: 1024 as crate::zutil_h::ush,
-        func: Some(
-            deflate_slow
-                as unsafe extern "C" fn(
-                    *mut crate::src::deflate::deflate_state,
-                    ::core::ffi::c_int,
-                ) -> block_state,
-        ),
+        func: Some(deflate_slow),
     },
     config_s {
         good_length: 32 as crate::zutil_h::ush,
         max_lazy: 258 as crate::zutil_h::ush,
         nice_length: 258 as crate::zutil_h::ush,
         max_chain: 4096 as crate::zutil_h::ush,
-        func: Some(
-            deflate_slow
-                as unsafe extern "C" fn(
-                    *mut crate::src::deflate::deflate_state,
-                    ::core::ffi::c_int,
-                ) -> block_state,
-        ),
+        func: Some(deflate_slow),
     },
 ];
 
@@ -416,7 +352,7 @@ fn deflate_hash_update(
     (ins_h << hash_shift ^ byte as crate::stdlib::uInt) & hash_mask
 }
 
-unsafe extern "C" fn read_buf(
+unsafe fn read_buf(
     mut strm: crate::zlib_h::z_streamp,
     mut buf: *mut crate::stdlib::Bytef,
     mut size: ::core::ffi::c_uint,
@@ -446,7 +382,7 @@ unsafe extern "C" fn read_buf(
     return len;
 }
 
-unsafe extern "C" fn fill_window(mut s: *mut crate::src::deflate::deflate_state) {
+unsafe fn fill_window(mut s: *mut crate::src::deflate::deflate_state) {
     let mut n: ::core::ffi::c_uint = 0;
     let mut more: ::core::ffi::c_uint = 0;
     let mut wsize: crate::stdlib::uInt = (*s).w_size;
@@ -792,7 +728,7 @@ fn deflate_state_fields_are_valid(state: &crate::src::deflate::deflate_state) ->
     deflate_status_is_valid(state.status)
 }
 
-unsafe extern "C" fn deflateStateCheck(mut strm: crate::zlib_h::z_streamp) -> ::core::ffi::c_int {
+unsafe fn deflateStateCheck(mut strm: crate::zlib_h::z_streamp) -> ::core::ffi::c_int {
     if strm.is_null() {
         return 1 as ::core::ffi::c_int;
     }
@@ -810,6 +746,17 @@ unsafe extern "C" fn deflateStateCheck(mut strm: crate::zlib_h::z_streamp) -> ::
     }
     return 0 as ::core::ffi::c_int;
 }
+
+fn deflate_dictionary_state_accepts(
+    wrap: ::core::ffi::c_int,
+    status: ::core::ffi::c_int,
+    lookahead: crate::stdlib::uInt,
+) -> bool {
+    wrap != 2 as ::core::ffi::c_int
+        && !(wrap == 1 as ::core::ffi::c_int && status != crate::src::deflate::INIT_STATE)
+        && lookahead == 0
+}
+
 #[export_name = "deflateSetDictionary"]
 
 pub unsafe extern "C" fn deflateSetDictionary_ffi(
@@ -829,10 +776,7 @@ pub unsafe extern "C" fn deflateSetDictionary_ffi(
     }
     s = (*strm).state as *mut crate::src::deflate::deflate_state;
     wrap = (*s).wrap;
-    if wrap == 2 as ::core::ffi::c_int
-        || wrap == 1 as ::core::ffi::c_int && (*s).status != crate::src::deflate::INIT_STATE
-        || (*s).lookahead != 0
-    {
+    if !deflate_dictionary_state_accepts(wrap, (*s).status, (*s).lookahead) {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
     if wrap == 1 as ::core::ffi::c_int {
@@ -1002,7 +946,7 @@ pub unsafe extern "C" fn deflateResetKeep_ffi(
     crate::src::trees::_tr_init_ffi(s as *mut crate::src::deflate::internal_state);
     return crate::zlib_h::Z_OK;
 }
-unsafe extern "C" fn lm_init(mut s: *mut crate::src::deflate::deflate_state) {
+unsafe fn lm_init(mut s: *mut crate::src::deflate::deflate_state) {
     (*s).window_size = (2 as ::core::ffi::c_long as crate::zutil_h::ulg)
         .wrapping_mul((*s).w_size as crate::zutil_h::ulg);
     *(*s)
@@ -1222,6 +1166,7 @@ fn deflate_params_valid(level: ::core::ffi::c_int, strategy: ::core::ffi::c_int)
         && (0 as ::core::ffi::c_int..=crate::zlib_h::Z_FIXED).contains(&strategy)
 }
 
+#[allow(unknown_lints, unpredictable_function_pointer_comparisons)]
 fn deflate_params_needs_flush(
     state: &crate::src::deflate::deflate_state,
     level: ::core::ffi::c_int,
@@ -1674,7 +1619,7 @@ fn deflate_pending_copy_len(
     }
 }
 
-unsafe extern "C" fn flush_pending(mut strm: crate::zlib_h::z_streamp) {
+unsafe fn flush_pending(mut strm: crate::zlib_h::z_streamp) {
     let mut len: ::core::ffi::c_uint = 0;
     let mut s: *mut crate::src::deflate::deflate_state =
         (*strm).state as *mut crate::src::deflate::deflate_state;
@@ -2321,7 +2266,7 @@ pub unsafe extern "C" fn deflateCopy_ffi(
         as *mut crate::src::deflate::ct_data;
     return crate::zlib_h::Z_OK;
 }
-unsafe extern "C" fn longest_match(
+unsafe fn longest_match(
     mut s: *mut crate::src::deflate::deflate_state,
     mut cur_match: crate::src::deflate::IPos,
 ) -> crate::stdlib::uInt {
@@ -2581,7 +2526,7 @@ fn deflate_flush_blocked_state(final_flush: bool) -> block_state {
     }
 }
 
-unsafe extern "C" fn deflate_stored(
+unsafe fn deflate_stored(
     mut s: *mut crate::src::deflate::deflate_state,
     mut flush: ::core::ffi::c_int,
 ) -> block_state {
@@ -2775,7 +2720,7 @@ unsafe extern "C" fn deflate_stored(
     }) as block_state;
 }
 
-unsafe extern "C" fn deflate_fast(
+unsafe fn deflate_fast(
     mut s: *mut crate::src::deflate::deflate_state,
     mut flush: ::core::ffi::c_int,
 ) -> block_state {
@@ -2956,7 +2901,7 @@ unsafe extern "C" fn deflate_fast(
     return block_done;
 }
 
-unsafe extern "C" fn deflate_slow(
+unsafe fn deflate_slow(
     mut s: *mut crate::src::deflate::deflate_state,
     mut flush: ::core::ffi::c_int,
 ) -> block_state {
@@ -3191,7 +3136,7 @@ unsafe extern "C" fn deflate_slow(
     return block_done;
 }
 
-unsafe extern "C" fn deflate_rle(
+unsafe fn deflate_rle(
     mut s: *mut crate::src::deflate::deflate_state,
     mut flush: ::core::ffi::c_int,
 ) -> block_state {
@@ -3380,7 +3325,7 @@ unsafe extern "C" fn deflate_rle(
     return block_done;
 }
 
-unsafe extern "C" fn deflate_huff(
+unsafe fn deflate_huff(
     mut s: *mut crate::src::deflate::deflate_state,
     mut flush: ::core::ffi::c_int,
 ) -> block_state {

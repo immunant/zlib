@@ -2702,7 +2702,7 @@ fn pqdownheap(
     heap[k as usize] = v;
 }
 
-unsafe extern "C" fn gen_bitlen(
+unsafe fn gen_bitlen(
     mut s: *mut crate::src::deflate::deflate_state,
     mut desc: *mut crate::src::deflate::tree_desc,
 ) {
@@ -2802,7 +2802,7 @@ unsafe extern "C" fn gen_bitlen(
     }
 }
 
-unsafe extern "C" fn build_tree(
+unsafe fn build_tree(
     mut s: *mut crate::src::deflate::deflate_state,
     mut desc: *mut crate::src::deflate::tree_desc,
 ) {
@@ -3052,7 +3052,7 @@ fn finish_bl_tree(
     (max_blindex, opt_len)
 }
 
-unsafe extern "C" fn send_tree(
+unsafe fn send_tree(
     mut s: *mut crate::src::deflate::deflate_state,
     mut tree: *mut crate::src::deflate::ct_data,
     mut max_code: ::core::ffi::c_int,
@@ -3324,9 +3324,7 @@ unsafe extern "C" fn send_tree(
     }
 }
 
-unsafe extern "C" fn build_bl_tree(
-    mut s: *mut crate::src::deflate::deflate_state,
-) -> ::core::ffi::c_int {
+unsafe fn build_bl_tree(mut s: *mut crate::src::deflate::deflate_state) -> ::core::ffi::c_int {
     let state = &mut *s;
     scan_tree(
         &mut state.bl_tree,
@@ -3348,7 +3346,7 @@ unsafe extern "C" fn build_bl_tree(
     max_blindex
 }
 
-unsafe extern "C" fn send_all_trees(
+unsafe fn send_all_trees(
     mut s: *mut crate::src::deflate::deflate_state,
     mut lcodes: ::core::ffi::c_int,
     mut dcodes: ::core::ffi::c_int,
@@ -3546,7 +3544,7 @@ pub unsafe extern "C" fn _tr_align_ffi(mut s: *mut crate::src::deflate::deflate_
     (*s).bi_buf = bits.bi_buf;
     (*s).bi_valid = bits.bi_valid;
 }
-unsafe extern "C" fn compress_block(
+unsafe fn compress_block(
     mut s: *mut crate::src::deflate::deflate_state,
     mut ltree: *const crate::src::deflate::ct_data,
     mut dtree: *const crate::src::deflate::ct_data,
