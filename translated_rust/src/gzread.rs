@@ -61,6 +61,56 @@ fn gzread_state_is_valid(
         && (err == crate::zlib_h::Z_OK || err == crate::zlib_h::Z_BUF_ERROR || again != 0)
 }
 
+/// Move unconsumed compressed input back to the beginning of its owned
+/// buffer before a refill.  The gzip adapter converts its ABI cursor to the
+/// `next_index` boundary value; this core therefore needs no raw pointers or
+/// overlapping libc copy.
+fn gz_avail_retain_input(
+    input: &mut [u8],
+    next_index: usize,
+    avail_in: crate::stdlib::uInt,
+) -> Option<()> {
+    let end = next_index.checked_add(avail_in as usize)?;
+    if end > input.len() || avail_in as usize > input.len() {
+        return None;
+    }
+    input.copy_within(next_index..end, 0);
+    Some(())
+}
+
+/// Inspect the pending compressed-input prefix without dereferencing the ABI
+/// stream cursor.  `start` is the boundary-reconciled index of that cursor.
+fn gz_look_input_is_gzip(
+    input: &[u8],
+    start: usize,
+    avail_in: crate::stdlib::uInt,
+) -> Option<bool> {
+    let end = start.checked_add(avail_in as usize)?;
+    let pending = input.get(start..end)?;
+    Some(
+        pending.len() > 3
+            && pending[0] == 31
+            && pending[1] == 139
+            && pending[2] == 8
+            && pending[3] < 32,
+    )
+}
+
+/// Copy pending compressed bytes into the owned direct-read output buffer.
+/// The buffers cannot overlap, but using slices keeps that ownership fact
+/// explicit and rejects a stale ABI cursor before copying.
+fn gz_look_copy_pending_input(
+    input: &[u8],
+    start: usize,
+    avail_in: crate::stdlib::uInt,
+    output: &mut [u8],
+) -> Option<()> {
+    let end = start.checked_add(avail_in as usize)?;
+    let pending = input.get(start..end)?;
+    output.get_mut(..pending.len())?.copy_from_slice(pending);
+    Some(())
+}
+
 unsafe extern "C" fn gz_load(
     mut state: crate::gzguts_h::gz_statep,
     mut buf: *mut ::core::ffi::c_uchar,
@@ -128,21 +178,14 @@ unsafe extern "C" fn gz_avail(mut state: crate::gzguts_h::gz_statep) -> ::core::
         };
         let input = buffers.input.as_mut_ptr();
         if (*strm).avail_in != 0 {
-            let mut p: *mut ::core::ffi::c_uchar = input;
-            let mut q: *const ::core::ffi::c_uchar = (*strm).next_in;
-            if q != p as *const ::core::ffi::c_uchar {
-                let mut n: ::core::ffi::c_uint = (*strm).avail_in as ::core::ffi::c_uint;
-                loop {
-                    let c2rust_fresh0 = q;
-                    q = q.offset(1);
-                    let c2rust_fresh1 = p;
-                    p = p.offset(1);
-                    *c2rust_fresh1 = *c2rust_fresh0;
-                    n = n.wrapping_sub(1);
-                    if n == 0 {
-                        break;
-                    }
-                }
+            let Some(next_index) = ((*strm).next_in as usize)
+                .checked_sub(input as usize)
+                .filter(|index| *index <= buffers.input.len())
+            else {
+                return -1;
+            };
+            if gz_avail_retain_input(&mut buffers.input, next_index, (*strm).avail_in).is_none() {
+                return -1;
             }
         }
         if gz_load(
@@ -226,35 +269,45 @@ unsafe extern "C" fn gz_look(mut state: crate::gzguts_h::gz_statep) -> ::core::f
     {
         return 0 as ::core::ffi::c_int;
     }
-    if (*strm).avail_in > 3 as crate::stdlib::uInt
-        && *(*strm).next_in.offset(0 as ::core::ffi::c_int as isize) as ::core::ffi::c_int
-            == 31 as ::core::ffi::c_int
-        && *(*strm).next_in.offset(1 as ::core::ffi::c_int as isize) as ::core::ffi::c_int
-            == 139 as ::core::ffi::c_int
-        && *(*strm).next_in.offset(2 as ::core::ffi::c_int as isize) as ::core::ffi::c_int
-            == 8 as ::core::ffi::c_int
-        && (*(*strm).next_in.offset(3 as ::core::ffi::c_int as isize) as ::core::ffi::c_int)
-            < 32 as ::core::ffi::c_int
-    {
+    let input_is_gzip = {
+        let Some(buffers) = state_ref.buffers.as_ref() else {
+            return -1;
+        };
+        let Some(next_index) = ((*strm).next_in as usize)
+            .checked_sub(buffers.input.as_ptr() as usize)
+            .filter(|index| *index <= buffers.input.len())
+        else {
+            return -1;
+        };
+        let Some(is_gzip) = gz_look_input_is_gzip(&buffers.input, next_index, (*strm).avail_in)
+        else {
+            return -1;
+        };
+        is_gzip
+    };
+    if input_is_gzip {
         crate::src::inflate::inflateReset(strm as *mut crate::zlib_h::z_stream_s);
         (*state).how = crate::gzguts_h::GZIP;
         (*state).junk = 1 as ::core::ffi::c_int;
         (*state).direct = 0 as ::core::ffi::c_int;
         return 0 as ::core::ffi::c_int;
     }
-    let Some(output) = state_ref
-        .buffers
-        .as_mut()
-        .and_then(|buffers| buffers.output.as_mut())
+    let Some(buffers) = state_ref.buffers.as_mut() else {
+        return -1;
+    };
+    let Some(next_index) = ((*strm).next_in as usize)
+        .checked_sub(buffers.input.as_ptr() as usize)
+        .filter(|index| *index <= buffers.input.len())
     else {
         return -1;
     };
+    let Some(output) = buffers.output.as_mut() else {
+        return -1;
+    };
+    if gz_look_copy_pending_input(&buffers.input, next_index, (*strm).avail_in, output).is_none() {
+        return -1;
+    }
     (*state).x.next = output.as_mut_ptr();
-    crate::stdlib::memcpy(
-        (*state).x.next as *mut ::core::ffi::c_void,
-        (*strm).next_in as *const ::core::ffi::c_void,
-        (*strm).avail_in as crate::__stddef_size_t_h::size_t,
-    );
     (*state).x.have = (*strm).avail_in as ::core::ffi::c_uint;
     (*strm).avail_in = 0 as crate::stdlib::uInt;
     (*state).how = crate::gzguts_h::COPY;
