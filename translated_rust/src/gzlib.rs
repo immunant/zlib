@@ -101,6 +101,17 @@ pub(crate) struct GzBufferedInput<'a> {
     have: usize,
 }
 
+// Codec calls see short-lived slices of gzip's two owned buffers.  Keep the
+// cursor validation and output-capacity check in pointer-free views so later
+// codec projections can carry slices instead of ABI `z_stream` cursors.
+pub(crate) struct GzCodecInputView<'a> {
+    bytes: &'a [u8],
+}
+
+pub(crate) struct GzCodecOutputView<'a> {
+    bytes: &'a mut [u8],
+}
+
 impl<'a> GzBufferedCursor<'a> {
     pub(crate) fn from_owned_buffer(
         buffer: &'a [u8],
@@ -250,6 +261,45 @@ impl<'a> GzBufferedInput<'a> {
 
     pub(crate) fn have(&self) -> Option<u32> {
         u32::try_from(self.have).ok()
+    }
+}
+
+impl<'a> GzCodecInputView<'a> {
+    // A codec input cursor is valid only when its entire advertised range is
+    // within gzip's owned input allocation.  Preserve the zero-length case:
+    // it may carry a null ABI cursor and therefore has no address to check.
+    pub(crate) fn from_owned_buffer(
+        buffer: &'a [u8],
+        cursor_address: usize,
+        available: u32,
+    ) -> Option<Self> {
+        if available == 0 {
+            return Some(Self { bytes: &[] });
+        }
+        let start = cursor_address.checked_sub(buffer.as_ptr().addr())?;
+        let end = start.checked_add(available as usize)?;
+        Some(Self {
+            bytes: buffer.get(start..end)?,
+        })
+    }
+
+    pub(crate) fn bytes(&self) -> &'a [u8] {
+        self.bytes
+    }
+}
+
+impl<'a> GzCodecOutputView<'a> {
+    // The caller chooses the exact initialized prefix a codec operation may
+    // write.  Keeping this bounded view separate prevents later transitions
+    // from rebuilding a raw output range from `avail_out`.
+    pub(crate) fn prefix(buffer: &'a mut [u8], available: usize) -> Option<Self> {
+        Some(Self {
+            bytes: buffer.get_mut(..available)?,
+        })
+    }
+
+    pub(crate) fn bytes_mut(&mut self) -> &mut [u8] {
+        self.bytes
     }
 }
 

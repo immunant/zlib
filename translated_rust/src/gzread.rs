@@ -447,28 +447,30 @@ unsafe fn gz_look(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
     // and inflate only advances that cursor. Validate it before deriving the
     // input view.
     let Some(input) = state.in_0.as_deref().and_then(|buffer| {
-        let start = next_in.addr().checked_sub(buffer.as_ptr().addr())?;
-        let end = start.checked_add(avail_in)?;
-        buffer.get(start..end)
+        crate::src::gzlib::GzCodecInputView::from_owned_buffer(
+            buffer,
+            next_in.addr(),
+            state.strm.avail_in,
+        )
     }) else {
         return -1 as ::core::ffi::c_int;
     };
-    if is_gzip_header(input) {
+    if is_gzip_header(input.bytes()) {
         crate::src::inflate::inflateReset(&raw mut state.strm as *mut crate::zlib_h::z_stream_s);
         state.how = crate::gzguts_h::GZIP;
         state.junk = 1 as ::core::ffi::c_int;
         state.direct = 0 as ::core::ffi::c_int;
         return 0 as ::core::ffi::c_int;
     }
-    let Some(output) = state
+    let Some(mut output) = state
         .out
         .as_deref_mut()
-        .and_then(|buffer| buffer.get_mut(..avail_in))
+        .and_then(|buffer| crate::src::gzlib::GzCodecOutputView::prefix(buffer, avail_in))
     else {
         return -1 as ::core::ffi::c_int;
     };
-    copy_buffered_input(input, output);
-    state.x.next = output.as_mut_ptr();
+    copy_buffered_input(input.bytes(), output.bytes_mut());
+    state.x.next = output.bytes_mut().as_mut_ptr();
     state.x.have = avail_in as ::core::ffi::c_uint;
     state.strm.avail_in = 0 as crate::stdlib::uInt;
     state.how = crate::gzguts_h::COPY;
