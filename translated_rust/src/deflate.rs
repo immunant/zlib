@@ -1211,20 +1211,17 @@ pub unsafe extern "C" fn deflateResetKeep_ffi(
     deflateResetKeep(strm, &mut state, false)
 }
 fn lm_init(s: &mut crate::src::deflate::deflate_state) {
+    let configuration = &configuration_table[s.level as usize];
     s.pending_buf_size = s.buffers().pending.len() as crate::zutil_h::ulg;
     s.pending_out = 0;
     s.window_size = (2 as ::core::ffi::c_long as crate::zutil_h::ulg)
         .wrapping_mul(s.w_size as crate::zutil_h::ulg);
-    s.buffers
-        .as_mut()
-        .expect("deflate buffers initialized")
-        .head
-        .fill(NIL as crate::src::deflate::Posf);
+    s.buffers_mut().head.fill(NIL as crate::src::deflate::Posf);
     s.slid = 0 as ::core::ffi::c_int;
-    s.max_lazy_match = configuration_table[s.level as usize].max_lazy as crate::stdlib::uInt;
-    s.good_match = configuration_table[s.level as usize].good_length as crate::stdlib::uInt;
-    s.nice_match = configuration_table[s.level as usize].nice_length as ::core::ffi::c_int;
-    s.max_chain_length = configuration_table[s.level as usize].max_chain as crate::stdlib::uInt;
+    s.max_lazy_match = configuration.max_lazy as crate::stdlib::uInt;
+    s.good_match = configuration.good_length as crate::stdlib::uInt;
+    s.nice_match = configuration.nice_length as ::core::ffi::c_int;
+    s.max_chain_length = configuration.max_chain as crate::stdlib::uInt;
     s.strstart = 0 as crate::stdlib::uInt;
     s.block_start = 0 as ::core::ffi::c_long;
     s.lookahead = 0 as crate::stdlib::uInt;
