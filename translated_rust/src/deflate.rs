@@ -943,15 +943,9 @@ fn input_prefix(
 }
 
 unsafe fn fill_window(
-    s: *mut crate::src::deflate::deflate_state,
-    strm: crate::zlib_h::z_streamp,
+    s: &mut crate::src::deflate::deflate_state,
+    strm: &mut crate::zlib_h::z_stream_s,
 ) {
-    let Some(s) = s.as_mut() else {
-        return;
-    };
-    let Some(strm) = strm.as_mut() else {
-        return;
-    };
     let wsize = s.w_size;
     let Ok(window_len) = usize::try_from(s.window_size) else {
         return;
@@ -1390,8 +1384,6 @@ pub unsafe extern "C" fn deflateSetDictionary(
     mut dictionary: *const crate::stdlib::Bytef,
     mut dictLength: crate::stdlib::uInt,
 ) -> ::core::ffi::c_int {
-    let mut s: *mut crate::src::deflate::deflate_state =
-        ::core::ptr::null_mut::<crate::src::deflate::deflate_state>();
     let mut str: crate::stdlib::uInt = 0;
     let mut n: crate::stdlib::uInt = 0;
     let mut wrap: ::core::ffi::c_int = 0;
@@ -1400,7 +1392,11 @@ pub unsafe extern "C" fn deflateSetDictionary(
     if deflateStateCheck(strm) != 0 || dictionary.is_null() {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    s = (*strm).state as *mut crate::src::deflate::deflate_state;
+    // `deflateStateCheck()` validated both links above.  Borrow each owner
+    // once so the dictionary setup and its window fills do not repeatedly
+    // traverse the raw ABI/state pointers.
+    let strm = &mut *strm;
+    let s = &mut *(strm.state as *mut crate::src::deflate::deflate_state);
     wrap = (*s).wrap;
     if wrap == 2 as ::core::ffi::c_int
         || wrap == 1 as ::core::ffi::c_int && (*s).status != crate::src::deflate::INIT_STATE
@@ -3425,7 +3421,7 @@ unsafe fn deflate_fast(
     let mut bflush: ::core::ffi::c_int = 0;
     loop {
         if s.lookahead < crate::src::deflate::MIN_LOOKAHEAD as crate::stdlib::uInt {
-            fill_window(core::ptr::from_mut(s), core::ptr::from_mut(strm));
+            fill_window(s, strm);
             if s.lookahead < crate::src::deflate::MIN_LOOKAHEAD as crate::stdlib::uInt
                 && flush == crate::zlib_h::Z_NO_FLUSH
             {
@@ -3539,7 +3535,7 @@ unsafe fn deflate_slow(
     let mut bflush: ::core::ffi::c_int = 0;
     loop {
         if (*s).lookahead < crate::src::deflate::MIN_LOOKAHEAD as crate::stdlib::uInt {
-            fill_window(core::ptr::from_mut(s), core::ptr::from_mut(strm));
+            fill_window(s, strm);
             if (*s).lookahead < crate::src::deflate::MIN_LOOKAHEAD as crate::stdlib::uInt
                 && flush == crate::zlib_h::Z_NO_FLUSH
             {
@@ -3764,7 +3760,7 @@ unsafe fn deflate_rle(
     let mut bflush: ::core::ffi::c_int = 0;
     loop {
         if s.lookahead <= crate::zutil_h::MAX_MATCH as crate::stdlib::uInt {
-            fill_window(core::ptr::from_mut(s), core::ptr::from_mut(strm));
+            fill_window(s, strm);
             if s.lookahead <= crate::zutil_h::MAX_MATCH as crate::stdlib::uInt
                 && flush == crate::zlib_h::Z_NO_FLUSH
             {
@@ -3899,7 +3895,7 @@ unsafe fn deflate_huff(
     let mut bflush: ::core::ffi::c_int = 0;
     loop {
         if s.lookahead == 0 as crate::stdlib::uInt {
-            fill_window(core::ptr::from_mut(s), core::ptr::from_mut(strm));
+            fill_window(s, strm);
             if s.lookahead == 0 as crate::stdlib::uInt {
                 if flush == crate::zlib_h::Z_NO_FLUSH {
                     return need_more;
