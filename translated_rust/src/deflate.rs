@@ -316,34 +316,18 @@ fn slide_hash_entry(
     }) as crate::src::deflate::Pos as crate::src::deflate::Posf
 }
 
+fn slide_hash_entries(entries: &mut [crate::src::deflate::Posf], wsize: crate::stdlib::uInt) {
+    for entry in entries.iter_mut().rev() {
+        *entry = slide_hash_entry(*entry as ::core::ffi::c_uint, wsize);
+    }
+}
+
 unsafe fn slide_hash(s: &mut crate::src::deflate::deflate_state) {
-    let mut n: ::core::ffi::c_uint = 0;
-    let mut m: ::core::ffi::c_uint = 0;
-    let mut p: *mut crate::src::deflate::Posf =
-        ::core::ptr::null_mut::<crate::src::deflate::Posf>();
-    let mut wsize: crate::stdlib::uInt = s.w_size;
-    n = s.hash_size as ::core::ffi::c_uint;
-    p = s.head.wrapping_add(n as usize) as *mut crate::src::deflate::Posf;
-    loop {
-        p = p.wrapping_sub(1);
-        m = *p as ::core::ffi::c_uint;
-        *p = slide_hash_entry(m, wsize);
-        n = n.wrapping_sub(1);
-        if !(n != 0) {
-            break;
-        }
-    }
-    n = wsize as ::core::ffi::c_uint;
-    p = s.prev.wrapping_add(n as usize) as *mut crate::src::deflate::Posf;
-    loop {
-        p = p.wrapping_sub(1);
-        m = *p as ::core::ffi::c_uint;
-        *p = slide_hash_entry(m, wsize);
-        n = n.wrapping_sub(1);
-        if !(n != 0) {
-            break;
-        }
-    }
+    let wsize = s.w_size;
+    let head = &mut *::core::ptr::slice_from_raw_parts_mut(s.head, s.hash_size as usize);
+    slide_hash_entries(head, wsize);
+    let prev = &mut *::core::ptr::slice_from_raw_parts_mut(s.prev, wsize as usize);
+    slide_hash_entries(prev, wsize);
     s.slid = 1 as ::core::ffi::c_int;
 }
 
