@@ -656,11 +656,11 @@ pub unsafe extern "C" fn inflate(
                                                                                                                 } else {
                                                                                                                     (*state).dmax = (1 as ::core::ffi::c_uint) << len;
                                                                                                                     (*state).flags = 0 as ::core::ffi::c_int;
-                                                                                                                    (*state).check = crate::src::adler32::adler32(
-                                                                                                                        0 as crate::stdlib::uLong,
-                                                                                                                        ::core::ptr::null:: <crate::stdlib::Bytef>(),
-                                                                                                                        0 as crate::stdlib::uInt,
-                                                                                                                    ) as ::core::ffi::c_ulong;
+                                                                                                                    // zlib defines the checksum of an empty
+                                                                                                                    // stream directly.  Do not route this
+                                                                                                                    // through the raw-pointer ABI adapter.
+                                                                                                                    (*state).check = crate::src::adler32::ADLER32_INITIAL
+                                                                                                                        as ::core::ffi::c_ulong;
                                                                                                                     (*strm).adler = (*state).check as crate::stdlib::uLong;
                                                                                                                     (*state).mode = (if hold & 0x200 as ::core::ffi::c_ulong
                                                                                                                         != 0
@@ -1111,11 +1111,8 @@ pub unsafe extern "C" fn inflate(
                                                                                         (*state).bits = bits;
                                                                                         return crate::zlib_h::Z_NEED_DICT;
                                                                                     }
-                                                                                    (*state).check = crate::src::adler32::adler32(
-                                                                                        0 as crate::stdlib::uLong,
-                                                                                        ::core::ptr::null:: <crate::stdlib::Bytef>(),
-                                                                                        0 as crate::stdlib::uInt,
-                                                                                    ) as ::core::ffi::c_ulong;
+                                                                                    (*state).check = crate::src::adler32::ADLER32_INITIAL
+                                                                                        as ::core::ffi::c_ulong;
                                                                                     (*strm).adler =
                                                                                         (*state)
                                                                                             .check
@@ -2307,11 +2304,7 @@ pub unsafe extern "C" fn inflateSetDictionary(
     if (*state).mode as ::core::ffi::c_uint
         == crate::src::inflate::DICT as ::core::ffi::c_int as ::core::ffi::c_uint
     {
-        dictid = crate::src::adler32::adler32(
-            0 as crate::stdlib::uLong,
-            ::core::ptr::null::<crate::stdlib::Bytef>(),
-            0 as crate::stdlib::uInt,
-        ) as ::core::ffi::c_ulong;
+        dictid = crate::src::adler32::ADLER32_INITIAL as ::core::ffi::c_ulong;
         dictid =
             crate::src::adler32::adler32(dictid as crate::stdlib::uLong, dictionary, dictLength)
                 as ::core::ffi::c_ulong;
