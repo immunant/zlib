@@ -83,6 +83,26 @@ pub(crate) fn gz_write_state_is_usable(state: &crate::gzguts_h::gz_state) -> boo
         && (state.err == crate::zlib_h::Z_OK || state.again != 0)
 }
 
+// Buffer configuration is valid only before either side of a gzip stream has
+// allocated its working buffers. Keep the mode, allocation, overflow, and
+// minimum-size decisions separate from the public handle adapter.
+pub(crate) fn gz_buffer_size(
+    state: &crate::gzguts_h::gz_state,
+    size: ::core::ffi::c_uint,
+) -> Option<::core::ffi::c_uint> {
+    if (!gz_has_mode(state, crate::gzguts_h::GZ_READ)
+        && !gz_has_mode(state, crate::gzguts_h::GZ_WRITE))
+        || state.size != 0
+        || (size << 1 as ::core::ffi::c_int) < size
+    {
+        None
+    } else if size < 8 {
+        Some(8)
+    } else {
+        Some(size)
+    }
+}
+
 // Rewind's descriptor operation only applies to a readable state without a
 // serious error. Keep that eligibility check independent of the descriptor
 // boundary.
@@ -1198,24 +1218,13 @@ pub unsafe extern "C" fn gzdopen_ffi(
 // validation and binding in the exported entry point.
 fn gz_buffer(
     state: &mut crate::gzguts_h::gz_state,
-    mut size: ::core::ffi::c_uint,
+    size: ::core::ffi::c_uint,
 ) -> ::core::ffi::c_int {
-    if !gz_has_mode(state, crate::gzguts_h::GZ_READ)
-        && !gz_has_mode(state, crate::gzguts_h::GZ_WRITE)
-    {
-        return -1 as ::core::ffi::c_int;
-    }
-    if state.size != 0 as ::core::ffi::c_uint {
-        return -1 as ::core::ffi::c_int;
-    }
-    if (size << 1 as ::core::ffi::c_int) < size {
-        return -1 as ::core::ffi::c_int;
-    }
-    if size < 8 as ::core::ffi::c_uint {
-        size = 8 as ::core::ffi::c_uint;
-    }
+    let Some(size) = gz_buffer_size(state, size) else {
+        return -1;
+    };
     state.want = size;
-    0 as ::core::ffi::c_int
+    0
 }
 #[export_name = "gzbuffer"]
 
