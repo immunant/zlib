@@ -775,11 +775,9 @@ pub fn gzsetparams(
         {
             return state.err;
         }
-        // SAFETY: `gz_init` created the deflater in this validated write
-        // state before a nonzero `size` can reach this branch.
-        unsafe {
-            crate::src::deflate::deflateParams(&mut state.strm, level, strategy);
-        }
+        // `deflateParams` validates the already-initialized stream/state
+        // pair internally, so this write-state transition stays safe.
+        crate::src::deflate::deflateParams(&mut state.strm, level, strategy);
     }
     state.level = level;
     state.strategy = strategy;
