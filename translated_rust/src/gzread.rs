@@ -943,6 +943,75 @@ fn gz_ungetc_progress(
     (gz_ungetc_next_have(have), gz_cursor_rewind(pos, 1), 0)
 }
 
+fn gz_output_cursor_offset(
+    output_start: usize,
+    cursor: usize,
+    output_len: usize,
+) -> Option<usize> {
+    cursor
+        .checked_sub(output_start)
+        .filter(|offset| *offset <= output_len)
+}
+
+#[derive(Debug, Eq, PartialEq)]
+struct GzUngetcResult {
+    have: ::core::ffi::c_uint,
+    pos: crate::stdlib::off64_t,
+    past: ::core::ffi::c_int,
+    next_offset: usize,
+}
+
+fn gz_ungetc_core(
+    output: &mut [crate::stdlib::Byte],
+    next_offset: usize,
+    have: ::core::ffi::c_uint,
+    size: ::core::ffi::c_uint,
+    pos: crate::stdlib::off64_t,
+    c: ::core::ffi::c_int,
+) -> Option<GzUngetcResult> {
+    if !gz_ungetc_accepts_byte(c) || output.len() != gz_output_buffer_len(size) as usize {
+        return None;
+    }
+
+    let next_is_out = next_offset == 0;
+    match gz_ungetc_action(have, size, next_is_out) {
+        GzUngetcAction::Full => None,
+        GzUngetcAction::Empty { write_index } => {
+            let (have, pos, past) = gz_ungetc_progress(have, pos);
+            let next_offset = write_index;
+            *output.get_mut(next_offset)? = c as crate::stdlib::Byte;
+            Some(GzUngetcResult {
+                have,
+                pos,
+                past,
+                next_offset,
+            })
+        }
+        GzUngetcAction::Pushable { compact } => {
+            let mut next_offset = next_offset;
+            if compact {
+                let plan = gz_ungetc_compact_plan(have, size);
+                let source = 0..plan.len;
+                let destination_end = plan.dest_index.checked_add(plan.len)?;
+                if destination_end > output.len() {
+                    return None;
+                }
+                output.copy_within(source, plan.dest_index);
+                next_offset = plan.dest_index;
+            }
+            let (have, pos, past) = gz_ungetc_progress(have, pos);
+            next_offset = next_offset.checked_sub(1)?;
+            *output.get_mut(next_offset)? = c as crate::stdlib::Byte;
+            Some(GzUngetcResult {
+                have,
+                pos,
+                past,
+                next_offset,
+            })
+        }
+    }
+}
+
 #[derive(Debug, Eq, PartialEq)]
 struct GzUngetcCompactPlan {
     dest_index: usize,
@@ -4239,6 +4308,45 @@ mod tests {
         assert_eq!(pos, 10);
         assert_eq!(skip, 4);
     }
+
+    #[test]
+    fn gz_ungetc_core_pushes_into_an_empty_output_buffer() {
+        let size = 4;
+        let mut output = vec![0; gz_output_buffer_len(size) as usize];
+
+        let result = gz_ungetc_core(&mut output, 0, 0, size, 10, b'x' as i32).unwrap();
+
+        assert_eq!(result.have, 1);
+        assert_eq!(result.pos, 9);
+        assert_eq!(result.past, 0);
+        assert_eq!(result.next_offset, output.len() - 1);
+        assert_eq!(output[result.next_offset], b'x');
+    }
+
+    #[test]
+    fn gz_ungetc_core_compacts_then_pushes_without_raw_pointer_walks() {
+        let size = 4;
+        let mut output = vec![0; gz_output_buffer_len(size) as usize];
+        output[..3].copy_from_slice(b"abc");
+
+        let result = gz_ungetc_core(&mut output, 0, 3, size, 10, b'x' as i32).unwrap();
+
+        assert_eq!(result.have, 4);
+        assert_eq!(result.pos, 9);
+        assert_eq!(result.past, 0);
+        assert_eq!(
+            &output[result.next_offset..result.next_offset + result.have as usize],
+            b"xabc"
+        );
+    }
+
+    #[test]
+    fn gz_output_cursor_offset_rejects_addresses_outside_the_buffer() {
+        assert_eq!(gz_output_cursor_offset(100, 100, 8), Some(0));
+        assert_eq!(gz_output_cursor_offset(100, 108, 8), Some(8));
+        assert_eq!(gz_output_cursor_offset(100, 99, 8), None);
+        assert_eq!(gz_output_cursor_offset(100, 109, 8), None);
+    }
 }
 
 unsafe fn gz_read(
@@ -4473,48 +4581,44 @@ pub unsafe extern "C" fn gzungetc_ffi(
     if !gz_ungetc_accepts_byte(c) {
         return -1 as ::core::ffi::c_int;
     }
-    match gz_ungetc_action(
+    let output_len = gz_output_buffer_len(state_ref.size) as usize;
+    if state_ref.out.is_null() {
+        return -1 as ::core::ffi::c_int;
+    }
+    let Some(next_offset) = gz_output_cursor_offset(
+        state_ref.out as usize,
+        state_ref.x.next as usize,
+        output_len,
+    ) else {
+        return -1 as ::core::ffi::c_int;
+    };
+    if matches!(
+        gz_ungetc_action(state_ref.x.have, state_ref.size, next_offset == 0),
+        GzUngetcAction::Full
+    ) {
+        crate::src::gzlib::gz_error(
+            state as *mut crate::gzguts_h::gz_state,
+            crate::zlib_h::Z_DATA_ERROR,
+            b"out of room to push characters\0".as_ptr() as *const ::core::ffi::c_char,
+        );
+        return -1 as ::core::ffi::c_int;
+    }
+    let output = core::slice::from_raw_parts_mut(state_ref.out, output_len);
+    let Some(result) = gz_ungetc_core(
+        output,
+        next_offset,
         state_ref.x.have,
         state_ref.size,
-        state_ref.x.next == state_ref.out,
-    ) {
-        GzUngetcAction::Empty { write_index } => {
-            let (have, pos, past) = gz_ungetc_progress(state_ref.x.have, state_ref.x.pos);
-            state_ref.x.have = have;
-            state_ref.x.next = state_ref.out.wrapping_add(write_index);
-            *state_ref.x.next = c as ::core::ffi::c_uchar;
-            state_ref.x.pos = pos;
-            state_ref.past = past;
-            return c;
-        }
-        GzUngetcAction::Full => {
-            crate::src::gzlib::gz_error(
-                state as *mut crate::gzguts_h::gz_state,
-                crate::zlib_h::Z_DATA_ERROR,
-                b"out of room to push characters\0".as_ptr() as *const ::core::ffi::c_char,
-            );
-            return -1 as ::core::ffi::c_int;
-        }
-        GzUngetcAction::Pushable { compact } => {
-            if compact {
-                let plan = gz_ungetc_compact_plan(state_ref.x.have, state_ref.size);
-                let mut remaining = plan.len;
-                while remaining != 0 {
-                    remaining -= 1;
-                    *state_ref.out.wrapping_add(plan.dest_index + remaining) =
-                        *state_ref.out.wrapping_add(remaining);
-                }
-                state_ref.x.next = state_ref.out.wrapping_add(plan.dest_index);
-            }
-        }
-    }
-    let (have, pos, past) = gz_ungetc_progress(state_ref.x.have, state_ref.x.pos);
-    state_ref.x.have = have;
-    state_ref.x.next = state_ref.x.next.wrapping_sub(1);
-    *state_ref.x.next = c as ::core::ffi::c_uchar;
-    state_ref.x.pos = pos;
-    state_ref.past = past;
-    return c;
+        state_ref.x.pos,
+        c,
+    ) else {
+        return -1 as ::core::ffi::c_int;
+    };
+    state_ref.x.have = result.have;
+    state_ref.x.next = state_ref.out.wrapping_add(result.next_offset);
+    state_ref.x.pos = result.pos;
+    state_ref.past = result.past;
+    c
 }
 #[export_name = "gzgets"]
 pub unsafe extern "C" fn gzgets_ffi(
