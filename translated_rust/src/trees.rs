@@ -4359,7 +4359,7 @@ pub unsafe extern "C" fn _tr_align(mut s: *mut crate::src::deflate::deflate_stat
 pub unsafe extern "C" fn _tr_align_ffi(mut s: *mut crate::src::deflate::deflate_state) {
     _tr_align(s)
 }
-fn compress_block_safe(
+fn compress_block(
     s: &mut crate::src::deflate::deflate_state,
     pending_buf: &mut [crate::stdlib::Bytef],
     ltree: &[crate::src::deflate::ct_data],
@@ -4428,22 +4428,6 @@ fn compress_block_safe(
     );
 }
 
-// The state still owns these buffers through raw zalloc storage. Keep that
-// conversion at the legacy boundary; the compression algorithm itself above
-// only operates on safe borrows.
-unsafe extern "C" fn compress_block(
-    s: *mut crate::src::deflate::deflate_state,
-    ltree: *const crate::src::deflate::ct_data,
-    dtree: *const crate::src::deflate::ct_data,
-) {
-    let s = &mut *s;
-    let pending_buf = ::core::slice::from_raw_parts_mut(s.pending_buf, s.pending_buf_size as usize);
-    let sym_buf = ::core::slice::from_raw_parts(s.sym_buf, s.sym_next as usize);
-    let ltree = ::core::slice::from_raw_parts(ltree, crate::src::deflate::L_CODES as usize);
-    let dtree = ::core::slice::from_raw_parts(dtree, crate::src::deflate::D_CODES as usize);
-    compress_block_safe(s, pending_buf, ltree, dtree, sym_buf);
-}
-
 fn detect_data_type(dyn_ltree: &[crate::src::deflate::ct_data; 573]) -> ::core::ffi::c_int {
     const BLOCK_MASK: ::core::ffi::c_ulong = 0xf3ffc07f;
 
@@ -4471,6 +4455,11 @@ pub unsafe extern "C" fn _tr_flush_block(
 ) {
     let s_raw = s;
     let s = &mut *s;
+    // These buffers remain raw-owned by the legacy state. Borrow them once at
+    // this boundary so all block encoding below stays slice-based.
+    let pending_buf =
+        ::core::slice::from_raw_parts_mut(s.pending_buf, s.pending_buf_size as usize);
+    let sym_buf = ::core::slice::from_raw_parts(s.sym_buf, s.sym_next as usize);
     let mut opt_lenb: crate::zutil_h::ulg = 0;
     let mut static_lenb: crate::zutil_h::ulg = 0;
     let mut max_blindex: ::core::ffi::c_int = 0 as ::core::ffi::c_int;
@@ -4530,11 +4519,7 @@ pub unsafe extern "C" fn _tr_flush_block(
                     << (*s).bi_valid) as crate::zutil_h::ush;
             (*s).bi_valid += len;
         }
-        compress_block(
-            s_raw,
-            &raw const static_ltree as *const crate::src::deflate::ct_data,
-            &raw const static_dtree as *const crate::src::deflate::ct_data,
-        );
+        compress_block(s, pending_buf, &static_ltree, &static_dtree, sym_buf);
     } else {
         let mut len_0: ::core::ffi::c_int = 3 as ::core::ffi::c_int;
         if (*s).bi_valid > crate::src::deflate::Buf_size - len_0 {
@@ -4566,21 +4551,13 @@ pub unsafe extern "C" fn _tr_flush_block(
         }
         let lcodes = s.l_desc.max_code + 1;
         let dcodes = s.d_desc.max_code + 1;
-        let pending_buf =
-            ::core::slice::from_raw_parts_mut(s.pending_buf, s.pending_buf_size as usize);
         send_all_trees(s, pending_buf, lcodes, dcodes, max_blindex + 1);
-        compress_block(
-            s_raw,
-            &raw mut (*s).dyn_ltree as *mut crate::src::deflate::ct_data_s
-                as *const crate::src::deflate::ct_data,
-            &raw mut (*s).dyn_dtree as *mut crate::src::deflate::ct_data_s
-                as *const crate::src::deflate::ct_data,
-        );
+        let ltree = s.dyn_ltree;
+        let dtree = s.dyn_dtree;
+        compress_block(s, pending_buf, &ltree, &dtree, sym_buf);
     }
     init_block_safe(s);
     if last != 0 {
-        let pending_buf =
-            ::core::slice::from_raw_parts_mut((*s).pending_buf, (*s).pending_buf_size as usize);
         bi_windup(s, pending_buf);
     }
 }
