@@ -1405,6 +1405,12 @@ pub unsafe extern "C" fn gz_error_ffi(
     mut err: ::core::ffi::c_int,
     mut msg: *const ::core::ffi::c_char,
 ) {
+    if state.is_null()
+        || state.align_offset(::core::mem::align_of::<crate::gzguts_h::gz_state>()) != 0
+    {
+        return;
+    }
+
     let state = &mut *state;
     let previous_message = state.msg;
     let plan = gz_error_state_core(state, err, !previous_message.is_null(), !msg.is_null());
@@ -1446,7 +1452,7 @@ pub unsafe extern "C" fn gz_intmax_ffi() -> ::core::ffi::c_uint {
 #[cfg(test)]
 mod tests {
     use super::{
-        gz_clear_read_flags, gz_errno_is_retryable, gz_error_clears_buffer,
+        gz_clear_read_flags, gz_errno_is_retryable, gz_error_clears_buffer, gz_error_ffi,
         gz_error_message_allocation_len, gz_error_needs_message_allocation, gz_error_plan,
         gz_is_read_mode, gz_is_read_or_write_mode, gz_legacy_offset_result, gz_lseek_succeeded,
         gz_open_fd_plan, gz_open_fd_succeeded, gz_open_has_required_inputs, gz_open_offset_plan,
@@ -2081,6 +2087,25 @@ mod tests {
             )
         }
         .is_null());
+    }
+
+    #[test]
+    fn gz_error_rejects_null_and_misaligned_states_before_dereferencing() {
+        unsafe {
+            gz_error_ffi(
+                core::ptr::null_mut(),
+                crate::zlib_h::Z_DATA_ERROR,
+                core::ptr::null(),
+            )
+        };
+
+        let alignment = core::mem::align_of::<crate::gzguts_h::gz_state>();
+        assert!(alignment > 1);
+        let mut bytes = vec![0_u8; alignment + 1];
+        let state = bytes.as_mut_ptr().wrapping_add(1) as *mut crate::gzguts_h::gz_state;
+
+        assert_ne!((state as usize) % alignment, 0);
+        unsafe { gz_error_ffi(state, crate::zlib_h::Z_DATA_ERROR, core::ptr::null()) };
     }
 
     #[test]
