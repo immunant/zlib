@@ -194,6 +194,18 @@ pub(crate) fn inflate_dynamic_counts(
     }
 }
 
+pub(crate) fn inflate_stored_block_length(
+    hold: ::core::ffi::c_ulong,
+) -> Option<::core::ffi::c_uint> {
+    if hold & 0xffff as ::core::ffi::c_ulong
+        != hold >> 16 as ::core::ffi::c_int ^ 0xffff as ::core::ffi::c_ulong
+    {
+        None
+    } else {
+        Some(hold as ::core::ffi::c_uint & 0xffff as ::core::ffi::c_uint)
+    }
+}
+
 fn inflate_data_type(
     bits: ::core::ffi::c_uint,
     last: ::core::ffi::c_int,
@@ -812,22 +824,20 @@ pub unsafe extern "C" fn inflate_ffi(
                     hold = hold.wrapping_add((*c2rust_fresh12 as ::core::ffi::c_ulong) << bits);
                     bits = bits.wrapping_add(8 as ::core::ffi::c_uint);
                 }
-                if hold & 0xffff as ::core::ffi::c_ulong
-                    != hold >> 16 as ::core::ffi::c_int ^ 0xffff as ::core::ffi::c_ulong
-                {
-                    (*strm).msg = b"invalid stored block lengths\0".as_ptr()
-                        as *const ::core::ffi::c_char
-                        as *mut ::core::ffi::c_char;
-                    (*state).mode = crate::src::inflate::BAD;
-                    continue;
-                } else {
-                    (*state).length = hold as ::core::ffi::c_uint & 0xffff as ::core::ffi::c_uint;
+                if let Some(length) = inflate_stored_block_length(hold) {
+                    (*state).length = length;
                     hold = 0 as ::core::ffi::c_ulong;
                     bits = 0 as ::core::ffi::c_uint;
                     (*state).mode = crate::src::inflate::COPY_;
                     if flush == crate::zlib_h::Z_TREES {
                         break;
                     }
+                } else {
+                    (*strm).msg = b"invalid stored block lengths\0".as_ptr()
+                        as *const ::core::ffi::c_char
+                        as *mut ::core::ffi::c_char;
+                    (*state).mode = crate::src::inflate::BAD;
+                    continue;
                 }
                 c2rust_current_block = 17610290921369817802;
             }
