@@ -408,7 +408,13 @@ enum GzWritePlan<'a> {
 // adapter has accounted for it.
 enum GzWriteOperation<'a> {
     Write(GzWriteTransaction<'a>),
-    Flush { flush: ::core::ffi::c_int },
+    Flush {
+        flush: ::core::ffi::c_int,
+    },
+    SetParams {
+        level: ::core::ffi::c_int,
+        strategy: ::core::ffi::c_int,
+    },
 }
 
 fn gzwrite_plan<'input>(
@@ -1124,6 +1130,63 @@ unsafe fn gzip_write_state_adapter(
             }
             return state.err as crate::stdlib::z_size_t;
         }
+        GzWriteOperation::SetParams { level, strategy } => {
+            let policy = GzWritePolicy {
+                mode: state.mode,
+                err: state.err,
+                again: state.again,
+                direct: state.direct,
+            };
+            let plan = gzsetparams_plan(
+                &policy,
+                state.level,
+                state.strategy,
+                level,
+                strategy,
+                state.skip,
+            );
+            if matches!(plan, GzSetParamsPlan::Reject) {
+                return crate::zlib_h::Z_STREAM_ERROR as crate::stdlib::z_size_t;
+            }
+            crate::src::gzlib::GzErrorState {
+                message: &mut state.msg,
+                error: &mut state.err,
+                buffered: &mut state.x.have,
+                again: state.again,
+                path: state.path.as_deref(),
+            }
+            .clear();
+            let GzSetParamsPlan::Change { materialize_skip } = plan else {
+                return crate::zlib_h::Z_OK as crate::stdlib::z_size_t;
+            };
+            if materialize_skip
+                && gz_comp(
+                    state,
+                    crate::zlib_h::Z_NO_FLUSH,
+                    None,
+                    None,
+                    None,
+                    GzSkipMaterialization::Only,
+                ) == -1 as ::core::ffi::c_int
+            {
+                return state.err as crate::stdlib::z_size_t;
+            }
+            if gzsetparams_needs_retune(state.buffers.size)
+                && gz_comp(
+                    state,
+                    crate::zlib_h::Z_BLOCK,
+                    None,
+                    Some(GzDeflateRetune { level, strategy }),
+                    None,
+                    GzSkipMaterialization::None,
+                ) == -1 as ::core::ffi::c_int
+            {
+                return state.err as crate::stdlib::z_size_t;
+            }
+            state.level = level;
+            state.strategy = strategy;
+            return crate::zlib_h::Z_OK as crate::stdlib::z_size_t;
+        }
         GzWriteOperation::Write(transaction) => transaction,
     };
     let mut request = transaction.request;
@@ -1384,68 +1447,6 @@ pub unsafe extern "C" fn gzflush_ffi(
     };
     gzip_write_state_adapter(state, GzWriteOperation::Flush { flush }) as ::core::ffi::c_int
 }
-unsafe fn gzsetparams(
-    state: &mut crate::gzguts_h::gz_state,
-    mut level: ::core::ffi::c_int,
-    mut strategy: ::core::ffi::c_int,
-) -> ::core::ffi::c_int {
-    let policy = GzWritePolicy {
-        mode: state.mode,
-        err: state.err,
-        again: state.again,
-        direct: state.direct,
-    };
-    let plan = gzsetparams_plan(
-        &policy,
-        state.level,
-        state.strategy,
-        level,
-        strategy,
-        state.skip,
-    );
-    if matches!(plan, GzSetParamsPlan::Reject) {
-        return crate::zlib_h::Z_STREAM_ERROR;
-    }
-    crate::src::gzlib::GzErrorState {
-        message: &mut state.msg,
-        error: &mut state.err,
-        buffered: &mut state.x.have,
-        again: state.again,
-        path: state.path.as_deref(),
-    }
-    .clear();
-    let GzSetParamsPlan::Change { materialize_skip } = plan else {
-        return crate::zlib_h::Z_OK;
-    };
-    if materialize_skip
-        && gz_comp(
-            state,
-            crate::zlib_h::Z_NO_FLUSH,
-            None,
-            None,
-            None,
-            GzSkipMaterialization::Only,
-        ) == -1 as ::core::ffi::c_int
-    {
-        return state.err;
-    }
-    if gzsetparams_needs_retune(state.buffers.size) {
-        if gz_comp(
-            state,
-            crate::zlib_h::Z_BLOCK,
-            None,
-            Some(GzDeflateRetune { level, strategy }),
-            None,
-            GzSkipMaterialization::None,
-        ) == -1 as ::core::ffi::c_int
-        {
-            return state.err;
-        }
-    }
-    state.level = level;
-    state.strategy = strategy;
-    return crate::zlib_h::Z_OK;
-}
 #[export_name = "gzsetparams"]
 
 pub unsafe extern "C" fn gzsetparams_ffi(
@@ -1456,7 +1457,8 @@ pub unsafe extern "C" fn gzsetparams_ffi(
     let Some(state) = (file as crate::gzguts_h::gz_statep).as_mut() else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
-    gzsetparams(state, level, strategy)
+    gzip_write_state_adapter(state, GzWriteOperation::SetParams { level, strategy })
+        as ::core::ffi::c_int
 }
 pub unsafe fn gzclose_w(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
     let Some(mut result) = GzWriteCloseResult::begin(state.mode) else {
