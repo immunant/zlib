@@ -1236,9 +1236,16 @@ pub unsafe extern "C" fn gzdirect_ffi(file: crate::zlib_h::gzFile) -> ::core::ff
     };
     gzdirect_impl(state)
 }
-pub unsafe fn gzclose_r(mut owned: Box<crate::gzguts_h::gz_state>) -> ::core::ffi::c_int {
+/// Close an already-owned read state.
+///
+/// The FFI boundary transfers the opaque handle into `Box` before reaching
+/// this function, so cleanup only operates on the state owner and its safe
+/// descriptor/compressor fields.
+pub(crate) fn gzclose_r_impl(
+    mut owned: Box<crate::gzguts_h::gz_state>,
+) -> ::core::ffi::c_int {
     let ret = {
-        let state: &mut crate::gzguts_h::gz_state = &mut owned;
+        let state = owned.as_mut();
         if state.mode != crate::gzguts_h::GZ_READ {
             return crate::zlib_h::Z_STREAM_ERROR;
         }
@@ -1269,6 +1276,12 @@ pub unsafe fn gzclose_r(mut owned: Box<crate::gzguts_h::gz_state>) -> ::core::ff
     };
     ret
 }
+
+/// Compatibility entry point for Rust callers that still hold the legacy
+/// unsafe close contract.  New implementation code uses `gzclose_r_impl`.
+pub unsafe fn gzclose_r(owned: Box<crate::gzguts_h::gz_state>) -> ::core::ffi::c_int {
+    gzclose_r_impl(owned)
+}
 #[export_name = "gzclose_r"]
 
 pub unsafe extern "C" fn gzclose_r_ffi(file: crate::zlib_h::gzFile) -> ::core::ffi::c_int {
@@ -1276,5 +1289,5 @@ pub unsafe extern "C" fn gzclose_r_ffi(file: crate::zlib_h::gzFile) -> ::core::f
         return crate::zlib_h::Z_STREAM_ERROR;
     }
     let owned = Box::from_raw(file.cast::<crate::gzguts_h::gz_state>());
-    gzclose_r(owned)
+    gzclose_r_impl(owned)
 }

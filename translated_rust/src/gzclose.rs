@@ -6,7 +6,6 @@ pub use crate::stdlib::__off64_t;
 pub use crate::stdlib::off64_t;
 
 pub use crate::src::deflate::internal_state;
-pub use crate::src::gzread::gzclose_r;
 pub use crate::stdlib::uInt;
 pub use crate::stdlib::uLong;
 pub use crate::stdlib::voidpf;
@@ -24,12 +23,22 @@ fn gz_mode(state: &crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
     state.mode
 }
 
-pub unsafe fn gzclose(owned: Box<crate::gzguts_h::gz_state>) -> ::core::ffi::c_int {
+/// Finish either kind of already-owned gzip state.
+///
+/// Ownership is established by the ABI wrapper, leaving the dispatch and
+/// cleanup paths entirely in ordinary Rust code.
+fn gzclose_impl(owned: Box<crate::gzguts_h::gz_state>) -> ::core::ffi::c_int {
     if gz_mode(owned.as_ref()) == crate::gzguts_h::GZ_READ {
-        crate::src::gzread::gzclose_r(owned)
+        crate::src::gzread::gzclose_r_impl(owned)
     } else {
         crate::src::gzwrite::gzclose_w_impl(owned)
     }
+}
+
+/// Compatibility entry point for Rust callers using the legacy unsafe
+/// contract.  All implementation callers dispatch through `gzclose_impl`.
+pub unsafe fn gzclose(owned: Box<crate::gzguts_h::gz_state>) -> ::core::ffi::c_int {
+    gzclose_impl(owned)
 }
 #[export_name = "gzclose"]
 
@@ -38,5 +47,5 @@ pub unsafe extern "C" fn gzclose_ffi(file: crate::zlib_h::gzFile) -> ::core::ffi
         return crate::zlib_h::Z_STREAM_ERROR;
     }
     let owned = Box::from_raw(file.cast::<crate::gzguts_h::gz_state>());
-    gzclose(owned)
+    gzclose_impl(owned)
 }
