@@ -796,6 +796,14 @@ enum ReadBufChecksum {
     Crc32,
 }
 
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+struct ReadBufResult {
+    copied: ::core::ffi::c_uint,
+    avail_in: crate::stdlib::uInt,
+    total_in: crate::stdlib::uLong,
+    adler: crate::stdlib::uLong,
+}
+
 fn read_buf_checksum(wrap: ::core::ffi::c_int) -> Option<ReadBufChecksum> {
     match wrap {
         1 => Some(ReadBufChecksum::Adler32),
@@ -804,37 +812,57 @@ fn read_buf_checksum(wrap: ::core::ffi::c_int) -> Option<ReadBufChecksum> {
     }
 }
 
+fn read_buf_core(
+    input: &[crate::stdlib::Bytef],
+    output: &mut [crate::stdlib::Bytef],
+    avail_in: crate::stdlib::uInt,
+    requested: ::core::ffi::c_uint,
+    total_in: crate::stdlib::uLong,
+    adler: crate::stdlib::uLong,
+    wrap: ::core::ffi::c_int,
+) -> ReadBufResult {
+    let copied = read_buf_len(avail_in, requested);
+    let copied_len = copied as usize;
+    output[..copied_len].copy_from_slice(&input[..copied_len]);
+    let (avail_in, total_in) = read_buf_input_progress_after_copy(avail_in, total_in, copied);
+    let adler = match read_buf_checksum(wrap) {
+        Some(ReadBufChecksum::Adler32) => crate::src::adler32::adler32_z(adler, &output[..copied_len]),
+        Some(ReadBufChecksum::Crc32) => crate::src::crc32::crc32_z(adler, &output[..copied_len]),
+        None => adler,
+    };
+    ReadBufResult {
+        copied,
+        avail_in,
+        total_in,
+        adler,
+    }
+}
+
 unsafe fn read_buf(
     mut strm: crate::zlib_h::z_streamp,
     mut buf: *mut crate::stdlib::Bytef,
     mut size: ::core::ffi::c_uint,
 ) -> ::core::ffi::c_uint {
-    let len = read_buf_len((*strm).avail_in as ::core::ffi::c_uint, size);
-    if len == 0 as ::core::ffi::c_uint {
+    let len = read_buf_len((*strm).avail_in, size);
+    if len == 0 {
         return 0 as ::core::ffi::c_uint;
     }
-    let (avail_in, total_in) =
-        read_buf_input_progress_after_copy((*strm).avail_in, (*strm).total_in, len);
-    (*strm).avail_in = avail_in;
-    crate::stdlib::memcpy(
-        buf as *mut ::core::ffi::c_void,
-        (*strm).next_in as *const ::core::ffi::c_void,
-        len as crate::__stddef_size_t_h::size_t,
+    let input = core::slice::from_raw_parts((*strm).next_in, len as usize);
+    let output = core::slice::from_raw_parts_mut(buf, len as usize);
+    let result = read_buf_core(
+        input,
+        output,
+        (*strm).avail_in,
+        size,
+        (*strm).total_in,
+        (*strm).adler,
+        (*(*strm).state).wrap,
     );
-    match read_buf_checksum((*(*strm).state).wrap) {
-        Some(ReadBufChecksum::Adler32) => {
-            (*strm).adler =
-                crate::src::adler32::adler32_ffi((*strm).adler, buf, len as crate::stdlib::uInt);
-        }
-        Some(ReadBufChecksum::Crc32) => {
-            (*strm).adler =
-                crate::src::crc32::crc32_ffi((*strm).adler, buf, len as crate::stdlib::uInt);
-        }
-        None => {}
-    }
-    (*strm).next_in = (*strm).next_in.wrapping_add(len as usize);
-    (*strm).total_in = total_in;
-    return len;
+    (*strm).avail_in = result.avail_in;
+    (*strm).adler = result.adler;
+    (*strm).next_in = (*strm).next_in.wrapping_add(result.copied as usize);
+    (*strm).total_in = result.total_in;
+    result.copied
 }
 
 fn fill_window_available_space(
@@ -4411,7 +4439,7 @@ mod tests {
         lm_initial_state, lm_match_parameters, lm_reset_plan, longest_match_candidate_update,
         longest_match_clamp_length, longest_match_limit, longest_match_next_chain_length,
         longest_match_search_parameters, normalize_deflate_params, pending_buffer_needs_flush,
-        pending_output_len, pending_short_cursors, read_buf_checksum,
+        pending_output_len, pending_short_cursors, read_buf_checksum, read_buf_core,
         read_buf_input_progress_after_copy, read_buf_len, read_buf_total_in_after_copy,
         short_msb_bytes, slide_hash_core, slide_hash_entry, stored_block_available_output,
         stored_block_buffered_len, stored_block_can_emit, stored_block_copy_lengths,
@@ -4420,6 +4448,7 @@ mod tests {
         stored_insert_after_input, symbol_buffer_is_full, symbol_triplet_cursors, zlib_header,
         DeflateFastMatchProgress, DeflateFinalFlushAction, DeflateMatchRefillAction,
         DeflatePreflight, DeflateRleRefillAction, DeflateRleTallyPlan, ReadBufChecksum,
+        ReadBufResult,
     };
 
     #[test]
@@ -5457,6 +5486,45 @@ mod tests {
         assert_eq!(read_buf_checksum(0), None);
         assert_eq!(read_buf_checksum(-1), None);
         assert_eq!(read_buf_checksum(3), None);
+    }
+
+    #[test]
+    fn read_buf_core_copies_clamped_input_and_updates_adler() {
+        let input = [1, 2, 3, 4];
+        let mut output = [0; 4];
+        let adler = crate::src::adler32::adler32_z(1, &input[..3]);
+
+        let result = read_buf_core(&input, &mut output, 3, 4, 10, 1, 1);
+
+        assert_eq!(
+            result,
+            ReadBufResult {
+                copied: 3,
+                avail_in: 0,
+                total_in: 13,
+                adler,
+            }
+        );
+        assert_eq!(output, [1, 2, 3, 0]);
+    }
+
+    #[test]
+    fn read_buf_core_preserves_adler_when_checksum_is_disabled() {
+        let input = [9, 8];
+        let mut output = [0; 2];
+
+        let result = read_buf_core(&input, &mut output, 2, 2, 7, 99, 0);
+
+        assert_eq!(
+            result,
+            ReadBufResult {
+                copied: 2,
+                avail_in: 0,
+                total_in: 9,
+                adler: 99,
+            }
+        );
+        assert_eq!(output, input);
     }
 
     #[test]
