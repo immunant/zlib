@@ -237,7 +237,6 @@ pub use crate::__stddef_size_t_h::size_t;
 
 pub use crate::src::trees::_dist_code;
 pub use crate::src::trees::_length_code;
-pub use crate::src::trees::_tr_flush_block;
 pub use crate::src::zutil::z_errmsg;
 pub use crate::stdlib::charf;
 
