@@ -274,7 +274,7 @@ unsafe extern "C" fn gz_zero(mut state: crate::gzguts_h::gz_statep) -> ::core::f
 
 unsafe extern "C" fn gz_write(
     mut state: crate::gzguts_h::gz_statep,
-    mut buf: crate::stdlib::voidpc,
+    buf: crate::stdlib::voidpc,
     mut len: crate::stdlib::z_size_t,
 ) -> crate::stdlib::z_size_t {
     let mut put: crate::stdlib::z_size_t = len;
@@ -288,6 +288,9 @@ unsafe extern "C" fn gz_write(
     if (*state).skip != 0 && gz_zero(state) == -1 as ::core::ffi::c_int {
         return 0 as crate::stdlib::z_size_t;
     }
+    // All callers provide `len` bytes at `buf`; retain one bounded view and
+    // advance it with safe slicing as compression consumes input.
+    let mut input = ::core::slice::from_raw_parts(buf.cast::<u8>(), len as usize);
     if len < (*state).size as crate::stdlib::z_size_t {
         loop {
             let mut have: ::core::ffi::c_uint = 0;
@@ -307,12 +310,12 @@ unsafe extern "C" fn gz_write(
             }
             if copy != 0 {
                 let buffer = &mut (*state).in_0.as_deref_mut().unwrap()[..(*state).size as usize];
-                let source = ::core::slice::from_raw_parts(buf.cast::<u8>(), copy as usize);
-                buffer[have as usize..have as usize + copy as usize].copy_from_slice(source);
+                buffer[have as usize..have as usize + copy as usize]
+                    .copy_from_slice(&input[..copy as usize]);
             }
             (*state).strm.avail_in = (*state).strm.avail_in.wrapping_add(copy);
             (*state).x.pos += copy as crate::stdlib::off64_t;
-            buf = buf.cast::<u8>().wrapping_add(copy as usize).cast();
+            input = &input[copy as usize..];
             len = len.wrapping_sub(copy as crate::stdlib::z_size_t);
             if len == 0 as crate::stdlib::z_size_t {
                 break;
@@ -331,7 +334,7 @@ unsafe extern "C" fn gz_write(
         {
             return 0 as crate::stdlib::z_size_t;
         }
-        (*state).strm.next_in = buf as *mut crate::stdlib::Bytef;
+        (*state).strm.next_in = input.as_ptr() as *mut crate::stdlib::Bytef;
         loop {
             let mut n: ::core::ffi::c_uint = -1 as ::core::ffi::c_int as ::core::ffi::c_uint;
             if n as crate::stdlib::z_size_t > len {
@@ -341,6 +344,7 @@ unsafe extern "C" fn gz_write(
             ret = gz_comp(state, crate::zlib_h::Z_NO_FLUSH);
             n = n.wrapping_sub((*state).strm.avail_in as ::core::ffi::c_uint);
             (*state).x.pos += n as crate::stdlib::off64_t;
+            input = &input[n as usize..];
             len = len.wrapping_sub(n as crate::stdlib::z_size_t);
             if ret == -1 as ::core::ffi::c_int {
                 return if (*state).again != 0 {
