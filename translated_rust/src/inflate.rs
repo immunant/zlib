@@ -2077,7 +2077,12 @@ pub unsafe fn inflate(
                                                                             }
                                                                         }
                                                                     }
-                                                                    copy = (*state).length;
+                                                                    // Stored-block copying needs no callbacks or new
+                                                                    // ABI views.  Keep its scalar state commits on one
+                                                                    // short-lived adopted state record instead of
+                                                                    // repeatedly traversing the compatibility pointer.
+                                                                    let state_ref = &mut *state;
+                                                                    copy = state_ref.length;
                                                                     if copy != 0 {
                                                                         copy =
                                                                             inflate_stored_copy_len(
@@ -2113,12 +2118,13 @@ pub unsafe fn inflate(
                                                                         put = put.wrapping_add(
                                                                             copy as usize,
                                                                         );
-                                                                        (*state).length = (*state)
-                                                                            .length
-                                                                            .wrapping_sub(copy);
+                                                                        state_ref.length =
+                                                                            state_ref
+                                                                                .length
+                                                                                .wrapping_sub(copy);
                                                                         continue '_inf_leave;
                                                                     } else {
-                                                                        (*state).mode = crate::src::inflate::TYPE;
+                                                                        state_ref.mode = crate::src::inflate::TYPE;
                                                                         continue '_inf_leave;
                                                                     }
                                                                 }
