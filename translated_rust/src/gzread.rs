@@ -335,6 +335,21 @@ fn gz_direct_result(direct: ::core::ffi::c_int) -> ::core::ffi::c_int {
     (direct == 1) as ::core::ffi::c_int
 }
 
+// `gzdirect()` has no independent ABI work once its possible LOOK transition
+// is represented as a callback.  Keep the mode decision and the returned
+// direct flag in this pointer-free core; the state adapter below still owns
+// the one embedded-codec fetch transition.
+fn gzdirect(
+    state: GzDirectState,
+    direct: ::core::ffi::c_int,
+    look: impl FnOnce() -> ::core::ffi::c_int,
+) -> ::core::ffi::c_int {
+    match gz_direct_action(state) {
+        GzDirectAction::Look => gz_direct_result(look()),
+        GzDirectAction::Report => gz_direct_result(direct),
+    }
+}
+
 impl GzFetchState {
     fn new(
         how: ::core::ffi::c_int,
@@ -1965,35 +1980,39 @@ pub unsafe extern "C" fn gzgets_ffi(
     let output = ::core::slice::from_raw_parts_mut(buf.cast::<u8>(), len as usize);
     gzgets_from_state(state, output)
 }
-unsafe fn gzdirect(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
-    if matches!(
-        gz_direct_action(GzDirectState {
+unsafe fn gzdirect_from_state(
+    state: &mut crate::gzguts_h::gz_state,
+) -> ::core::ffi::c_int {
+    let direct = state.direct;
+    gzdirect(
+        GzDirectState {
             mode: state.mode,
             how: state.how,
             have: state.x.have,
-        }),
-        GzDirectAction::Look
-    ) {
-        let _ = gz_look(&mut GzFetchOwner::new(
-            &mut state.buffers,
-            state.want,
-            &mut state.direct,
-            &mut state.junk,
-            &mut state.how,
-            &mut state.again,
-            &mut state.eof,
-            &mut state.err,
-            &mut state.msg,
-            &mut state.x.have,
-            state.fd.as_ref().expect("gzip state has an open file"),
-            state.path.as_deref(),
-            &mut state.strm.avail_in,
-            &mut state.strm.avail_out,
-            &mut state.strm.total_in,
-            &mut state.strm.total_out,
-        ));
-    }
-    gz_direct_result(state.direct)
+        },
+        direct,
+        || {
+            let _ = gz_look(&mut GzFetchOwner::new(
+                &mut state.buffers,
+                state.want,
+                &mut state.direct,
+                &mut state.junk,
+                &mut state.how,
+                &mut state.again,
+                &mut state.eof,
+                &mut state.err,
+                &mut state.msg,
+                &mut state.x.have,
+                state.fd.as_ref().expect("gzip state has an open file"),
+                state.path.as_deref(),
+                &mut state.strm.avail_in,
+                &mut state.strm.avail_out,
+                &mut state.strm.total_in,
+                &mut state.strm.total_out,
+            ));
+            state.direct
+        },
+    )
 }
 #[export_name = "gzdirect"]
 
@@ -2001,7 +2020,7 @@ pub unsafe extern "C" fn gzdirect_ffi(mut file: crate::zlib_h::gzFile) -> ::core
     let Some(mut state) = ::core::ptr::NonNull::new(file as crate::gzguts_h::gz_statep) else {
         return 0 as ::core::ffi::c_int;
     };
-    gzdirect(state.as_mut())
+    gzdirect_from_state(state.as_mut())
 }
 pub unsafe fn gzclose_r(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
     let mut ret: ::core::ffi::c_int = 0;
