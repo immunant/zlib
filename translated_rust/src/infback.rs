@@ -829,6 +829,7 @@ fn inflate_back_distance_fits(
     offset <= wsize.wrapping_sub(if whave < wsize { left } else { 0 })
 }
 
+#[derive(Copy, Clone)]
 struct InflateBackMatchCopy {
     from_offset: isize,
     count: ::core::ffi::c_uint,
@@ -849,6 +850,39 @@ fn inflate_back_match_copy(
     InflateBackMatchCopy {
         from_offset,
         count: available.min(length),
+    }
+}
+
+// A match may overlap the bytes it is producing, so copy it forward one byte
+// at a time just as the raw decoder did.  The caller derives both indices
+// from the active window's checked capacity before borrowing the window.
+// This keeps the overlap semantics in slice code instead of dereferencing
+// the raw `put` and `from` cursors in the decoder loop.
+fn inflate_back_copy_match_window(
+    window: &mut [crate::stdlib::Bytef],
+    write_index: usize,
+    copy: InflateBackMatchCopy,
+) {
+    let source_index = if copy.from_offset < 0 {
+        write_index
+            .checked_sub((-copy.from_offset) as usize)
+            .expect("validated match source precedes output")
+    } else {
+        write_index
+            .checked_add(copy.from_offset as usize)
+            .expect("validated match source stays in window")
+    };
+    let count = copy.count as usize;
+    let source_end = source_index
+        .checked_add(count)
+        .expect("validated match source range stays in window");
+    let write_end = write_index
+        .checked_add(count)
+        .expect("validated match output range stays in window");
+    assert!(source_end <= window.len() && write_end <= window.len());
+    for index in 0..count {
+        let byte = window[source_index + index];
+        window[write_index + index] = byte;
     }
 }
 
@@ -1117,7 +1151,6 @@ pub unsafe extern "C" fn inflateBack(
     let mut hold: ::core::ffi::c_ulong = 0;
     let mut bits: ::core::ffi::c_uint = 0;
     let mut copy: ::core::ffi::c_uint = 0;
-    let mut from: *mut ::core::ffi::c_uchar = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
     let mut here: crate::src::inftrees::code = crate::src::inftrees::code {
         op: 0,
         bits: 0,
@@ -1663,28 +1696,34 @@ pub unsafe extern "C" fn inflateBack(
                                         left,
                                         state_ref.length,
                                     );
-                                    // `inflate_back_distance_fits()` above bounds this
-                                    // window-relative back-reference. Keep the cursor
-                                    // calculation non-unsafe; the bounded copy below
-                                    // performs the actual accesses.
-                                    from = put.wrapping_offset(match_copy.from_offset);
-                                    copy = match_copy.count;
+                                    // The distance check above establishes both the
+                                    // source and destination ranges in the active
+                                    // window. Borrow that already-configured window
+                                    // through the inflater's bounded access path so
+                                    // overlapping LZ copies need no raw dereferences.
+                                    let write_index =
+                                        state_ref.wsize.wrapping_sub(left) as usize;
+                                    crate::src::inflate::updatewindow(
+                                        strm,
+                                        state_ref,
+                                        crate::src::inflate::InflateWindowAccess::Existing,
+                                        |_, window| {
+                                            inflate_back_copy_match_window(
+                                                window.expect(
+                                                    "inflateBack has a configured output window",
+                                                ),
+                                                write_index,
+                                                match_copy,
+                                            );
+                                        },
+                                    )
+                                    .expect("inflateBack existing window access cannot fail");
+                                    put = put.wrapping_add(match_copy.count as usize);
                                     inflate_back_consume_output_copy(
                                         state_ref,
                                         &mut left,
                                         match_copy.count,
                                     );
-                                    loop {
-                                        let c2rust_fresh20 = from;
-                                        from = from.wrapping_add(1);
-                                        let c2rust_fresh21 = put;
-                                        put = put.wrapping_add(1);
-                                        *c2rust_fresh21 = *c2rust_fresh20;
-                                        copy = copy.wrapping_sub(1);
-                                        if copy == 0 {
-                                            break;
-                                        }
-                                    }
                                     if state_ref.length == 0 as ::core::ffi::c_uint {
                                         break;
                                     }
