@@ -1392,8 +1392,11 @@ mod callback_owner {
         if complete {
             Some(state)
         } else {
-            let state_ref = state.as_mut();
-            release(stream, state, state_ref);
+            // Release consumes the same typed state handle that carried each
+            // storage publication.  Do not rebuild a caller-side state view
+            // solely for this failure path: the owner owns that projection
+            // together with the matching callback sequence.
+            release(stream, state);
             None
         }
     }
@@ -1511,9 +1514,13 @@ mod callback_owner {
     // callback state for every release in case an earlier free re-enters.
     pub(super) unsafe fn release(
         stream: &mut crate::zlib_h::z_stream_s,
-        state_handle: ::core::ptr::NonNull<crate::src::deflate::deflate_state>,
-        state: &mut crate::src::deflate::deflate_state,
+        mut state_handle: ::core::ptr::NonNull<crate::src::deflate::deflate_state>,
     ) -> ::core::ffi::c_int {
+        // The caller has already converted `strm.state` once to this typed
+        // handle.  Keep the only release-time state projection inside the
+        // owner, next to the liveness ledger and the callback order.
+        let state = state_handle.as_mut();
+        drop(state.gzhead.take());
         let release_plan = state.callback_storage.take_release_plan(state.status);
         let allocations = release_plan.ordered_slots().map(|slot| {
             slot.and_then(|slot| match slot {
@@ -6203,13 +6210,12 @@ pub unsafe fn deflateEnd(
     // Convert the opaque state before dispatching to the callback owner.  The
     // owner retains both the state allocation and all backing handles through
     // the complete matching-release transaction.
-    let Some((strm, state_handle, state, _)) =
+    let Some((strm, state_handle, _state, _)) =
         deflate_stream_and_state(strm, DeflateStorageProjection::None)
     else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
-    drop(state.gzhead.take());
-    callback_owner::release(strm, state_handle, state)
+    callback_owner::release(strm, state_handle)
 }
 #[export_name = "deflateEnd"]
 
