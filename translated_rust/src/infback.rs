@@ -67,6 +67,37 @@ pub use crate::zlib_h::Z_OK;
 pub use crate::zlib_h::Z_STREAM_END;
 pub use crate::zlib_h::Z_STREAM_ERROR;
 pub use crate::zlib_h::Z_VERSION_ERROR;
+
+// Keep the validation and scalar geometry for callback-back mode independent
+// of its ABI stream and caller window.  This is the first piece of the
+// pointer-free back-mode owner: a later call-scoped window/callback facade can
+// consume this plan without repeating the FFI checks.
+struct InflateBackInitPlan {
+    wbits: ::core::ffi::c_uint,
+    wsize: ::core::ffi::c_uint,
+}
+
+impl InflateBackInitPlan {
+    fn new(
+        version_matches: bool,
+        window_bits: ::core::ffi::c_int,
+        stream_size: ::core::ffi::c_int,
+    ) -> Result<Self, ::core::ffi::c_int> {
+        if !version_matches
+            || stream_size != ::core::mem::size_of::<crate::zlib_h::z_stream>() as ::core::ffi::c_int
+        {
+            return Err(crate::zlib_h::Z_VERSION_ERROR);
+        }
+        if !(8..=15).contains(&window_bits) {
+            return Err(crate::zlib_h::Z_STREAM_ERROR);
+        }
+        Ok(Self {
+            wbits: window_bits as ::core::ffi::c_uint,
+            wsize: 1u32 << window_bits,
+        })
+    }
+}
+
 pub unsafe extern "C" fn inflateBackInit_(
     mut strm: crate::zlib_h::z_streamp,
     mut windowBits: ::core::ffi::c_int,
@@ -76,18 +107,14 @@ pub unsafe extern "C" fn inflateBackInit_(
 ) -> ::core::ffi::c_int {
     let mut state: *mut crate::src::inflate::inflate_state =
         ::core::ptr::null_mut::<crate::src::inflate::inflate_state>();
-    if version.is_null()
-        || *version.offset(0 as isize) as ::core::ffi::c_int
-            != crate::zlib_h::ZLIB_VERSION[0 as usize] as ::core::ffi::c_int
-        || stream_size != ::core::mem::size_of::<crate::zlib_h::z_stream>() as ::core::ffi::c_int
-    {
-        return crate::zlib_h::Z_VERSION_ERROR;
-    }
-    if strm.is_null()
-        || window.is_null()
-        || windowBits < 8 as ::core::ffi::c_int
-        || windowBits > 15 as ::core::ffi::c_int
-    {
+    let version_matches = !version.is_null()
+        && *version.offset(0) as ::core::ffi::c_int
+            == crate::zlib_h::ZLIB_VERSION[0] as ::core::ffi::c_int;
+    let plan = match InflateBackInitPlan::new(version_matches, windowBits, stream_size) {
+        Ok(plan) => plan,
+        Err(status) => return status,
+    };
+    if strm.is_null() || window.is_null() {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
     (*strm).msg = ::core::ptr::null_mut::<::core::ffi::c_char>();
@@ -125,8 +152,8 @@ pub unsafe extern "C" fn inflateBackInit_(
     (*state).stream_identity = strm.addr();
     (*state).mode = crate::src::inflate::TYPE;
     (*state).dmax = 32768 as ::core::ffi::c_uint;
-    (*state).wbits = windowBits as crate::stdlib::uInt as ::core::ffi::c_uint;
-    (*state).wsize = (1 as ::core::ffi::c_uint) << windowBits;
+    (*state).wbits = plan.wbits;
+    (*state).wsize = plan.wsize;
     (*state).window = Some(::core::ptr::NonNull::new(window).expect("validated caller window"));
     // The state allocation comes from the caller's zalloc() callback, whose
     // returned bytes are not required to be initialized.
