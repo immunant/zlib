@@ -1722,19 +1722,15 @@ fn deflate_bound_result(bound: crate::stdlib::z_size_t) -> crate::stdlib::uLong 
     }
 }
 
-pub unsafe extern "C" fn deflateBound(
-    mut strm: crate::zlib_h::z_streamp,
-    mut sourceLen: crate::stdlib::uLong,
-) -> crate::stdlib::uLong {
-    deflate_bound_result(deflateBound_z(strm, sourceLen as crate::stdlib::z_size_t))
-}
 #[export_name = "deflateBound"]
 
 pub unsafe extern "C" fn deflateBound_ffi(
     mut strm: crate::zlib_h::z_streamp,
     mut sourceLen: crate::stdlib::uLong,
 ) -> crate::stdlib::uLong {
-    deflateBound(strm, sourceLen)
+    // Keep the public-width conversion at this thin dispatcher. The raw
+    // stream is handled only by the named size_t implementation above.
+    deflate_bound_result(deflateBound_z(strm, sourceLen as crate::stdlib::z_size_t))
 }
 fn put_short_msb_bytes(output: &mut [crate::stdlib::Bytef], b: crate::stdlib::uInt) {
     output[0] = (b >> 8 as ::core::ffi::c_int) as crate::stdlib::Byte;
