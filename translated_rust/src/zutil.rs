@@ -16,17 +16,17 @@ static ERROR_BUFFER: [u8; 13] = *b"buffer error\0";
 static ERROR_VERSION: [u8; 21] = *b"incompatible version\0";
 #[no_mangle]
 
-pub static mut z_errmsg: [*mut ::core::ffi::c_char; 10] = [
-    ERROR_NEED_DICT.as_ptr() as *const ::core::ffi::c_char as *mut ::core::ffi::c_char,
-    ERROR_STREAM_END.as_ptr() as *const ::core::ffi::c_char as *mut ::core::ffi::c_char,
-    ERROR_EMPTY.as_ptr() as *const ::core::ffi::c_char as *mut ::core::ffi::c_char,
-    ERROR_FILE.as_ptr() as *const ::core::ffi::c_char as *mut ::core::ffi::c_char,
-    ERROR_STREAM.as_ptr() as *const ::core::ffi::c_char as *mut ::core::ffi::c_char,
-    ERROR_DATA.as_ptr() as *const ::core::ffi::c_char as *mut ::core::ffi::c_char,
-    ERROR_MEMORY.as_ptr() as *const ::core::ffi::c_char as *mut ::core::ffi::c_char,
-    ERROR_BUFFER.as_ptr() as *const ::core::ffi::c_char as *mut ::core::ffi::c_char,
-    ERROR_VERSION.as_ptr() as *const ::core::ffi::c_char as *mut ::core::ffi::c_char,
-    ERROR_EMPTY.as_ptr() as *const ::core::ffi::c_char as *mut ::core::ffi::c_char,
+pub static z_errmsg: [::core::sync::atomic::AtomicPtr<::core::ffi::c_char>; 10] = [
+    ::core::sync::atomic::AtomicPtr::new(ERROR_NEED_DICT.as_ptr() as *mut ::core::ffi::c_char),
+    ::core::sync::atomic::AtomicPtr::new(ERROR_STREAM_END.as_ptr() as *mut ::core::ffi::c_char),
+    ::core::sync::atomic::AtomicPtr::new(ERROR_EMPTY.as_ptr() as *mut ::core::ffi::c_char),
+    ::core::sync::atomic::AtomicPtr::new(ERROR_FILE.as_ptr() as *mut ::core::ffi::c_char),
+    ::core::sync::atomic::AtomicPtr::new(ERROR_STREAM.as_ptr() as *mut ::core::ffi::c_char),
+    ::core::sync::atomic::AtomicPtr::new(ERROR_DATA.as_ptr() as *mut ::core::ffi::c_char),
+    ::core::sync::atomic::AtomicPtr::new(ERROR_MEMORY.as_ptr() as *mut ::core::ffi::c_char),
+    ::core::sync::atomic::AtomicPtr::new(ERROR_BUFFER.as_ptr() as *mut ::core::ffi::c_char),
+    ::core::sync::atomic::AtomicPtr::new(ERROR_VERSION.as_ptr() as *mut ::core::ffi::c_char),
+    ::core::sync::atomic::AtomicPtr::new(ERROR_EMPTY.as_ptr() as *mut ::core::ffi::c_char),
 ];
 
 static ERROR_MESSAGES: [&[u8]; 10] = [
