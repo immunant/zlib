@@ -3244,6 +3244,31 @@ unsafe fn deflate_stored(
     }) as block_state;
 }
 
+/// Flush the current fast-deflate block and report whether the caller can
+/// continue producing output.  All callers use the same block boundaries;
+/// centralizing the tree dispatch keeps that boundary in one place.
+fn flush_fast_block(
+    s: &mut crate::src::deflate::deflate_state,
+    strm: &mut crate::zlib_h::z_stream_s,
+    last: ::core::ffi::c_int,
+) -> bool {
+    let block_len = (s.strstart as ::core::ffi::c_long - s.block_start) as crate::zutil_h::ulg;
+    let block = if s.block_start >= 0 {
+        s.block_data(s.block_start as crate::stdlib::uInt, block_len)
+    } else {
+        None
+    };
+    // `block_data()` borrows the owned window for this synchronous tree
+    // encoding operation; `tr_flush_block_impl()` neither retains it nor the
+    // stream reference.
+    unsafe {
+        crate::src::trees::tr_flush_block_impl(s, Some(strm), block.as_deref(), block_len, last);
+    }
+    s.block_start = s.strstart as ::core::ffi::c_long;
+    flush_pending_impl(s, strm);
+    strm.avail_out != 0
+}
+
 unsafe fn deflate_fast(
     s: &mut crate::src::deflate::deflate_state,
     strm: &mut crate::zlib_h::z_stream_s,
@@ -3332,17 +3357,7 @@ unsafe fn deflate_fast(
             s.strstart = s.strstart.wrapping_add(1);
         }
         if bflush != 0 {
-            let block_len =
-                (s.strstart as ::core::ffi::c_long - s.block_start) as crate::zutil_h::ulg;
-            let block = if s.block_start >= 0 {
-                s.block_data(s.block_start as crate::stdlib::uInt, block_len)
-            } else {
-                None
-            };
-            crate::src::trees::tr_flush_block_impl(s, Some(strm), block.as_deref(), block_len, 0);
-            s.block_start = s.strstart as ::core::ffi::c_long;
-            flush_pending_impl(s, strm);
-            if strm.avail_out == 0 {
+            if !flush_fast_block(s, strm, 0) {
                 return need_more;
             }
         }
@@ -3355,31 +3370,13 @@ unsafe fn deflate_fast(
         (crate::zutil_h::MIN_MATCH - 1 as ::core::ffi::c_int) as crate::stdlib::uInt
     };
     if flush == crate::zlib_h::Z_FINISH {
-        let block_len = (s.strstart as ::core::ffi::c_long - s.block_start) as crate::zutil_h::ulg;
-        let block = if s.block_start >= 0 {
-            s.block_data(s.block_start as crate::stdlib::uInt, block_len)
-        } else {
-            None
-        };
-        crate::src::trees::tr_flush_block_impl(s, Some(strm), block.as_deref(), block_len, 1);
-        s.block_start = s.strstart as ::core::ffi::c_long;
-        flush_pending_impl(s, strm);
-        if strm.avail_out == 0 {
+        if !flush_fast_block(s, strm, 1) {
             return finish_started;
         }
         return finish_done;
     }
     if s.sym_next != 0 {
-        let block_len = (s.strstart as ::core::ffi::c_long - s.block_start) as crate::zutil_h::ulg;
-        let block = if s.block_start >= 0 {
-            s.block_data(s.block_start as crate::stdlib::uInt, block_len)
-        } else {
-            None
-        };
-        crate::src::trees::tr_flush_block_impl(s, Some(strm), block.as_deref(), block_len, 0);
-        s.block_start = s.strstart as ::core::ffi::c_long;
-        flush_pending_impl(s, strm);
-        if strm.avail_out == 0 {
+        if !flush_fast_block(s, strm, 0) {
             return need_more;
         }
     }
