@@ -137,6 +137,17 @@ fn gz_load(
     }
 }
 
+// Callers that already have a Rust-facing buffer should retain that bound
+// range until the descriptor boundary. This leaves `gz_load()` as the one
+// adapter for internal raw gzip buffers while avoiding another raw pointer
+// hand-off in the read state machine.
+fn gz_load_slice(
+    state: &mut crate::gzguts_h::gz_state,
+    buf: &mut [::core::ffi::c_uchar],
+) -> GzLoadResult {
+    gz_load(state, buf.as_mut_ptr(), buf.len() as ::core::ffi::c_uint)
+}
+
 // This helper is internal and all of its callers have already bound the
 // validated gzip state. Descriptor I/O remains confined to `gz_load`.
 fn gz_avail(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
@@ -510,7 +521,10 @@ fn gz_read(
             }
             crate::src::gzlib::GzReadPlan::Copy(chunk) => {
                 n = chunk;
-                let result = gz_load(state, buf[got as usize..].as_mut_ptr(), n);
+                let result = gz_load_slice(
+                    state,
+                    &mut buf[got as usize..got.wrapping_add(n as crate::stdlib::z_size_t) as usize],
+                );
                 n = result.received;
                 err = result.status;
             }
