@@ -863,7 +863,6 @@ unsafe fn gz_decomp(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int
                 strm as *mut crate::zlib_h::z_stream_s,
                 crate::zlib_h::Z_NO_FLUSH,
             );
-            let input = call.input_cursor().after_codec(strm.avail_in)?;
             // `inflate()` owns every diagnostic it publishes through
             // `strm.msg`. Match that known static storage by address rather
             // than dereferencing the ABI pointer. The safe loop receives only
@@ -879,14 +878,15 @@ unsafe fn gz_decomp(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int
             } else {
                 None
             };
-            Some(GzCodecResult {
+            GzCodecResult::from_codec_call(
+                &call,
                 result,
-                input,
-                output_available: strm.avail_out,
-                total_in: strm.total_in,
-                total_out: strm.total_out,
+                strm.avail_in,
+                strm.avail_out,
+                strm.total_in,
+                strm.total_out,
                 data_error_message,
-            })
+            )
         })
     };
     // The core transition returns the checked start of its owned output span,

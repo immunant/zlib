@@ -922,6 +922,30 @@ pub(crate) struct GzCodecResult {
     pub(crate) data_error_message: Option<&'static [u8]>,
 }
 
+impl GzCodecResult {
+    // A codec owner reports only scalar cursor counters after its ABI call.
+    // Rebuild the checked input cursor from the call that supplied it, so the
+    // gzip state machine never needs to derive progress from `next_in`.
+    pub(crate) fn from_codec_call(
+        call: &GzCodecCall<'_>,
+        result: ::core::ffi::c_int,
+        remaining_input: crate::stdlib::uInt,
+        output_available: crate::stdlib::uInt,
+        total_in: crate::stdlib::uLong,
+        total_out: crate::stdlib::uLong,
+        data_error_message: Option<&'static [u8]>,
+    ) -> Option<Self> {
+        Some(Self {
+            result,
+            input: call.input_cursor().after_codec(remaining_input)?,
+            output_available,
+            total_in,
+            total_out,
+            data_error_message,
+        })
+    }
+}
+
 // The decompression loop mutates only these scalar gzip fields in response to
 // an inflate result.  Keep that transition with the bounded output accounting
 // so an eventual owned gzip codec can run the loop without borrowing the ABI
