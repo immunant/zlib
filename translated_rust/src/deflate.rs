@@ -1949,14 +1949,13 @@ pub unsafe extern "C" fn deflate(
                 );
                 crate::src::trees::_tr_align(state, pending_buf);
             } else if flush != crate::zlib_h::Z_BLOCK {
-                crate::src::trees::_tr_stored_block(
-                    s as *mut crate::src::deflate::internal_state,
-                    ::core::ptr::null_mut::<crate::stdlib::charf>(),
-                    0 as crate::zutil_h::ulg,
-                    0 as ::core::ffi::c_int,
+                let state = &mut *s;
+                let pending_buf = ::core::slice::from_raw_parts_mut(
+                    state.pending_buf,
+                    state.pending_buf_size as usize,
                 );
+                crate::src::trees::_tr_stored_block(state, pending_buf, &[], 0);
                 if flush == crate::zlib_h::Z_FULL_FLUSH {
-                    let state = &mut *s;
                     *state
                         .head
                         .offset(state.hash_size.wrapping_sub(1 as crate::stdlib::uInt) as isize) =
@@ -2400,28 +2399,26 @@ unsafe extern "C" fn deflate_stored(
         } else {
             0 as ::core::ffi::c_int
         };
-        crate::src::trees::_tr_stored_block(
-            s as *mut crate::src::deflate::internal_state,
-            ::core::ptr::null_mut::<crate::stdlib::charf>(),
-            0 as crate::zutil_h::ulg,
-            last,
-        );
-        *(*s)
-            .pending_buf
-            .offset((*s).pending.wrapping_sub(4 as crate::zutil_h::ulg) as isize) =
-            len as crate::stdlib::Bytef;
-        *(*s)
-            .pending_buf
-            .offset((*s).pending.wrapping_sub(3 as crate::zutil_h::ulg) as isize) =
-            (len >> 8 as ::core::ffi::c_int) as crate::stdlib::Bytef;
-        *(*s)
-            .pending_buf
-            .offset((*s).pending.wrapping_sub(2 as crate::zutil_h::ulg) as isize) =
-            !len as crate::stdlib::Bytef;
-        *(*s)
-            .pending_buf
-            .offset((*s).pending.wrapping_sub(1 as crate::zutil_h::ulg) as isize) =
-            (!len >> 8 as ::core::ffi::c_int) as crate::stdlib::Bytef;
+        let state = &mut *s;
+        let prefix_start = state.pending as usize;
+        let (prefix, prefix_len) = crate::src::trees::stored_block_prefix(state, last);
+        for (index, byte) in prefix[..prefix_len].iter().enumerate() {
+            *state.pending_buf.offset((prefix_start + index) as isize) = *byte;
+        }
+        let stored_len = len as crate::zutil_h::ush;
+        let header_start = state.pending as usize;
+        for (index, byte) in [
+            stored_len as crate::stdlib::Bytef,
+            (stored_len >> 8) as crate::stdlib::Bytef,
+            (!stored_len) as crate::stdlib::Bytef,
+            ((!stored_len) >> 8) as crate::stdlib::Bytef,
+        ]
+        .iter()
+        .enumerate()
+        {
+            *state.pending_buf.offset((header_start + index) as isize) = *byte;
+        }
+        state.pending = state.pending.wrapping_add(4);
         flush_pending((*s).strm);
         if left != 0 {
             if left > len {
@@ -2583,12 +2580,16 @@ unsafe extern "C" fn deflate_stored(
         } else {
             0 as ::core::ffi::c_int
         };
-        crate::src::trees::_tr_stored_block(
-            s as *mut crate::src::deflate::internal_state,
-            ((*s).window as *mut crate::stdlib::charf).offset((*s).block_start as isize),
-            len as crate::zutil_h::ulg,
-            last,
+        let state = &mut *s;
+        let pending_buf = ::core::slice::from_raw_parts_mut(
+            state.pending_buf,
+            state.pending_buf_size as usize,
         );
+        let stored = ::core::slice::from_raw_parts(
+            state.window.offset(state.block_start as isize),
+            len as usize,
+        );
+        crate::src::trees::_tr_stored_block(state, pending_buf, stored, last);
         (*s).block_start += len as ::core::ffi::c_long;
         flush_pending((*s).strm);
     }

@@ -4216,70 +4216,56 @@ fn send_all_trees(
     send_tree(s, pending_buf, &ltree, lcodes - 1);
     send_tree(s, pending_buf, &dtree, dcodes - 1);
 }
-pub unsafe extern "C" fn _tr_stored_block(
-    mut s: *mut crate::src::deflate::deflate_state,
-    mut buf: *mut crate::stdlib::charf,
-    mut stored_len: crate::zutil_h::ulg,
-    mut last: ::core::ffi::c_int,
-) {
-    let s = &mut *s;
-    let mut len: ::core::ffi::c_int = 3 as ::core::ffi::c_int;
-    if (*s).bi_valid > crate::src::deflate::Buf_size - len {
-        let mut val: ::core::ffi::c_int =
-            ((0 as ::core::ffi::c_int) << 1 as ::core::ffi::c_int) + last;
-        (*s).bi_buf = ((*s).bi_buf as ::core::ffi::c_int
-            | (val as crate::zutil_h::ush as ::core::ffi::c_int) << (*s).bi_valid)
-            as crate::zutil_h::ush;
-        let c2rust_fresh49 = (*s).pending;
-        (*s).pending = (*s).pending.wrapping_add(1);
-        *(*s).pending_buf.offset(c2rust_fresh49 as isize) =
-            ((*s).bi_buf as ::core::ffi::c_int & 0xff as ::core::ffi::c_int) as crate::zutil_h::uch;
-        let c2rust_fresh50 = (*s).pending;
-        (*s).pending = (*s).pending.wrapping_add(1);
-        *(*s).pending_buf.offset(c2rust_fresh50 as isize) =
-            ((*s).bi_buf as ::core::ffi::c_int >> 8 as ::core::ffi::c_int) as crate::zutil_h::uch;
-        (*s).bi_buf = (val as crate::zutil_h::ush as ::core::ffi::c_int
-            >> crate::src::deflate::Buf_size - (*s).bi_valid)
-            as crate::zutil_h::ush;
-        (*s).bi_valid += len - crate::src::deflate::Buf_size;
+pub(crate) fn stored_block_prefix(
+    s: &mut crate::src::deflate::deflate_state,
+    last: ::core::ffi::c_int,
+) -> ([crate::stdlib::Bytef; 4], usize) {
+    // A stored block has BTYPE=00, so its three-bit header is just BFINAL.
+    let mut bytes = [0; 4];
+    let mut len = 0;
+    if s.bi_valid > crate::src::deflate::Buf_size - 3 {
+        s.bi_buf = (s.bi_buf as ::core::ffi::c_int | last << s.bi_valid) as crate::zutil_h::ush;
+        bytes[len] = s.bi_buf as crate::stdlib::Bytef;
+        bytes[len + 1] = (s.bi_buf as ::core::ffi::c_int >> 8) as crate::stdlib::Bytef;
+        len += 2;
+        s.pending = s.pending.wrapping_add(2);
+        s.bi_buf = (last >> (crate::src::deflate::Buf_size - s.bi_valid)) as crate::zutil_h::ush;
+        s.bi_valid += 3 - crate::src::deflate::Buf_size;
     } else {
-        (*s).bi_buf = ((*s).bi_buf as ::core::ffi::c_int
-            | ((((0 as ::core::ffi::c_int) << 1 as ::core::ffi::c_int) + last)
-                as crate::zutil_h::ush as ::core::ffi::c_int)
-                << (*s).bi_valid) as crate::zutil_h::ush;
-        (*s).bi_valid += len;
+        s.bi_buf = (s.bi_buf as ::core::ffi::c_int | last << s.bi_valid) as crate::zutil_h::ush;
+        s.bi_valid += 3;
     }
-    let pending_buf =
-        ::core::slice::from_raw_parts_mut((*s).pending_buf, (*s).pending_buf_size as usize);
-    bi_windup(s, pending_buf);
-    let c2rust_fresh51 = (*s).pending;
-    (*s).pending = (*s).pending.wrapping_add(1);
-    *(*s).pending_buf.offset(c2rust_fresh51 as isize) =
-        (stored_len as crate::zutil_h::ush as ::core::ffi::c_int & 0xff as ::core::ffi::c_int)
-            as crate::zutil_h::uch;
-    let c2rust_fresh52 = (*s).pending;
-    (*s).pending = (*s).pending.wrapping_add(1);
-    *(*s).pending_buf.offset(c2rust_fresh52 as isize) =
-        (stored_len as crate::zutil_h::ush as ::core::ffi::c_int >> 8 as ::core::ffi::c_int)
-            as crate::zutil_h::uch;
-    let c2rust_fresh53 = (*s).pending;
-    (*s).pending = (*s).pending.wrapping_add(1);
-    *(*s).pending_buf.offset(c2rust_fresh53 as isize) =
-        (!stored_len as crate::zutil_h::ush as ::core::ffi::c_int & 0xff as ::core::ffi::c_int)
-            as crate::zutil_h::uch;
-    let c2rust_fresh54 = (*s).pending;
-    (*s).pending = (*s).pending.wrapping_add(1);
-    *(*s).pending_buf.offset(c2rust_fresh54 as isize) =
-        (!stored_len as crate::zutil_h::ush as ::core::ffi::c_int >> 8 as ::core::ffi::c_int)
-            as crate::zutil_h::uch;
-    if stored_len != 0 {
-        crate::stdlib::memcpy(
-            (*s).pending_buf.offset((*s).pending as isize) as *mut ::core::ffi::c_void,
-            buf as *mut crate::stdlib::Bytef as *const ::core::ffi::c_void,
-            stored_len as crate::__stddef_size_t_h::size_t,
-        );
-    }
-    (*s).pending = (*s).pending.wrapping_add(stored_len);
+
+    let (windup, windup_len) = bi_windup_bits(s);
+    bytes[len..len + windup_len].copy_from_slice(&windup[..windup_len]);
+    (bytes, len + windup_len)
+}
+
+pub fn _tr_stored_block(
+    s: &mut crate::src::deflate::deflate_state,
+    pending_buf: &mut [crate::stdlib::Bytef],
+    buf: &[crate::stdlib::Bytef],
+    last: ::core::ffi::c_int,
+) {
+    // The bit writer and the supplied slices keep all state and buffer access
+    // within safe Rust after the FFI boundary.
+    let prefix_start = s.pending as usize;
+    let (prefix, prefix_len) = stored_block_prefix(s, last);
+    pending_buf[prefix_start..prefix_start + prefix_len].copy_from_slice(&prefix[..prefix_len]);
+
+    let stored_len = buf.len() as crate::zutil_h::ush;
+    let header_start = s.pending as usize;
+    pending_buf[header_start..header_start + 4].copy_from_slice(&[
+        stored_len as crate::stdlib::Bytef,
+        (stored_len >> 8) as crate::stdlib::Bytef,
+        (!stored_len) as crate::stdlib::Bytef,
+        ((!stored_len) >> 8) as crate::stdlib::Bytef,
+    ]);
+    s.pending = s.pending.wrapping_add(4);
+
+    let data_start = s.pending as usize;
+    pending_buf[data_start..data_start + buf.len()].copy_from_slice(buf);
+    s.pending = s.pending.wrapping_add(buf.len() as crate::zutil_h::ulg);
 }
 #[export_name = "_tr_stored_block"]
 
@@ -4289,7 +4275,15 @@ pub unsafe extern "C" fn _tr_stored_block_ffi(
     mut stored_len: crate::zutil_h::ulg,
     mut last: ::core::ffi::c_int,
 ) {
-    _tr_stored_block(s, buf, stored_len, last)
+    let s = &mut *s;
+    let pending_buf =
+        ::core::slice::from_raw_parts_mut(s.pending_buf, s.pending_buf_size as usize);
+    let buf = if stored_len == 0 {
+        &[]
+    } else {
+        ::core::slice::from_raw_parts(buf as *const crate::stdlib::Bytef, stored_len as usize)
+    };
+    _tr_stored_block(s, pending_buf, buf, last)
 }
 #[export_name = "_tr_flush_bits"]
 
@@ -4416,7 +4410,6 @@ pub unsafe extern "C" fn _tr_flush_block(
     mut stored_len: crate::zutil_h::ulg,
     mut last: ::core::ffi::c_int,
 ) {
-    let s_raw = s;
     let s = &mut *s;
     // These buffers remain raw-owned by the legacy state. Borrow them once at
     // this boundary so all block encoding below stays slice-based.
@@ -4452,7 +4445,9 @@ pub unsafe extern "C" fn _tr_flush_block(
         opt_lenb = static_lenb;
     }
     if stored_len.wrapping_add(4 as crate::zutil_h::ulg) <= opt_lenb && !buf.is_null() {
-        _tr_stored_block(s_raw, buf, stored_len, last);
+        let stored =
+            ::core::slice::from_raw_parts(buf as *const crate::stdlib::Bytef, stored_len as usize);
+        _tr_stored_block(s, pending_buf, stored, last);
     } else if static_lenb == opt_lenb {
         let mut len: ::core::ffi::c_int = 3 as ::core::ffi::c_int;
         if (*s).bi_valid > crate::src::deflate::Buf_size - len {
