@@ -2806,13 +2806,21 @@ pub use crate::zlib_h::z_stream_s;
 pub use crate::zlib_h::z_streamp;
 
 pub const MAXBITS: ::core::ffi::c_int = 15 as ::core::ffi::c_int;
+
+const fn copyright_chars(bytes: [u8; 49]) -> [::core::ffi::c_char; 49] {
+    let mut chars = [0; 49];
+    let mut index = 0;
+    while index < bytes.len() {
+        chars[index] = bytes[index] as ::core::ffi::c_char;
+        index += 1;
+    }
+    chars
+}
+
 #[no_mangle]
 
-pub static mut inflate_copyright: [::core::ffi::c_char; 49] = unsafe {
-    ::core::mem::transmute::<[u8; 49], [::core::ffi::c_char; 49]>(
-        *b" inflate 1.3.2.1 Copyright 1995-2026 Mark Adler \0",
-    )
-};
+pub static inflate_copyright: [::core::ffi::c_char; 49] =
+    copyright_chars(*b" inflate 1.3.2.1 Copyright 1995-2026 Mark Adler \0");
 pub unsafe extern "C" fn inflate_table(
     mut type_0: crate::src::inftrees::codetype,
     mut lens: *mut ::core::ffi::c_ushort,
