@@ -202,12 +202,10 @@ fn gz_look(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
             (state.want << 1 as ::core::ffi::c_int) as crate::__stddef_size_t_h::size_t,
         ) as *mut ::core::ffi::c_uchar;
         if state.in_0.is_null() || state.out.is_null() {
-            // SAFETY: this state owns any successful allocation above. The
-            // matching libc deallocator may only receive those allocations.
-            unsafe {
-                crate::stdlib::free(state.out as *mut ::core::ffi::c_void);
-                crate::stdlib::free(state.in_0 as *mut ::core::ffi::c_void);
-            }
+            // These are zlib default-allocator allocations, so the matching
+            // safe callback adapter can release either successful buffer.
+            crate::src::zutil::zcfree(::core::ptr::null_mut(), state.out as crate::stdlib::voidpf);
+            crate::src::zutil::zcfree(::core::ptr::null_mut(), state.in_0 as crate::stdlib::voidpf);
             crate::src::gzlib::gz_error(
                 state,
                 crate::zlib_h::Z_MEM_ERROR,
@@ -219,24 +217,24 @@ fn gz_look(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
         // SAFETY: this state now owns both gzip buffers and has initialized
         // its stream fields. The inflater constructor is the remaining raw
         // callback/allocation boundary.
-        unsafe {
-            if crate::src::inflate::inflateInit2_(
+        let init_ret = unsafe {
+            crate::src::inflate::inflateInit2_(
                 &mut state.strm,
                 15 as ::core::ffi::c_int + 16 as ::core::ffi::c_int,
                 crate::zlib_h::ZLIB_VERSION.as_ptr(),
                 ::core::mem::size_of::<crate::zlib_h::z_stream>() as ::core::ffi::c_int,
-            ) != crate::zlib_h::Z_OK
-            {
-                crate::stdlib::free(state.out as *mut ::core::ffi::c_void);
-                crate::stdlib::free(state.in_0 as *mut ::core::ffi::c_void);
-                gz_look_init_failed(state);
-                crate::src::gzlib::gz_error(
-                    state,
-                    crate::zlib_h::Z_MEM_ERROR,
-                    Some(b"out of memory\0"),
-                );
-                return -1 as ::core::ffi::c_int;
-            }
+            )
+        };
+        if init_ret != crate::zlib_h::Z_OK {
+            crate::src::zutil::zcfree(::core::ptr::null_mut(), state.out as crate::stdlib::voidpf);
+            crate::src::zutil::zcfree(::core::ptr::null_mut(), state.in_0 as crate::stdlib::voidpf);
+            gz_look_init_failed(state);
+            crate::src::gzlib::gz_error(
+                state,
+                crate::zlib_h::Z_MEM_ERROR,
+                Some(b"out of memory\0"),
+            );
+            return -1 as ::core::ffi::c_int;
         }
     }
     if state.direct == -1 as ::core::ffi::c_int || state.junk == 0 as ::core::ffi::c_int {
@@ -1060,15 +1058,17 @@ fn gz_close_read_finish(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c
 }
 
 // The close dispatcher has already validated and bound `file` to `state`.
-// Keep its mode/error decisions safe; inflater teardown, allocation release,
-// and descriptor closing remain at the narrow raw cleanup boundary below.
+// Keep its mode/error decisions safe; inflater teardown and descriptor
+// closing remain at the narrow raw cleanup boundary below.
 pub fn gzclose_r(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
     let mut ret: ::core::ffi::c_int = 0;
     let mut err: ::core::ffi::c_int = 0;
     if !crate::src::gzlib::gz_has_mode(state, crate::gzguts_h::GZ_READ) {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    match crate::src::gzlib::gz_read_close_cleanup(state) {
+    let cleanup = crate::src::gzlib::gz_read_close_cleanup(state);
+    let release_buffers = matches!(&cleanup, crate::src::gzlib::GzReadCloseCleanup::Inflater);
+    match cleanup {
         crate::src::gzlib::GzReadCloseCleanup::None => {}
         crate::src::gzlib::GzReadCloseCleanup::Inflater => unsafe {
             // SAFETY: this close path owns the initialized inflater and gzip
@@ -1077,22 +1077,25 @@ pub fn gzclose_r(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
             crate::src::inflate::inflateEnd(
                 &raw mut state.strm as *mut _ as *mut crate::zlib_h::z_stream_s,
             );
-            crate::stdlib::free(state.out as *mut ::core::ffi::c_void);
-            crate::stdlib::free(state.in_0 as *mut ::core::ffi::c_void);
         },
+    }
+    if release_buffers {
+        // `gz_look` allocated these through zlib's default allocator.
+        crate::src::zutil::zcfree(::core::ptr::null_mut(), state.out as crate::stdlib::voidpf);
+        crate::src::zutil::zcfree(::core::ptr::null_mut(), state.in_0 as crate::stdlib::voidpf);
     }
     err = gz_close_read_finish(state);
     let path = state.path;
     let fd = state.fd;
-    // SAFETY: `path`, `fd`, and the allocation backing `state` are owned by
-    // this closing state. The
-    // result of closing the descriptor intentionally overrides the earlier
-    // buffered-error result, matching zlib's cleanup order.
-    unsafe {
-        crate::stdlib::free(path as *mut ::core::ffi::c_void);
-        ret = crate::stdlib::close(fd);
-        crate::stdlib::free(state as *mut crate::gzguts_h::gz_state as *mut ::core::ffi::c_void);
-    }
+    // The result of closing the descriptor intentionally overrides the
+    // earlier buffered-error result, matching zlib's cleanup order. `path`
+    // and `state` are default-allocator allocations owned by this close.
+    crate::src::zutil::zcfree(::core::ptr::null_mut(), path as crate::stdlib::voidpf);
+    ret = crate::stdlib::close(fd);
+    crate::src::zutil::zcfree(
+        ::core::ptr::null_mut(),
+        state as *mut crate::gzguts_h::gz_state as crate::stdlib::voidpf,
+    );
     return if ret != 0 {
         crate::zlib_h::Z_ERRNO
     } else {
