@@ -64,33 +64,38 @@ fn gz_owned_buffer_index(base: usize, len: usize, cursor: usize) -> Option<usize
     cursor.checked_sub(base).filter(|index| *index <= len)
 }
 
-/// Move unconsumed compressed input back to the beginning of its owned
-/// buffer before a refill.  The gzip adapter converts its ABI cursor to the
-/// `next_index` boundary value; this core therefore needs no raw pointers or
-/// overlapping libc copy.
-fn gz_avail_retain_input(
-    input: &mut [u8],
-    next_index: usize,
-    avail_in: crate::stdlib::uInt,
-) -> Option<()> {
-    let end = next_index.checked_add(avail_in as usize)?;
-    if end > input.len() || avail_in as usize > input.len() {
-        return None;
-    }
-    input.copy_within(next_index..end, 0);
+/// Validated owned-buffer transition for one compressed-input refill. The
+/// gzip adapter reconciles its ABI cursor to `next_index` before calling this
+/// plan, which checks both the retained prefix and writable suffix before
+/// either slice operation takes place.
+struct GzAvailRefillPlan {
+    retain: ::core::ops::Range<usize>,
+    load: ::core::ops::Range<usize>,
+}
+
+/// Apply the already-planned retained-input move to its owned storage. The
+/// plan has checked codec metadata; this final slice check also protects the
+/// owned allocation from an incoherent opaque buffer length.
+fn gz_avail_retain_input(input: &mut [u8], retain: ::core::ops::Range<usize>) -> Option<()> {
+    input.get(retain.clone())?;
+    input.copy_within(retain, 0);
     Some(())
 }
 
-/// Plan the writable suffix for one owned compressed-input refill. This keeps
-/// the range validation independent of the ABI stream cursor and preserves
-/// zlib's wrapping availability accounting at the codec boundary.
-fn gz_avail_load_span(
+/// Keep cursor/range validation independent of the ABI stream cursor and
+/// preserve zlib's wrapping availability accounting at the codec boundary.
+fn gz_avail_refill_plan(
+    next_index: usize,
     avail_in: crate::stdlib::uInt,
     size: ::core::ffi::c_uint,
-) -> Option<::core::ops::Range<usize>> {
+) -> Option<GzAvailRefillPlan> {
+    let configured_len = size as usize;
+    let retained_end = next_index.checked_add(avail_in as usize)?;
     let start = avail_in as usize;
-    let end = size as usize;
-    (start <= end).then_some(start..end)
+    (retained_end <= configured_len && start <= configured_len).then_some(GzAvailRefillPlan {
+        retain: next_index..retained_end,
+        load: start..configured_len,
+    })
 }
 
 /// Advance the owned input cursor after one inflate call. The boundary passes
@@ -243,26 +248,27 @@ fn gz_avail(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
         return -1 as ::core::ffi::c_int;
     }
     if state.eof == 0 as ::core::ffi::c_int {
-        {
+        let refill = {
             let Some(buffers) = state.buffers.as_mut() else {
                 return -1;
             };
-            if state.strm.avail_in != 0 {
-                if gz_avail_retain_input(&mut buffers.input, state.input_index, state.strm.avail_in)
-                    .is_none()
-                {
-                    return -1;
-                }
+            let Some(refill) =
+                gz_avail_refill_plan(state.input_index, state.strm.avail_in, state.size)
+            else {
+                return -1;
+            };
+            if state.strm.avail_in != 0
+                && gz_avail_retain_input(&mut buffers.input, refill.retain.clone()).is_none()
+            {
+                return -1;
             }
-        }
-        let Some(load_span) = gz_avail_load_span(state.strm.avail_in, state.size) else {
-            return -1;
+            refill
         };
         let result = {
             let (Some(file), Some(buffers)) = (state.file.as_mut(), state.buffers.as_mut()) else {
                 return -1;
             };
-            let Some(input) = buffers.input.get_mut(load_span) else {
+            let Some(input) = buffers.input.get_mut(refill.load) else {
                 return -1;
             };
             gz_load(file, input)
