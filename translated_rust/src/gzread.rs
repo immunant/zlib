@@ -49,11 +49,11 @@ pub use crate::zlib_h::Z_OK;
 pub use crate::zlib_h::Z_STREAM_END;
 pub use crate::zlib_h::Z_STREAM_ERROR;
 
-unsafe extern "C" fn gz_load(
+unsafe fn gz_load(
     mut state: crate::gzguts_h::gz_statep,
     mut buf: *mut ::core::ffi::c_uchar,
     mut len: ::core::ffi::c_uint,
-    mut have: *mut ::core::ffi::c_uint,
+    have: &mut ::core::ffi::c_uint,
 ) -> ::core::ffi::c_int {
     let mut ret: ::core::ffi::c_int = 0;
     let mut get: ::core::ffi::c_uint = 0;
@@ -134,7 +134,7 @@ unsafe extern "C" fn gz_avail(mut state: crate::gzguts_h::gz_statep) -> ::core::
             (*state)
                 .size
                 .wrapping_sub((*strm).avail_in as ::core::ffi::c_uint),
-            &raw mut got,
+            &mut got,
         ) == -1 as ::core::ffi::c_int
         {
             return -1 as ::core::ffi::c_int;
@@ -330,7 +330,7 @@ unsafe extern "C" fn gz_fetch(mut state: crate::gzguts_h::gz_statep) -> ::core::
                     state,
                     (*state).out,
                     (*state).size << 1 as ::core::ffi::c_int,
-                    &raw mut (*state).x.have,
+                    &mut (*state).x.have,
                 ) == -1 as ::core::ffi::c_int
                 {
                     return -1 as ::core::ffi::c_int;
@@ -439,7 +439,7 @@ unsafe extern "C" fn gz_read(
                 c2rust_current_block_30 = 15240798224410183470;
             } else {
                 if (*state).how == crate::gzguts_h::COPY {
-                    err = gz_load(state, buf as *mut ::core::ffi::c_uchar, n, &raw mut n);
+                    err = gz_load(state, buf as *mut ::core::ffi::c_uchar, n, &mut n);
                 } else {
                     (*state).strm.avail_out = n as crate::stdlib::uInt;
                     (*state).strm.next_out =
