@@ -1085,6 +1085,7 @@ struct GzRewindState<'a> {
     start: crate::stdlib::off64_t,
     fd: &'a rustix::fd::OwnedFd,
     reset: GzResetTarget<'a>,
+    output_cursor: &'a mut Option<GzCodecOutputCursor>,
 }
 
 impl GzResetState {
@@ -1612,6 +1613,9 @@ fn gzrewind(state: GzRewindState<'_>) -> ::core::ffi::c_int {
         return -1 as ::core::ffi::c_int;
     }
     reset_gz_target(state.mode, state.reset);
+    // The ABI cursor is empty after a rewind, so retire the owner cursor as
+    // well.  A later refill will install a newly checked cursor.
+    *state.output_cursor = None;
     return 0 as ::core::ffi::c_int;
 }
 
@@ -1631,8 +1635,19 @@ struct GzSeekState<'a> {
 struct GzSeekTarget<'a> {
     mode: ::core::ffi::c_int,
     reset: GzResetTarget<'a>,
+    output_cursor: &'a mut Option<GzCodecOutputCursor>,
     fd: Option<&'a rustix::fd::OwnedFd>,
     start: crate::stdlib::off64_t,
+}
+
+// Seeking either discards the completed output span (a direct seek or
+// rewind), advances within it, or leaves it alone while scheduling a future
+// skip.  Keep that decision in the pointer-free seek implementation so the
+// ABI wrapper only supplies validated views and publishes its cursor.
+enum GzSeekCursorAction {
+    Clear,
+    Advance(usize),
+    Keep,
 }
 
 fn gzseek64_state<'a>(
@@ -1640,7 +1655,7 @@ fn gzseek64_state<'a>(
     buffered: Option<&[u8]>,
     mut offset: crate::stdlib::off64_t,
     whence: ::core::ffi::c_int,
-) -> (crate::stdlib::off64_t, GzSeekState<'a>, usize) {
+) -> (crate::stdlib::off64_t, GzSeekState<'a>, GzSeekCursorAction) {
     let plan = gzseek_plan(
         state.reset.mode,
         state.reset.err,
@@ -1653,18 +1668,19 @@ fn gzseek64_state<'a>(
         whence,
     );
     let Some(plan) = plan else {
-        return (-1, state, 0);
+        return (-1, state, GzSeekCursorAction::Keep);
     };
     if plan.clear_skip {
         state.reset.skip = 0;
     }
+    let mut clear_output_cursor = false;
     offset = match plan.action {
         GzSeekAction::Direct { seek_by, position } => {
             let Some(fd) = state.fd else {
-                return (-1, state, 0);
+                return (-1, state, GzSeekCursorAction::Keep);
             };
             if rustix::fs::seek(fd, rustix::fs::SeekFrom::Current(seek_by as i64)).is_err() {
-                return (-1, state, 0);
+                return (-1, state, GzSeekCursorAction::Keep);
             }
             state.reset.have = 0;
             state.reset.eof = 0;
@@ -1673,20 +1689,21 @@ fn gzseek64_state<'a>(
             gz_clear_error(&mut state.reset.msg, &mut state.reset.err);
             state.reset.codec.reset_input();
             state.reset.pos = position;
-            return (state.reset.pos, state, 0);
+            return (state.reset.pos, state, GzSeekCursorAction::Clear);
         }
         GzSeekAction::Rewind { offset } => {
             let Some(fd) = state.fd else {
-                return (-1, state, 0);
+                return (-1, state, GzSeekCursorAction::Keep);
             };
             if rustix::fs::seek(fd, rustix::fs::SeekFrom::Start(state.start as u64)).is_err() {
-                return (-1, state, 0);
+                return (-1, state, GzSeekCursorAction::Keep);
             }
             state.reset.apply_reset();
+            clear_output_cursor = true;
             offset
         }
         GzSeekAction::Skip { offset } => offset,
-        GzSeekAction::Reject => return (-1, state, 0),
+        GzSeekAction::Reject => return (-1, state, GzSeekCursorAction::Keep),
     };
     let mut consumed = 0;
     if state.reset.mode == crate::gzguts_h::GZ_READ {
@@ -1704,10 +1721,10 @@ fn gzseek64_state<'a>(
             // ABI cursor and advertised length lie within the owned output
             // allocation.  Keep the same proof here before consuming it.
             let Some(buffered) = buffered else {
-                return (-1, state, 0);
+                return (-1, state, GzSeekCursorAction::Keep);
             };
             if buffered.get(..n as usize).is_none() {
-                return (-1, state, 0);
+                return (-1, state, GzSeekCursorAction::Keep);
             }
         }
         state.reset.have = state.reset.have.wrapping_sub(n);
@@ -1716,7 +1733,17 @@ fn gzseek64_state<'a>(
         consumed = n as usize;
     }
     state.reset.skip = offset;
-    (state.reset.pos + offset, state, consumed)
+    (
+        state.reset.pos + offset,
+        state,
+        if clear_output_cursor {
+            GzSeekCursorAction::Clear
+        } else if consumed == 0 {
+            GzSeekCursorAction::Keep
+        } else {
+            GzSeekCursorAction::Advance(consumed)
+        },
+    )
 }
 
 #[export_name = "gzrewind"]
@@ -1748,6 +1775,7 @@ pub unsafe extern "C" fn gzrewind_ffi(mut file: crate::zlib_h::gzFile) -> ::core
             codec_total_out: &mut state.strm.total_out,
             input_cursor: &mut state.buffers.input_cursor,
         },
+        output_cursor: &mut state.buffers.output_cursor,
     })
 }
 fn gzseek64(
@@ -1776,7 +1804,7 @@ fn gzseek64(
             *target.reset.codec_total_out,
         ),
     };
-    let (result, reset, consumed) = gzseek64_state(
+    let (result, reset, cursor_action) = gzseek64_state(
         GzSeekState {
             reset,
             fd: target.fd,
@@ -1787,6 +1815,24 @@ fn gzseek64(
         whence,
     );
     store_gz_reset_target(target.reset, reset.reset);
+    let consumed = match cursor_action {
+        GzSeekCursorAction::Clear => {
+            *target.output_cursor = None;
+            0
+        }
+        GzSeekCursorAction::Advance(consumed) => {
+            let Some(next) = target
+                .output_cursor
+                .as_ref()
+                .and_then(|cursor| cursor.advance(consumed))
+            else {
+                return (-1, 0);
+            };
+            *target.output_cursor = Some(next);
+            consumed
+        }
+        GzSeekCursorAction::Keep => 0,
+    };
     (result, consumed)
 }
 #[export_name = "gzseek64"]
@@ -1837,6 +1883,7 @@ pub unsafe extern "C" fn gzseek64_ffi(
                 codec_total_out: &mut state.strm.total_out,
                 input_cursor: &mut state.buffers.input_cursor,
             },
+            output_cursor: &mut state.buffers.output_cursor,
             fd: state.fd.as_ref(),
             start: state.start,
         },
@@ -1900,6 +1947,7 @@ pub unsafe extern "C" fn gzseek_ffi(
                 codec_total_out: &mut state.strm.total_out,
                 input_cursor: &mut state.buffers.input_cursor,
             },
+            output_cursor: &mut state.buffers.output_cursor,
             fd: state.fd.as_ref(),
             start: state.start,
         },
