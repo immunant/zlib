@@ -395,16 +395,23 @@ unsafe fn gz_comp(
     return 0 as ::core::ffi::c_int;
 }
 
-unsafe fn gz_zero(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
+/// Fill a pending gzip seek gap through the supplied buffered compressor.
+///
+/// This owns the zero-fill bookkeeping only.  The caller supplies the legacy
+/// deflate dispatch, keeping this state machine independent of how the stream
+/// is eventually represented.
+fn gz_zero_impl<F>(
+    state: &mut crate::gzguts_h::gz_state,
+    mut compress_buffered: F,
+) -> ::core::ffi::c_int
+where
+    F: FnMut(&mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int,
+{
     let mut first: ::core::ffi::c_int = 0;
     let mut ret: ::core::ffi::c_int = 0;
     let mut n: ::core::ffi::c_uint = 0;
     if state.strm.avail_in != 0
-        && gz_comp(
-            state,
-            crate::zlib_h::Z_NO_FLUSH,
-            Some(GzCompInput::Buffered),
-        ) == -1 as ::core::ffi::c_int
+        && compress_buffered(state) == -1 as ::core::ffi::c_int
     {
         return -1 as ::core::ffi::c_int;
     }
@@ -427,11 +434,7 @@ unsafe fn gz_zero(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
         }
         state.strm.avail_in = n as crate::stdlib::uInt;
         state.strm.next_in = state.in_0.as_mut_ptr() as *mut crate::stdlib::Bytef;
-        ret = gz_comp(
-            state,
-            crate::zlib_h::Z_NO_FLUSH,
-            Some(GzCompInput::Buffered),
-        );
+        ret = compress_buffered(state);
         n = n.wrapping_sub(state.strm.avail_in as ::core::ffi::c_uint);
         state.x.pos += n as crate::stdlib::off64_t;
         state.skip -= n as crate::stdlib::off64_t;
@@ -443,6 +446,16 @@ unsafe fn gz_zero(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
         }
     }
     return 0 as ::core::ffi::c_int;
+}
+
+unsafe fn gz_zero(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
+    gz_zero_impl(state, |state| {
+        gz_comp(
+            state,
+            crate::zlib_h::Z_NO_FLUSH,
+            Some(GzCompInput::Buffered),
+        )
+    })
 }
 
 unsafe fn gz_write(state: &mut crate::gzguts_h::gz_state, input: &[u8]) -> crate::stdlib::z_size_t {
