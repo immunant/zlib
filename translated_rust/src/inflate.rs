@@ -2605,21 +2605,16 @@ pub unsafe extern "C" fn inflateValidate_ffi(
     (*state).wrap = inflate_validate_wrap((*state).wrap, check);
     crate::zlib_h::Z_OK
 }
-pub unsafe extern "C" fn inflateMark(mut strm: crate::zlib_h::z_streamp) -> ::core::ffi::c_long {
-    let mut state: *mut crate::src::inflate::inflate_state =
-        ::core::ptr::null_mut::<crate::src::inflate::inflate_state>();
-    if inflateStateCheck(strm) != 0 {
-        return -((1 as ::core::ffi::c_long) << 16 as ::core::ffi::c_int);
-    }
-    state = (*strm).state as *mut crate::src::inflate::inflate_state;
-    return inflate_mark_value((*state).back, (*state).mode, (*state).length, (*state).was);
-}
 #[export_name = "inflateMark"]
 
 pub unsafe extern "C" fn inflateMark_ffi(
     mut strm: crate::zlib_h::z_streamp,
 ) -> ::core::ffi::c_long {
-    inflateMark(strm)
+    if inflateStateCheck(strm) != 0 {
+        return -((1 as ::core::ffi::c_long) << 16 as ::core::ffi::c_int);
+    }
+    let state = (*strm).state as *mut crate::src::inflate::inflate_state;
+    inflate_mark_value((*state).back, (*state).mode, (*state).length, (*state).was)
 }
 pub unsafe extern "C" fn inflateCodesUsed(
     mut strm: crate::zlib_h::z_streamp,
@@ -3030,6 +3025,14 @@ mod tests {
         assert_eq!(inflate_mark_progress(MATCH, 7, 10), 3);
         assert_eq!(inflate_mark_progress(HEAD, 7, 10), 0);
         assert_eq!(inflate_mark_progress(MATCH, 5, 2), 2_u32.wrapping_sub(5));
+    }
+
+    #[test]
+    fn inflate_mark_rejects_a_null_stream() {
+        assert_eq!(
+            unsafe { super::inflateMark_ffi(::core::ptr::null_mut()) },
+            -(1 << 16)
+        );
     }
 
     #[test]
