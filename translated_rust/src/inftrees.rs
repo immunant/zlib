@@ -2813,6 +2813,89 @@ pub static inflate_copyright: [::core::ffi::c_char; 49] = unsafe {
         *b" inflate 1.3.2.1 Copyright 1995-2026 Mark Adler \0",
     )
 };
+
+enum InflateTableBounds {
+    Empty,
+    Ready {
+        min: ::core::ffi::c_uint,
+        max: ::core::ffi::c_uint,
+        root: ::core::ffi::c_uint,
+    },
+}
+
+fn inflate_table_bounds(
+    type_0: crate::src::inftrees::codetype,
+    count: &[::core::ffi::c_ushort; 16],
+    mut root: ::core::ffi::c_uint,
+) -> Result<InflateTableBounds, ::core::ffi::c_int> {
+    let mut max = MAXBITS as ::core::ffi::c_uint;
+    while max >= 1 {
+        if count[max as usize] != 0 {
+            break;
+        }
+        max -= 1;
+    }
+    if root > max {
+        root = max;
+    }
+    if max == 0 {
+        return Ok(InflateTableBounds::Empty);
+    }
+
+    let mut min = 1;
+    while min < max {
+        if count[min as usize] != 0 {
+            break;
+        }
+        min += 1;
+    }
+    if root < min {
+        root = min;
+    }
+
+    let mut left = 1 as ::core::ffi::c_int;
+    for len in 1..=MAXBITS as usize {
+        left <<= 1;
+        left -= count[len] as ::core::ffi::c_int;
+        if left < 0 {
+            return Err(-1);
+        }
+    }
+    if left > 0 && (type_0 == CODES || max != 1) {
+        return Err(-1);
+    }
+    Ok(InflateTableBounds::Ready { min, max, root })
+}
+
+fn inflate_table_entry(
+    symbol: ::core::ffi::c_ushort,
+    match_0: ::core::ffi::c_uint,
+    base: &[::core::ffi::c_ushort],
+    extra: &[::core::ffi::c_ushort],
+) -> crate::src::inftrees::code {
+    let symbol = symbol as ::core::ffi::c_uint;
+    if symbol.wrapping_add(1) < match_0 {
+        crate::src::inftrees::code {
+            op: 0,
+            bits: 0,
+            val: symbol as ::core::ffi::c_ushort,
+        }
+    } else if symbol >= match_0 {
+        let index = symbol.wrapping_sub(match_0) as usize;
+        crate::src::inftrees::code {
+            op: extra[index] as ::core::ffi::c_uchar,
+            bits: 0,
+            val: base[index],
+        }
+    } else {
+        crate::src::inftrees::code {
+            op: 96,
+            bits: 0,
+            val: 0,
+        }
+    }
+}
+
 pub unsafe extern "C" fn inflate_table(
     mut type_0: crate::src::inftrees::codetype,
     mut lens: *mut ::core::ffi::c_ushort,
@@ -2842,8 +2925,8 @@ pub unsafe extern "C" fn inflate_table(
     };
     let mut next: *mut crate::src::inftrees::code =
         ::core::ptr::null_mut::<crate::src::inftrees::code>();
-    let mut base: *const ::core::ffi::c_ushort = ::core::ptr::null::<::core::ffi::c_ushort>();
-    let mut extra: *const ::core::ffi::c_ushort = ::core::ptr::null::<::core::ffi::c_ushort>();
+    let mut base: &[::core::ffi::c_ushort] = &[];
+    let mut extra: &[::core::ffi::c_ushort] = &[];
     let mut match_0: ::core::ffi::c_uint = 0 as ::core::ffi::c_uint;
     let mut count: [::core::ffi::c_ushort; 16] = [0; 16];
     let mut offs: [::core::ffi::c_ushort; 16] = [0; 16];
@@ -2993,55 +3076,30 @@ pub unsafe extern "C" fn inflate_table(
         sym = sym.wrapping_add(1);
     }
     root = *bits;
-    max = MAXBITS as ::core::ffi::c_uint;
-    while max >= 1 as ::core::ffi::c_uint {
-        if count[max as usize] as ::core::ffi::c_int != 0 as ::core::ffi::c_int {
-            break;
+    match inflate_table_bounds(type_0, &count, root) {
+        Ok(InflateTableBounds::Empty) => {
+            here.op = 64 as ::core::ffi::c_int as ::core::ffi::c_uchar;
+            here.bits = 1 as ::core::ffi::c_int as ::core::ffi::c_uchar;
+            here.val = 0 as ::core::ffi::c_int as ::core::ffi::c_ushort;
+            let c2rust_fresh0 = *table;
+            *table = (*table).offset(1);
+            *c2rust_fresh0 = here;
+            let c2rust_fresh1 = *table;
+            *table = (*table).offset(1);
+            *c2rust_fresh1 = here;
+            *bits = 1 as ::core::ffi::c_uint;
+            return 0 as ::core::ffi::c_int;
         }
-        max = max.wrapping_sub(1);
-    }
-    if root > max {
-        root = max;
-    }
-    if max == 0 as ::core::ffi::c_uint {
-        here.op = 64 as ::core::ffi::c_int as ::core::ffi::c_uchar;
-        here.bits = 1 as ::core::ffi::c_int as ::core::ffi::c_uchar;
-        here.val = 0 as ::core::ffi::c_int as ::core::ffi::c_ushort;
-        let c2rust_fresh0 = *table;
-        *table = (*table).offset(1);
-        *c2rust_fresh0 = here;
-        let c2rust_fresh1 = *table;
-        *table = (*table).offset(1);
-        *c2rust_fresh1 = here;
-        *bits = 1 as ::core::ffi::c_uint;
-        return 0 as ::core::ffi::c_int;
-    }
-    min = 1 as ::core::ffi::c_uint;
-    while min < max {
-        if count[min as usize] as ::core::ffi::c_int != 0 as ::core::ffi::c_int {
-            break;
+        Ok(InflateTableBounds::Ready {
+            min: table_min,
+            max: table_max,
+            root: table_root,
+        }) => {
+            min = table_min;
+            max = table_max;
+            root = table_root;
         }
-        min = min.wrapping_add(1);
-    }
-    if root < min {
-        root = min;
-    }
-    left = 1 as ::core::ffi::c_int;
-    len = 1 as ::core::ffi::c_uint;
-    while len <= MAXBITS as ::core::ffi::c_uint {
-        left <<= 1 as ::core::ffi::c_int;
-        left -= count[len as usize] as ::core::ffi::c_int;
-        if left < 0 as ::core::ffi::c_int {
-            return -1 as ::core::ffi::c_int;
-        }
-        len = len.wrapping_add(1);
-    }
-    if left > 0 as ::core::ffi::c_int
-        && (type_0 as ::core::ffi::c_uint
-            == crate::src::inftrees::CODES as ::core::ffi::c_int as ::core::ffi::c_uint
-            || max != 1 as ::core::ffi::c_uint)
-    {
-        return -1 as ::core::ffi::c_int;
+        Err(error) => return error,
     }
     offs[1 as ::core::ffi::c_int as usize] = 0 as ::core::ffi::c_ushort;
     len = 1 as ::core::ffi::c_uint;
@@ -3066,13 +3124,13 @@ pub unsafe extern "C" fn inflate_table(
             match_0 = 20 as ::core::ffi::c_uint;
         }
         1 => {
-            base = &raw const lbase as *const ::core::ffi::c_ushort;
-            extra = &raw const lext as *const ::core::ffi::c_ushort;
+            base = &lbase;
+            extra = &lext;
             match_0 = 257 as ::core::ffi::c_uint;
         }
         2 => {
-            base = &raw const dbase as *const ::core::ffi::c_ushort;
-            extra = &raw const dext as *const ::core::ffi::c_ushort;
+            base = &dbase;
+            extra = &dext;
         }
         _ => {}
     }
@@ -3096,23 +3154,9 @@ pub unsafe extern "C" fn inflate_table(
     }
     loop {
         here.bits = len.wrapping_sub(drop_0) as ::core::ffi::c_uchar;
-        if (*work.offset(sym as isize) as ::core::ffi::c_uint)
-            .wrapping_add(1 as ::core::ffi::c_uint)
-            < match_0
-        {
-            here.op = 0 as ::core::ffi::c_int as ::core::ffi::c_uchar;
-            here.val = *work.offset(sym as isize);
-        } else if *work.offset(sym as isize) as ::core::ffi::c_uint >= match_0 {
-            here.op = *extra.offset(
-                (*work.offset(sym as isize) as ::core::ffi::c_uint).wrapping_sub(match_0) as isize,
-            ) as ::core::ffi::c_uchar;
-            here.val = *base.offset(
-                (*work.offset(sym as isize) as ::core::ffi::c_uint).wrapping_sub(match_0) as isize,
-            );
-        } else {
-            here.op = (32 as ::core::ffi::c_int + 64 as ::core::ffi::c_int) as ::core::ffi::c_uchar;
-            here.val = 0 as ::core::ffi::c_ushort;
-        }
+        let entry = inflate_table_entry(*work.offset(sym as isize), match_0, base, extra);
+        here.op = entry.op;
+        here.val = entry.val;
         incr = (1 as ::core::ffi::c_uint) << len.wrapping_sub(drop_0);
         fill = (1 as ::core::ffi::c_uint) << curr;
         min = fill;
