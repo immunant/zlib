@@ -1705,13 +1705,9 @@ pub unsafe extern "C" fn deflateParams(
     mut level: ::core::ffi::c_int,
     mut strategy: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
-    let mut s: *mut crate::src::deflate::deflate_state =
-        ::core::ptr::null_mut::<crate::src::deflate::deflate_state>();
-    let mut algorithm: DeflateAlgorithm;
     if deflateStateCheck(strm) != 0 {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    s = (*strm).state as *mut crate::src::deflate::deflate_state;
     if level == crate::zlib_h::Z_DEFAULT_COMPRESSION {
         level = 6 as ::core::ffi::c_int;
     }
@@ -1722,26 +1718,39 @@ pub unsafe extern "C" fn deflateParams(
     {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    algorithm = configuration_table[(*s).level as usize].algorithm;
-    if (strategy != (*s).strategy || algorithm != configuration_table[level as usize].algorithm)
-        && (*s).last_flush != -2 as ::core::ffi::c_int
-    {
+    // Project the ABI stream and its opaque state once for each phase.  The
+    // block flush can re-enter the dispatcher, so do not retain either Rust
+    // borrow across that call; reproject afterwards instead of indexing the
+    // raw cursors throughout the parameter policy.
+    let needs_flush = {
+        let stream = &mut *strm;
+        let state = &mut *(stream.state as *mut crate::src::deflate::deflate_state);
+        let algorithm = configuration_table[state.level as usize].algorithm;
+        (strategy != state.strategy || algorithm != configuration_table[level as usize].algorithm)
+            && state.last_flush != -2 as ::core::ffi::c_int
+    };
+    if needs_flush {
         let mut err: ::core::ffi::c_int = deflate(strm, crate::zlib_h::Z_BLOCK);
         if err == crate::zlib_h::Z_STREAM_ERROR {
             return err;
         }
-        if (*strm).avail_in != 0
-            || (*s).strstart as ::core::ffi::c_long - (*s).block_start
-                + (*s).lookahead as ::core::ffi::c_long
-                != 0
-        {
+        let flush_left_input = {
+            let stream = &mut *strm;
+            let state = &mut *(stream.state as *mut crate::src::deflate::deflate_state);
+            stream.avail_in != 0
+                || state.strstart as ::core::ffi::c_long - state.block_start
+                    + state.lookahead as ::core::ffi::c_long
+                    != 0
+        };
+        if flush_left_input {
             return crate::zlib_h::Z_BUF_ERROR;
         }
     }
-    if (*s).level != level {
-        if (*s).level == 0 as ::core::ffi::c_int && (*s).matches != 0 as crate::stdlib::uInt {
-            if (*s).matches == 1 as crate::stdlib::uInt {
-                let state = &mut *s;
+    let stream = &mut *strm;
+    let state = &mut *(stream.state as *mut crate::src::deflate::deflate_state);
+    if state.level != level {
+        if state.level == 0 as ::core::ffi::c_int && state.matches != 0 as crate::stdlib::uInt {
+            if state.matches == 1 as crate::stdlib::uInt {
                 // `head` and `prev` are allocated at these exact element
                 // counts in `deflateInit2_()` and `deflateCopy()`.
                 let head = ::core::slice::from_raw_parts_mut(
@@ -1759,22 +1768,22 @@ pub unsafe extern "C" fn deflateParams(
                 // `head` has exactly `hash_size` elements from
                 // `deflateInit2_()` or `deflateCopy()`.
                 let head = ::core::slice::from_raw_parts_mut(
-                    (*s).head.expect("initialized head table").as_ptr(),
-                    (*s).hash_size as usize,
+                    state.head.expect("initialized head table").as_ptr(),
+                    state.hash_size as usize,
                 );
                 clear_hash_table(head);
-                (*s).slid = 0 as ::core::ffi::c_int;
+                state.slid = 0 as ::core::ffi::c_int;
             }
-            (*s).matches = 0 as crate::stdlib::uInt;
+            state.matches = 0 as crate::stdlib::uInt;
         }
-        (*s).level = level;
-        (*s).max_lazy_match = configuration_table[level as usize].max_lazy as crate::stdlib::uInt;
-        (*s).good_match = configuration_table[level as usize].good_length as crate::stdlib::uInt;
-        (*s).nice_match = configuration_table[level as usize].nice_length as ::core::ffi::c_int;
-        (*s).max_chain_length =
+        state.level = level;
+        state.max_lazy_match = configuration_table[level as usize].max_lazy as crate::stdlib::uInt;
+        state.good_match = configuration_table[level as usize].good_length as crate::stdlib::uInt;
+        state.nice_match = configuration_table[level as usize].nice_length as ::core::ffi::c_int;
+        state.max_chain_length =
             configuration_table[level as usize].max_chain as crate::stdlib::uInt;
     }
-    (*s).strategy = strategy;
+    state.strategy = strategy;
     return crate::zlib_h::Z_OK;
 }
 #[export_name = "deflateParams"]
