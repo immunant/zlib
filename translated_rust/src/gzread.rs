@@ -282,6 +282,10 @@ fn gz_read_marks_past_eof(len: crate::stdlib::z_size_t, eof: ::core::ffi::c_int)
     len != 0 && eof != 0
 }
 
+fn gzdirect_result(direct: ::core::ffi::c_int) -> ::core::ffi::c_int {
+    (direct == 1) as ::core::ffi::c_int
+}
+
 fn gz_read_needs_look(
     mode: ::core::ffi::c_int,
     how: ::core::ffi::c_int,
@@ -1645,6 +1649,15 @@ mod tests {
     }
 
     #[test]
+    fn gzdirect_result_accepts_only_direct_mode() {
+        assert_eq!(gzdirect_result(1), 1);
+        assert_eq!(gzdirect_result(0), 0);
+        assert_eq!(gzdirect_result(-1), 0);
+        assert_eq!(gzdirect_result(::core::ffi::c_int::MIN), 0);
+        assert_eq!(gzdirect_result(::core::ffi::c_int::MAX), 0);
+    }
+
+    #[test]
     fn gzclose_r_result_preserves_buffer_error_on_clean_close() {
         assert_eq!(
             gzclose_r_result(crate::zlib_h::Z_BUF_ERROR, 0),
@@ -2051,7 +2064,7 @@ pub unsafe extern "C" fn gzdirect(mut file: crate::zlib_h::gzFile) -> ::core::ff
     if gz_read_needs_look((*state).mode, (*state).how, (*state).x.have) {
         gz_look(state);
     }
-    return ((*state).direct == 1 as ::core::ffi::c_int) as ::core::ffi::c_int;
+    return gzdirect_result((*state).direct);
 }
 #[export_name = "gzdirect"]
 

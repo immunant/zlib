@@ -4805,11 +4805,16 @@ fn crc32_update_byte(crc: crate::stdlib::uLong, byte: u8) -> crate::stdlib::uLon
     ((crc >> 8) ^ crc_table[table_index] as crate::stdlib::uLong) & CRC32_MASK
 }
 
+fn crc32_update_bytes(mut state: crate::stdlib::uLong, bytes: &[u8]) -> crate::stdlib::uLong {
+    for &byte in bytes {
+        state = crc32_update_byte(state, byte);
+    }
+    state
+}
+
 pub fn crc32_z(mut crc: crate::stdlib::uLong, buf: &[u8]) -> crate::stdlib::uLong {
     crc = !crc & CRC32_MASK;
-    for &byte in buf {
-        crc = crc32_update_byte(crc, byte);
-    }
+    crc = crc32_update_bytes(crc, buf);
     (crc ^ CRC32_MASK) & CRC32_MASK
 }
 
@@ -4922,8 +4927,8 @@ pub unsafe extern "C" fn crc32_combine_ffi(
 #[cfg(test)]
 mod tests {
     use super::{
-        crc32, crc32_combine, crc32_combine_gen64, crc32_combine_op, crc32_update_byte, crc32_z,
-        crc_table_ref, next_poly_term, CRC32_MASK, POLY,
+        crc32, crc32_combine, crc32_combine_gen64, crc32_combine_op, crc32_update_byte,
+        crc32_update_bytes, crc32_z, crc_table_ref, next_poly_term, CRC32_MASK, POLY,
     };
 
     const HELLO_SPACE_CRC: crate::stdlib::uLong = 0xed81_f9f6;
@@ -4958,6 +4963,17 @@ mod tests {
         }
 
         assert_eq!((state ^ CRC32_MASK) & CRC32_MASK, crc32_z(0, input));
+    }
+
+    #[test]
+    fn byte_updates_preserve_internal_crc_state_boundaries() {
+        let input = b"123456789";
+        let whole = crc32_update_bytes(CRC32_MASK, input);
+        let split = crc32_update_bytes(crc32_update_bytes(CRC32_MASK, &input[..4]), &input[4..]);
+
+        assert_eq!((whole ^ CRC32_MASK) & CRC32_MASK, 0xcbf4_3926);
+        assert_eq!(split, whole);
+        assert_eq!(crc32_update_bytes(0x340b_c6d9, b""), 0x340b_c6d9);
     }
 
     #[test]
