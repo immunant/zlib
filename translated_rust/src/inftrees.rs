@@ -2922,6 +2922,14 @@ fn table_inputs_fit(codes: usize, work_len: usize) -> bool {
     codes <= u16::MAX as usize && work_len >= codes
 }
 
+fn code_input_buffers_are_valid(
+    codes: ::core::ffi::c_uint,
+    lens_present: bool,
+    work_present: bool,
+) -> bool {
+    codes == 0 || (lens_present && work_present)
+}
+
 fn table_usage_fits(type_0: CodeType, used: u32, table_cursor: TableCursor) -> bool {
     let within_type_capacity = type_0
         .maximum_used_entries()
@@ -3222,7 +3230,10 @@ pub unsafe extern "C" fn inflate_table_ffi(
     bits: *mut ::core::ffi::c_uint,
     work: *mut ::core::ffi::c_ushort,
 ) -> ::core::ffi::c_int {
-    if table_out.is_null() || bits.is_null() || (codes != 0 && (lens.is_null() || work.is_null())) {
+    if table_out.is_null()
+        || bits.is_null()
+        || !code_input_buffers_are_valid(codes, !lens.is_null(), !work.is_null())
+    {
         return -1;
     }
 
@@ -3359,6 +3370,16 @@ mod tests {
         assert!(table_inputs_fit(u16::MAX as usize, u16::MAX as usize));
         assert!(!table_inputs_fit(u16::MAX as usize + 1, usize::MAX));
         assert!(!table_inputs_fit(2, 1));
+    }
+
+    #[test]
+    fn code_input_buffers_are_required_only_for_nonempty_codes() {
+        assert!(code_input_buffers_are_valid(0, false, false));
+        assert!(code_input_buffers_are_valid(0, true, true));
+        assert!(code_input_buffers_are_valid(1, true, true));
+        assert!(!code_input_buffers_are_valid(1, false, true));
+        assert!(!code_input_buffers_are_valid(1, true, false));
+        assert!(!code_input_buffers_are_valid(1, false, false));
     }
 
     #[test]

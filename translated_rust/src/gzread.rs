@@ -207,6 +207,20 @@ fn gz_fread_items_read(
     }
 }
 
+#[derive(Debug, Eq, PartialEq)]
+enum GzFreadAction {
+    ReturnZero,
+    Read,
+}
+
+fn gz_fread_action(len: crate::stdlib::z_size_t) -> GzFreadAction {
+    if gz_read_request_is_empty(len) {
+        GzFreadAction::ReturnZero
+    } else {
+        GzFreadAction::Read
+    }
+}
+
 fn gzgetc_read_result(
     bytes_read: crate::stdlib::z_size_t,
     byte: ::core::ffi::c_uchar,
@@ -1447,6 +1461,20 @@ mod tests {
     }
 
     #[test]
+    fn gz_fread_action_skips_empty_requests() {
+        assert_eq!(gz_fread_action(0), GzFreadAction::ReturnZero);
+    }
+
+    #[test]
+    fn gz_fread_action_reads_nonempty_requests() {
+        assert_eq!(gz_fread_action(1), GzFreadAction::Read);
+        assert_eq!(
+            gz_fread_action(crate::stdlib::z_size_t::MAX),
+            GzFreadAction::Read
+        );
+    }
+
+    #[test]
     fn gzgetc_read_result_returns_error_when_no_byte_was_read() {
         assert_eq!(gzgetc_read_result(0, 42), -1);
     }
@@ -2263,10 +2291,9 @@ pub unsafe extern "C" fn gzfread(
         return 0 as crate::stdlib::z_size_t;
     };
     len = request_len;
-    return if !gz_read_request_is_empty(len) {
-        gz_fread_items_read(size, gz_read(state, buf, len))
-    } else {
-        0 as crate::stdlib::z_size_t
+    return match gz_fread_action(len) {
+        GzFreadAction::ReturnZero => 0 as crate::stdlib::z_size_t,
+        GzFreadAction::Read => gz_fread_items_read(size, gz_read(state, buf, len)),
     };
 }
 #[export_name = "gzfread"]

@@ -254,6 +254,25 @@ fn gz_write_direct_progress(
     }
 }
 
+enum GzWriteDirectAction {
+    Error,
+    Done,
+    Continue,
+}
+
+fn gz_write_direct_action(
+    ret: ::core::ffi::c_int,
+    remaining: crate::stdlib::z_size_t,
+) -> GzWriteDirectAction {
+    if ret == -1 as ::core::ffi::c_int {
+        GzWriteDirectAction::Error
+    } else if gz_write_is_empty(remaining) {
+        GzWriteDirectAction::Done
+    } else {
+        GzWriteDirectAction::Continue
+    }
+}
+
 fn gz_zero_apply_progress(
     pos: &mut crate::stdlib::off64_t,
     skip: &mut crate::stdlib::off64_t,
@@ -739,11 +758,10 @@ unsafe fn gz_write(
             let progress = gz_write_direct_progress(state.x.pos, len, n, state.strm.avail_in);
             state.x.pos = progress.pos;
             len = progress.remaining;
-            if ret == -1 as ::core::ffi::c_int {
-                return gz_write_error_result(state.again, put, len);
-            }
-            if gz_write_is_empty(len) {
-                break;
+            match gz_write_direct_action(ret, len) {
+                GzWriteDirectAction::Error => return gz_write_error_result(state.again, put, len),
+                GzWriteDirectAction::Done => break,
+                GzWriteDirectAction::Continue => {}
             }
         }
     }
@@ -1060,13 +1078,14 @@ mod tests {
         gz_has_pending_skip, gz_init_stream_defaults, gz_write_advanced_pos,
         gz_write_apply_chunk_progress, gz_write_buffered_copy_len,
         gz_write_buffered_have_after_copy, gz_write_buffered_step, gz_write_chunk_len,
-        gz_write_direct_progress, gz_write_errno_is_retryable, gz_write_error_result,
-        gz_write_is_empty, gz_write_remaining_after_consumption, gz_write_state_is_usable,
-        gz_write_uses_buffered_path, gz_zero_action, gz_zero_apply_progress, gz_zero_chunk_len,
-        gz_zero_needs_initialization, gzclose_mode_is_writable, gzclose_w_result,
-        gzflush_mode_is_valid, gzfwrite_result, gzputc_result, gzputs_len_fits_int, gzputs_result,
-        gzsetparams_settings_match, gzsetparams_state_is_usable, gzwrite_len_fits_int,
-        GzCompResetAction, GzCompWriteFailure, GzZeroAction,
+        gz_write_direct_action, gz_write_direct_progress, gz_write_errno_is_retryable,
+        gz_write_error_result, gz_write_is_empty, gz_write_remaining_after_consumption,
+        gz_write_state_is_usable, gz_write_uses_buffered_path, gz_zero_action,
+        gz_zero_apply_progress, gz_zero_chunk_len, gz_zero_needs_initialization,
+        gzclose_mode_is_writable, gzclose_w_result, gzflush_mode_is_valid, gzfwrite_result,
+        gzputc_result, gzputs_len_fits_int, gzputs_result, gzsetparams_settings_match,
+        gzsetparams_state_is_usable, gzwrite_len_fits_int, GzCompResetAction, GzCompWriteFailure,
+        GzWriteDirectAction, GzZeroAction,
     };
 
     #[test]
@@ -1742,6 +1761,30 @@ mod tests {
             ::core::ffi::c_uint::MAX as crate::stdlib::off64_t
         );
         assert_eq!(progress.remaining, 0);
+    }
+
+    #[test]
+    fn gz_write_direct_action_prioritizes_errors_over_completion() {
+        assert!(matches!(
+            gz_write_direct_action(-1, 0),
+            GzWriteDirectAction::Error
+        ));
+    }
+
+    #[test]
+    fn gz_write_direct_action_finishes_after_all_input_is_consumed() {
+        assert!(matches!(
+            gz_write_direct_action(0, 0),
+            GzWriteDirectAction::Done
+        ));
+    }
+
+    #[test]
+    fn gz_write_direct_action_continues_after_successful_partial_write() {
+        assert!(matches!(
+            gz_write_direct_action(0, 1),
+            GzWriteDirectAction::Continue
+        ));
     }
 
     #[test]
