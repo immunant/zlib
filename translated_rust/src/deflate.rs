@@ -155,7 +155,6 @@ pub use crate::src::crc32::crc32_z;
 pub use crate::src::trees::_dist_code;
 pub use crate::src::trees::_length_code;
 pub use crate::src::trees::_tr_align;
-pub use crate::src::trees::_tr_flush_bits;
 pub use crate::src::trees::_tr_flush_block;
 pub use crate::src::trees::_tr_stored_block;
 pub use crate::src::zutil::z_errmsg;
@@ -4094,3 +4093,4 @@ unsafe extern "C" fn deflate_huff(
     }
     return block_done;
 }
+pub use crate::src::trees::_tr_flush_bits;
