@@ -343,30 +343,28 @@ unsafe fn gz_write(
     }
     if len < state.size as crate::stdlib::z_size_t {
         loop {
-            let mut have: ::core::ffi::c_uint = 0;
-            let mut copy: ::core::ffi::c_uint = 0;
-            if state.strm.avail_in == 0 as crate::stdlib::uInt {
-                state.strm.next_in = state.in_0.as_deref_mut().unwrap().as_mut_ptr();
-            }
-            have = state
-                .strm
-                .next_in
-                .wrapping_add(state.strm.avail_in as usize)
-                .addr()
-                .wrapping_sub(state.in_0.as_deref().unwrap().as_ptr().addr())
-                as ::core::ffi::c_uint;
-            copy = state.size.wrapping_sub(have);
-            if copy as crate::stdlib::z_size_t > len {
-                copy = len as ::core::ffi::c_uint;
-            }
-            if copy != 0 {
+            let (copy, have) = {
+                let strm = &mut state.strm;
                 let buffer = &mut state.in_0.as_deref_mut().unwrap()[..state.size as usize];
-                buffer[have as usize..have as usize + copy as usize]
-                    .copy_from_slice(&input[..copy as usize]);
-            }
-            state.strm.avail_in = state.strm.avail_in.wrapping_add(copy);
+                if strm.avail_in == 0 as crate::stdlib::uInt {
+                    strm.next_in = buffer.as_mut_ptr();
+                }
+                let Some(mut buffered) = crate::src::gzlib::GzBufferedInput::from_owned_buffer(
+                    buffer,
+                    strm.next_in.addr(),
+                    strm.avail_in,
+                ) else {
+                    return 0 as crate::stdlib::z_size_t;
+                };
+                let copy = buffered.append(input);
+                let Some(have) = buffered.have() else {
+                    return 0 as crate::stdlib::z_size_t;
+                };
+                (copy, have)
+            };
+            state.strm.avail_in = have;
             state.x.pos += copy as crate::stdlib::off64_t;
-            input = &input[copy as usize..];
+            input = &input[copy..];
             len = len.wrapping_sub(copy as crate::stdlib::z_size_t);
             if len == 0 as crate::stdlib::z_size_t {
                 break;

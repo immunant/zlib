@@ -91,6 +91,16 @@ pub(crate) struct GzBufferedCursor<'a> {
     have: usize,
 }
 
+// The write side uses the same cursor representation, but needs exclusive
+// access to append bytes after the already-buffered input.  Keep that proof in
+// a pointer-free view so callers only publish the resulting byte count back to
+// the ABI stream fields.
+pub(crate) struct GzBufferedInput<'a> {
+    buffer: &'a mut [u8],
+    start: usize,
+    have: usize,
+}
+
 impl<'a> GzBufferedCursor<'a> {
     pub(crate) fn from_owned_buffer(
         buffer: &'a [u8],
@@ -163,6 +173,39 @@ impl<'a> GzBufferedCursor<'a> {
         let next = next.checked_sub(1)?;
         buffer[next] = byte;
         Some((next, have.checked_add(1)?))
+    }
+}
+
+impl<'a> GzBufferedInput<'a> {
+    pub(crate) fn from_owned_buffer(
+        buffer: &'a mut [u8],
+        cursor_address: usize,
+        have: u32,
+    ) -> Option<Self> {
+        let start = cursor_address.checked_sub(buffer.as_ptr().addr())?;
+        let have = have as usize;
+        let end = start.checked_add(have)?;
+        buffer.get(start..end)?;
+        Some(Self {
+            buffer,
+            start,
+            have,
+        })
+    }
+
+    pub(crate) fn append(&mut self, input: &[u8]) -> usize {
+        let end = match self.start.checked_add(self.have) {
+            Some(end) => end,
+            None => return 0,
+        };
+        let copy = input.len().min(self.buffer.len().saturating_sub(end));
+        self.buffer[end..end + copy].copy_from_slice(&input[..copy]);
+        self.have += copy;
+        copy
+    }
+
+    pub(crate) fn have(&self) -> Option<u32> {
+        u32::try_from(self.have).ok()
     }
 }
 
