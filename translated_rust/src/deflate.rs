@@ -77,6 +77,31 @@ pub type Posf = crate::src::deflate::Pos;
 pub type IPos = ::core::ffi::c_uint;
 
 pub type deflate_state = crate::src::deflate::internal_state;
+
+/// A callback-allocated slot for one opaque stream state.
+///
+/// The allocator callback supplies uninitialized storage, so turning that
+/// storage into the first Rust value remains the one explicit unsafe boundary
+/// in this facade. Keeping the callback boundary typed lets initialization and
+/// deep-copy setup share it without each recreating a raw state reference.
+fn with_callback_state_slot<T, R>(
+    strm: &mut crate::zlib_h::z_stream,
+    value: T,
+    initialize: impl FnOnce(&mut crate::zlib_h::z_stream, &mut T) -> R,
+) -> Option<R> {
+    let allocation = (strm.zalloc?)(
+        strm.opaque,
+        1 as crate::stdlib::uInt,
+        ::core::mem::size_of::<T>() as crate::stdlib::uInt,
+    ) as *mut ::core::mem::MaybeUninit<T>;
+    let mut slot = ::core::ptr::NonNull::new(allocation)?;
+    // The callback allocation is live and uniquely owned by the stream
+    // setup path. Establish exactly one initialized Rust value in it before
+    // exposing its typed reference to the caller.
+    let state = unsafe { slot.as_mut().write(value) };
+    Some(initialize(strm, state))
+}
+
 #[derive(Clone)]
 #[repr(C)]
 
@@ -1150,44 +1175,33 @@ fn initialize_allocated_deflate_state(
     let Some(storage) = DeflateStorageLayout::from_init(config.window_bits, mem_level) else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
-    let state = Some(strm.zalloc.expect("non-null function pointer"))
-        .expect("non-null function pointer")(
-        strm.opaque,
-        1 as crate::stdlib::uInt,
-        ::core::mem::size_of::<crate::src::deflate::deflate_state>() as crate::stdlib::uInt,
-    ) as *mut crate::src::deflate::deflate_state;
-    if state.is_null() {
-        return crate::zlib_h::Z_MEM_ERROR;
-    }
-    // Callback allocation returns uninitialized storage. Convert it once to
-    // the slot type, then all state setup uses an initialized Rust reference.
-    let state_slot = unsafe {
-        &mut *state.cast::<::core::mem::MaybeUninit<crate::src::deflate::deflate_state>>()
-    };
-    let state = state_slot.write(empty_deflate_state());
-    strm.state = (state as *mut crate::src::deflate::deflate_state)
-        .cast::<crate::src::deflate::internal_state>();
-    let outcome = configure_allocated_deflate_state(
-        state,
-        strm,
-        &storage,
-        &config,
-        method,
-        mem_level,
-        strategy,
-        allocator_provenance,
-    );
-    match outcome {
-        Ok(DeflateInitializationOutcome::ReadyForLegacyReset) => deflate_reset_legacy_stream(strm),
-        Ok(DeflateInitializationOutcome::Complete(result)) => result,
-        Err(error) => {
-            state.status = crate::src::deflate::FINISH_STATE;
-            strm.msg = crate::src::zutil::zError(-4 as ::core::ffi::c_int)
-                .load(::core::sync::atomic::Ordering::Relaxed);
-            deflateEnd(strm);
-            error
+    with_callback_state_slot(strm, empty_deflate_state(), |strm, state| {
+        strm.state = ::core::ptr::from_mut(state).cast::<crate::src::deflate::internal_state>();
+        let outcome = configure_allocated_deflate_state(
+            state,
+            strm,
+            &storage,
+            &config,
+            method,
+            mem_level,
+            strategy,
+            allocator_provenance,
+        );
+        match outcome {
+            Ok(DeflateInitializationOutcome::ReadyForLegacyReset) => {
+                deflate_reset_legacy_stream(strm)
+            }
+            Ok(DeflateInitializationOutcome::Complete(result)) => result,
+            Err(error) => {
+                state.status = crate::src::deflate::FINISH_STATE;
+                strm.msg = crate::src::zutil::zError(-4 as ::core::ffi::c_int)
+                    .load(::core::sync::atomic::Ordering::Relaxed);
+                deflateEnd(strm);
+                error
+            }
         }
-    }
+    })
+    .unwrap_or(crate::zlib_h::Z_MEM_ERROR)
 }
 
 pub fn deflateInit_(
@@ -3266,9 +3280,7 @@ pub fn deflate(
                     input,
                     output,
                 };
-                let Some(bstate) =
-                    deflate_update(state, strm, &mut workspace, flush)
-                else {
+                let Some(bstate) = deflate_update(state, strm, &mut workspace, flush) else {
                     return crate::zlib_h::Z_STREAM_ERROR;
                 };
                 drop(workspace);
@@ -3439,8 +3451,6 @@ pub fn deflateCopy(
     dest: Option<&mut crate::zlib_h::z_stream>,
     source: Option<&crate::zlib_h::z_stream>,
 ) -> ::core::ffi::c_int {
-    let mut ds: *mut crate::src::deflate::deflate_state =
-        ::core::ptr::null_mut::<crate::src::deflate::deflate_state>();
     let Some(source_stream) = source else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
@@ -3475,121 +3485,118 @@ pub fn deflateCopy(
         None => None,
     };
     crate::zlib_h::copy_z_stream(dest_stream, source_stream);
-    ds = Some(dest_stream.zalloc.expect("non-null function pointer"))
-        .expect("non-null function pointer")(
-        dest_stream.opaque,
-        1 as crate::stdlib::uInt,
-        ::core::mem::size_of::<crate::src::deflate::deflate_state>() as crate::stdlib::uInt,
-    ) as *mut crate::src::deflate::deflate_state;
-    if ds.is_null() {
-        return crate::zlib_h::Z_MEM_ERROR;
-    }
-    dest_stream.state = ds as *mut crate::src::deflate::internal_state;
-    // `ds` is fresh callback-allocated storage, so initialize rather than
-    // assign (assignment would try to drop an uninitialized header snapshot).
-    // Convert the callback allocation once to an uninitialized slot, then
-    // establish the first Rust value with `MaybeUninit::write`.
-    let ds_slot =
-        unsafe { &mut *ds.cast::<::core::mem::MaybeUninit<crate::src::deflate::deflate_state>>() };
-    let dest_state = ds_slot.write(source_state.clone());
-    // Do not retain the derived clone's workspace. The default-pair branch
-    // installs the range-preserving copy prepared above; custom and mixed
-    // streams replace the raw handles through their original callbacks.
-    dest_state.owned_storage = None;
-    dest_state.strm = stream_identity(dest_stream);
-    if let Some(mut storage) = owned_copy {
-        if !storage.bind_state_buffers(dest_state) {
-            // The destination is still a fresh callback allocation. Clear
-            // copied source handles before teardown so a corrupt layout
-            // cannot make its failure path free source-owned storage.
-            dest_state.window = ::core::ptr::null_mut();
-            dest_state.prev = ::core::ptr::null_mut();
-            dest_state.head = ::core::ptr::null_mut();
-            dest_state.pending_buf = ::core::ptr::null_mut();
-            deflateEnd(dest_stream);
-            return crate::zlib_h::Z_MEM_ERROR;
-        }
-        dest_state.owned_storage = Some(storage);
-        return crate::zlib_h::Z_OK;
-    }
-    let storage = DeflateStorageLayout::from_state(dest_state);
-    dest_state.window = Some(dest_stream.zalloc.expect("non-null function pointer"))
-        .expect("non-null function pointer")(
-        dest_stream.opaque,
-        storage.window_items,
-        (2 as usize).wrapping_mul(::core::mem::size_of::<crate::stdlib::Byte>())
-            as crate::stdlib::uInt,
-    ) as *mut crate::stdlib::Bytef;
-    dest_state.prev = Some(dest_stream.zalloc.expect("non-null function pointer"))
-        .expect("non-null function pointer")(
-        dest_stream.opaque,
-        storage.window_items,
-        ::core::mem::size_of::<crate::src::deflate::Pos>() as crate::stdlib::uInt,
-    ) as *mut crate::src::deflate::Posf;
-    dest_state.head = Some(dest_stream.zalloc.expect("non-null function pointer"))
-        .expect("non-null function pointer")(
-        dest_stream.opaque,
-        storage.hash_items,
-        ::core::mem::size_of::<crate::src::deflate::Pos>() as crate::stdlib::uInt,
-    ) as *mut crate::src::deflate::Posf;
-    dest_state.pending_buf = Some(dest_stream.zalloc.expect("non-null function pointer"))
-        .expect("non-null function pointer")(
-        dest_stream.opaque,
-        storage.pending_items,
-        4 as crate::stdlib::uInt,
-    ) as *mut crate::zutil_h::uchf as *mut crate::stdlib::Bytef;
-    if dest_state.window.is_null()
-        || dest_state.prev.is_null()
-        || dest_state.head.is_null()
-        || dest_state.pending_buf.is_null()
-    {
-        deflateEnd(dest_stream);
-        return crate::zlib_h::Z_MEM_ERROR;
-    }
-    unsafe {
-        crate::stdlib::memcpy(
-            dest_state.window as *mut ::core::ffi::c_void,
-            source_state.window as *const ::core::ffi::c_void,
-            copy_layout.window_bytes as crate::__stddef_size_t_h::size_t,
-        )
-    };
-    unsafe {
-        crate::stdlib::memcpy(
-            dest_state.prev as *mut ::core::ffi::c_void,
-            source_state.prev as *const ::core::ffi::c_void,
-            (copy_layout.prev_items as crate::__stddef_size_t_h::size_t)
-                .wrapping_mul(::core::mem::size_of::<crate::src::deflate::Pos>()),
-        )
-    };
-    unsafe {
-        crate::stdlib::memcpy(
-            dest_state.head as *mut ::core::ffi::c_void,
-            source_state.head as *const ::core::ffi::c_void,
-            (copy_layout.head_items as crate::__stddef_size_t_h::size_t)
-                .wrapping_mul(::core::mem::size_of::<crate::src::deflate::Pos>()),
-        )
-    };
-    dest_state.pending_out = copy_layout.pending_offset;
-    unsafe {
-        crate::stdlib::memcpy(
-            dest_state.pending_buf.wrapping_add(dest_state.pending_out) as *mut ::core::ffi::c_void,
-            source_state
-                .pending_buf
-                .wrapping_add(source_state.pending_out) as *const ::core::ffi::c_void,
-            copy_layout.pending_bytes as crate::__stddef_size_t_h::size_t,
-        )
-    };
-    dest_state.sym_buf = dest_state.lit_bufsize as usize;
-    unsafe {
-        crate::stdlib::memcpy(
-            dest_state.pending_buf.wrapping_add(dest_state.sym_buf) as *mut ::core::ffi::c_void,
-            source_state
-                .pending_buf
-                .wrapping_add(copy_layout.sym_offset) as *const ::core::ffi::c_void,
-            copy_layout.sym_bytes as crate::__stddef_size_t_h::size_t,
-        )
-    };
-    return crate::zlib_h::Z_OK;
+    with_callback_state_slot(
+        dest_stream,
+        source_state.clone(),
+        |dest_stream, dest_state| {
+            dest_stream.state =
+                ::core::ptr::from_mut(dest_state).cast::<crate::src::deflate::internal_state>();
+            // Do not retain the derived clone's workspace. The default-pair branch
+            // installs the range-preserving copy prepared above; custom and mixed
+            // streams replace the raw handles through their original callbacks.
+            dest_state.owned_storage = None;
+            dest_state.strm = stream_identity(dest_stream);
+            if let Some(mut storage) = owned_copy {
+                if !storage.bind_state_buffers(dest_state) {
+                    // The destination is still a fresh callback allocation. Clear
+                    // copied source handles before teardown so a corrupt layout
+                    // cannot make its failure path free source-owned storage.
+                    dest_state.window = ::core::ptr::null_mut();
+                    dest_state.prev = ::core::ptr::null_mut();
+                    dest_state.head = ::core::ptr::null_mut();
+                    dest_state.pending_buf = ::core::ptr::null_mut();
+                    deflateEnd(dest_stream);
+                    return crate::zlib_h::Z_MEM_ERROR;
+                }
+                dest_state.owned_storage = Some(storage);
+                return crate::zlib_h::Z_OK;
+            }
+            let storage = DeflateStorageLayout::from_state(dest_state);
+            dest_state.window = Some(dest_stream.zalloc.expect("non-null function pointer"))
+                .expect("non-null function pointer")(
+                dest_stream.opaque,
+                storage.window_items,
+                (2 as usize).wrapping_mul(::core::mem::size_of::<crate::stdlib::Byte>())
+                    as crate::stdlib::uInt,
+            ) as *mut crate::stdlib::Bytef;
+            dest_state.prev = Some(dest_stream.zalloc.expect("non-null function pointer"))
+                .expect("non-null function pointer")(
+                dest_stream.opaque,
+                storage.window_items,
+                ::core::mem::size_of::<crate::src::deflate::Pos>() as crate::stdlib::uInt,
+            ) as *mut crate::src::deflate::Posf;
+            dest_state.head = Some(dest_stream.zalloc.expect("non-null function pointer"))
+                .expect("non-null function pointer")(
+                dest_stream.opaque,
+                storage.hash_items,
+                ::core::mem::size_of::<crate::src::deflate::Pos>() as crate::stdlib::uInt,
+            ) as *mut crate::src::deflate::Posf;
+            dest_state.pending_buf = Some(dest_stream.zalloc.expect("non-null function pointer"))
+                .expect("non-null function pointer")(
+                dest_stream.opaque,
+                storage.pending_items,
+                4 as crate::stdlib::uInt,
+            ) as *mut crate::zutil_h::uchf
+                as *mut crate::stdlib::Bytef;
+            if dest_state.window.is_null()
+                || dest_state.prev.is_null()
+                || dest_state.head.is_null()
+                || dest_state.pending_buf.is_null()
+            {
+                deflateEnd(dest_stream);
+                return crate::zlib_h::Z_MEM_ERROR;
+            }
+            unsafe {
+                crate::stdlib::memcpy(
+                    dest_state.window as *mut ::core::ffi::c_void,
+                    source_state.window as *const ::core::ffi::c_void,
+                    copy_layout.window_bytes as crate::__stddef_size_t_h::size_t,
+                )
+            };
+            unsafe {
+                crate::stdlib::memcpy(
+                    dest_state.prev as *mut ::core::ffi::c_void,
+                    source_state.prev as *const ::core::ffi::c_void,
+                    (copy_layout.prev_items as crate::__stddef_size_t_h::size_t)
+                        .wrapping_mul(::core::mem::size_of::<crate::src::deflate::Pos>()),
+                )
+            };
+            unsafe {
+                crate::stdlib::memcpy(
+                    dest_state.head as *mut ::core::ffi::c_void,
+                    source_state.head as *const ::core::ffi::c_void,
+                    (copy_layout.head_items as crate::__stddef_size_t_h::size_t)
+                        .wrapping_mul(::core::mem::size_of::<crate::src::deflate::Pos>()),
+                )
+            };
+            dest_state.pending_out = copy_layout.pending_offset;
+            unsafe {
+                crate::stdlib::memcpy(
+                    dest_state.pending_buf.wrapping_add(dest_state.pending_out)
+                        as *mut ::core::ffi::c_void,
+                    source_state
+                        .pending_buf
+                        .wrapping_add(source_state.pending_out)
+                        as *const ::core::ffi::c_void,
+                    copy_layout.pending_bytes as crate::__stddef_size_t_h::size_t,
+                )
+            };
+            dest_state.sym_buf = dest_state.lit_bufsize as usize;
+            unsafe {
+                crate::stdlib::memcpy(
+                    dest_state.pending_buf.wrapping_add(dest_state.sym_buf)
+                        as *mut ::core::ffi::c_void,
+                    source_state
+                        .pending_buf
+                        .wrapping_add(copy_layout.sym_offset)
+                        as *const ::core::ffi::c_void,
+                    copy_layout.sym_bytes as crate::__stddef_size_t_h::size_t,
+                )
+            };
+            crate::zlib_h::Z_OK
+        },
+    )
+    .unwrap_or(crate::zlib_h::Z_MEM_ERROR)
 }
 #[export_name = "deflateCopy"]
 
