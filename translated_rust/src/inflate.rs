@@ -574,6 +574,10 @@ pub unsafe extern "C" fn inflate(
         ::core::ptr::null_mut::<crate::src::inflate::inflate_state>();
     let mut next: *mut ::core::ffi::c_uchar = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
     let mut put: *mut ::core::ffi::c_uchar = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
+    // Preserve the start of this caller-owned output range. Once progress is
+    // known, its produced prefix can be handled as one bounded slice.
+    let mut output_start: *mut ::core::ffi::c_uchar =
+        ::core::ptr::null_mut::<::core::ffi::c_uchar>();
     let mut have: ::core::ffi::c_uint = 0;
     let mut left: ::core::ffi::c_uint = 0;
     let mut hold: ::core::ffi::c_ulong = 0;
@@ -629,6 +633,7 @@ pub unsafe extern "C" fn inflate(
         (*state).mode = crate::src::inflate::TYPEDO;
     }
     put = (*strm).next_out as *mut ::core::ffi::c_uchar;
+    output_start = put;
     left = (*strm).avail_out as ::core::ffi::c_uint;
     next = (*strm).next_in as *mut ::core::ffi::c_uchar;
     have = (*strm).avail_in as ::core::ffi::c_uint;
@@ -2320,22 +2325,14 @@ pub unsafe extern "C" fn inflate(
     (*strm).total_out = (*strm).total_out.wrapping_add(out as crate::stdlib::uLong);
     (*state).total = (*state).total.wrapping_add(out as ::core::ffi::c_ulong);
     if (*state).wrap & 4 as ::core::ffi::c_int != 0 && out != 0 {
+        // `out` is bounded by the entry `avail_out`, and `output_start` is
+        // that range's start. Construct the produced view once for either
+        // checksum instead of reconstructing it from a backwards raw cursor.
+        let produced = ::core::slice::from_raw_parts(output_start, out as usize);
         (*state).check = (if (*state).flags != 0 {
-            crate::src::crc32::crc32_z(
-                (*state).check as crate::stdlib::uLong,
-                Some(::core::slice::from_raw_parts(
-                    (*strm).next_out.offset(-(out as isize)),
-                    out as usize,
-                )),
-            )
+            crate::src::crc32::crc32_z((*state).check as crate::stdlib::uLong, Some(produced))
         } else {
-            crate::src::adler32::adler32(
-                (*state).check as crate::stdlib::uLong,
-                ::core::slice::from_raw_parts(
-                    (*strm).next_out.offset(-(out as isize)),
-                    out as usize,
-                ),
-            )
+            crate::src::adler32::adler32((*state).check as crate::stdlib::uLong, produced)
         }) as ::core::ffi::c_ulong;
         (*strm).adler = (*state).check as crate::stdlib::uLong;
     }
