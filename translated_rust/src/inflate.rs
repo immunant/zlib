@@ -2576,6 +2576,11 @@ pub unsafe extern "C" fn inflateCopy_ffi(
 ) -> ::core::ffi::c_int {
     inflateCopy(dest, source)
 }
+fn inflate_undermine_core(sane: &mut ::core::ffi::c_int) -> ::core::ffi::c_int {
+    *sane = 1 as ::core::ffi::c_int;
+    crate::zlib_h::Z_DATA_ERROR
+}
+
 pub unsafe extern "C" fn inflateUndermine(
     mut strm: crate::zlib_h::z_streamp,
     mut _subvert: ::core::ffi::c_int,
@@ -2586,8 +2591,7 @@ pub unsafe extern "C" fn inflateUndermine(
         return crate::zlib_h::Z_STREAM_ERROR;
     }
     state = (*strm).state as *mut crate::src::inflate::inflate_state;
-    (*state).sane = 1 as ::core::ffi::c_int;
-    return crate::zlib_h::Z_DATA_ERROR;
+    return inflate_undermine_core(&mut (*state).sane);
 }
 #[export_name = "inflateUndermine"]
 
@@ -2673,7 +2677,7 @@ mod tests {
         apply_window_update, copy_dictionary_from_window, dynamic_code_length_repeat_fits,
         dynamic_header_counts,
         inflate_data_type_value, inflate_header_wrap_allows_capture, inflate_mark_value,
-        inflate_mode_is_valid, inflate_needs_buffer_error, inflate_prime_update,
+        inflate_mode_is_valid, inflate_needs_buffer_error, inflate_prime_update, inflate_undermine_core,
         inflate_reset2_params, inflate_state_metadata_is_valid, inflate_sync_point_value,
         inflate_sync_search_core, inflate_should_update_window, inflate_validate_wrap, initial_window_metadata,
         stored_block_lengths_are_valid, syncsearch_safe, window_update_plan, InflatePrimeUpdate,
@@ -2744,6 +2748,14 @@ mod tests {
         assert!(stored_block_lengths_are_valid(0xffff_0000));
         assert!(!stored_block_lengths_are_valid(0x1234_1234));
         assert!(!stored_block_lengths_are_valid(0x0000_0001));
+    }
+
+    #[test]
+    fn inflate_undermine_core_marks_stream_sane_and_returns_data_error() {
+        let mut sane = 0;
+
+        assert_eq!(inflate_undermine_core(&mut sane), crate::zlib_h::Z_DATA_ERROR);
+        assert_eq!(sane, 1);
     }
 
     #[test]
