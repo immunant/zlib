@@ -1374,12 +1374,144 @@ fn gz_comp_request<'request>(
     finish_close(owner, 0)
 }
 
+// The public write family mutates only this pointer-free transaction between
+// compressor requests.  The legacy gzip state is lent to `gz_comp()` for one
+// request at a time, then immediately recovered, so neither result mapping
+// nor partial-write accounting needs an ABI-shaped state reference.
+struct GzWriteStateOwner {
+    buffers: crate::gzguts_h::GzBuffers,
+    fd: Option<rustix::fd::OwnedFd>,
+    path: Option<Box<[u8]>>,
+    message: Option<Box<[u8]>>,
+    error: ::core::ffi::c_int,
+    buffered: crate::stdlib::uInt,
+    position: crate::stdlib::off64_t,
+    mode: ::core::ffi::c_int,
+    want: crate::stdlib::uInt,
+    direct: ::core::ffi::c_int,
+    level: ::core::ffi::c_int,
+    strategy: ::core::ffi::c_int,
+    skip: crate::stdlib::off64_t,
+    again: ::core::ffi::c_int,
+    reset: ::core::ffi::c_int,
+    input_available: crate::stdlib::uInt,
+}
+
+impl GzWriteStateOwner {
+    unsafe fn take_from_abi(state: &mut crate::gzguts_h::gz_state) -> Self {
+        Self {
+            buffers: ::core::mem::replace(&mut state.buffers, crate::gzguts_h::GzBuffers::empty()),
+            fd: state.fd.take(),
+            path: state.path.take(),
+            message: state.msg.take(),
+            error: ::core::mem::replace(&mut state.err, crate::zlib_h::Z_OK),
+            buffered: ::core::mem::replace(&mut state.x.have, 0),
+            position: ::core::mem::replace(&mut state.x.pos, 0),
+            mode: state.mode,
+            want: state.want,
+            direct: state.direct,
+            level: state.level,
+            strategy: state.strategy,
+            skip: state.skip,
+            again: state.again,
+            reset: state.reset,
+            input_available: state.strm.avail_in,
+        }
+    }
+
+    unsafe fn publish_into_abi(self, state: &mut crate::gzguts_h::gz_state) {
+        state.buffers = self.buffers;
+        state.fd = self.fd;
+        state.path = self.path;
+        state.msg = self.message;
+        state.err = self.error;
+        state.x.have = self.buffered;
+        state.x.pos = self.position;
+        state.mode = self.mode;
+        state.want = self.want;
+        state.direct = self.direct;
+        state.level = self.level;
+        state.strategy = self.strategy;
+        state.skip = self.skip;
+        state.again = self.again;
+        state.reset = self.reset;
+        state.strm.avail_in = self.input_available;
+    }
+
+    // Preserve the established C4 boundary: publish the scalar/buffer owner,
+    // run exactly one codec request, then recover the complete transaction.
+    // `strm` and `x.next` remain projected only for this call.
+    unsafe fn run_compressor(
+        &mut self,
+        state: &mut crate::gzguts_h::gz_state,
+        flush: ::core::ffi::c_int,
+        external_input: Option<&[u8]>,
+        retune: Option<GzDeflateRetune>,
+        close: Option<GzWriteCloseCodec<'_>>,
+        skip_materialization: GzSkipMaterialization,
+    ) -> ::core::ffi::c_int {
+        state.buffers =
+            ::core::mem::replace(&mut self.buffers, crate::gzguts_h::GzBuffers::empty());
+        state.fd = self.fd.take();
+        state.path = self.path.take();
+        state.msg = self.message.take();
+        state.err = self.error;
+        state.x.have = self.buffered;
+        state.x.pos = self.position;
+        state.mode = self.mode;
+        state.want = self.want;
+        state.direct = self.direct;
+        state.level = self.level;
+        state.strategy = self.strategy;
+        state.skip = self.skip;
+        state.again = self.again;
+        state.reset = self.reset;
+        state.strm.avail_in = self.input_available;
+
+        let status = gz_comp(
+            state,
+            flush,
+            external_input,
+            retune,
+            close,
+            skip_materialization,
+        );
+
+        self.buffers =
+            ::core::mem::replace(&mut state.buffers, crate::gzguts_h::GzBuffers::empty());
+        self.fd = state.fd.take();
+        self.path = state.path.take();
+        self.message = state.msg.take();
+        self.error = state.err;
+        self.buffered = state.x.have;
+        self.position = state.x.pos;
+        self.mode = state.mode;
+        self.want = state.want;
+        self.direct = state.direct;
+        self.level = state.level;
+        self.strategy = state.strategy;
+        self.skip = state.skip;
+        self.again = state.again;
+        self.reset = state.reset;
+        self.input_available = state.strm.avail_in;
+        status
+    }
+}
+
 // This is the only ABI-shaped write adapter.  The persistent `GzWriteOwner`
 // supplies the owned input cursor and deflater lifecycle; the adapter merely
 // projects those bounded requests through the legacy gzip/deflate state.
-pub(crate) unsafe fn gzip_write_state_adapter(
-    state: &mut crate::gzguts_h::gz_state,
+fn gzip_write_owner(
+    state: &mut GzWriteStateOwner,
     operation: GzWriteOperation<'_>,
+    mut compressor: impl FnMut(
+        &mut GzWriteStateOwner,
+        ::core::ffi::c_int,
+        Option<&[u8]>,
+        Option<GzDeflateRetune>,
+        Option<GzWriteCloseCodec<'_>>,
+        GzSkipMaterialization,
+    ) -> ::core::ffi::c_int,
 ) -> crate::stdlib::z_size_t {
     // Take a fresh scalar snapshot for every public operation.  Compressor
     // requests can initialize, retune, or materialize a deferred seek, so a
@@ -1387,7 +1519,7 @@ pub(crate) unsafe fn gzip_write_state_adapter(
     let snapshot = GzWriteStateSnapshot {
         policy: GzWritePolicy {
             mode: state.mode,
-            err: state.err,
+            err: state.error,
             again: state.again,
             direct: state.direct,
         },
@@ -1404,7 +1536,7 @@ pub(crate) unsafe fn gzip_write_state_adapter(
                 return crate::zlib_h::Z_STREAM_ERROR as crate::stdlib::z_size_t;
             };
             let mut deflater_closed = false;
-            gz_comp(
+            compressor(
                 state,
                 crate::zlib_h::Z_FINISH,
                 None,
@@ -1419,8 +1551,8 @@ pub(crate) unsafe fn gzip_write_state_adapter(
                 &mut state.buffers,
                 &mut state.fd,
                 &mut state.path,
-                &mut state.msg,
-                &mut state.err,
+                &mut state.message,
+                &mut state.error,
             );
             resources.release_write_buffers(deflater_closed);
             return result.finish(resources.finish()) as crate::stdlib::z_size_t;
@@ -1430,9 +1562,9 @@ pub(crate) unsafe fn gzip_write_state_adapter(
                 return crate::zlib_h::Z_STREAM_ERROR as crate::stdlib::z_size_t;
             }
             crate::src::gzlib::GzErrorState {
-                message: &mut state.msg,
-                error: &mut state.err,
-                buffered: &mut state.x.have,
+                message: &mut state.message,
+                error: &mut state.error,
+                buffered: &mut state.buffered,
                 again: state.again,
                 path: state.path.as_deref(),
             }
@@ -1440,7 +1572,7 @@ pub(crate) unsafe fn gzip_write_state_adapter(
             let GzFlushPlan::Dispatch { flush } = plan else {
                 return crate::zlib_h::Z_STREAM_ERROR as crate::stdlib::z_size_t;
             };
-            if gz_comp(
+            if compressor(
                 state,
                 flush,
                 None,
@@ -1449,9 +1581,9 @@ pub(crate) unsafe fn gzip_write_state_adapter(
                 GzSkipMaterialization::Continue,
             ) == -1
             {
-                return state.err as crate::stdlib::z_size_t;
+                return state.error as crate::stdlib::z_size_t;
             }
-            return state.err as crate::stdlib::z_size_t;
+            return state.error as crate::stdlib::z_size_t;
         }
         GzWriteAdmission::SetParams {
             level,
@@ -1462,9 +1594,9 @@ pub(crate) unsafe fn gzip_write_state_adapter(
                 return crate::zlib_h::Z_STREAM_ERROR as crate::stdlib::z_size_t;
             }
             crate::src::gzlib::GzErrorState {
-                message: &mut state.msg,
-                error: &mut state.err,
-                buffered: &mut state.x.have,
+                message: &mut state.message,
+                error: &mut state.error,
+                buffered: &mut state.buffered,
                 again: state.again,
                 path: state.path.as_deref(),
             }
@@ -1473,7 +1605,7 @@ pub(crate) unsafe fn gzip_write_state_adapter(
                 return crate::zlib_h::Z_OK as crate::stdlib::z_size_t;
             };
             if materialize_skip
-                && gz_comp(
+                && compressor(
                     state,
                     crate::zlib_h::Z_NO_FLUSH,
                     None,
@@ -1482,10 +1614,10 @@ pub(crate) unsafe fn gzip_write_state_adapter(
                     GzSkipMaterialization::Only,
                 ) == -1 as ::core::ffi::c_int
             {
-                return state.err as crate::stdlib::z_size_t;
+                return state.error as crate::stdlib::z_size_t;
             }
             if gzsetparams_needs_retune(state.buffers.size)
-                && gz_comp(
+                && compressor(
                     state,
                     crate::zlib_h::Z_BLOCK,
                     None,
@@ -1494,7 +1626,7 @@ pub(crate) unsafe fn gzip_write_state_adapter(
                     GzSkipMaterialization::None,
                 ) == -1 as ::core::ffi::c_int
             {
-                return state.err as crate::stdlib::z_size_t;
+                return state.error as crate::stdlib::z_size_t;
             }
             state.level = level;
             state.strategy = strategy;
@@ -1510,9 +1642,9 @@ pub(crate) unsafe fn gzip_write_state_adapter(
                 flavor,
                 policy,
                 crate::src::gzlib::GzErrorState {
-                    message: &mut state.msg,
-                    error: &mut state.err,
-                    buffered: &mut state.x.have,
+                    message: &mut state.message,
+                    error: &mut state.error,
+                    buffered: &mut state.buffered,
                     again: state.again,
                     path: state.path.as_deref(),
                 },
@@ -1533,7 +1665,7 @@ pub(crate) unsafe fn gzip_write_state_adapter(
     let mut request = transaction.request;
     let mut ret: ::core::ffi::c_int = 0;
     if state.buffers.size == 0 as ::core::ffi::c_uint
-        && gz_comp(
+        && compressor(
             state,
             crate::zlib_h::Z_NO_FLUSH,
             None,
@@ -1545,7 +1677,7 @@ pub(crate) unsafe fn gzip_write_state_adapter(
         return result.finish(0);
     }
     if state.skip != 0
-        && gz_comp(
+        && compressor(
             state,
             crate::zlib_h::Z_NO_FLUSH,
             None,
@@ -1584,21 +1716,21 @@ pub(crate) unsafe fn gzip_write_state_adapter(
                 };
                 (copy, cursor)
             };
-            state.strm.avail_in = cursor.available();
+            state.input_available = cursor.available();
             state
                 .buffers
                 .write_owner
                 .as_mut()
                 .unwrap()
                 .set_input(cursor);
-            state.x.pos += copy as crate::stdlib::off64_t;
+            state.position += copy as crate::stdlib::off64_t;
             if request.advance(copy).is_none() {
                 return result.finish(0);
             }
             if request.is_empty() {
                 break;
             }
-            if gz_comp(
+            if compressor(
                 state,
                 crate::zlib_h::Z_NO_FLUSH,
                 None,
@@ -1616,7 +1748,7 @@ pub(crate) unsafe fn gzip_write_state_adapter(
             .write_owner
             .as_ref()
             .is_some_and(|owner| owner.input().available() != 0)
-            && gz_comp(
+            && compressor(
                 state,
                 crate::zlib_h::Z_NO_FLUSH,
                 None,
@@ -1635,7 +1767,7 @@ pub(crate) unsafe fn gzip_write_state_adapter(
                 state.again = 0;
                 match gz_direct_write(state.fd.as_ref().unwrap(), &request.remaining()[..count]) {
                     Ok(written) => {
-                        state.x.pos += written as crate::stdlib::off64_t;
+                        state.position += written as crate::stdlib::off64_t;
                         if request.advance(written).is_none() {
                             return result.finish(0);
                         }
@@ -1646,9 +1778,9 @@ pub(crate) unsafe fn gzip_write_state_adapter(
                         }
                         let message = errno::Errno(failure.errno_value).to_string();
                         crate::src::gzlib::GzErrorState {
-                            message: &mut state.msg,
-                            error: &mut state.err,
-                            buffered: &mut state.x.have,
+                            message: &mut state.message,
+                            error: &mut state.error,
+                            buffered: &mut state.buffered,
                             again: state.again,
                             path: state.path.as_deref(),
                         }
@@ -1661,8 +1793,8 @@ pub(crate) unsafe fn gzip_write_state_adapter(
         }
         loop {
             let chunk = GzCompressionChunk::next(request.len());
-            state.strm.avail_in = chunk.input_len;
-            ret = gz_comp(
+            state.input_available = chunk.input_len;
+            ret = compressor(
                 state,
                 crate::zlib_h::Z_NO_FLUSH,
                 Some(request.remaining()),
@@ -1670,8 +1802,8 @@ pub(crate) unsafe fn gzip_write_state_adapter(
                 None,
                 GzSkipMaterialization::None,
             );
-            let consumed = chunk.consumed(state.strm.avail_in);
-            state.x.pos += consumed as crate::stdlib::off64_t;
+            let consumed = chunk.consumed(state.input_available);
+            state.position += consumed as crate::stdlib::off64_t;
             if request.advance(consumed as usize).is_none() {
                 return result.finish(0);
             }
@@ -1685,6 +1817,26 @@ pub(crate) unsafe fn gzip_write_state_adapter(
     }
     result.finish(request.total)
 }
+
+// The sole ABI-facing write adapter now only transfers the transaction owner
+// across the C4 compressor boundary.  Admission, mutation, and return-value
+// mapping live in `gzip_write_owner()`, whose signature is pointer-free.
+pub(crate) unsafe fn gzip_write_state_adapter(
+    state: &mut crate::gzguts_h::gz_state,
+    operation: GzWriteOperation<'_>,
+) -> crate::stdlib::z_size_t {
+    let mut owner = GzWriteStateOwner::take_from_abi(state);
+    let result = gzip_write_owner(
+        &mut owner,
+        operation,
+        |owner, flush, input, retune, close, materialization| {
+            owner.run_compressor(state, flush, input, retune, close, materialization)
+        },
+    );
+    owner.publish_into_abi(state);
+    result
+}
+
 #[export_name = "gzwrite"]
 
 pub unsafe extern "C" fn gzwrite_ffi(
