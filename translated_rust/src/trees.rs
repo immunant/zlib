@@ -2376,10 +2376,6 @@ pub(crate) fn flush_bits_impl(s: &mut crate::src::deflate::deflate_state) {
     }
 }
 
-unsafe fn bi_flush(s: &mut crate::src::deflate::deflate_state) {
-    flush_bits_impl(s);
-}
-
 /// Finish the current bit buffer for an already-validated deflate state.
 ///
 /// The state still owns raw allocations, so this remains an unsafe internal
@@ -3071,7 +3067,7 @@ pub unsafe extern "C" fn _tr_flush_bits_ffi(mut s: *mut crate::src::deflate::def
         return;
     }
     // The exported boundary validates and converts the opaque state once.
-    bi_flush(&mut *s);
+    flush_bits_impl(&mut *s);
 }
 unsafe fn tr_align(s: &mut crate::src::deflate::deflate_state) {
     let len: ::core::ffi::c_int = 3;
@@ -3119,7 +3115,7 @@ unsafe fn tr_align(s: &mut crate::src::deflate::deflate_state) {
             as crate::zutil_h::ush;
         s.bi_valid += len_0;
     }
-    bi_flush(s);
+    flush_bits_impl(s);
 }
 
 pub unsafe extern "C" fn _tr_align(mut s: *mut crate::src::deflate::deflate_state) {
