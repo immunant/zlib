@@ -377,10 +377,14 @@ unsafe fn gzwrite(
     }
     crate::src::gzlib::gz_clear_error(&mut state.msg, &mut state.err);
     if (input.len() as ::core::ffi::c_uint as ::core::ffi::c_int) < 0 as ::core::ffi::c_int {
-        crate::src::gzlib::gz_error(
-            state,
+        crate::src::gzlib::gz_set_error(
+            &mut state.msg,
+            &mut state.err,
+            &mut state.x.have,
+            state.again,
+            state.path.as_deref(),
             crate::zlib_h::Z_DATA_ERROR,
-            b"requested length does not fit in int\0".as_ptr() as *const ::core::ffi::c_char,
+            Some(b"requested length does not fit in int"),
         );
         return 0 as ::core::ffi::c_int;
     }
@@ -422,10 +426,14 @@ unsafe fn gzfwrite(
     crate::src::gzlib::gz_clear_error(&mut state.msg, &mut state.err);
     len = nitems.wrapping_mul(size);
     if size != 0 && len.wrapping_div(size) != nitems {
-        crate::src::gzlib::gz_error(
-            state as *mut crate::gzguts_h::gz_state,
+        crate::src::gzlib::gz_set_error(
+            &mut state.msg,
+            &mut state.err,
+            &mut state.x.have,
+            state.again,
+            state.path.as_deref(),
             crate::zlib_h::Z_STREAM_ERROR,
-            b"request does not fit in a size_t\0".as_ptr() as *const ::core::ffi::c_char,
+            Some(b"request does not fit in a size_t"),
         );
         return 0 as crate::stdlib::z_size_t;
     }
@@ -544,10 +552,14 @@ unsafe fn gzputs(
     if (len as ::core::ffi::c_int) < 0 as ::core::ffi::c_int
         || len as ::core::ffi::c_uint as crate::stdlib::z_size_t != len
     {
-        crate::src::gzlib::gz_error(
-            state,
+        crate::src::gzlib::gz_set_error(
+            &mut state.msg,
+            &mut state.err,
+            &mut state.x.have,
+            state.again,
+            state.path.as_deref(),
             crate::zlib_h::Z_STREAM_ERROR,
-            b"string length does not fit in int\0".as_ptr() as *const ::core::ffi::c_char,
+            Some(b"string length does not fit in int"),
         );
         return -1 as ::core::ffi::c_int;
     }

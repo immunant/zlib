@@ -577,10 +577,14 @@ unsafe fn gzread(
     }
     crate::src::gzlib::gz_clear_error(&mut state.msg, &mut state.err);
     if (output.len() as ::core::ffi::c_uint as ::core::ffi::c_int) < 0 as ::core::ffi::c_int {
-        crate::src::gzlib::gz_error(
-            state,
+        crate::src::gzlib::gz_set_error(
+            &mut state.msg,
+            &mut state.err,
+            &mut state.x.have,
+            state.again,
+            state.path.as_deref(),
             crate::zlib_h::Z_STREAM_ERROR,
-            b"request does not fit in an int\0".as_ptr() as *const ::core::ffi::c_char,
+            Some(b"request does not fit in an int"),
         );
         return -1 as ::core::ffi::c_int;
     }
@@ -641,10 +645,14 @@ unsafe fn gzfread(
     crate::src::gzlib::gz_clear_error(&mut state.msg, &mut state.err);
     len = nitems.wrapping_mul(size);
     if size != 0 && len.wrapping_div(size) != nitems {
-        crate::src::gzlib::gz_error(
-            state,
+        crate::src::gzlib::gz_set_error(
+            &mut state.msg,
+            &mut state.err,
+            &mut state.x.have,
+            state.again,
+            state.path.as_deref(),
             crate::zlib_h::Z_STREAM_ERROR,
-            b"request does not fit in a size_t\0".as_ptr() as *const ::core::ffi::c_char,
+            Some(b"request does not fit in a size_t"),
         );
         return 0 as crate::stdlib::z_size_t;
     }
