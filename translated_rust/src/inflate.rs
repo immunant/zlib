@@ -640,7 +640,7 @@ impl<'a> InflateStateStream<'a> {
 /// always has an installed owner to return it from `inflateEnd`; if the
 /// callback reports allocation failure, releasing the owner needs no callback
 /// cleanup because no ABI allocation exists.
-fn with_inflate_callback_allocation(
+pub(crate) fn with_inflate_callback_allocation(
     strm: &mut crate::zlib_h::z_stream_s,
     allocator_source: Option<&crate::zlib_h::z_stream_s>,
     state_address: usize,

@@ -230,7 +230,7 @@ unsafe fn inflate_back_init_boundary(
         strm.state = state_allocation.cast_mut().cast();
         return crate::zlib_h::Z_OK;
     }
-    let (Some(zalloc), Some(_)) = (strm.zalloc, strm.zfree) else {
+    let (Some(_), Some(_)) = (strm.zalloc, strm.zfree) else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
     let state = Box::new(state);
@@ -238,16 +238,13 @@ unsafe fn inflate_back_init_boundary(
     let Some(state_address) = crate::src::inflate::retain_callback_inflate_state(state) else {
         return crate::zlib_h::Z_MEM_ERROR;
     };
-    let allocation = zalloc(
-        strm.opaque,
-        1,
-        ::core::mem::size_of::<crate::src::inflate::inflate_state>() as crate::stdlib::uInt,
-    );
-    if allocation.is_null() {
-        debug_assert!(crate::src::inflate::release_inflate_state_owner(state_address).is_none());
-        return crate::zlib_h::Z_MEM_ERROR;
+    if let Err(error) = crate::src::inflate::with_inflate_callback_allocation(
+        strm,
+        None,
+        state_address,
+    ) {
+        return error;
     }
-    crate::src::inflate::set_callback_inflate_state_allocation(state_address, allocation.addr());
     strm.state = state_pointer
         .cast_mut()
         .cast::<crate::src::deflate::internal_state>();
