@@ -157,8 +157,6 @@ pub struct inflate_state {
 }
 pub use crate::__stddef_size_t_h::size_t;
 
-pub use crate::src::adler32::adler32;
-pub use crate::src::crc32::crc32;
 pub use crate::src::deflate::internal_state;
 pub use crate::src::inftrees::code;
 pub use crate::src::inftrees::codetype;
@@ -777,10 +775,9 @@ pub unsafe extern "C" fn inflate(
                                                                                                                 } else {
                                                                                                                     (*state).dmax = (1 as ::core::ffi::c_uint) << len;
                                                                                                                     (*state).flags = 0 as ::core::ffi::c_int;
-                                                                                                                    (*state).check = crate::src::adler32::adler32(
+                                                                                                                    (*state).check = crate::src::adler32::adler32_buffer(
                                                                                                                         0 as crate::stdlib::uLong,
-                                                                                                                        ::core::ptr::null:: <crate::stdlib::Bytef>(),
-                                                                                                                        0 as crate::stdlib::uInt,
+                                                                                                                        None,
                                                                                                                     ) as ::core::ffi::c_ulong;
                                                                                                                     (*strm).adler = (*state).check as crate::stdlib::uLong;
                                                                                                                     (*state).mode = (if hold & 0x200 as ::core::ffi::c_ulong
@@ -1230,10 +1227,9 @@ pub unsafe extern "C" fn inflate(
                                                                                         (*state).bits = bits;
                                                                                         return crate::zlib_h::Z_NEED_DICT;
                                                                                     }
-                                                                                    (*state).check = crate::src::adler32::adler32(
+                                                                                    (*state).check = crate::src::adler32::adler32_buffer(
                                                                                         0 as crate::stdlib::uLong,
-                                                                                        ::core::ptr::null:: <crate::stdlib::Bytef>(),
-                                                                                        0 as crate::stdlib::uInt,
+                                                                                        None,
                                                                                     ) as ::core::ffi::c_ulong;
                                                                                     (*strm).adler =
                                                                                         (*state)

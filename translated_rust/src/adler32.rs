@@ -44,7 +44,7 @@ pub(crate) fn adler32_bytes(
 // Keep checksum calculation independent of the FFI byte-buffer boundary.
 // A null buffer has the documented reset meaning, even when its length is
 // nonzero.
-fn adler32_buffer(
+pub(crate) fn adler32_buffer(
     adler: crate::stdlib::uLong,
     buf: Option<&[crate::stdlib::Bytef]>,
 ) -> crate::stdlib::uLong {
@@ -52,17 +52,6 @@ fn adler32_buffer(
         Some(buf) => adler32_bytes(adler, buf),
         None => 1 as crate::stdlib::uLong,
     }
-}
-
-// The exported ABI adapter owns the raw caller-buffer conversion. Keep this
-// compatibility entry point as a narrow forwarder so internal callers do not
-// duplicate that boundary.
-pub unsafe extern "C" fn adler32(
-    adler: crate::stdlib::uLong,
-    buf: *const crate::stdlib::Bytef,
-    len: crate::stdlib::uInt,
-) -> crate::stdlib::uLong {
-    adler32_z_ffi(adler, buf, len as crate::stdlib::z_size_t)
 }
 
 #[export_name = "adler32_z"]

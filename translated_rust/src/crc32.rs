@@ -4892,22 +4892,11 @@ pub(crate) fn crc32_bytes(mut crc: crate::stdlib::uLong, mut bytes: &[u8]) -> cr
 // Keep checksum calculation independent of the FFI byte-buffer boundary.
 // A null buffer has the documented reset meaning, even when its length is
 // nonzero.
-fn crc32_buffer(crc: crate::stdlib::uLong, buf: Option<&[u8]>) -> crate::stdlib::uLong {
+pub(crate) fn crc32_buffer(crc: crate::stdlib::uLong, buf: Option<&[u8]>) -> crate::stdlib::uLong {
     match buf {
         Some(buf) => crc32_bytes(crc, buf),
         None => 0,
     }
-}
-
-// The exported ABI adapter owns the raw caller-buffer conversion. Keep this
-// compatibility entry point as a narrow forwarder so internal callers do not
-// duplicate that boundary.
-pub unsafe extern "C" fn crc32(
-    crc: crate::stdlib::uLong,
-    buf: *const ::core::ffi::c_uchar,
-    len: crate::stdlib::uInt,
-) -> crate::stdlib::uLong {
-    crc32_z_ffi(crc, buf, len as crate::stdlib::z_size_t)
 }
 
 #[export_name = "crc32_z"]

@@ -150,8 +150,6 @@ pub const MIN_LOOKAHEAD: ::core::ffi::c_int =
 pub const WIN_INIT: ::core::ffi::c_int = crate::zutil_h::MAX_MATCH;
 pub use crate::__stddef_size_t_h::size_t;
 
-pub use crate::src::adler32::adler32;
-pub use crate::src::crc32::crc32;
 pub use crate::src::crc32::crc32_z_ffi as crc32_z;
 pub use crate::src::trees::_dist_code;
 pub use crate::src::trees::_length_code;
@@ -815,7 +813,11 @@ pub unsafe extern "C" fn deflateSetDictionary(
         return crate::zlib_h::Z_STREAM_ERROR;
     }
     if wrap == 1 as ::core::ffi::c_int {
-        (*strm).adler = crate::src::adler32::adler32((*strm).adler, dictionary, dictLength);
+        (*strm).adler = crate::src::adler32::adler32_z_ffi(
+            (*strm).adler,
+            dictionary,
+            dictLength as crate::stdlib::z_size_t,
+        );
     }
     (*s).wrap = 0 as ::core::ffi::c_int;
     if dictLength >= (*s).w_size {
@@ -1757,10 +1759,9 @@ pub unsafe extern "C" fn deflate(
                 ((*strm).adler & 0xffff as crate::stdlib::uLong) as crate::stdlib::uInt,
             );
         }
-        (*strm).adler = crate::src::adler32::adler32(
+        (*strm).adler = crate::src::adler32::adler32_buffer(
             0 as crate::stdlib::uLong,
-            ::core::ptr::null::<crate::stdlib::Bytef>(),
-            0 as crate::stdlib::uInt,
+            None,
         );
         (*s).status = crate::src::deflate::BUSY_STATE;
         flush_pending(strm);
@@ -1770,11 +1771,7 @@ pub unsafe extern "C" fn deflate(
         }
     }
     if (*s).status == crate::src::deflate::GZIP_STATE {
-        (*strm).adler = crate::src::crc32::crc32(
-            0 as crate::stdlib::uLong,
-            ::core::ptr::null::<crate::stdlib::Bytef>(),
-            0 as crate::stdlib::uInt,
-        );
+        (*strm).adler = crate::src::crc32::crc32_buffer(0 as crate::stdlib::uLong, None);
         let c2rust_fresh0 = (*s).pending;
         (*s).pending = (*s).pending.wrapping_add(1);
         *(*s).pending_buf.offset(c2rust_fresh0 as isize) =
@@ -2052,11 +2049,7 @@ pub unsafe extern "C" fn deflate(
             *(*s).pending_buf.offset(c2rust_fresh24 as isize) =
                 ((*strm).adler >> 8 as ::core::ffi::c_int & 0xff as crate::stdlib::uLong)
                     as crate::stdlib::Byte;
-            (*strm).adler = crate::src::crc32::crc32(
-                0 as crate::stdlib::uLong,
-                ::core::ptr::null::<crate::stdlib::Bytef>(),
-                0 as crate::stdlib::uInt,
-            );
+            (*strm).adler = crate::src::crc32::crc32_buffer(0 as crate::stdlib::uLong, None);
         }
         (*s).status = crate::src::deflate::BUSY_STATE;
         flush_pending(strm);
