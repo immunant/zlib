@@ -1425,22 +1425,22 @@ pub unsafe extern "C" fn inflateBack_ffi(
     }
     callback_result.result
 }
-fn inflate_back_end<F>(
+fn inflate_back_end(
     strm: &mut crate::zlib_h::z_stream,
     state: Option<&crate::src::inflate::inflate_state>,
-    free: Option<F>,
-) -> ::core::ffi::c_int
-where
-    F: FnOnce(),
-{
-    if state.is_none() || free.is_none() {
+) -> ::core::ffi::c_int {
+    if state.is_none() {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    // The wrapper adapts the ABI allocator callback to this synchronous safe
-    // operation after it has borrowed the validated stream state.
-    free.expect("checked above")();
+    let Some(free) = strm.zfree else {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    };
+    // The state token is an opaque callback allocation.  Release it only
+    // after the typed-state validation above; the FFI wrapper merely borrows
+    // that typed state and dispatches here.
+    free(strm.opaque, strm.state.cast());
     strm.state = ::core::ptr::null_mut::<crate::src::deflate::internal_state>();
-    return crate::zlib_h::Z_OK;
+    crate::zlib_h::Z_OK
 }
 #[export_name = "inflateBackEnd"]
 
@@ -1452,10 +1452,5 @@ pub unsafe extern "C" fn inflateBackEnd_ffi(
     };
     let state_ptr = strm.state as *mut crate::src::inflate::inflate_state;
     let state = state_ptr.as_ref();
-    let free = strm.zfree.map(|free| {
-        let opaque = strm.opaque;
-        let state = state_ptr as crate::stdlib::voidpf;
-        move || free(opaque, state)
-    });
-    inflate_back_end(strm, state, free)
+    inflate_back_end(strm, state)
 }
