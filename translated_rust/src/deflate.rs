@@ -5150,6 +5150,11 @@ pub unsafe fn deflateEnd(
     mut strm: ::core::ptr::NonNull<crate::zlib_h::z_stream_s>,
 ) -> ::core::ffi::c_int {
     let strm = strm.as_mut();
+    // Retain the opaque state allocation handle before borrowing its Rust
+    // payload.  Teardown must return this exact callback allocation to zfree;
+    // deriving a new raw pointer from the payload borrow would make the
+    // pointer-free lifecycle plan depend on that temporary projection.
+    let state_allocation = strm.state;
     let Some((strm, state, _storage, _)) =
         deflate_stream_and_state(strm, DeflateStorageProjection::None, None)
     else {
@@ -5158,7 +5163,6 @@ pub unsafe fn deflateEnd(
     // Keep the ABI projection at the release boundary.  Everything after
     // this uses the two scoped views and the exact callback pairing that was
     // established by deflateInit2_().
-    let state_ptr = state as *mut crate::src::deflate::deflate_state;
     let zfree = strm.zfree.expect("validated by deflate_stream_and_state");
     let opaque = strm.opaque;
     // Snapshot every callback-owned allocation before the first release.
@@ -5194,7 +5198,7 @@ pub unsafe fn deflateEnd(
                     None
                 },
                 if release_plan.state {
-                    ::core::ptr::NonNull::new(state_ptr.cast())
+                    state_allocation.map(|allocation| allocation.cast())
                 } else {
                     None
                 },
