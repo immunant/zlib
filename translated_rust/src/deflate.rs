@@ -796,142 +796,148 @@ fn fill_window_write_span(
     (end <= window_len).then_some(start..end)
 }
 
-unsafe fn fill_window(mut s: *mut crate::src::deflate::deflate_state) {
-    let mut n: ::core::ffi::c_uint = 0;
-    let mut more: ::core::ffi::c_uint = 0;
-    // This remains the transitional state/allocator boundary, but adopt the
-    // validated state record once.  The bounded slice helpers below continue
-    // to own all ordinary buffer manipulation.
-    let state = &mut *s;
-    let wsize: crate::stdlib::uInt = state.w_size;
-    loop {
-        let (space, should_slide) =
-            fill_window_space_state(state.window_size, state.lookahead, state.strstart, wsize);
-        more = space;
-        // Lend the window once for this iteration.  Both the slide path and
-        // the post-refill hash insertion use the same checked allocation, so
-        // retaining this one view avoids a second raw window adapter.
-        let Ok(window_len) = usize::try_from(state.window_size) else {
-            return;
-        };
-        if window_len != 0 && state.window.is_null() {
-            return;
-        }
-        let window = if window_len == 0 {
-            &mut []
-        } else {
-            ::core::slice::from_raw_parts_mut(state.window, window_len)
-        };
-        if should_slide {
-            let Some(next_more) = slide_window_state(
-                window,
-                wsize,
-                more,
-                &mut state.match_start,
-                &mut state.strstart,
-                &mut state.block_start,
-                &mut state.insert,
-            ) else {
+fn fill_window(mut s: *mut crate::src::deflate::deflate_state) {
+    unsafe {
+        let mut n: ::core::ffi::c_uint = 0;
+        let mut more: ::core::ffi::c_uint = 0;
+        // This remains the transitional state/allocator boundary, but adopt the
+        // validated state record once.  The bounded slice helpers below continue
+        // to own all ordinary buffer manipulation.
+        let state = &mut *s;
+        let wsize: crate::stdlib::uInt = state.w_size;
+        loop {
+            let (space, should_slide) =
+                fill_window_space_state(state.window_size, state.lookahead, state.strstart, wsize);
+            more = space;
+            // Lend the window once for this iteration.  Both the slide path and
+            // the post-refill hash insertion use the same checked allocation, so
+            // retaining this one view avoids a second raw window adapter.
+            let Ok(window_len) = usize::try_from(state.window_size) else {
                 return;
             };
-            // `fill_window` is the sole transitional owner of these
-            // callback-allocated hash buffers. Lend them directly to the
-            // safe sliding routine instead of routing through a second
-            // unsafe implementation adapter.
-            let Ok(head_len) = usize::try_from(state.hash_size) else {
-                return;
-            };
-            let Ok(prev_len) = usize::try_from(state.w_size) else {
-                return;
-            };
-            if (head_len != 0 && state.head.is_null()) || (prev_len != 0 && state.prev.is_null()) {
+            if window_len != 0 && state.window.is_null() {
                 return;
             }
-            let head = if head_len == 0 {
+            let window = if window_len == 0 {
                 &mut []
             } else {
-                ::core::slice::from_raw_parts_mut(state.head, head_len)
+                ::core::slice::from_raw_parts_mut(state.window, window_len)
             };
-            let prev = if prev_len == 0 {
-                &mut []
-            } else {
-                ::core::slice::from_raw_parts_mut(state.prev, prev_len)
-            };
-            slide_hash_state(head, prev, wsize);
-            state.slid = 1;
-            more = next_more;
-        }
-        // `read_buf()` consumes at most this exact available-input snapshot.
-        // Retain it so the loop need not dereference the compatibility stream
-        // again merely to decide whether more input remains.
-        let Some(write_span) =
-            fill_window_write_span(window.len(), state.strstart, state.lookahead, more)
-        else {
-            return;
-        };
-        let Some(output) = window.get_mut(write_span) else {
-            return;
-        };
-        let progress = read_buf(state.strm, output.as_mut_ptr(), more, state.wrap);
-        n = progress.copied;
-        state.lookahead = state.lookahead.wrapping_add(n);
-        if state.lookahead.wrapping_add(state.insert)
-            >= crate::zutil_h::MIN_MATCH as crate::stdlib::uInt
-        {
-            let Ok(head_len) = usize::try_from(state.hash_size) else {
+            if should_slide {
+                let Some(next_more) = slide_window_state(
+                    window,
+                    wsize,
+                    more,
+                    &mut state.match_start,
+                    &mut state.strstart,
+                    &mut state.block_start,
+                    &mut state.insert,
+                ) else {
+                    return;
+                };
+                // `fill_window` is the sole transitional owner of these
+                // callback-allocated hash buffers. Lend them directly to the
+                // safe sliding routine instead of routing through a second
+                // unsafe implementation adapter.
+                let Ok(head_len) = usize::try_from(state.hash_size) else {
+                    return;
+                };
+                let Ok(prev_len) = usize::try_from(state.w_size) else {
+                    return;
+                };
+                if (head_len != 0 && state.head.is_null())
+                    || (prev_len != 0 && state.prev.is_null())
+                {
+                    return;
+                }
+                let head = if head_len == 0 {
+                    &mut []
+                } else {
+                    ::core::slice::from_raw_parts_mut(state.head, head_len)
+                };
+                let prev = if prev_len == 0 {
+                    &mut []
+                } else {
+                    ::core::slice::from_raw_parts_mut(state.prev, prev_len)
+                };
+                slide_hash_state(head, prev, wsize);
+                state.slid = 1;
+                more = next_more;
+            }
+            // `read_buf()` consumes at most this exact available-input snapshot.
+            // Retain it so the loop need not dereference the compatibility stream
+            // again merely to decide whether more input remains.
+            let Some(write_span) =
+                fill_window_write_span(window.len(), state.strstart, state.lookahead, more)
+            else {
                 return;
             };
-            let Ok(prev_len) = usize::try_from(state.w_size) else {
+            let Some(output) = window.get_mut(write_span) else {
                 return;
             };
-            if (head_len != 0 && state.head.is_null()) || (prev_len != 0 && state.prev.is_null()) {
+            let progress = read_buf(state.strm, output.as_mut_ptr(), more, state.wrap);
+            n = progress.copied;
+            state.lookahead = state.lookahead.wrapping_add(n);
+            if state.lookahead.wrapping_add(state.insert)
+                >= crate::zutil_h::MIN_MATCH as crate::stdlib::uInt
+            {
+                let Ok(head_len) = usize::try_from(state.hash_size) else {
+                    return;
+                };
+                let Ok(prev_len) = usize::try_from(state.w_size) else {
+                    return;
+                };
+                if (head_len != 0 && state.head.is_null())
+                    || (prev_len != 0 && state.prev.is_null())
+                {
+                    return;
+                }
+                let head = if head_len == 0 {
+                    &mut []
+                } else {
+                    ::core::slice::from_raw_parts_mut(state.head, head_len)
+                };
+                let prev = if prev_len == 0 {
+                    &mut []
+                } else {
+                    ::core::slice::from_raw_parts_mut(state.prev, prev_len)
+                };
+                if !insert_pending_strings_state(
+                    window,
+                    head,
+                    prev,
+                    state.strstart,
+                    state.lookahead,
+                    &mut state.insert,
+                    &mut state.ins_h,
+                    state.hash_shift,
+                    state.hash_mask,
+                    state.w_mask,
+                ) {
+                    return;
+                }
+            }
+            if state.lookahead < crate::src::deflate::MIN_LOOKAHEAD as crate::stdlib::uInt
+                && progress.avail_in != 0 as crate::stdlib::uInt
+            {
+                continue;
+            }
+            // Reuse this iteration's already validated window lend for the
+            // final high-water initialization.  Taking another raw slice after
+            // the loop would only duplicate the same boundary conversion.
+            if state.high_water < state.window_size
+                && !clear_window_tail_state(
+                    window,
+                    state.window_size,
+                    state.strstart,
+                    state.lookahead,
+                    &mut state.high_water,
+                )
+            {
                 return;
             }
-            let head = if head_len == 0 {
-                &mut []
-            } else {
-                ::core::slice::from_raw_parts_mut(state.head, head_len)
-            };
-            let prev = if prev_len == 0 {
-                &mut []
-            } else {
-                ::core::slice::from_raw_parts_mut(state.prev, prev_len)
-            };
-            if !insert_pending_strings_state(
-                window,
-                head,
-                prev,
-                state.strstart,
-                state.lookahead,
-                &mut state.insert,
-                &mut state.ins_h,
-                state.hash_shift,
-                state.hash_mask,
-                state.w_mask,
-            ) {
-                return;
-            }
+            break;
         }
-        if state.lookahead < crate::src::deflate::MIN_LOOKAHEAD as crate::stdlib::uInt
-            && progress.avail_in != 0 as crate::stdlib::uInt
-        {
-            continue;
-        }
-        // Reuse this iteration's already validated window lend for the
-        // final high-water initialization.  Taking another raw slice after
-        // the loop would only duplicate the same boundary conversion.
-        if state.high_water < state.window_size
-            && !clear_window_tail_state(
-                window,
-                state.window_size,
-                state.strstart,
-                state.lookahead,
-                &mut state.high_water,
-            )
-        {
-            return;
-        }
-        break;
     }
 }
 
