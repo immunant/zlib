@@ -4415,6 +4415,15 @@ enum ScanTreeAction {
     RepeatZeroLong,
 }
 
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+struct TreeRunStep {
+    action: Option<ScanTreeAction>,
+    count: ::core::ffi::c_int,
+    previous_len: ::core::ffi::c_int,
+    max_count: ::core::ffi::c_int,
+    min_count: ::core::ffi::c_int,
+}
+
 fn classify_tree_run(
     count: ::core::ffi::c_int,
     min_count: ::core::ffi::c_int,
@@ -4431,6 +4440,35 @@ fn classify_tree_run(
         ScanTreeAction::RepeatZeroShort
     } else {
         ScanTreeAction::RepeatZeroLong
+    }
+}
+
+fn tree_run_step(
+    count: ::core::ffi::c_int,
+    max_count: ::core::ffi::c_int,
+    min_count: ::core::ffi::c_int,
+    current_len: ::core::ffi::c_int,
+    next_len: ::core::ffi::c_int,
+    previous_len: ::core::ffi::c_int,
+) -> TreeRunStep {
+    if tree_run_continues(count, max_count, current_len, next_len) {
+        return TreeRunStep {
+            action: None,
+            count,
+            previous_len,
+            max_count,
+            min_count,
+        };
+    }
+
+    let action = classify_tree_run(count, min_count, current_len, previous_len);
+    let (max_count, min_count) = tree_run_limits(current_len, next_len);
+    TreeRunStep {
+        action: Some(action),
+        count: 0,
+        previous_len: current_len,
+        max_count,
+        min_count,
     }
 }
 
@@ -4524,16 +4562,14 @@ unsafe fn scan_tree(
         curlen = nextlen;
         nextlen = (*tree.wrapping_add(tree_next_cursor(n))).dl.len as ::core::ffi::c_int;
         count += 1;
-        if !tree_run_continues(count, max_count, curlen, nextlen) {
-            tally_scan_tree_action(
-                &mut (*s).bl_tree,
-                curlen,
-                classify_tree_run(count, min_count, curlen, prevlen),
-            );
-            count = 0 as ::core::ffi::c_int;
-            prevlen = curlen;
-            (max_count, min_count) = tree_run_limits(curlen, nextlen);
+        let step = tree_run_step(count, max_count, min_count, curlen, nextlen, prevlen);
+        if let Some(action) = step.action {
+            tally_scan_tree_action(&mut (*s).bl_tree, curlen, action);
         }
+        count = step.count;
+        prevlen = step.previous_len;
+        max_count = step.max_count;
+        min_count = step.min_count;
         n += 1;
     }
 }
@@ -4554,8 +4590,9 @@ unsafe fn send_tree(
         curlen = nextlen;
         nextlen = (*tree.wrapping_add(tree_next_cursor(n))).dl.len as ::core::ffi::c_int;
         count += 1;
-        if !tree_run_continues(count, max_count, curlen, nextlen) {
-            match classify_tree_run(count, min_count, curlen, prevlen) {
+        let step = tree_run_step(count, max_count, min_count, curlen, nextlen, prevlen);
+        if let Some(action) = step.action {
+            match action {
                 ScanTreeAction::LiteralCount(_) => loop {
                     let mut len: ::core::ffi::c_int =
                         (*s).bl_tree[curlen as usize].dl.len as ::core::ffi::c_int;
@@ -4817,10 +4854,11 @@ unsafe fn send_tree(
                     }
                 }
             }
-            count = 0 as ::core::ffi::c_int;
-            prevlen = curlen;
-            (max_count, min_count) = tree_run_limits(curlen, nextlen);
         }
+        count = step.count;
+        prevlen = step.previous_len;
+        max_count = step.max_count;
+        min_count = step.min_count;
         n += 1;
     }
 }
@@ -5582,9 +5620,10 @@ mod tests {
         symbol_triplet_cursors, tally_match_tree_indices, tally_scan_tree_action,
         tally_symbol_bytes, tally_tree_update, tree_bit_length_cost,
         tree_bit_length_totals_after_node, tree_heap_has_pair, tree_next_cursor, tree_parent_depth,
-        tree_run_continues, tree_run_extra_bits, tree_run_limits, BlockEncoding,
+        tree_run_continues, tree_run_extra_bits, tree_run_limits, tree_run_step, BlockEncoding,
         GenBitlenOverflowNode, GenBitlenOverflowReassignment, HeapChild, ScanTreeAction,
-        TallyTreeUpdate, BL_CODE_ORDER_LEN, END_BLOCK, MAX_BITS, REPZ_11_138, REPZ_3_10, REP_3_6,
+        TallyTreeUpdate, TreeRunStep, BL_CODE_ORDER_LEN, END_BLOCK, MAX_BITS, REPZ_11_138,
+        REPZ_3_10, REP_3_6,
     };
 
     fn ltree_with_frequency(
@@ -5768,6 +5807,48 @@ mod tests {
         assert_eq!(
             classify_tree_run(11, 3, 0, -1),
             ScanTreeAction::RepeatZeroLong
+        );
+    }
+
+    #[test]
+    fn tree_run_step_preserves_continuation_state() {
+        assert_eq!(
+            tree_run_step(2, 3, 4, 7, 7, 6),
+            TreeRunStep {
+                action: None,
+                count: 2,
+                previous_len: 6,
+                max_count: 3,
+                min_count: 4,
+            }
+        );
+    }
+
+    #[test]
+    fn tree_run_step_emits_and_resets_at_run_boundary() {
+        assert_eq!(
+            tree_run_step(3, 3, 3, 7, 8, 6),
+            TreeRunStep {
+                action: Some(ScanTreeAction::RepeatLength {
+                    emit_length_once: true,
+                }),
+                count: 0,
+                previous_len: 7,
+                max_count: 7,
+                min_count: 4,
+            }
+        );
+    }
+
+    #[test]
+    fn tree_run_step_keeps_zero_run_repeat_boundary() {
+        assert_eq!(
+            tree_run_step(10, 10, 3, 0, 1, -1).action,
+            Some(ScanTreeAction::RepeatZeroShort)
+        );
+        assert_eq!(
+            tree_run_step(11, 11, 3, 0, 1, -1).action,
+            Some(ScanTreeAction::RepeatZeroLong)
         );
     }
 
