@@ -2990,22 +2990,150 @@ pub unsafe extern "C" fn deflate(
             strm.total_out = total_out;
             strm.adler = adler;
             result as ::core::ffi::c_uint
-        } else if s.strategy == crate::zlib_h::Z_HUFFMAN_ONLY {
-            deflate_match_from_abi(s, strm, flush, deflate_huff_from_views)
-                as ::core::ffi::c_uint
-        } else if s.strategy == crate::zlib_h::Z_RLE {
-            deflate_match_from_abi(s, strm, flush, deflate_rle_from_views)
-                as ::core::ffi::c_uint
         } else {
-            (match configuration_table[s.level as usize].algorithm {
-                DeflateAlgorithm::Stored => unreachable!("level zero is handled above"),
-                DeflateAlgorithm::Fast => {
-                    deflate_match_from_abi(s, strm, flush, deflate_fast_from_views)
+            // All non-stored modes share the same bounded stream and state
+            // projections.  Establish them once at the ABI boundary, then
+            // dispatch through the slice-based matcher.  In particular, do
+            // not make each algorithm reconstruct a raw view of the same
+            // callback-owned allocations.
+            let run = if s.strategy == crate::zlib_h::Z_HUFFMAN_ONLY {
+                deflate_huff_from_views
+            } else if s.strategy == crate::zlib_h::Z_RLE {
+                deflate_rle_from_views
+            } else {
+                match configuration_table[s.level as usize].algorithm {
+                    DeflateAlgorithm::Stored => unreachable!("level zero is handled above"),
+                    DeflateAlgorithm::Fast => deflate_fast_from_views,
+                    DeflateAlgorithm::Slow => deflate_slow_from_views,
                 }
-                DeflateAlgorithm::Slow => {
-                    deflate_match_from_abi(s, strm, flush, deflate_slow_from_views)
-                }
-            }) as ::core::ffi::c_uint
+            };
+            let input = if strm.avail_in == 0 {
+                &[]
+            } else {
+                ::core::slice::from_raw_parts(strm.next_in, strm.avail_in as usize)
+            };
+            let output = if strm.avail_out == 0 {
+                &mut []
+            } else {
+                ::core::slice::from_raw_parts_mut(strm.next_out, strm.avail_out as usize)
+            };
+            let window = ::core::slice::from_raw_parts_mut(
+                s.window.expect("initialized window").as_ptr(),
+                s.window_size as usize,
+            );
+            let prev = ::core::slice::from_raw_parts_mut(
+                s.prev.expect("initialized prev table").as_ptr(),
+                s.w_size as usize,
+            );
+            let head = ::core::slice::from_raw_parts_mut(
+                s.head.expect("initialized head table").as_ptr(),
+                s.hash_size as usize,
+            );
+            let pending_buf = ::core::slice::from_raw_parts_mut(
+                s.pending_buf.expect("initialized pending buffer").as_ptr(),
+                s.pending_buf_size as usize,
+            );
+            let (result, progress) = {
+                let mut matched = DeflateFastState {
+                    window,
+                    prev,
+                    head,
+                    pending_buf,
+                    pending_out: s.pending_out,
+                    pending: s.pending,
+                    bi_buf: s.bi_buf,
+                    bi_valid: s.bi_valid,
+                    bi_used: s.bi_used,
+                    dyn_ltree: &mut s.dyn_ltree,
+                    dyn_dtree: &mut s.dyn_dtree,
+                    bl_tree: &mut s.bl_tree,
+                    l_desc: &mut s.l_desc,
+                    d_desc: &mut s.d_desc,
+                    bl_desc: &mut s.bl_desc,
+                    heap: &mut s.heap,
+                    heap_len: s.heap_len,
+                    heap_max: s.heap_max,
+                    depth: &mut s.depth,
+                    bl_count: &mut s.bl_count,
+                    opt_len: s.opt_len,
+                    static_len: s.static_len,
+                    sym_buf_start: s.sym_buf_start,
+                    sym_next: s.sym_next,
+                    sym_end: s.sym_end,
+                    matches: s.matches,
+                    lookahead: s.lookahead,
+                    strstart: s.strstart,
+                    block_start: s.block_start,
+                    insert: s.insert,
+                    ins_h: s.ins_h,
+                    match_length: s.match_length,
+                    match_start: s.match_start,
+                    prev_length: s.prev_length,
+                    prev_match: s.prev_match,
+                    match_available: s.match_available,
+                    max_chain_length: s.max_chain_length,
+                    max_lazy_match: s.max_lazy_match,
+                    good_match: s.good_match,
+                    nice_match: s.nice_match,
+                    level: s.level,
+                    strategy: s.strategy,
+                    w_size: s.w_size,
+                    w_mask: s.w_mask,
+                    hash_shift: s.hash_shift,
+                    hash_mask: s.hash_mask,
+                    wrap: s.wrap,
+                    slid: s.slid,
+                    high_water: s.high_water,
+                };
+                let mut matched_stream = DeflateFastStream {
+                    input,
+                    input_pos: 0,
+                    output,
+                    output_pos: 0,
+                    avail_out: strm.avail_out,
+                    total_in: strm.total_in,
+                    total_out: strm.total_out,
+                    adler: strm.adler,
+                    data_type: &mut strm.data_type,
+                };
+                let result =
+                    deflate_match_from_views(&mut matched, &mut matched_stream, flush, run);
+                let progress = DeflateMatchProgress::from_views(&matched, &matched_stream);
+                (result, progress)
+            };
+            strm.next_in = strm.next_in.wrapping_add(progress.input_consumed);
+            strm.avail_in = strm
+                .avail_in
+                .wrapping_sub(progress.input_consumed as crate::stdlib::uInt);
+            strm.next_out = strm.next_out.wrapping_add(progress.output_produced);
+            strm.avail_out = progress.avail_out;
+            strm.total_in = progress.total_in;
+            strm.total_out = progress.total_out;
+            strm.adler = progress.adler;
+            s.pending_out = progress.pending_out;
+            s.pending = progress.pending;
+            s.bi_buf = progress.bi_buf;
+            s.bi_valid = progress.bi_valid;
+            s.bi_used = progress.bi_used;
+            s.heap_len = progress.heap_len;
+            s.heap_max = progress.heap_max;
+            s.opt_len = progress.opt_len;
+            s.static_len = progress.static_len;
+            s.sym_next = progress.sym_next;
+            s.matches = progress.matches;
+            s.lookahead = progress.lookahead;
+            s.strstart = progress.strstart;
+            s.block_start = progress.block_start;
+            s.insert = progress.insert;
+            s.ins_h = progress.ins_h;
+            s.match_length = progress.match_length;
+            s.match_start = progress.match_start;
+            s.prev_length = progress.prev_length;
+            s.prev_match = progress.prev_match;
+            s.match_available = progress.match_available;
+            s.slid = progress.slid;
+            s.high_water = progress.high_water;
+            result as ::core::ffi::c_uint
         }) as block_state;
         if bstate as ::core::ffi::c_uint
             == finish_started as ::core::ffi::c_int as ::core::ffi::c_uint
@@ -4952,97 +5080,18 @@ fn deflate_huff_from_views(
     return block_done;
 }
 
-// RLE and Huffman mode differ only in their symbol-selection loops.  Keep the
-// ABI and callback-owned allocation projection in one small adapter, then
-// hand the bounded state to either safe loop.
-unsafe fn deflate_match_from_abi(
-    state: &mut crate::src::deflate::deflate_state,
-    stream: &mut crate::zlib_h::z_stream_s,
+// RLE and Huffman mode differ only in their symbol-selection loops.  The
+// caller constructs the bounded stream and allocation views once, leaving
+// this dispatch entirely pointer-free.
+fn deflate_match_from_views(
+    state: &mut DeflateFastState<'_>,
+    stream: &mut DeflateFastStream<'_>,
     flush: ::core::ffi::c_int,
-    run: fn(&mut DeflateFastState<'_>, &mut DeflateFastStream<'_>, ::core::ffi::c_int) -> block_state,
+    run: fn(
+        &mut DeflateFastState<'_>,
+        &mut DeflateFastStream<'_>,
+        ::core::ffi::c_int,
+    ) -> block_state,
 ) -> block_state {
-    let input = if stream.avail_in == 0 {
-        &[]
-    } else {
-        ::core::slice::from_raw_parts(stream.next_in, stream.avail_in as usize)
-    };
-    let output = if stream.avail_out == 0 {
-        &mut []
-    } else {
-        ::core::slice::from_raw_parts_mut(stream.next_out, stream.avail_out as usize)
-    };
-    let window = ::core::slice::from_raw_parts_mut(
-        state.window.expect("initialized window").as_ptr(),
-        state.window_size as usize,
-    );
-    let prev = ::core::slice::from_raw_parts_mut(
-        state.prev.expect("initialized prev table").as_ptr(),
-        state.w_size as usize,
-    );
-    let head = ::core::slice::from_raw_parts_mut(
-        state.head.expect("initialized head table").as_ptr(),
-        state.hash_size as usize,
-    );
-    let pending_buf = ::core::slice::from_raw_parts_mut(
-        state.pending_buf.expect("initialized pending buffer").as_ptr(),
-        state.pending_buf_size as usize,
-    );
-    let mut matched = DeflateFastState {
-        window, prev, head, pending_buf,
-        pending_out: state.pending_out, pending: state.pending, bi_buf: state.bi_buf,
-        bi_valid: state.bi_valid, bi_used: state.bi_used,
-        dyn_ltree: &mut state.dyn_ltree, dyn_dtree: &mut state.dyn_dtree,
-        bl_tree: &mut state.bl_tree, l_desc: &mut state.l_desc, d_desc: &mut state.d_desc,
-        bl_desc: &mut state.bl_desc, heap: &mut state.heap, heap_len: state.heap_len,
-        heap_max: state.heap_max, depth: &mut state.depth, bl_count: &mut state.bl_count,
-        opt_len: state.opt_len, static_len: state.static_len, sym_buf_start: state.sym_buf_start,
-        sym_next: state.sym_next, sym_end: state.sym_end, matches: state.matches,
-        lookahead: state.lookahead, strstart: state.strstart, block_start: state.block_start,
-        insert: state.insert, ins_h: state.ins_h, match_length: state.match_length,
-        match_start: state.match_start, prev_length: state.prev_length,
-        prev_match: state.prev_match, match_available: state.match_available,
-        max_chain_length: state.max_chain_length, max_lazy_match: state.max_lazy_match,
-        good_match: state.good_match, nice_match: state.nice_match, level: state.level,
-        strategy: state.strategy, w_size: state.w_size, w_mask: state.w_mask,
-        hash_shift: state.hash_shift, hash_mask: state.hash_mask, wrap: state.wrap,
-        slid: state.slid, high_water: state.high_water,
-    };
-    let mut matched_stream = DeflateFastStream {
-        input, input_pos: 0, output, output_pos: 0, avail_out: stream.avail_out,
-        total_in: stream.total_in, total_out: stream.total_out, adler: stream.adler,
-        data_type: &mut stream.data_type,
-    };
-    let result = run(&mut matched, &mut matched_stream, flush);
-    let progress = DeflateMatchProgress::from_views(&matched, &matched_stream);
-    stream.next_in = stream.next_in.wrapping_add(progress.input_consumed);
-    stream.avail_in = stream.avail_in.wrapping_sub(progress.input_consumed as crate::stdlib::uInt);
-    stream.next_out = stream.next_out.wrapping_add(progress.output_produced);
-    stream.avail_out = progress.avail_out;
-    stream.total_in = progress.total_in;
-    stream.total_out = progress.total_out;
-    stream.adler = progress.adler;
-    state.pending_out = progress.pending_out;
-    state.pending = progress.pending;
-    state.bi_buf = progress.bi_buf;
-    state.bi_valid = progress.bi_valid;
-    state.bi_used = progress.bi_used;
-    state.heap_len = progress.heap_len;
-    state.heap_max = progress.heap_max;
-    state.opt_len = progress.opt_len;
-    state.static_len = progress.static_len;
-    state.sym_next = progress.sym_next;
-    state.matches = progress.matches;
-    state.lookahead = progress.lookahead;
-    state.strstart = progress.strstart;
-    state.block_start = progress.block_start;
-    state.insert = progress.insert;
-    state.ins_h = progress.ins_h;
-    state.match_length = progress.match_length;
-    state.match_start = progress.match_start;
-    state.prev_length = progress.prev_length;
-    state.prev_match = progress.prev_match;
-    state.match_available = progress.match_available;
-    state.slid = progress.slid;
-    state.high_water = progress.high_water;
-    result
+    run(state, stream, flush)
 }
