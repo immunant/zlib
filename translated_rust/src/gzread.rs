@@ -111,94 +111,133 @@ fn gz_look_copy_pending_input(
     Some(())
 }
 
-unsafe extern "C" fn gz_load(
-    mut state: crate::gzguts_h::gz_statep,
-    mut buf: *mut ::core::ffi::c_uchar,
-    mut len: ::core::ffi::c_uint,
-    mut have: *mut ::core::ffi::c_uint,
-) -> ::core::ffi::c_int {
-    let mut ret: ::core::ffi::c_int = 0;
-    let mut get: ::core::ffi::c_uint = 0;
-    let mut max: ::core::ffi::c_uint = (-1 as ::core::ffi::c_int as ::core::ffi::c_uint
-        >> 2 as ::core::ffi::c_int)
-        .wrapping_add(1 as ::core::ffi::c_uint);
-    (*state).again = 0 as ::core::ffi::c_int;
-    *crate::stdlib::__errno_location() = 0 as ::core::ffi::c_int;
-    *have = 0 as ::core::ffi::c_uint;
+/// Result of safely filling one caller-owned read buffer from the descriptor.
+enum GzLoad {
+    Loaded {
+        have: ::core::ffi::c_uint,
+        eof: bool,
+        again: bool,
+    },
+    Error(::core::ffi::c_int),
+}
+
+/// Read through the gzip state's RAII descriptor into an ordinary slice.
+/// This preserves bounded refill and nonblocking partial-progress behavior
+/// without raw buffers, libc I/O, or errno access.
+fn gz_load(file: &mut ::std::fs::File, buf: &mut [u8]) -> GzLoad {
+    use std::io::Read;
+
+    let max = (-1 as ::core::ffi::c_int as ::core::ffi::c_uint >> 2).wrapping_add(1) as usize;
+    let mut have = 0usize;
     loop {
-        get = len.wrapping_sub(*have);
-        if get > max {
-            get = max;
+        let get = (buf.len() - have).min(max);
+        if get == 0 {
+            return GzLoad::Loaded {
+                have: have as ::core::ffi::c_uint,
+                eof: false,
+                again: false,
+            };
         }
-        ret = crate::stdlib::read(
-            (*state).fd,
-            buf.offset(*have as isize) as *mut ::core::ffi::c_void,
-            get as crate::__stddef_size_t_h::size_t,
-        ) as ::core::ffi::c_int;
-        if ret <= 0 as ::core::ffi::c_int {
-            break;
-        }
-        *have = (*have).wrapping_add(ret as ::core::ffi::c_uint);
-        if *have >= len {
-            break;
-        }
-    }
-    if ret < 0 as ::core::ffi::c_int {
-        if *crate::stdlib::__errno_location() == crate::stdlib::EAGAIN
-            || *crate::stdlib::__errno_location() == crate::stdlib::EWOULDBLOCK
-        {
-            (*state).again = 1 as ::core::ffi::c_int;
-            if *have != 0 as ::core::ffi::c_uint {
-                return 0 as ::core::ffi::c_int;
+        match file.read(&mut buf[have..have + get]) {
+            Ok(0) => {
+                return GzLoad::Loaded {
+                    have: have as ::core::ffi::c_uint,
+                    eof: true,
+                    again: false,
+                };
+            }
+            Ok(read) => {
+                have += read;
+                if have == buf.len() {
+                    return GzLoad::Loaded {
+                        have: have as ::core::ffi::c_uint,
+                        eof: false,
+                        again: false,
+                    };
+                }
+            }
+            Err(error) => {
+                let code = error.raw_os_error().unwrap_or(0);
+                let again = code == crate::stdlib::EAGAIN || code == crate::stdlib::EWOULDBLOCK;
+                if again && have != 0 {
+                    return GzLoad::Loaded {
+                        have: have as ::core::ffi::c_uint,
+                        eof: false,
+                        again: true,
+                    };
+                }
+                return GzLoad::Error(code);
             }
         }
-        crate::src::gzlib::gz_error(
-            state as *mut crate::gzguts_h::gz_state,
-            crate::zlib_h::Z_ERRNO,
-            crate::stdlib::strerror(*crate::stdlib::__errno_location()),
-        );
-        return -1 as ::core::ffi::c_int;
     }
-    if ret == 0 as ::core::ffi::c_int {
-        (*state).eof = 1 as ::core::ffi::c_int;
+}
+
+/// Apply descriptor-read scalar progress to owned gzip state. The safe loader
+/// never exposes raw state or C diagnostics.
+fn gz_load_commit(
+    state: &mut crate::gzguts_h::gz_state,
+    result: GzLoad,
+) -> Result<::core::ffi::c_uint, ()> {
+    match result {
+        GzLoad::Loaded { have, eof, again } => {
+            state.again = again as ::core::ffi::c_int;
+            if eof {
+                state.eof = 1;
+            }
+            Ok(have)
+        }
+        GzLoad::Error(code) => {
+            state.again = 0;
+            crate::src::gzlib::gz_error_io(state, code);
+            Err(())
+        }
     }
-    return 0 as ::core::ffi::c_int;
 }
 
 unsafe extern "C" fn gz_avail(mut state: crate::gzguts_h::gz_statep) -> ::core::ffi::c_int {
-    let mut got: ::core::ffi::c_uint = 0;
     let state_ref = &mut *state;
     let mut strm: crate::zlib_h::z_streamp = &raw mut state_ref.strm;
     if (*state).err != crate::zlib_h::Z_OK && (*state).err != crate::zlib_h::Z_BUF_ERROR {
         return -1 as ::core::ffi::c_int;
     }
     if (*state).eof == 0 as ::core::ffi::c_int {
-        let Some(buffers) = state_ref.buffers.as_mut() else {
-            return -1;
-        };
-        let input = buffers.input.as_mut_ptr();
-        if (*strm).avail_in != 0 {
-            let Some(next_index) = ((*strm).next_in as usize)
-                .checked_sub(input as usize)
-                .filter(|index| *index <= buffers.input.len())
+        {
+            let Some(buffers) = state_ref.buffers.as_mut() else {
+                return -1;
+            };
+            if (*strm).avail_in != 0 {
+                let input = buffers.input.as_mut_ptr();
+                let Some(next_index) = ((*strm).next_in as usize)
+                    .checked_sub(input as usize)
+                    .filter(|index| *index <= buffers.input.len())
+                else {
+                    return -1;
+                };
+                if gz_avail_retain_input(&mut buffers.input, next_index, (*strm).avail_in).is_none()
+                {
+                    return -1;
+                }
+            }
+        }
+        let avail_in = (*strm).avail_in as usize;
+        let result = {
+            let (Some(file), Some(buffers)) = (state_ref.file.as_mut(), state_ref.buffers.as_mut())
             else {
                 return -1;
             };
-            if gz_avail_retain_input(&mut buffers.input, next_index, (*strm).avail_in).is_none() {
+            let Some(input) = buffers.input.get_mut(avail_in..state_ref.size as usize) else {
                 return -1;
-            }
-        }
-        if gz_load(
-            state,
-            input.offset((*strm).avail_in as isize),
-            (*state)
-                .size
-                .wrapping_sub((*strm).avail_in as ::core::ffi::c_uint),
-            &raw mut got,
-        ) == -1 as ::core::ffi::c_int
-        {
-            return -1 as ::core::ffi::c_int;
-        }
+            };
+            gz_load(file, input)
+        };
+        let got = match gz_load_commit(state_ref, result) {
+            Ok(got) => got,
+            Err(()) => return -1,
+        };
+        let input = match state_ref.buffers.as_mut() {
+            Some(buffers) => buffers.input.as_mut_ptr(),
+            None => return -1,
+        };
         (*strm).avail_in = (*strm).avail_in.wrapping_add(got);
         (*strm).next_in = input as *mut crate::stdlib::Bytef;
     }
@@ -411,6 +450,23 @@ unsafe extern "C" fn gz_fetch(mut state: crate::gzguts_h::gz_statep) -> ::core::
                 }
             }
             crate::gzguts_h::COPY => {
+                let result = {
+                    let Some(file) = state_ref.file.as_mut() else {
+                        return -1;
+                    };
+                    let Some(output) = state_ref
+                        .buffers
+                        .as_mut()
+                        .and_then(|buffers| buffers.output.as_mut())
+                    else {
+                        return -1;
+                    };
+                    gz_load(file, output)
+                };
+                let have = match gz_load_commit(state_ref, result) {
+                    Ok(have) => have,
+                    Err(()) => return -1,
+                };
                 let Some(output) = state_ref
                     .buffers
                     .as_mut()
@@ -418,17 +474,8 @@ unsafe extern "C" fn gz_fetch(mut state: crate::gzguts_h::gz_statep) -> ::core::
                 else {
                     return -1;
                 };
-                let output = output.as_mut_ptr();
-                if gz_load(
-                    state,
-                    output,
-                    (*state).size << 1 as ::core::ffi::c_int,
-                    &raw mut (*state).x.have,
-                ) == -1 as ::core::ffi::c_int
-                {
-                    return -1 as ::core::ffi::c_int;
-                }
-                (*state).x.next = output;
+                (*state).x.have = have;
+                (*state).x.next = output.as_mut_ptr();
                 return 0 as ::core::ffi::c_int;
             }
             crate::gzguts_h::GZIP => {
@@ -765,7 +812,17 @@ unsafe fn gz_read(
                     else {
                         return got;
                     };
-                    err = gz_load(state_ref, destination.as_mut_ptr(), n, &raw mut n);
+                    let result = match state_ref.file.as_mut() {
+                        Some(file) => gz_load(file, destination),
+                        None => GzLoad::Error(0),
+                    };
+                    n = match gz_load_commit(state_ref, result) {
+                        Ok(have) => have,
+                        Err(()) => 0,
+                    };
+                    if state_ref.err != crate::zlib_h::Z_OK {
+                        err = -1;
+                    }
                 } else {
                     let Some(destination) = destination
                         .get_mut(got..)

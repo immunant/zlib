@@ -29,7 +29,13 @@ pub(crate) fn gzclose_read_release_state(
     let err = state.err;
     state.msg = None;
     state.err = crate::zlib_h::Z_OK;
-    (state.fd, err)
+    let fd = state
+        .file
+        .take()
+        .map(::std::os::fd::IntoRawFd::into_raw_fd)
+        .unwrap_or(state.fd);
+    state.fd = -1;
+    (fd, err)
 }
 
 /// Clear the write-side resources owned by opaque gzip state after its codec
@@ -41,7 +47,13 @@ pub(crate) fn gzclose_write_release_state(
     state.buffers = None;
     state.msg = None;
     state.err = crate::zlib_h::Z_OK;
-    state.fd
+    let fd = state
+        .file
+        .take()
+        .map(::std::os::fd::IntoRawFd::into_raw_fd)
+        .unwrap_or(state.fd);
+    state.fd = -1;
+    fd
 }
 
 // These macros are deliberately invoked only by exported close entry points.

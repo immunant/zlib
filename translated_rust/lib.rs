@@ -68,6 +68,10 @@ pub mod gzguts_h {
         pub x: crate::zlib_h::gzFile_s,
         pub mode: ::core::ffi::c_int,
         pub fd: ::core::ffi::c_int,
+        // The opaque gzip handle owns its descriptor. Keep the integer for
+        // ABI-facing seek/query adapters, while normal I/O uses this RAII
+        // owner and safe slice operations.
+        pub file: Option<::std::fs::File>,
         // `gz_state` is opaque beyond the public `x` prefix.  Retain the
         // pathname as owned C text instead of a separately malloc'd pointer.
         pub path: ::std::ffi::CString,

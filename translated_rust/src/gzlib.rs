@@ -17,6 +17,7 @@ pub use crate::stdlib::fcntl;
 
 pub use crate::stdlib::open;
 
+pub use crate::stdlib::__O_CLOEXEC;
 pub use crate::stdlib::F_GETFD;
 pub use crate::stdlib::F_GETFL;
 pub use crate::stdlib::F_SETFD;
@@ -33,7 +34,6 @@ pub use crate::stdlib::O_WRONLY;
 pub use crate::stdlib::SEEK_CUR;
 pub use crate::stdlib::SEEK_END;
 pub use crate::stdlib::SEEK_SET;
-pub use crate::stdlib::__O_CLOEXEC;
 
 pub use crate::stdlib::__off64_t;
 pub use crate::stdlib::__off_t;
@@ -373,6 +373,7 @@ macro_rules! gz_open_at_boundary {
                 },
                 mode: crate::gzguts_h::GZ_NONE,
                 fd: -1,
+                file: None,
                 path,
                 size: 0,
                 want: crate::gzguts_h::GZBUFSIZE as ::core::ffi::c_uint,
@@ -468,6 +469,9 @@ macro_rules! gz_open_at_boundary {
             };
             gz_open_apply_descriptor_position(state, descriptor_position);
             gz_reset_state(state);
+            state.file = Some(<::std::fs::File as ::std::os::fd::FromRawFd>::from_raw_fd(
+                state.fd,
+            ));
             state as *mut crate::gzguts_h::gz_state as crate::zlib_h::gzFile
         }
     }};
@@ -1178,6 +1182,21 @@ pub(crate) fn gz_error_static(
 ) {
     match ::std::ffi::CStr::from_bytes_with_nul(message) {
         Ok(message) => gz_error_update_state(state, err, Some(message)),
+        Err(_) => gz_error_update_state(state, crate::zlib_h::Z_MEM_ERROR, None),
+    }
+}
+
+/// Record a descriptor failure without converting a foreign `strerror()`
+/// pointer.  Rust's OS error text has the same platform source; remove its
+/// added numeric suffix so `gzerror()` keeps the C-facing diagnostic form.
+pub(crate) fn gz_error_io(state: &mut crate::gzguts_h::gz_state, code: ::core::ffi::c_int) {
+    let message = ::std::io::Error::from_raw_os_error(code).to_string();
+    let message = message
+        .split_once(" (os error ")
+        .map(|(message, _)| message)
+        .unwrap_or(&message);
+    match ::std::ffi::CString::new(message) {
+        Ok(message) => gz_error_update_state(state, crate::zlib_h::Z_ERRNO, Some(&message)),
         Err(_) => gz_error_update_state(state, crate::zlib_h::Z_MEM_ERROR, None),
     }
 }
