@@ -89,7 +89,6 @@ pub struct internal_state {
     pub status: ::core::ffi::c_int,
     pub pending_buf: *mut crate::stdlib::Bytef,
     pub pending_buf_size: crate::zutil_h::ulg,
-    pub pending_out: *mut crate::stdlib::Bytef,
     pub pending_out_offset: usize,
     pub pending: crate::zutil_h::ulg,
     pub wrap: ::core::ffi::c_int,
@@ -1706,7 +1705,6 @@ fn deflate_reset_keep_state(
     strm.msg = ::core::ptr::null_mut::<::core::ffi::c_char>();
     strm.data_type = crate::zlib_h::Z_UNKNOWN;
     state.pending = 0;
-    state.pending_out = state.pending_buf;
     state.pending_out_offset = 0;
     if state.wrap < 0 {
         state.wrap = -state.wrap;
@@ -2490,18 +2488,16 @@ unsafe fn flush_pending(mut strm: crate::zlib_h::z_streamp) {
     };
     crate::stdlib::memcpy(
         (*strm).next_out as *mut ::core::ffi::c_void,
-        state.pending_out as *const ::core::ffi::c_void,
+        state
+            .pending_buf
+            .wrapping_add(state.pending_out_offset) as *const ::core::ffi::c_void,
         result.copied as crate::__stddef_size_t_h::size_t,
     );
     (*strm).next_out = (*strm).next_out.wrapping_add(result.copied as usize);
-    state.pending_out = state.pending_out.wrapping_add(result.copied as usize);
     (*strm).total_out = result.total_out;
     (*strm).avail_out = result.avail_out;
     state.pending = result.next.pending;
     state.pending_out_offset = result.next.pending_out_offset;
-    if result.reset_pending_out {
-        state.pending_out = state.pending_buf;
-    }
 }
 
 fn gzip_header_crc(
@@ -3358,10 +3354,13 @@ pub unsafe extern "C" fn deflateCopy(
             .wrapping_mul(::core::mem::size_of::<crate::src::deflate::Pos>()
                 as crate::__stddef_size_t_h::size_t),
     );
-    (*ds).pending_out = (*ds).pending_buf.wrapping_add((*ds).pending_out_offset);
     crate::stdlib::memcpy(
-        (*ds).pending_out as *mut ::core::ffi::c_void,
-        (*ss).pending_out as *const ::core::ffi::c_void,
+        (*ds)
+            .pending_buf
+            .wrapping_add((*ds).pending_out_offset) as *mut ::core::ffi::c_void,
+        (*ss)
+            .pending_buf
+            .wrapping_add((*ss).pending_out_offset) as *const ::core::ffi::c_void,
         (*ss).pending as crate::__stddef_size_t_h::size_t,
     );
     (*ds).sym_buf =
