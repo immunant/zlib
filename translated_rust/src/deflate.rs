@@ -439,6 +439,31 @@ struct DeflateAllocationPlan {
     storage: DeflateStorageLayout,
 }
 
+// This is the portion of a freshly allocated state that does not depend on
+// either the ABI stream backlink or any callback-returned allocation.  Keeping
+// it as a value makes the initialization contract available to the eventual
+// owner-backed constructor without making that constructor reconstruct the
+// C-era all-zero state by hand.
+struct DeflateInitialState {
+    status: ::core::ffi::c_int,
+    pending_buf_size: crate::zutil_h::ulg,
+    pending_out: usize,
+    pending: crate::zutil_h::ulg,
+    wrap: ::core::ffi::c_int,
+    gzindex: usize,
+    method: crate::stdlib::Byte,
+    last_flush: ::core::ffi::c_int,
+    w_size: crate::stdlib::uInt,
+    w_bits: crate::stdlib::uInt,
+    w_mask: crate::stdlib::uInt,
+    window_size: crate::zutil_h::ulg,
+    ins_h: crate::stdlib::uInt,
+    hash_size: crate::stdlib::uInt,
+    hash_bits: crate::stdlib::uInt,
+    hash_mask: crate::stdlib::uInt,
+    hash_shift: crate::stdlib::uInt,
+}
+
 impl DeflateLayout {
     fn storage(&self) -> DeflateStorageLayout {
         DeflateStorageLayout::new(self.w_size, self.hash_size, self.lit_bufsize)
@@ -452,6 +477,28 @@ impl DeflateLayout {
                     as crate::stdlib::uInt,
             },
             storage: self.storage(),
+        }
+    }
+
+    fn initial_state(&self) -> DeflateInitialState {
+        DeflateInitialState {
+            status: crate::src::deflate::INIT_STATE,
+            pending_buf_size: 0,
+            pending_out: 0,
+            pending: 0,
+            wrap: self.wrap,
+            gzindex: 0,
+            method: 0,
+            last_flush: 0,
+            w_size: self.w_size,
+            w_bits: self.w_bits,
+            w_mask: self.w_mask,
+            window_size: 0,
+            ins_h: 0,
+            hash_size: self.hash_size,
+            hash_bits: self.hash_bits,
+            hash_mask: self.hash_mask,
+            hash_shift: self.hash_shift,
         }
     }
 }
@@ -825,6 +872,7 @@ pub unsafe extern "C" fn deflateInit2_(
         return crate::zlib_h::Z_STREAM_ERROR;
     };
     let allocation_plan = layout.allocation_plan();
+    let initial_state = layout.initial_state();
     let storage = allocation_plan.storage;
     let s = Some(stream.zalloc.expect("non-null function pointer"))
         .expect("non-null function pointer")(
@@ -841,28 +889,28 @@ pub unsafe extern "C" fn deflateInit2_(
     // all-zero bytes into Rust enum fields.
     s.write(crate::src::deflate::internal_state {
         strm: ::core::ptr::NonNull::from(&mut *stream),
-        status: crate::src::deflate::INIT_STATE,
+        status: initial_state.status,
         pending_buf: None,
-        pending_buf_size: 0,
-        pending_out: 0,
-        pending: 0,
-        wrap: layout.wrap,
+        pending_buf_size: initial_state.pending_buf_size,
+        pending_out: initial_state.pending_out,
+        pending: initial_state.pending,
+        wrap: initial_state.wrap,
         gzhead: None,
-        gzindex: 0,
-        method: 0,
-        last_flush: 0,
-        w_size: layout.w_size,
-        w_bits: layout.w_bits,
-        w_mask: layout.w_mask,
+        gzindex: initial_state.gzindex,
+        method: initial_state.method,
+        last_flush: initial_state.last_flush,
+        w_size: initial_state.w_size,
+        w_bits: initial_state.w_bits,
+        w_mask: initial_state.w_mask,
         window: None,
-        window_size: 0,
+        window_size: initial_state.window_size,
         prev: None,
         head: None,
-        ins_h: 0,
-        hash_size: layout.hash_size,
-        hash_bits: layout.hash_bits,
-        hash_mask: layout.hash_mask,
-        hash_shift: layout.hash_shift,
+        ins_h: initial_state.ins_h,
+        hash_size: initial_state.hash_size,
+        hash_bits: initial_state.hash_bits,
+        hash_mask: initial_state.hash_mask,
+        hash_shift: initial_state.hash_shift,
         block_start: 0,
         match_length: 0,
         prev_match: 0,
