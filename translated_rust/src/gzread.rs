@@ -909,7 +909,7 @@ unsafe extern "C" fn gz_skip(mut state: crate::gzguts_h::gz_statep) -> ::core::f
                     &mut (*state).skip,
                     crate::src::gzlib::gz_intmax(),
                 );
-                (*state).x.next = (*state).x.next.offset(n as isize);
+                (*state).x.next = (*state).x.next.wrapping_add(n as usize);
             }
             GzSkipAction::StopAtEof => break,
             GzSkipAction::Fetch => {
@@ -1710,7 +1710,7 @@ unsafe extern "C" fn gz_read(
                     (*state).x.next as *const ::core::ffi::c_void,
                     n as crate::__stddef_size_t_h::size_t,
                 );
-                (*state).x.next = (*state).x.next.offset(n as isize);
+                (*state).x.next = (*state).x.next.wrapping_add(n as usize);
                 ((*state).x.have, err) = gz_read_drain_buffered((*state).x.have, (*state).err, n);
                 true
             }
@@ -1737,7 +1737,8 @@ unsafe extern "C" fn gz_read(
         };
         if advance {
             (len, got, (*state).x.pos) = gz_read_progress(len, got, (*state).x.pos, n);
-            buf = (buf as *mut ::core::ffi::c_char).offset(n as isize) as crate::stdlib::voidp;
+            buf =
+                (buf as *mut ::core::ffi::c_char).wrapping_add(n as usize) as crate::stdlib::voidp;
         }
         if !gz_read_should_continue(len, err) {
             break;
@@ -2031,8 +2032,8 @@ pub unsafe extern "C" fn gzgets(
                 );
                 ((*state).x.have, left, (*state).x.pos) =
                     gzgets_progress((*state).x.have, left, (*state).x.pos, n);
-                (*state).x.next = (*state).x.next.offset(n as isize);
-                buf = buf.offset(n as isize);
+                (*state).x.next = (*state).x.next.wrapping_add(n as usize);
+                buf = buf.wrapping_add(n as usize);
                 if !gzgets_should_continue(left, !eol.is_null()) {
                     break;
                 }

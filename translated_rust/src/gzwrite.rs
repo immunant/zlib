@@ -509,7 +509,7 @@ unsafe extern "C" fn gz_comp(
                     );
                     return -1 as ::core::ffi::c_int;
                 }
-                (*state).x.next = (*state).x.next.offset(writ as isize);
+                (*state).x.next = (*state).x.next.wrapping_add(writ as usize);
             }
             if gz_comp_needs_output_buffer_reset((*strm).avail_out) {
                 (*strm).avail_out = (*state).size as crate::stdlib::uInt;
