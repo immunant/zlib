@@ -2968,6 +2968,11 @@ unsafe fn longest_match(
 
 pub const MAX_STORED: ::core::ffi::c_int = 65535 as ::core::ffi::c_int;
 
+fn stored_block_header_bytes(bi_valid: ::core::ffi::c_int) -> ::core::ffi::c_uint {
+    (bi_valid as ::core::ffi::c_uint).wrapping_add(42 as ::core::ffi::c_uint)
+        >> 3 as ::core::ffi::c_int
+}
+
 fn stored_block_min_size(
     pending_buf_size: crate::zutil_h::ulg,
     window_size: crate::stdlib::uInt,
@@ -2984,8 +2989,7 @@ fn stored_block_available_output(
     bi_valid: ::core::ffi::c_int,
     avail_out: crate::stdlib::uInt,
 ) -> Option<::core::ffi::c_uint> {
-    let header_bytes = (bi_valid as ::core::ffi::c_uint).wrapping_add(42 as ::core::ffi::c_uint)
-        >> 3 as ::core::ffi::c_int;
+    let header_bytes = stored_block_header_bytes(bi_valid);
     if avail_out < header_bytes {
         None
     } else {
@@ -3223,8 +3227,7 @@ unsafe extern "C" fn deflate_stored(
     if (*s).high_water < (*s).strstart as crate::zutil_h::ulg {
         (*s).high_water = (*s).strstart as crate::zutil_h::ulg;
     }
-    have = ((*s).bi_valid as ::core::ffi::c_uint).wrapping_add(42 as ::core::ffi::c_uint)
-        >> 3 as ::core::ffi::c_int;
+    have = stored_block_header_bytes((*s).bi_valid);
     have = (if (*s)
         .pending_buf_size
         .wrapping_sub(have as crate::zutil_h::ulg)
@@ -4151,7 +4154,8 @@ mod tests {
         pending_output_len, pending_short_cursors, read_buf_checksum, read_buf_len,
         read_buf_total_in_after_copy, short_msb_bytes, slide_hash_entry,
         stored_block_available_output, stored_block_can_emit, stored_block_is_last,
-        stored_block_min_size, stored_block_payload_len, stored_block_should_wait,
+        stored_block_header_bytes, stored_block_min_size, stored_block_payload_len,
+        stored_block_should_wait,
         stored_insert_after_input, symbol_triplet_cursors, zlib_header, DeflateMatchRefillAction,
         DeflatePreflight, DeflateRleRefillAction, ReadBufChecksum,
     };
@@ -4937,6 +4941,16 @@ mod tests {
         assert_eq!(stored_block_available_output(7, 5), None);
         assert_eq!(stored_block_available_output(7, 9), Some(3));
         assert_eq!(stored_block_available_output(-1, 5), Some(0));
+    }
+
+    #[test]
+    fn stored_block_header_bytes_preserves_rounding_and_wrapping() {
+        assert_eq!(stored_block_header_bytes(0), 5);
+        assert_eq!(stored_block_header_bytes(5), 5);
+        assert_eq!(stored_block_header_bytes(6), 6);
+        assert_eq!(stored_block_header_bytes(13), 6);
+        assert_eq!(stored_block_header_bytes(14), 7);
+        assert_eq!(stored_block_header_bytes(-1), 5);
     }
 
     #[test]

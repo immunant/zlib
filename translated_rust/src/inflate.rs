@@ -2305,7 +2305,7 @@ pub unsafe extern "C" fn inflate(
                 (*state).mode = crate::src::inflate::MATCH;
             }
             13612704868423442610 => {
-                if (*state).flags & 0x200 as ::core::ffi::c_int != 0 {
+                if inflate_gzip_header_has_crc((*state).flags) {
                     while bits < 16 as ::core::ffi::c_int as ::core::ffi::c_uint {
                         if have == 0 as ::core::ffi::c_uint {
                             break 's_88;
@@ -2329,7 +2329,7 @@ pub unsafe extern "C" fn inflate(
                 }
                 if !(*state).head.is_null() {
                     (*(*state).head).hcrc =
-                        (*state).flags >> 9 as ::core::ffi::c_int & 1 as ::core::ffi::c_int;
+                        inflate_gzip_header_has_crc((*state).flags) as ::core::ffi::c_int;
                     (*(*state).head).done = 1 as ::core::ffi::c_int;
                 }
                 (*state).check = crate::src::crc32::CRC32_INITIAL as ::core::ffi::c_ulong;
@@ -2584,7 +2584,7 @@ fn inflate_needs_buffer_error(
 }
 
 fn inflate_header_crc_enabled(flags: ::core::ffi::c_int, wrap: ::core::ffi::c_int) -> bool {
-    flags & 0x200 != 0 && wrap & 4 != 0
+    inflate_gzip_header_has_crc(flags) && wrap & 4 != 0
 }
 
 fn inflate_gzip_header_crc_is_valid(
@@ -2634,6 +2634,10 @@ fn inflate_gzip_flags_validation(
 
 fn inflate_gzip_header_has_extra(flags: ::core::ffi::c_int) -> bool {
     flags & 0x400 != 0
+}
+
+fn inflate_gzip_header_has_crc(flags: ::core::ffi::c_int) -> bool {
+    flags & 0x200 != 0
 }
 
 fn inflate_gzip_header_has_name(flags: ::core::ffi::c_int) -> bool {
@@ -3130,7 +3134,7 @@ mod tests {
         inflate_dictionary_is_allowed, inflate_get_dictionary_result, inflate_gzip_extra_progress,
         inflate_gzip_flags, inflate_gzip_flags_error, inflate_gzip_flags_validation,
         inflate_gzip_header_crc_is_valid, inflate_gzip_header_has_comment,
-        inflate_gzip_header_has_extra, inflate_gzip_header_has_name,
+        inflate_gzip_header_has_crc, inflate_gzip_header_has_extra, inflate_gzip_header_has_name,
         inflate_gzip_length_check_required, inflate_gzip_window_bits, inflate_head_skip_mode,
         inflate_header_crc_enabled, inflate_header_wrap_allows_capture, inflate_is_gzip_header,
         inflate_mark_progress, inflate_mark_value, inflate_match_copy_plan,
@@ -3475,6 +3479,16 @@ mod tests {
         assert!(inflate_gzip_header_has_extra(0x600));
         assert!(!inflate_gzip_header_has_extra(0));
         assert!(!inflate_gzip_header_has_extra(0x200));
+    }
+
+    #[test]
+    fn inflate_gzip_header_crc_flag_requires_the_crc_bit() {
+        assert!(inflate_gzip_header_has_crc(0x200));
+        assert!(inflate_gzip_header_has_crc(0x1e00));
+        assert!(!inflate_gzip_header_has_crc(0));
+        assert!(!inflate_gzip_header_has_crc(0x400));
+        assert!(!inflate_gzip_header_has_crc(0x800));
+        assert!(!inflate_gzip_header_has_crc(0x1000));
     }
 
     #[test]
