@@ -116,6 +116,19 @@ fn gz_load_max_read_len() -> ::core::ffi::c_uint {
     (1 as ::core::ffi::c_uint) << (::core::ffi::c_uint::BITS - 2)
 }
 
+fn gz_load_apply_flags(
+    eof: &mut ::core::ffi::c_int,
+    again: &mut ::core::ffi::c_int,
+    decision: &GzLoadDecision,
+) {
+    if decision.eof {
+        *eof = 1;
+    }
+    if decision.again {
+        *again = 1;
+    }
+}
+
 fn gz_avail_can_load(err: ::core::ffi::c_int) -> bool {
     err == crate::zlib_h::Z_OK || err == crate::zlib_h::Z_BUF_ERROR
 }
@@ -618,12 +631,7 @@ unsafe fn gz_load(
             Ok(ret as ::core::ffi::c_uint)
         };
         let decision = gz_load_decision(have, len, read);
-        if decision.eof {
-            state_ref.eof = 1 as ::core::ffi::c_int;
-        }
-        if decision.again {
-            state_ref.again = 1 as ::core::ffi::c_int;
-        }
+        gz_load_apply_flags(&mut state_ref.eof, &mut state_ref.again, &decision);
         have = decision.have;
         if let Some(errno) = decision.error {
             crate::src::gzlib::gz_error(
@@ -1276,6 +1284,42 @@ unsafe fn gz_skip(mut state: crate::gzguts_h::gz_statep) -> ::core::ffi::c_int {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn gz_load_apply_flags_sets_only_requested_flags() {
+        let mut eof = 0;
+        let mut again = -1;
+        let decision = GzLoadDecision {
+            have: 0,
+            eof: true,
+            again: false,
+            more: false,
+            error: None,
+        };
+
+        gz_load_apply_flags(&mut eof, &mut again, &decision);
+
+        assert_eq!(eof, 1);
+        assert_eq!(again, -1);
+    }
+
+    #[test]
+    fn gz_load_apply_flags_preserves_flags_when_not_requested() {
+        let mut eof = -1;
+        let mut again = 0;
+        let decision = GzLoadDecision {
+            have: 0,
+            eof: false,
+            again: true,
+            more: false,
+            error: None,
+        };
+
+        gz_load_apply_flags(&mut eof, &mut again, &decision);
+
+        assert_eq!(eof, -1);
+        assert_eq!(again, 1);
+    }
 
     #[test]
     fn gz_avail_can_load_accepts_only_refillable_stream_errors() {

@@ -1120,6 +1120,24 @@ pub unsafe extern "C" fn deflateResetKeep_ffi(
 ) -> ::core::ffi::c_int {
     deflateResetKeep(strm)
 }
+
+fn lm_match_parameters(
+    level: ::core::ffi::c_int,
+) -> (
+    crate::stdlib::uInt,
+    crate::stdlib::uInt,
+    ::core::ffi::c_int,
+    crate::stdlib::uInt,
+) {
+    let config = configuration_table[level as usize];
+    (
+        config.max_lazy as crate::stdlib::uInt,
+        config.good_length as crate::stdlib::uInt,
+        config.nice_length as ::core::ffi::c_int,
+        config.max_chain as crate::stdlib::uInt,
+    )
+}
+
 unsafe fn lm_init(mut s: *mut crate::src::deflate::deflate_state) {
     (*s).window_size = (2 as ::core::ffi::c_long as crate::zutil_h::ulg)
         .wrapping_mul((*s).w_size as crate::zutil_h::ulg);
@@ -1135,11 +1153,12 @@ unsafe fn lm_init(mut s: *mut crate::src::deflate::deflate_state) {
                 as crate::__stddef_size_t_h::size_t),
     );
     (*s).slid = 0 as ::core::ffi::c_int;
-    (*s).max_lazy_match = configuration_table[(*s).level as usize].max_lazy as crate::stdlib::uInt;
-    (*s).good_match = configuration_table[(*s).level as usize].good_length as crate::stdlib::uInt;
-    (*s).nice_match = configuration_table[(*s).level as usize].nice_length as ::core::ffi::c_int;
-    (*s).max_chain_length =
-        configuration_table[(*s).level as usize].max_chain as crate::stdlib::uInt;
+    (
+        (*s).max_lazy_match,
+        (*s).good_match,
+        (*s).nice_match,
+        (*s).max_chain_length,
+    ) = lm_match_parameters((*s).level);
     (*s).strstart = 0 as crate::stdlib::uInt;
     (*s).block_start = 0 as ::core::ffi::c_long;
     (*s).lookahead = 0 as crate::stdlib::uInt;
@@ -3852,12 +3871,13 @@ mod tests {
         dictionary_tail_offset, fill_window_available_space, fill_window_cursor,
         fill_window_insert_after_slide, fill_window_should_refill, fill_window_should_slide,
         fill_window_zero_range, flush_pending_accounting, gzip_default_xfl, gzip_header_crc,
-        gzip_header_crc_pending, gzip_header_crc_pending_range, longest_match_limit,
-        longest_match_search_parameters, normalize_deflate_params, pending_buffer_needs_flush,
-        pending_output_len, pending_short_cursors, read_buf_len, read_buf_total_in_after_copy,
-        short_msb_bytes, slide_hash_entry, stored_block_available_output, stored_block_can_emit,
-        stored_block_is_last, stored_block_min_size, stored_block_should_wait,
-        stored_insert_after_input, symbol_triplet_cursors, zlib_header, DeflatePreflight,
+        gzip_header_crc_pending, gzip_header_crc_pending_range, lm_match_parameters,
+        longest_match_limit, longest_match_search_parameters, normalize_deflate_params,
+        pending_buffer_needs_flush, pending_output_len, pending_short_cursors, read_buf_len,
+        read_buf_total_in_after_copy, short_msb_bytes, slide_hash_entry,
+        stored_block_available_output, stored_block_can_emit, stored_block_is_last,
+        stored_block_min_size, stored_block_should_wait, stored_insert_after_input,
+        symbol_triplet_cursors, zlib_header, DeflatePreflight,
     };
 
     #[test]
@@ -3891,6 +3911,14 @@ mod tests {
             deflate_rle_clamp_match_length(crate::stdlib::uInt::MAX, crate::stdlib::uInt::MAX),
             crate::stdlib::uInt::MAX
         );
+    }
+
+    #[test]
+    fn lm_match_parameters_preserve_compression_level_tuning() {
+        assert_eq!(lm_match_parameters(0), (0, 0, 0, 0));
+        assert_eq!(lm_match_parameters(1), (4, 4, 8, 4));
+        assert_eq!(lm_match_parameters(6), (16, 8, 128, 128));
+        assert_eq!(lm_match_parameters(9), (258, 32, 258, 4096));
     }
 
     #[test]
