@@ -352,6 +352,19 @@ struct DeflateCallbackAllocation {
     item_size: crate::stdlib::uInt,
 }
 
+/// The four callback allocations that back one deflate workspace.
+///
+/// This is deliberately pointer-free.  Initialization and deep copy must
+/// make the same four callback requests, while the eventual callback-paired
+/// Rust owner will use the same geometry for its safe buffers and leave these
+/// allocations solely as callback lifetime tokens.
+struct CallbackDeflateStoragePlan {
+    window: DeflateCallbackAllocation,
+    prev: DeflateCallbackAllocation,
+    head: DeflateCallbackAllocation,
+    pending: DeflateCallbackAllocation,
+}
+
 /// The complete pointer-free plan for copying a callback-owned workspace.
 ///
 /// `deflateCopy` must preserve four independent callback allocations and the
@@ -360,10 +373,7 @@ struct DeflateCallbackAllocation {
 /// plan without deriving sizes or cursor offsets from raw handles again.
 struct DeflateCallbackCopyPlan {
     layout: DeflateCopyLayout,
-    window: DeflateCallbackAllocation,
-    prev: DeflateCallbackAllocation,
-    head: DeflateCallbackAllocation,
-    pending: DeflateCallbackAllocation,
+    storage: CallbackDeflateStoragePlan,
 }
 
 impl DeflateCopyLayout {
@@ -433,25 +443,7 @@ impl DeflateCallbackCopyPlan {
         let storage = DeflateStorageLayout::from_state(state);
         Some(Self {
             layout,
-            window: DeflateCallbackAllocation {
-                items: storage.window_items,
-                item_size: (2usize).wrapping_mul(::core::mem::size_of::<crate::stdlib::Byte>())
-                    as crate::stdlib::uInt,
-            },
-            prev: DeflateCallbackAllocation {
-                items: storage.window_items,
-                item_size: ::core::mem::size_of::<crate::src::deflate::Pos>()
-                    as crate::stdlib::uInt,
-            },
-            head: DeflateCallbackAllocation {
-                items: storage.hash_items,
-                item_size: ::core::mem::size_of::<crate::src::deflate::Pos>()
-                    as crate::stdlib::uInt,
-            },
-            pending: DeflateCallbackAllocation {
-                items: storage.pending_items,
-                item_size: 4 as crate::stdlib::uInt,
-            },
+            storage: storage.callback_storage_plan(),
         })
     }
 }
@@ -493,6 +485,34 @@ impl DeflateStorageLayout {
 
     fn pending_byte_len(&self) -> Option<usize> {
         usize::try_from(self.pending_items).ok()?.checked_mul(4)
+    }
+
+    /// Describe the callback allocation ABI once for both initialization and
+    /// deep copy. Keeping these requests paired with the safe storage layout
+    /// prevents a future owner conversion from having to rediscover the
+    /// callback element sizes at either call site.
+    fn callback_storage_plan(&self) -> CallbackDeflateStoragePlan {
+        CallbackDeflateStoragePlan {
+            window: DeflateCallbackAllocation {
+                items: self.window_items,
+                item_size: (2usize).wrapping_mul(::core::mem::size_of::<crate::stdlib::Byte>())
+                    as crate::stdlib::uInt,
+            },
+            prev: DeflateCallbackAllocation {
+                items: self.window_items,
+                item_size: ::core::mem::size_of::<crate::src::deflate::Pos>()
+                    as crate::stdlib::uInt,
+            },
+            head: DeflateCallbackAllocation {
+                items: self.hash_items,
+                item_size: ::core::mem::size_of::<crate::src::deflate::Pos>()
+                    as crate::stdlib::uInt,
+            },
+            pending: DeflateCallbackAllocation {
+                items: self.pending_items,
+                item_size: 4 as crate::stdlib::uInt,
+            },
+        }
     }
 
     fn try_owned(&self) -> Option<DeflateOwnedStorage> {
@@ -1276,34 +1296,34 @@ fn configure_allocated_deflate_state(
         }
         state.owned_storage = Some(owned);
     } else {
+        let callback_storage = storage.callback_storage_plan();
         state.window =
             ::core::ptr::NonNull::new(Some(strm.zalloc.expect("non-null function pointer"))
                 .expect("non-null function pointer")(
                 strm.opaque,
-                storage.window_items,
-                (2 as usize).wrapping_mul(::core::mem::size_of::<crate::stdlib::Byte>())
-                    as crate::stdlib::uInt,
+                callback_storage.window.items,
+                callback_storage.window.item_size,
             ) as *mut crate::stdlib::Bytef);
         state.prev =
             ::core::ptr::NonNull::new(Some(strm.zalloc.expect("non-null function pointer"))
                 .expect("non-null function pointer")(
                 strm.opaque,
-                storage.window_items,
-                ::core::mem::size_of::<crate::src::deflate::Pos>() as crate::stdlib::uInt,
+                callback_storage.prev.items,
+                callback_storage.prev.item_size,
             ) as *mut crate::src::deflate::Posf);
         state.head =
             ::core::ptr::NonNull::new(Some(strm.zalloc.expect("non-null function pointer"))
                 .expect("non-null function pointer")(
                 strm.opaque,
-                storage.hash_items,
-                ::core::mem::size_of::<crate::src::deflate::Pos>() as crate::stdlib::uInt,
+                callback_storage.head.items,
+                callback_storage.head.item_size,
             ) as *mut crate::src::deflate::Posf);
         state.pending_buf =
             ::core::ptr::NonNull::new(Some(strm.zalloc.expect("non-null function pointer"))
                 .expect("non-null function pointer")(
                 strm.opaque,
-                storage.pending_items,
-                4 as crate::stdlib::uInt,
+                callback_storage.pending.items,
+                callback_storage.pending.item_size,
             ) as *mut crate::zutil_h::uchf
                 as *mut crate::stdlib::Bytef);
     }
@@ -4101,8 +4121,8 @@ pub fn deflateCopy(
             )
             .expect("non-null function pointer")(
                 dest_stream.opaque,
-                callback_copy_plan.window.items,
-                callback_copy_plan.window.item_size,
+                callback_copy_plan.storage.window.items,
+                callback_copy_plan.storage.window.item_size,
             )
                 as *mut crate::stdlib::Bytef);
             dest_state.prev = ::core::ptr::NonNull::new(Some(
@@ -4110,8 +4130,8 @@ pub fn deflateCopy(
             )
             .expect("non-null function pointer")(
                 dest_stream.opaque,
-                callback_copy_plan.prev.items,
-                callback_copy_plan.prev.item_size,
+                callback_copy_plan.storage.prev.items,
+                callback_copy_plan.storage.prev.item_size,
             )
                 as *mut crate::src::deflate::Posf);
             dest_state.head = ::core::ptr::NonNull::new(Some(
@@ -4119,8 +4139,8 @@ pub fn deflateCopy(
             )
             .expect("non-null function pointer")(
                 dest_stream.opaque,
-                callback_copy_plan.head.items,
-                callback_copy_plan.head.item_size,
+                callback_copy_plan.storage.head.items,
+                callback_copy_plan.storage.head.item_size,
             )
                 as *mut crate::src::deflate::Posf);
             dest_state.pending_buf = ::core::ptr::NonNull::new(Some(
@@ -4128,8 +4148,8 @@ pub fn deflateCopy(
             )
             .expect("non-null function pointer")(
                 dest_stream.opaque,
-                callback_copy_plan.pending.items,
-                callback_copy_plan.pending.item_size,
+                callback_copy_plan.storage.pending.items,
+                callback_copy_plan.storage.pending.item_size,
             )
                 as *mut crate::zutil_h::uchf
                 as *mut crate::stdlib::Bytef);
