@@ -2729,17 +2729,15 @@ pub unsafe extern "C" fn deflate_ffi(
     };
     deflate(strm, flush)
 }
-pub unsafe fn deflateEnd(strm: &mut crate::zlib_h::z_stream_s) -> ::core::ffi::c_int {
-    if strm.zalloc.is_none() || strm.zfree.is_none() {
-        return crate::zlib_h::Z_STREAM_ERROR;
-    }
+/// Tear down the owned portions of a validated deflate state.
+///
+/// The state allocation itself remains the responsibility of
+/// `deflate_end_release()`: it was obtained through the stream's ABI
+/// allocator and must be returned through that same allocator.
+pub fn deflateEnd(
+    state: &mut crate::src::deflate::deflate_state,
+) -> ::core::ffi::c_int {
     let (status, gzhead, head, prev, pending, allocations) = {
-        // The state was installed by the initialization boundary and is only
-        // retained while this stream owns it.  All later cleanup uses the
-        // reference and the allocator that belong to this stream.
-        let Some(state) = strm.state.as_mut() else {
-            return crate::zlib_h::Z_STREAM_ERROR;
-        };
         if state.status != crate::src::deflate::INIT_STATE
                 && state.status != crate::src::deflate::GZIP_STATE
                 && state.status != crate::src::deflate::EXTRA_STATE
@@ -2782,7 +2780,12 @@ pub(crate) unsafe fn deflate_end_release(
         return crate::zlib_h::Z_STREAM_ERROR;
     }
     let state_allocation = strm.state.cast::<::core::ffi::c_void>();
-    let end = deflateEnd(strm);
+    // Validate the stream before borrowing its state.  The initializer owns
+    // this allocation, and only this boundary returns it through `zfree`.
+    let Some(state) = strm.state.as_mut() else {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    };
+    let end = deflateEnd(state);
     if end != crate::zlib_h::Z_STREAM_ERROR {
         let zfree = strm.zfree.expect("deflate_end_release validates zfree");
         zfree(strm.opaque, state_allocation);
