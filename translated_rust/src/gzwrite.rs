@@ -196,6 +196,14 @@ fn gz_comp_needs_reset(avail_in: crate::stdlib::uInt, flush: ::core::ffi::c_int)
     avail_in != 0 || flush != crate::zlib_h::Z_NO_FLUSH
 }
 
+fn gz_comp_skips_empty_flush(
+    reset: ::core::ffi::c_int,
+    avail_in: crate::stdlib::uInt,
+    flush: ::core::ffi::c_int,
+) -> bool {
+    reset != 0 && avail_in == 0 && flush == crate::zlib_h::Z_NO_FLUSH
+}
+
 fn gz_write_errno_is_retryable(errno: ::core::ffi::c_int) -> bool {
     errno == crate::stdlib::EAGAIN || errno == crate::stdlib::EWOULDBLOCK
 }
@@ -329,10 +337,7 @@ unsafe extern "C" fn gz_comp(
         return 0 as ::core::ffi::c_int;
     }
     let reset = (*state).reset;
-    if reset != 0
-        && (*strm).avail_in == 0 as crate::stdlib::uInt
-        && flush == crate::zlib_h::Z_NO_FLUSH
-    {
+    if gz_comp_skips_empty_flush(reset, (*strm).avail_in, flush) {
         return 0 as ::core::ffi::c_int;
     }
     if reset != 0 {
@@ -841,12 +846,12 @@ pub unsafe extern "C" fn gzclose_w_ffi(mut file: crate::zlib_h::gzFile) -> ::cor
 mod tests {
     use super::{
         gz_buffered_have, gz_comp_needs_output_write, gz_comp_needs_reset, gz_comp_output_produced,
-        gz_comp_remaining_direct_input, gz_comp_write_chunk_len, gz_write_apply_direct_progress,
-        gz_write_buffered_copy_len, gz_write_buffered_progress, gz_write_chunk_consumed_len,
-        gz_write_chunk_len, gz_write_errno_is_retryable, gz_write_error_result,
-        gz_write_uses_buffered_path, gz_zero_apply_progress, gz_zero_chunk_len,
-        gzflush_mode_is_valid, gzfwrite_len, gzputc_result, gzputs_len_fits_int, gzputs_result,
-        gzwrite_len_fits_int,
+        gz_comp_remaining_direct_input, gz_comp_skips_empty_flush, gz_comp_write_chunk_len,
+        gz_write_apply_direct_progress, gz_write_buffered_copy_len, gz_write_buffered_progress,
+        gz_write_chunk_consumed_len, gz_write_chunk_len, gz_write_errno_is_retryable,
+        gz_write_error_result, gz_write_uses_buffered_path, gz_zero_apply_progress,
+        gz_zero_chunk_len, gzflush_mode_is_valid, gzfwrite_len, gzputc_result, gzputs_len_fits_int,
+        gzputs_result, gzwrite_len_fits_int,
     };
 
     #[test]
@@ -968,6 +973,19 @@ mod tests {
     fn gz_comp_needs_reset_handles_input_and_flush_requests() {
         assert!(gz_comp_needs_reset(1, crate::zlib_h::Z_NO_FLUSH));
         assert!(gz_comp_needs_reset(0, crate::zlib_h::Z_BLOCK));
+    }
+
+    #[test]
+    fn gz_comp_skips_empty_no_flush_when_reset_is_pending() {
+        assert!(gz_comp_skips_empty_flush(1, 0, crate::zlib_h::Z_NO_FLUSH));
+        assert!(gz_comp_skips_empty_flush(-1, 0, crate::zlib_h::Z_NO_FLUSH));
+    }
+
+    #[test]
+    fn gz_comp_does_not_skip_when_input_or_flush_requires_work() {
+        assert!(!gz_comp_skips_empty_flush(0, 0, crate::zlib_h::Z_NO_FLUSH));
+        assert!(!gz_comp_skips_empty_flush(1, 1, crate::zlib_h::Z_NO_FLUSH));
+        assert!(!gz_comp_skips_empty_flush(1, 0, crate::zlib_h::Z_BLOCK));
     }
 
     #[test]

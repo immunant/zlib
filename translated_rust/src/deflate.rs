@@ -1526,20 +1526,25 @@ fn gzip_header_crc_pending(
     begin: crate::zutil_h::ulg,
     end: crate::zutil_h::ulg,
 ) -> crate::stdlib::uLong {
-    if hcrc == 0 || end <= begin {
-        return crc;
-    }
-
-    let Ok(begin) = usize::try_from(begin) else {
+    let Some(range) = gzip_header_crc_pending_range(hcrc, begin, end) else {
         return crc;
     };
-    let Ok(end) = usize::try_from(end) else {
-        return crc;
-    };
-    let Some(bytes) = pending_buffer.get(begin..end) else {
+    let Some(bytes) = pending_buffer.get(range) else {
         return crc;
     };
     crate::src::crc32::crc32_z(crc, bytes)
+}
+
+fn gzip_header_crc_pending_range(
+    hcrc: ::core::ffi::c_int,
+    begin: crate::zutil_h::ulg,
+    end: crate::zutil_h::ulg,
+) -> Option<::core::ops::Range<usize>> {
+    if hcrc == 0 || end <= begin {
+        return None;
+    }
+
+    Some(usize::try_from(begin).ok()?..usize::try_from(end).ok()?)
 }
 
 pub unsafe extern "C" fn deflate(
@@ -3564,7 +3569,8 @@ unsafe extern "C" fn deflate_huff(
 mod tests {
     use super::{
         deflate_bound_lengths, deflate_copyright, deflate_version_matches, gzip_header_crc,
-        gzip_header_crc_pending, pending_output_len, slide_hash_entry,
+        gzip_header_crc_pending, gzip_header_crc_pending_range, pending_output_len,
+        slide_hash_entry,
     };
 
     #[test]
@@ -3601,6 +3607,14 @@ mod tests {
         assert_eq!(crc, crate::src::crc32::crc32_z(0, &pending));
         assert_eq!(gzip_header_crc_pending(crc, 0, &pending, 0, 5), crc);
         assert_eq!(gzip_header_crc_pending(crc, 1, &pending, 5, 5), crc);
+    }
+
+    #[test]
+    fn gzip_header_crc_pending_range_requires_enabled_ordered_indices() {
+        assert_eq!(gzip_header_crc_pending_range(1, 2, 5), Some(2..5));
+        assert_eq!(gzip_header_crc_pending_range(0, 2, 5), None);
+        assert_eq!(gzip_header_crc_pending_range(1, 5, 5), None);
+        assert_eq!(gzip_header_crc_pending_range(1, 5, 2), None);
     }
 
     #[test]

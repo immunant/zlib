@@ -163,6 +163,10 @@ fn gz_read_needs_fetch(
     how == crate::gzguts_h::LOOK || chunk_len < size << 1 as ::core::ffi::c_int
 }
 
+fn gz_read_stops_at_eof(eof: ::core::ffi::c_int, avail_in: crate::stdlib::uInt) -> bool {
+    eof != 0 && avail_in == 0
+}
+
 enum GzReadAction {
     DrainBuffered,
     StopAtEof,
@@ -181,7 +185,7 @@ fn gz_read_action(
 ) -> GzReadAction {
     if have != 0 {
         GzReadAction::DrainBuffered
-    } else if eof != 0 && avail_in == 0 {
+    } else if gz_read_stops_at_eof(eof, avail_in) {
         GzReadAction::StopAtEof
     } else if gz_read_needs_fetch(how, chunk_len, size) {
         GzReadAction::Fetch
@@ -1055,6 +1059,13 @@ mod tests {
     fn gz_read_needs_fetch_for_small_chunks_only() {
         assert!(gz_read_needs_fetch(crate::gzguts_h::COPY, 15, 8));
         assert!(!gz_read_needs_fetch(crate::gzguts_h::COPY, 16, 8));
+    }
+
+    #[test]
+    fn gz_read_stops_at_eof_requires_eof_without_input() {
+        assert!(gz_read_stops_at_eof(1, 0));
+        assert!(!gz_read_stops_at_eof(0, 0));
+        assert!(!gz_read_stops_at_eof(1, 1));
     }
 
     #[test]

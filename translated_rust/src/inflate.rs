@@ -294,6 +294,27 @@ fn apply_window_update(
     plan
 }
 
+fn inflate_mark_value(
+    back: ::core::ffi::c_int,
+    mode: inflate_mode,
+    length: crate::stdlib::uInt,
+    was: crate::stdlib::uInt,
+) -> ::core::ffi::c_long {
+    (((back as ::core::ffi::c_long as ::core::ffi::c_ulong) << 16 as ::core::ffi::c_int)
+        as ::core::ffi::c_long)
+        + (if mode as ::core::ffi::c_uint
+            == crate::src::inflate::COPY_1 as ::core::ffi::c_int as ::core::ffi::c_uint
+        {
+            length
+        } else if mode as ::core::ffi::c_uint
+            == crate::src::inflate::MATCH as ::core::ffi::c_int as ::core::ffi::c_uint
+        {
+            was.wrapping_sub(length)
+        } else {
+            0 as ::core::ffi::c_uint
+        }) as ::core::ffi::c_long
+}
+
 unsafe extern "C" fn inflateStateCheck(mut strm: crate::zlib_h::z_streamp) -> ::core::ffi::c_int {
     let mut state: *mut crate::src::inflate::inflate_state =
         ::core::ptr::null_mut::<crate::src::inflate::inflate_state>();
@@ -2557,21 +2578,7 @@ pub unsafe extern "C" fn inflateMark(mut strm: crate::zlib_h::z_streamp) -> ::co
         return -((1 as ::core::ffi::c_long) << 16 as ::core::ffi::c_int);
     }
     state = (*strm).state as *mut crate::src::inflate::inflate_state;
-    return (((*state).back as ::core::ffi::c_long as ::core::ffi::c_ulong)
-        << 16 as ::core::ffi::c_int) as ::core::ffi::c_long
-        + (if (*state).mode as ::core::ffi::c_uint
-            == crate::src::inflate::COPY_1 as ::core::ffi::c_int as ::core::ffi::c_uint
-        {
-            (*state).length
-        } else {
-            if (*state).mode as ::core::ffi::c_uint
-                == crate::src::inflate::MATCH as ::core::ffi::c_int as ::core::ffi::c_uint
-            {
-                (*state).was.wrapping_sub((*state).length)
-            } else {
-                0 as ::core::ffi::c_uint
-            }
-        }) as ::core::ffi::c_long;
+    return inflate_mark_value((*state).back, (*state).mode, (*state).length, (*state).was);
 }
 #[export_name = "inflateMark"]
 
@@ -2605,10 +2612,10 @@ pub unsafe extern "C" fn inflateCodesUsed_ffi(
 #[cfg(test)]
 mod tests {
     use super::{
-        apply_window_update, inflate_mode_is_valid, inflate_prime_update,
+        apply_window_update, inflate_mark_value, inflate_mode_is_valid, inflate_prime_update,
         inflate_state_metadata_is_valid, inflate_sync_search_core, initial_window_metadata,
-        syncsearch_safe, window_update_plan, InflatePrimeUpdate, InflateSyncSearch, BAD, HEAD,
-        SYNC,
+        syncsearch_safe, window_update_plan, InflatePrimeUpdate, InflateSyncSearch, BAD, COPY_1,
+        HEAD, MATCH, SYNC,
     };
 
     #[test]
@@ -2722,6 +2729,17 @@ mod tests {
         assert!(inflate_state_metadata_is_valid(true, HEAD));
         assert!(!inflate_state_metadata_is_valid(false, HEAD));
         assert!(!inflate_state_metadata_is_valid(true, SYNC + 1));
+    }
+
+    #[test]
+    fn inflate_mark_value_preserves_mode_specific_progress() {
+        assert_eq!(inflate_mark_value(2, COPY_1, 7, 99), (2 << 16) + 7);
+        assert_eq!(inflate_mark_value(2, MATCH, 7, 10), (2 << 16) + 3);
+        assert_eq!(inflate_mark_value(-1, HEAD, 7, 10), -(1 << 16));
+        assert_eq!(
+            inflate_mark_value(0, MATCH, 5, 2),
+            (2_u32.wrapping_sub(5)) as ::core::ffi::c_long
+        );
     }
 
     #[test]
