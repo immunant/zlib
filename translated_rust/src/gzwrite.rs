@@ -101,6 +101,46 @@ struct GzCompressor<'a> {
     state: &'a mut crate::gzguts_h::gz_state,
 }
 
+/// The gzip writer's narrow access point to the still-legacy deflate stream.
+///
+/// `GzCompressor` owns the staging-buffer protocol.  This facade contains the
+/// three remaining calls that cross into deflate's ABI-stream implementation,
+/// keeping that protocol independent of the stream's raw cursor fields.  The
+/// gzip state supplies only its own stream and owned buffers; deflate performs
+/// its existing stream and state validation on every operation.
+struct GzDeflater<'a> {
+    stream: &'a mut crate::zlib_h::z_stream_s,
+}
+
+impl GzDeflater<'_> {
+    fn initialize(
+        &mut self,
+        level: ::core::ffi::c_int,
+        strategy: ::core::ffi::c_int,
+    ) -> ::core::ffi::c_int {
+        unsafe {
+            crate::src::deflate::deflateInit2_(
+                Some(self.stream),
+                level,
+                8 as ::core::ffi::c_int,
+                15 as ::core::ffi::c_int + 16 as ::core::ffi::c_int,
+                8 as ::core::ffi::c_int,
+                strategy,
+                Some(crate::zlib_h::ZLIB_VERSION[0]),
+                ::core::mem::size_of::<crate::zlib_h::z_stream>() as ::core::ffi::c_int,
+            )
+        }
+    }
+
+    fn reset(&mut self) -> ::core::ffi::c_int {
+        unsafe { crate::src::deflate::deflateReset(self.stream) }
+    }
+
+    fn compress(&mut self, flush: ::core::ffi::c_int) -> ::core::ffi::c_int {
+        unsafe { crate::src::deflate::deflate(self.stream, flush) }
+    }
+}
+
 fn gz_save_direct_input(state: &mut crate::gzguts_h::gz_state, input: &[u8]) -> bool {
     state.in_0.clear();
     if state.in_0.try_reserve_exact(input.len()).is_err() {
@@ -293,18 +333,10 @@ impl GzCompressor<'_> {
             return -1;
         }
         if state.strm.state.is_null() {
-            let initialized = unsafe {
-                crate::src::deflate::deflateInit2_(
-                    Some(&mut state.strm),
-                    state.level,
-                    8 as ::core::ffi::c_int,
-                    15 as ::core::ffi::c_int + 16 as ::core::ffi::c_int,
-                    8 as ::core::ffi::c_int,
-                    state.strategy,
-                    Some(crate::zlib_h::ZLIB_VERSION[0]),
-                    ::core::mem::size_of::<crate::zlib_h::z_stream>() as ::core::ffi::c_int,
-                )
-            };
+            let initialized = GzDeflater {
+                stream: &mut state.strm,
+            }
+            .initialize(state.level, state.strategy);
             if initialized != crate::zlib_h::Z_OK {
                 state.in_0.clear();
                 state.out.clear();
@@ -392,10 +424,16 @@ impl GzCompressor<'_> {
             }
             have = state.strm.avail_out as ::core::ffi::c_uint;
             if reset {
-                unsafe { crate::src::deflate::deflateReset(&mut state.strm) };
+                GzDeflater {
+                    stream: &mut state.strm,
+                }
+                .reset();
                 state.reset = 0;
             }
-            ret = unsafe { crate::src::deflate::deflate(&mut state.strm, flush) };
+            ret = GzDeflater {
+                stream: &mut state.strm,
+            }
+            .compress(flush);
             buffers_ready = true;
             reset = false;
             if ret == -1 {
