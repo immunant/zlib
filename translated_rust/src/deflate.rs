@@ -2176,12 +2176,24 @@ fn pending_short_write(
     }
 }
 
-unsafe fn putShortMSB(mut s: *mut crate::src::deflate::deflate_state, mut b: crate::stdlib::uInt) {
-    let state = &mut *s;
-    let write = pending_short_write(state.pending, b);
-    state.pending = write.next_pending;
-    *state.pending_buf.wrapping_add(write.cursors[0] as usize) = write.bytes[0];
-    *state.pending_buf.wrapping_add(write.cursors[1] as usize) = write.bytes[1];
+fn put_short_msb_core(
+    pending_buffer: &mut [crate::stdlib::Bytef],
+    pending: &mut crate::zutil_h::ulg,
+    value: crate::stdlib::uInt,
+) -> bool {
+    let write = pending_short_write(*pending, value);
+    let Ok(start) = usize::try_from(write.cursors[0]) else {
+        return false;
+    };
+    let Some(end) = start.checked_add(write.bytes.len()) else {
+        return false;
+    };
+    let Some(output) = pending_buffer.get_mut(start..end) else {
+        return false;
+    };
+    output.copy_from_slice(&write.bytes);
+    *pending = write.next_pending;
+    true
 }
 
 fn pending_output_len(
@@ -2488,21 +2500,34 @@ pub unsafe extern "C" fn deflate(
     if (*s).status == crate::src::deflate::INIT_STATE && (*s).wrap == 0 as ::core::ffi::c_int {
         (*s).status = crate::src::deflate::BUSY_STATE;
     }
-    if (*s).status == crate::src::deflate::INIT_STATE {
-        let header = zlib_header((*s).w_bits, (*s).strategy, (*s).level, (*s).strstart != 0);
-        putShortMSB(s, header);
-        if (*s).strstart != 0 as crate::stdlib::uInt {
-            putShortMSB(
-                s,
+    let initialized = (*s).status == crate::src::deflate::INIT_STATE;
+    if initialized {
+        let state = &mut *s;
+        let header = zlib_header(
+            state.w_bits,
+            state.strategy,
+            state.level,
+            state.strstart != 0,
+        );
+        let pending_buffer =
+            core::slice::from_raw_parts_mut(state.pending_buf, state.pending_buf_size as usize);
+        let _ = put_short_msb_core(pending_buffer, &mut state.pending, header);
+        if state.strstart != 0 as crate::stdlib::uInt {
+            let _ = put_short_msb_core(
+                pending_buffer,
+                &mut state.pending,
                 ((*strm).adler >> 16 as ::core::ffi::c_int) as crate::stdlib::uInt,
             );
-            putShortMSB(
-                s,
+            let _ = put_short_msb_core(
+                pending_buffer,
+                &mut state.pending,
                 ((*strm).adler & 0xffff as crate::stdlib::uLong) as crate::stdlib::uInt,
             );
         }
         (*strm).adler = 1 as crate::stdlib::uLong;
-        (*s).status = crate::src::deflate::BUSY_STATE;
+        state.status = crate::src::deflate::BUSY_STATE;
+    }
+    if initialized {
         flush_pending(strm);
         if (*s).pending != 0 as crate::zutil_h::ulg {
             (*s).last_flush = -1 as ::core::ffi::c_int;
@@ -2924,12 +2949,17 @@ pub unsafe extern "C" fn deflate(
             ((*strm).total_in >> 24 as ::core::ffi::c_int & 0xff as crate::stdlib::uLong)
                 as crate::stdlib::Byte;
     } else {
-        putShortMSB(
-            s,
+        let state = &mut *s;
+        let pending_buffer =
+            core::slice::from_raw_parts_mut(state.pending_buf, state.pending_buf_size as usize);
+        let _ = put_short_msb_core(
+            pending_buffer,
+            &mut state.pending,
             ((*strm).adler >> 16 as ::core::ffi::c_int) as crate::stdlib::uInt,
         );
-        putShortMSB(
-            s,
+        let _ = put_short_msb_core(
+            pending_buffer,
+            &mut state.pending,
             ((*strm).adler & 0xffff as crate::stdlib::uLong) as crate::stdlib::uInt,
         );
     }
@@ -4436,8 +4466,8 @@ mod tests {
         lm_head_reset_plan, lm_init_plan, lm_initial_state, lm_match_parameters, lm_reset_plan,
         longest_match_candidate_update, longest_match_clamp_length, longest_match_limit,
         longest_match_next_chain_length, longest_match_search_parameters, normalize_deflate_params,
-        pending_buffer_needs_flush, pending_output_len, pending_short_cursors, read_buf_checksum,
-        read_buf_core, read_buf_input_progress_after_copy, read_buf_len,
+        pending_buffer_needs_flush, pending_output_len, pending_short_cursors, put_short_msb_core,
+        read_buf_checksum, read_buf_core, read_buf_input_progress_after_copy, read_buf_len,
         read_buf_total_in_after_copy, short_msb_bytes, slide_hash_core, slide_hash_entry,
         stored_block_available_output, stored_block_buffered_len, stored_block_can_emit,
         stored_block_copy_lengths, stored_block_header_bytes, stored_block_is_last,
@@ -5203,6 +5233,45 @@ mod tests {
             pending_short_cursors(crate::zutil_h::ulg::MAX),
             ([crate::zutil_h::ulg::MAX, 0], 1)
         );
+    }
+
+    #[test]
+    fn put_short_msb_core_writes_network_order_and_advances_pending() {
+        let mut pending_buffer = [0; 4];
+        let mut pending = 1;
+
+        assert!(put_short_msb_core(
+            &mut pending_buffer,
+            &mut pending,
+            0x1234
+        ));
+        assert_eq!(pending_buffer, [0, 0x12, 0x34, 0]);
+        assert_eq!(pending, 3);
+    }
+
+    #[test]
+    fn put_short_msb_core_rejects_short_or_overflowed_ranges_without_progress() {
+        let mut pending_buffer = [0xaa];
+        let mut pending = 0;
+
+        assert!(!put_short_msb_core(
+            &mut pending_buffer,
+            &mut pending,
+            0x1234
+        ));
+        assert_eq!(pending_buffer, [0xaa]);
+        assert_eq!(pending, 0);
+
+        let mut pending_buffer = [0xaa; 2];
+        let mut pending = crate::zutil_h::ulg::MAX;
+
+        assert!(!put_short_msb_core(
+            &mut pending_buffer,
+            &mut pending,
+            0x1234
+        ));
+        assert_eq!(pending_buffer, [0xaa; 2]);
+        assert_eq!(pending, crate::zutil_h::ulg::MAX);
     }
 
     #[test]
