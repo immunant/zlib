@@ -3412,11 +3412,15 @@ fn flush_fast_block(
         None
     };
     // `block_data()` borrows the owned window for this synchronous tree
-    // encoding operation; `tr_flush_block_impl()` neither retains it nor the
+    // encoding operation; `tr_flush_block()` neither retains it nor the
     // stream reference.
-    unsafe {
-        crate::src::trees::tr_flush_block_impl(s, Some(strm), block.as_deref(), block_len, last);
-    }
+    crate::src::trees::tr_flush_block(
+        s,
+        Some(&mut strm.data_type),
+        block.as_deref(),
+        block_len,
+        last,
+    );
     s.block_start = s.strstart as ::core::ffi::c_long;
     flush_pending_impl(s, strm);
     strm.avail_out != 0
@@ -3638,9 +3642,9 @@ unsafe fn deflate_slow(
                 } else {
                     None
                 };
-                crate::src::trees::tr_flush_block_impl(
+                crate::src::trees::tr_flush_block(
                     s,
-                    Some(strm),
+                    Some(&mut strm.data_type),
                     block.as_deref(),
                     block_len,
                     0,
@@ -3671,9 +3675,9 @@ unsafe fn deflate_slow(
                 } else {
                     None
                 };
-                crate::src::trees::tr_flush_block_impl(
+                crate::src::trees::tr_flush_block(
                     s,
-                    Some(strm),
+                    Some(&mut strm.data_type),
                     block.as_deref(),
                     block_len,
                     0,
@@ -3716,9 +3720,9 @@ unsafe fn deflate_slow(
         } else {
             None
         };
-        crate::src::trees::tr_flush_block_impl(
+        crate::src::trees::tr_flush_block(
             s,
-            Some(strm),
+            Some(&mut strm.data_type),
             block.as_deref(),
             block_len,
             1,
@@ -3742,9 +3746,9 @@ unsafe fn deflate_slow(
         } else {
             None
         };
-        crate::src::trees::tr_flush_block_impl(
+        crate::src::trees::tr_flush_block(
             s,
-            Some(strm),
+            Some(&mut strm.data_type),
             block.as_deref(),
             block_len,
             0,
@@ -3838,7 +3842,13 @@ unsafe fn deflate_rle(
             } else {
                 None
             };
-            crate::src::trees::tr_flush_block_impl(s, Some(strm), block.as_deref(), block_len, 0);
+            crate::src::trees::tr_flush_block(
+                s,
+                Some(&mut strm.data_type),
+                block.as_deref(),
+                block_len,
+                0,
+            );
             s.block_start = s.strstart as ::core::ffi::c_long;
             flush_pending_impl(s, strm);
             if strm.avail_out == 0 {
@@ -3854,7 +3864,13 @@ unsafe fn deflate_rle(
         } else {
             None
         };
-        crate::src::trees::tr_flush_block_impl(s, Some(strm), block.as_deref(), block_len, 1);
+        crate::src::trees::tr_flush_block(
+            s,
+            Some(&mut strm.data_type),
+            block.as_deref(),
+            block_len,
+            1,
+        );
         s.block_start = s.strstart as ::core::ffi::c_long;
         flush_pending_impl(s, strm);
         if strm.avail_out == 0 {
@@ -3869,7 +3885,13 @@ unsafe fn deflate_rle(
         } else {
             None
         };
-        crate::src::trees::tr_flush_block_impl(s, Some(strm), block.as_deref(), block_len, 0);
+        crate::src::trees::tr_flush_block(
+            s,
+            Some(&mut strm.data_type),
+            block.as_deref(),
+            block_len,
+            0,
+        );
         s.block_start = s.strstart as ::core::ffi::c_long;
         flush_pending_impl(s, strm);
         if strm.avail_out == 0 {
@@ -3913,7 +3935,13 @@ unsafe fn deflate_huff(
             } else {
                 None
             };
-            crate::src::trees::tr_flush_block_impl(s, Some(strm), block.as_deref(), block_len, 0);
+            crate::src::trees::tr_flush_block(
+                s,
+                Some(&mut strm.data_type),
+                block.as_deref(),
+                block_len,
+                0,
+            );
             s.block_start = s.strstart as ::core::ffi::c_long;
             flush_pending_impl(s, strm);
             if strm.avail_out == 0 {
@@ -3929,7 +3957,13 @@ unsafe fn deflate_huff(
         } else {
             None
         };
-        crate::src::trees::tr_flush_block_impl(s, Some(strm), block.as_deref(), block_len, 1);
+        crate::src::trees::tr_flush_block(
+            s,
+            Some(&mut strm.data_type),
+            block.as_deref(),
+            block_len,
+            1,
+        );
         s.block_start = s.strstart as ::core::ffi::c_long;
         flush_pending_impl(s, strm);
         if strm.avail_out == 0 {
@@ -3944,7 +3978,13 @@ unsafe fn deflate_huff(
         } else {
             None
         };
-        crate::src::trees::tr_flush_block_impl(s, Some(strm), block.as_deref(), block_len, 0);
+        crate::src::trees::tr_flush_block(
+            s,
+            Some(&mut strm.data_type),
+            block.as_deref(),
+            block_len,
+            0,
+        );
         s.block_start = s.strstart as ::core::ffi::c_long;
         flush_pending_impl(s, strm);
         if strm.avail_out == 0 {

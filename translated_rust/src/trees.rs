@@ -3458,9 +3458,14 @@ fn detect_data_type_impl(s: &crate::src::deflate::deflate_state) -> ::core::ffi:
     }
     return crate::zlib_h::Z_BINARY;
 }
-pub(crate) unsafe fn tr_flush_block_impl(
+/// Flush a completed block using already-borrowed codec state and stream.
+///
+/// All buffers are owned or borrowed Rust views at this point.  The legacy
+/// raw-pointer adapter below retains the unsafe boundary for callers that
+/// have not yet converted their inputs.
+pub(crate) fn tr_flush_block(
     s: &mut crate::src::deflate::deflate_state,
-    strm: Option<&mut crate::zlib_h::z_stream_s>,
+    mut data_type: Option<&mut ::core::ffi::c_int>,
     buf: Option<&[u8]>,
     stored_len: crate::zutil_h::ulg,
     last: ::core::ffi::c_int,
@@ -3469,13 +3474,13 @@ pub(crate) unsafe fn tr_flush_block_impl(
     let mut static_lenb: crate::zutil_h::ulg = 0;
     let mut max_blindex: ::core::ffi::c_int = 0 as ::core::ffi::c_int;
     if s.level > 0 as ::core::ffi::c_int {
-        if strm
+        if data_type
             .as_ref()
-            .is_some_and(|strm| strm.data_type == crate::zlib_h::Z_UNKNOWN)
+            .is_some_and(|data_type| **data_type == crate::zlib_h::Z_UNKNOWN)
         {
-            let data_type = detect_data_type_impl(s);
-            if let Some(strm) = strm {
-                strm.data_type = data_type;
+            let detected_data_type = detect_data_type_impl(s);
+            if let Some(stream_data_type) = data_type {
+                *stream_data_type = detected_data_type;
             }
         }
         build_tree_impl(s, crate::src::deflate::STATIC_TREE_LITERAL);
@@ -3565,6 +3570,22 @@ pub(crate) unsafe fn tr_flush_block_impl(
     if last != 0 {
         bi_windup_impl(s);
     }
+}
+
+pub(crate) unsafe fn tr_flush_block_impl(
+    s: &mut crate::src::deflate::deflate_state,
+    strm: Option<&mut crate::zlib_h::z_stream_s>,
+    buf: Option<&[u8]>,
+    stored_len: crate::zutil_h::ulg,
+    last: ::core::ffi::c_int,
+) {
+    tr_flush_block(
+        s,
+        strm.map(|strm| &mut strm.data_type),
+        buf,
+        stored_len,
+        last,
+    );
 }
 
 pub unsafe fn tr_flush_block_from_raw(
