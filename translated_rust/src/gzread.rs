@@ -474,14 +474,13 @@ fn gz_read(
                 // SAFETY: the public reader entry point supplied a writable
                 // caller buffer of the requested length, and `x.next` plus
                 // `x.have` identifies the initialized internal output range.
-                // `gz_read_plan` bounds this copy by both ranges.
-                unsafe {
-                    crate::stdlib::memcpy(
-                        buf[got as usize..].as_mut_ptr() as *mut ::core::ffi::c_void,
-                        state.x.next as *const ::core::ffi::c_void,
-                        n as crate::__stddef_size_t_h::size_t,
-                    );
-                }
+                // `gz_read_plan` bounds this source view and the destination
+                // subslice by both ranges. The copy itself is then checked
+                // Rust slice work rather than a raw C `memcpy` call.
+                let source = unsafe {
+                    ::core::slice::from_raw_parts(state.x.next, n as usize)
+                };
+                buf[got as usize..got as usize + n as usize].copy_from_slice(source);
                 n = gz_consume(state, n as crate::stdlib::off64_t);
                 consumed_buffered = true;
                 if state.err != crate::zlib_h::Z_OK {
