@@ -112,13 +112,13 @@ unsafe fn gz_init(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
         strm.zfree = None;
         strm.opaque = ::core::ptr::null_mut::<::core::ffi::c_void>();
         ret = crate::src::deflate::deflateInit2_(
-            strm,
+            Some(strm),
             state.level,
             8 as ::core::ffi::c_int,
             15 as ::core::ffi::c_int + 16 as ::core::ffi::c_int,
             8 as ::core::ffi::c_int,
             state.strategy,
-            crate::zlib_h::ZLIB_VERSION.as_ptr(),
+            Some(crate::zlib_h::ZLIB_VERSION[0]),
             ::core::mem::size_of::<crate::zlib_h::z_stream>() as ::core::ffi::c_int,
         );
         if ret != crate::zlib_h::Z_OK {
