@@ -670,6 +670,44 @@ fn inflate_consumed_input(
     input.get(start..end).unwrap_or(&[])
 }
 
+/// A bounded input cursor used by the ordinary inflate state machine.
+///
+/// The translated C decoder advanced a raw pointer for every bit refill.
+/// Keeping the base slice and its offset together makes those advances and
+/// reads bounds-checked; stream pointers are materialized only when committing
+/// progress to the ABI stream.
+#[derive(Copy, Clone)]
+struct InflateInput<'a> {
+    bytes: &'a [crate::stdlib::Bytef],
+    index: usize,
+}
+
+impl<'a> InflateInput<'a> {
+    fn new(bytes: &'a [crate::stdlib::Bytef]) -> Self {
+        Self { bytes, index: 0 }
+    }
+
+    fn at(bytes: &'a [crate::stdlib::Bytef], index: usize) -> Self {
+        Self { bytes, index }
+    }
+
+    fn wrapping_offset(self, offset: isize) -> Self {
+        Self {
+            bytes: self.bytes,
+            index: self.index.wrapping_add_signed(offset),
+        }
+    }
+
+}
+
+impl ::core::ops::Deref for InflateInput<'_> {
+    type Target = crate::stdlib::Bytef;
+
+    fn deref(&self) -> &Self::Target {
+        &self.bytes[self.index]
+    }
+}
+
 pub unsafe fn inflate(
     strm: &mut crate::zlib_h::z_stream_s,
     mut flush: ::core::ffi::c_int,
@@ -677,8 +715,8 @@ pub unsafe fn inflate(
     output: &mut [crate::stdlib::Bytef],
 ) -> ::core::ffi::c_int {
     let mut strm = InflateStream(strm);
-    let mut next: *mut ::core::ffi::c_uchar = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
-    let mut put: *mut ::core::ffi::c_uchar = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
+    let mut next = InflateInput::new(input);
+    let mut put = 0usize;
     let mut have: ::core::ffi::c_uint = 0;
     let mut left: ::core::ffi::c_uint = 0;
     let mut hold: ::core::ffi::c_ulong = 0;
@@ -733,9 +771,9 @@ pub unsafe fn inflate(
     {
         (*state).mode = crate::src::inflate::TYPEDO;
     }
-    put = output.as_mut_ptr();
+    put = 0;
     left = output.len() as ::core::ffi::c_uint;
-    next = input.as_ptr() as *mut ::core::ffi::c_uchar;
+    next = InflateInput::new(input);
     have = input.len() as ::core::ffi::c_uint;
     hold = (*state).hold;
     bits = (*state).bits;
@@ -1115,9 +1153,8 @@ pub unsafe fn inflate(
                                                                                                     if left == 0 as ::core::ffi::c_uint {
                                                                                                         break '_inf_leave;
                                                                                                     }
-                                                                                                    let c2rust_fresh32 = put;
-                                                                                                    put = put.wrapping_offset(1);
-                                                                                                    *c2rust_fresh32 = (*state).length as ::core::ffi::c_uchar;
+                                                                                                    output[put] = (*state).length as ::core::ffi::c_uchar;
+                                                                                                    put += 1;
                                                                                                     left = left.wrapping_sub(1);
                                                                                                     (*state).mode = crate::src::inflate::LEN;
                                                                                                     continue '_inf_leave;
@@ -1298,9 +1335,9 @@ pub unsafe fn inflate(
                                                                                         }
                                                                                     }
                                                                                     if (*state).havedict == 0 as ::core::ffi::c_int {
-                                                                                        (*strm).next_out = put as *mut crate::stdlib::Bytef;
+                                                                                        (*strm).next_out = output.as_mut_ptr().wrapping_add(put);
                                                                                         (*strm).avail_out = left as crate::stdlib::uInt;
-                                                                                        (*strm).next_in = next as *mut crate::stdlib::Bytef;
+                                                                                        (*strm).next_in = input.as_ptr().wrapping_add(next.index) as *mut crate::stdlib::Bytef;
                                                                                         (*strm).avail_in = have as crate::stdlib::uInt;
                                                                                         (*state).hold = hold;
                                                                                         (*state).bits = bits;
@@ -1623,8 +1660,7 @@ pub unsafe fn inflate(
                                                                             .wrapping_offset(copy as isize);
                                                                         left =
                                                                             left.wrapping_sub(copy);
-                                                                        put = put
-                                                                            .wrapping_offset(copy as isize);
+                                                                        put += copy as usize;
                                                                         (*state).length = (*state)
                                                                             .length
                                                                             .wrapping_sub(copy);
@@ -1839,9 +1875,9 @@ pub unsafe fn inflate(
                                         if have >= 6 as ::core::ffi::c_uint
                                             && left >= 258 as ::core::ffi::c_uint
                                         {
-                                            (*strm).next_out = put as *mut crate::stdlib::Bytef;
+                                            (*strm).next_out = output.as_mut_ptr().wrapping_add(put);
                                             (*strm).avail_out = left as crate::stdlib::uInt;
-                                            (*strm).next_in = next as *mut crate::stdlib::Bytef;
+                                            (*strm).next_in = input.as_ptr().wrapping_add(next.index) as *mut crate::stdlib::Bytef;
                                             (*strm).avail_in = have as crate::stdlib::uInt;
                                             (*state).hold = hold;
                                             (*state).bits = bits;
@@ -1849,10 +1885,10 @@ pub unsafe fn inflate(
                                                 strm.0,
                                                 out,
                                             );
-                                            put = (*strm).next_out as *mut ::core::ffi::c_uchar;
                                             left = (*strm).avail_out as ::core::ffi::c_uint;
-                                            next = (*strm).next_in as *mut ::core::ffi::c_uchar;
+                                            put = output.len() - left as usize;
                                             have = (*strm).avail_in as ::core::ffi::c_uint;
+                                            next = InflateInput::at(input, input.len() - have as usize);
                                             hold = (*state).hold;
                                             bits = (*state).bits;
                                             if (*state).mode as ::core::ffi::c_uint
@@ -2303,7 +2339,9 @@ pub unsafe fn inflate(
                 copy = (*state).length;
             }
         } else {
-            from = put.wrapping_offset(-((*state).offset as isize));
+            from = output
+                .as_mut_ptr()
+                .wrapping_add(put - (*state).offset as usize);
             copy = (*state).length;
         }
         if copy > left {
@@ -2314,9 +2352,8 @@ pub unsafe fn inflate(
         loop {
             let c2rust_fresh30 = from;
             from = from.wrapping_offset(1);
-            let c2rust_fresh31 = put;
-            put = put.wrapping_offset(1);
-            *c2rust_fresh31 = *c2rust_fresh30;
+            output[put] = *c2rust_fresh30;
+            put += 1;
             copy = copy.wrapping_sub(1);
             if copy == 0 {
                 break;
@@ -2326,9 +2363,9 @@ pub unsafe fn inflate(
             (*state).mode = crate::src::inflate::LEN;
         }
     }
-    (*strm).next_out = put as *mut crate::stdlib::Bytef;
+    (*strm).next_out = output.as_mut_ptr().wrapping_add(put);
     (*strm).avail_out = left as crate::stdlib::uInt;
-    (*strm).next_in = next as *mut crate::stdlib::Bytef;
+    (*strm).next_in = input.as_ptr().wrapping_add(next.index) as *mut crate::stdlib::Bytef;
     (*strm).avail_in = have as crate::stdlib::uInt;
     (*state).hold = hold;
     (*state).bits = bits;
@@ -2396,8 +2433,31 @@ pub unsafe fn inflate(
     }
     return ret;
 }
-#[export_name = "inflate"]
+/// Converts the ABI stream's current buffers once before entering the
+/// slice-based decoder.  Keeping this boundary out of the exported wrapper
+/// leaves the latter responsible only for validating and borrowing `strm`.
+fn inflate_from_stream(
+    strm: &mut crate::zlib_h::z_stream_s,
+    flush: ::core::ffi::c_int,
+) -> ::core::ffi::c_int {
+    if strm.next_out.is_null() || (strm.next_in.is_null() && strm.avail_in != 0) {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    }
+    let input = if strm.avail_in == 0 {
+        &[]
+    } else {
+        // `next_in` was checked above and the caller owns the advertised
+        // range for the duration of this FFI call.
+        unsafe { ::core::slice::from_raw_parts(strm.next_in, strm.avail_in as usize) }
+    };
+    // zlib requires `next_out` even for a zero-sized output range.
+    let output = unsafe {
+        ::core::slice::from_raw_parts_mut(strm.next_out, strm.avail_out as usize)
+    };
+    unsafe { inflate(strm, flush, input, output) }
+}
 
+#[export_name = "inflate"]
 pub unsafe extern "C" fn inflate_ffi(
     mut strm: crate::zlib_h::z_streamp,
     mut flush: ::core::ffi::c_int,
@@ -2405,17 +2465,7 @@ pub unsafe extern "C" fn inflate_ffi(
     if strm.is_null() {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    let strm = &mut *strm;
-    if strm.next_out.is_null() || (strm.next_in.is_null() && strm.avail_in != 0) {
-        return crate::zlib_h::Z_STREAM_ERROR;
-    }
-    let input = if strm.avail_in == 0 {
-        &[]
-    } else {
-        ::core::slice::from_raw_parts(strm.next_in, strm.avail_in as usize)
-    };
-    let output = ::core::slice::from_raw_parts_mut(strm.next_out, strm.avail_out as usize);
-    inflate(strm, flush, input, output)
+    inflate_from_stream(&mut *strm, flush)
 }
 pub unsafe fn inflateEnd(strm: &mut crate::zlib_h::z_stream_s) -> ::core::ffi::c_int {
     let state = strm.state as *mut crate::src::inflate::inflate_state;
