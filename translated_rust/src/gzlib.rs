@@ -409,6 +409,26 @@ pub fn gz_consume_buffered_read_cursor(
     n
 }
 
+pub fn gz_seek64_normalize(
+    mut offset: crate::stdlib::off64_t,
+    whence: ::core::ffi::c_int,
+    pos: crate::stdlib::off64_t,
+    past: ::core::ffi::c_int,
+    skip: crate::stdlib::off64_t,
+) -> (crate::stdlib::off64_t, bool) {
+    if whence == crate::stdlib::SEEK_SET {
+        offset -= pos;
+        (offset, false)
+    } else {
+        offset += if past != 0 {
+            0 as crate::stdlib::off64_t
+        } else {
+            skip
+        };
+        (offset, true)
+    }
+}
+
 pub fn gz_io_chunk_limit() -> ::core::ffi::c_uint {
     (-1 as ::core::ffi::c_int as ::core::ffi::c_uint >> 2 as ::core::ffi::c_int)
         .wrapping_add(1 as ::core::ffi::c_uint)
@@ -475,14 +495,13 @@ pub unsafe extern "C" fn gzseek64_ffi(
     if whence != crate::stdlib::SEEK_SET && whence != crate::stdlib::SEEK_CUR {
         return -1 as ::core::ffi::c_int as crate::stdlib::off64_t;
     }
-    if whence == crate::stdlib::SEEK_SET {
-        offset -= (*state).x.pos;
-    } else {
-        offset += if (*state).past != 0 {
-            0 as crate::stdlib::off64_t
-        } else {
-            (*state).skip
-        };
+    let clear_skip = {
+        let normalized =
+            gz_seek64_normalize(offset, whence, (*state).x.pos, (*state).past, (*state).skip);
+        offset = normalized.0;
+        normalized.1
+    };
+    if clear_skip {
         (*state).skip = 0 as crate::stdlib::off64_t;
     }
     if (*state).mode == crate::gzguts_h::GZ_READ

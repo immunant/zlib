@@ -206,6 +206,64 @@ pub(crate) fn inflate_stored_block_length(
     }
 }
 
+enum InflateZlibHeaderError {
+    IncorrectHeaderCheck,
+    UnknownCompressionMethod,
+    InvalidWindowSize { wbits: ::core::ffi::c_uint },
+}
+
+struct InflateZlibHeader {
+    wbits: ::core::ffi::c_uint,
+    dmax: ::core::ffi::c_uint,
+    needs_dictionary: bool,
+}
+
+fn inflate_zlib_header(
+    hold: ::core::ffi::c_ulong,
+    wrap: ::core::ffi::c_int,
+    current_wbits: ::core::ffi::c_uint,
+) -> Result<InflateZlibHeader, InflateZlibHeaderError> {
+    if wrap & 1 as ::core::ffi::c_int == 0
+        || (((hold as ::core::ffi::c_uint
+            & ((1 as ::core::ffi::c_uint) << 8 as ::core::ffi::c_int)
+                .wrapping_sub(1 as ::core::ffi::c_uint))
+            << 8 as ::core::ffi::c_int) as ::core::ffi::c_ulong)
+            .wrapping_add(hold >> 8 as ::core::ffi::c_int)
+            .wrapping_rem(31 as ::core::ffi::c_ulong)
+            != 0
+    {
+        return Err(InflateZlibHeaderError::IncorrectHeaderCheck);
+    }
+
+    if hold as ::core::ffi::c_uint
+        & ((1 as ::core::ffi::c_uint) << 4 as ::core::ffi::c_int)
+            .wrapping_sub(1 as ::core::ffi::c_uint)
+        != crate::zlib_h::Z_DEFLATED as ::core::ffi::c_uint
+    {
+        return Err(InflateZlibHeaderError::UnknownCompressionMethod);
+    }
+
+    let shifted = hold >> 4 as ::core::ffi::c_int;
+    let len = (shifted as ::core::ffi::c_uint
+        & ((1 as ::core::ffi::c_uint) << 4 as ::core::ffi::c_int)
+            .wrapping_sub(1 as ::core::ffi::c_uint))
+    .wrapping_add(8 as ::core::ffi::c_uint);
+    let wbits = if current_wbits == 0 as ::core::ffi::c_uint {
+        len
+    } else {
+        current_wbits
+    };
+    if len > 15 as ::core::ffi::c_uint || len > wbits {
+        return Err(InflateZlibHeaderError::InvalidWindowSize { wbits });
+    }
+
+    Ok(InflateZlibHeader {
+        wbits,
+        dmax: (1 as ::core::ffi::c_uint) << len,
+        needs_dictionary: shifted & 0x200 as ::core::ffi::c_ulong != 0,
+    })
+}
+
 fn inflate_data_type(
     bits: ::core::ffi::c_uint,
     last: ::core::ffi::c_int,
@@ -647,55 +705,15 @@ pub unsafe extern "C" fn inflate_ffi(
                         if !(*state).head.is_null() {
                             (*(*state).head).done = -1 as ::core::ffi::c_int;
                         }
-                        if (*state).wrap & 1 as ::core::ffi::c_int == 0
-                            || (((hold as ::core::ffi::c_uint
-                                & ((1 as ::core::ffi::c_uint) << 8 as ::core::ffi::c_int)
-                                    .wrapping_sub(1 as ::core::ffi::c_uint))
-                                << 8 as ::core::ffi::c_int)
-                                as ::core::ffi::c_ulong)
-                                .wrapping_add(hold >> 8 as ::core::ffi::c_int)
-                                .wrapping_rem(31 as ::core::ffi::c_ulong)
-                                != 0
-                        {
-                            (*strm).msg = b"incorrect header check\0".as_ptr()
-                                as *const ::core::ffi::c_char
-                                as *mut ::core::ffi::c_char;
-                            (*state).mode = crate::src::inflate::BAD;
-                            continue;
-                        } else if hold as ::core::ffi::c_uint
-                            & ((1 as ::core::ffi::c_uint) << 4 as ::core::ffi::c_int)
-                                .wrapping_sub(1 as ::core::ffi::c_uint)
-                            != crate::zlib_h::Z_DEFLATED as ::core::ffi::c_uint
-                        {
-                            (*strm).msg = b"unknown compression method\0".as_ptr()
-                                as *const ::core::ffi::c_char
-                                as *mut ::core::ffi::c_char;
-                            (*state).mode = crate::src::inflate::BAD;
-                            continue;
-                        } else {
-                            hold >>= 4 as ::core::ffi::c_int;
-                            bits =
-                                bits.wrapping_sub(4 as ::core::ffi::c_int as ::core::ffi::c_uint);
-                            len = (hold as ::core::ffi::c_uint
-                                & ((1 as ::core::ffi::c_uint) << 4 as ::core::ffi::c_int)
-                                    .wrapping_sub(1 as ::core::ffi::c_uint))
-                            .wrapping_add(8 as ::core::ffi::c_uint);
-                            if (*state).wbits == 0 as ::core::ffi::c_uint {
-                                (*state).wbits = len;
-                            }
-                            if len > 15 as ::core::ffi::c_uint || len > (*state).wbits {
-                                (*strm).msg = b"invalid window size\0".as_ptr()
-                                    as *const ::core::ffi::c_char
-                                    as *mut ::core::ffi::c_char;
-                                (*state).mode = crate::src::inflate::BAD;
-                                continue;
-                            } else {
-                                (*state).dmax = (1 as ::core::ffi::c_uint) << len;
+                        match inflate_zlib_header(hold, (*state).wrap, (*state).wbits) {
+                            Ok(header) => {
+                                (*state).wbits = header.wbits;
+                                (*state).dmax = header.dmax;
                                 (*state).flags = 0 as ::core::ffi::c_int;
                                 (*state).check =
                                     crate::src::adler32::adler32_initial() as ::core::ffi::c_ulong;
                                 (*strm).adler = (*state).check as crate::stdlib::uLong;
-                                (*state).mode = (if hold & 0x200 as ::core::ffi::c_ulong != 0 {
+                                (*state).mode = (if header.needs_dictionary {
                                     crate::src::inflate::DICTID as ::core::ffi::c_int
                                 } else {
                                     crate::src::inflate::TYPE as ::core::ffi::c_int
@@ -703,6 +721,31 @@ pub unsafe extern "C" fn inflate_ffi(
                                     as crate::src::inflate::inflate_mode;
                                 hold = 0 as ::core::ffi::c_ulong;
                                 bits = 0 as ::core::ffi::c_uint;
+                                continue;
+                            }
+                            Err(InflateZlibHeaderError::IncorrectHeaderCheck) => {
+                                (*strm).msg = b"incorrect header check\0".as_ptr()
+                                    as *const ::core::ffi::c_char
+                                    as *mut ::core::ffi::c_char;
+                                (*state).mode = crate::src::inflate::BAD;
+                                continue;
+                            }
+                            Err(InflateZlibHeaderError::UnknownCompressionMethod) => {
+                                (*strm).msg = b"unknown compression method\0".as_ptr()
+                                    as *const ::core::ffi::c_char
+                                    as *mut ::core::ffi::c_char;
+                                (*state).mode = crate::src::inflate::BAD;
+                                continue;
+                            }
+                            Err(InflateZlibHeaderError::InvalidWindowSize { wbits }) => {
+                                (*state).wbits = wbits;
+                                hold >>= 4 as ::core::ffi::c_int;
+                                bits = bits
+                                    .wrapping_sub(4 as ::core::ffi::c_int as ::core::ffi::c_uint);
+                                (*strm).msg = b"invalid window size\0".as_ptr()
+                                    as *const ::core::ffi::c_char
+                                    as *mut ::core::ffi::c_char;
+                                (*state).mode = crate::src::inflate::BAD;
                                 continue;
                             }
                         }
