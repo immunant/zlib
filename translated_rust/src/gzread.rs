@@ -644,7 +644,7 @@ fn gz_skip_buffer_plan(
 }
 
 /// Commit a preflighted buffered-seek consumption after the boundary has
-/// advanced the raw output cursor.
+/// reconciled and advanced the owned-output cursor.
 fn gz_skip_buffer_commit_state(
     state: &mut crate::gzguts_h::gz_state,
     consume: ::core::ffi::c_uint,
@@ -656,6 +656,27 @@ fn gz_skip_buffer_commit_state(
     state.x.pos = state.x.pos.wrapping_add(consume as crate::stdlib::off64_t);
     state.skip = state.skip.wrapping_sub(consume as crate::stdlib::off64_t);
     true
+}
+
+/// Advance a buffered-seek cursor using only owned-buffer indices.  The
+/// public `gzgetc` macro can alter `x.next` between calls, so the export
+/// boundary must reconcile that ABI cursor before it can consume buffered
+/// bytes.  Validate the whole advertised buffered range as well as the
+/// consumed prefix before returning the next index.
+fn gz_skip_buffer_next_index(
+    output_len: usize,
+    next_index: usize,
+    have: crate::stdlib::uInt,
+    consume: ::core::ffi::c_uint,
+) -> Option<usize> {
+    if consume > have {
+        return None;
+    }
+    let end = next_index.checked_add(have as usize)?;
+    if end > output_len {
+        return None;
+    }
+    next_index.checked_add(consume as usize)
 }
 
 /// Limit a direct copy from already-buffered gzip output to the amount that
@@ -897,12 +918,9 @@ fn gz_skip(state: &mut crate::gzguts_h::gz_state) -> Result<GzSkipStep, ()> {
         let Some(consume) = gz_skip_buffer_plan(state.x.have, state.skip) else {
             return Err(());
         };
-        if !gz_skip_buffer_commit_state(state, consume) {
-            return Err(());
-        }
         return Ok(GzSkipStep::Advance {
             consumed: consume,
-            complete: state.skip == 0,
+            complete: state.skip == consume as crate::stdlib::off64_t,
         });
     }
     if state.eof != 0 && state.strm.avail_in == 0 as crate::stdlib::uInt {
@@ -936,7 +954,42 @@ macro_rules! gz_read_at_boundary {
                         }
                     }
                     Ok(GzSkipStep::Advance { consumed, complete }) => {
-                        state_ref.x.next = state_ref.x.next.wrapping_add(consumed as usize);
+                        let next_index = {
+                            let Some(output) = state_ref
+                                .buffers
+                                .as_ref()
+                                .and_then(|buffers| buffers.output.as_ref())
+                            else {
+                                break 'gz_read_result 0;
+                            };
+                            let Some(next_index) = gz_owned_buffer_index(
+                                output.as_ptr() as usize,
+                                output.len(),
+                                state_ref.x.next as usize,
+                            ) else {
+                                break 'gz_read_result 0;
+                            };
+                            let Some(next_index) = gz_skip_buffer_next_index(
+                                output.len(),
+                                next_index,
+                                state_ref.x.have,
+                                consumed,
+                            ) else {
+                                break 'gz_read_result 0;
+                            };
+                            next_index
+                        };
+                        if !gz_skip_buffer_commit_state(state_ref, consumed) {
+                            break 'gz_read_result 0;
+                        }
+                        let Some(output) = state_ref
+                            .buffers
+                            .as_mut()
+                            .and_then(|buffers| buffers.output.as_mut())
+                        else {
+                            break 'gz_read_result 0;
+                        };
+                        state_ref.x.next = output.as_mut_ptr().wrapping_add(next_index);
                         if complete {
                             break;
                         }
