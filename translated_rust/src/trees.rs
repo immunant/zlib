@@ -3668,6 +3668,28 @@ fn heap_node_precedes(
         || left_frequency == right_frequency && left_depth <= right_depth
 }
 
+fn rebalance_overflowed_bit_lengths(
+    bl_count: &mut [crate::zutil_h::ush; 16],
+    max_length: ::core::ffi::c_int,
+    mut overflow: ::core::ffi::c_int,
+) {
+    loop {
+        let mut bits = max_length - 1 as ::core::ffi::c_int;
+        while bl_count[bits as usize] as ::core::ffi::c_int == 0 as ::core::ffi::c_int {
+            bits -= 1;
+        }
+        bl_count[bits as usize] = bl_count[bits as usize].wrapping_sub(1);
+        bl_count[(bits + 1 as ::core::ffi::c_int) as usize] =
+            (bl_count[(bits + 1 as ::core::ffi::c_int) as usize] as ::core::ffi::c_int
+                + 2 as ::core::ffi::c_int) as crate::zutil_h::ush;
+        bl_count[max_length as usize] = bl_count[max_length as usize].wrapping_sub(1);
+        overflow -= 2 as ::core::ffi::c_int;
+        if !(overflow > 0 as ::core::ffi::c_int) {
+            break;
+        }
+    }
+}
+
 fn tally_symbol_bytes(
     dist: ::core::ffi::c_uint,
     lc: ::core::ffi::c_uint,
@@ -3944,21 +3966,7 @@ unsafe extern "C" fn gen_bitlen(
     if overflow == 0 as ::core::ffi::c_int {
         return;
     }
-    loop {
-        bits = max_length - 1 as ::core::ffi::c_int;
-        while (*s).bl_count[bits as usize] as ::core::ffi::c_int == 0 as ::core::ffi::c_int {
-            bits -= 1;
-        }
-        (*s).bl_count[bits as usize] = (*s).bl_count[bits as usize].wrapping_sub(1);
-        (*s).bl_count[(bits + 1 as ::core::ffi::c_int) as usize] =
-            ((*s).bl_count[(bits + 1 as ::core::ffi::c_int) as usize] as ::core::ffi::c_int
-                + 2 as ::core::ffi::c_int) as crate::zutil_h::ush;
-        (*s).bl_count[max_length as usize] = (*s).bl_count[max_length as usize].wrapping_sub(1);
-        overflow -= 2 as ::core::ffi::c_int;
-        if !(overflow > 0 as ::core::ffi::c_int) {
-            break;
-        }
-    }
+    rebalance_overflowed_bit_lengths(&mut (*s).bl_count, max_length, overflow);
     bits = max_length;
     while bits != 0 as ::core::ffi::c_int {
         n = (*s).bl_count[bits as usize] as ::core::ffi::c_int;
@@ -5161,10 +5169,10 @@ mod tests {
     use super::{
         bi_flush_core, bi_reverse, bi_windup_core, bl_order, block_bit_length_bytes,
         detect_data_type_from_ltree, dist_code_index, heap_node_precedes, next_code_for_len,
-        next_codes, pending_cursor_after_bytes, reset_block_trees, select_block_encoding,
-        static_bl_desc, static_d_desc, static_l_desc, symbol_triplet_cursors,
-        tally_match_tree_indices, tally_symbol_bytes, tree_next_cursor, tree_run_continues,
-        tree_run_limits, BlockEncoding, END_BLOCK, MAX_BITS,
+        next_codes, pending_cursor_after_bytes, rebalance_overflowed_bit_lengths,
+        reset_block_trees, select_block_encoding, static_bl_desc, static_d_desc, static_l_desc,
+        symbol_triplet_cursors, tally_match_tree_indices, tally_symbol_bytes, tree_next_cursor,
+        tree_run_continues, tree_run_limits, BlockEncoding, END_BLOCK, MAX_BITS,
     };
 
     fn ltree_with_frequency(
@@ -5361,6 +5369,32 @@ mod tests {
         assert!(heap_node_precedes(3, 4, 3, 4));
         assert!(heap_node_precedes(3, 4, 3, 5));
         assert!(!heap_node_precedes(3, 5, 3, 4));
+    }
+
+    #[test]
+    fn bit_length_overflow_rebalancing_moves_counts_to_longer_lengths() {
+        let mut counts = [0; 16];
+        counts[3] = 1;
+        counts[4] = 2;
+        counts[5] = 3;
+
+        rebalance_overflowed_bit_lengths(&mut counts, 5, 4);
+
+        assert_eq!(counts[3], 1);
+        assert_eq!(counts[4], 0);
+        assert_eq!(counts[5], 5);
+    }
+
+    #[test]
+    fn bit_length_overflow_rebalancing_preserves_wrapping_count_updates() {
+        let mut counts = [0; 16];
+        counts[4] = 1;
+        counts[5] = u16::MAX;
+
+        rebalance_overflowed_bit_lengths(&mut counts, 5, 2);
+
+        assert_eq!(counts[4], 0);
+        assert_eq!(counts[5], 0);
     }
 
     #[test]

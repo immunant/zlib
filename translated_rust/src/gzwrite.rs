@@ -211,6 +211,13 @@ fn gz_write_advanced_pos(
     pos + consumed as crate::stdlib::off64_t
 }
 
+fn gz_write_remaining_after_consumption(
+    remaining: crate::stdlib::z_size_t,
+    consumed: ::core::ffi::c_uint,
+) -> crate::stdlib::z_size_t {
+    remaining.wrapping_sub(consumed as crate::stdlib::z_size_t)
+}
+
 fn gz_write_apply_direct_progress(
     pos: &mut crate::stdlib::off64_t,
     remaining: &mut crate::stdlib::z_size_t,
@@ -218,7 +225,7 @@ fn gz_write_apply_direct_progress(
     remaining_avail_in: crate::stdlib::uInt,
 ) -> bool {
     let consumed = gz_write_apply_chunk_progress(pos, chunk_len, remaining_avail_in);
-    *remaining = remaining.wrapping_sub(consumed as crate::stdlib::z_size_t);
+    *remaining = gz_write_remaining_after_consumption(*remaining, consumed);
     *remaining != 0
 }
 
@@ -412,7 +419,7 @@ fn gz_write_buffered_step(
         copy,
         avail_in.wrapping_add(copy),
         gz_write_advanced_pos(pos, copy),
-        remaining.wrapping_sub(copy as crate::stdlib::z_size_t),
+        gz_write_remaining_after_consumption(remaining, copy),
     )
 }
 
@@ -1008,11 +1015,12 @@ mod tests {
         gz_write_apply_direct_progress, gz_write_buffered_copy_len,
         gz_write_buffered_have_after_copy, gz_write_buffered_step, gz_write_chunk_len,
         gz_write_errno_is_retryable, gz_write_error_result, gz_write_is_empty,
-        gz_write_state_is_usable, gz_write_uses_buffered_path, gz_zero_apply_progress,
-        gz_zero_chunk_len, gz_zero_needs_initialization, gzclose_mode_is_writable,
-        gzclose_w_result, gzflush_mode_is_valid, gzfwrite_len, gzfwrite_result, gzputc_result,
-        gzputs_len_fits_int, gzputs_result, gzsetparams_settings_match,
-        gzsetparams_state_is_usable, gzwrite_len_fits_int, GzCompWriteFailure,
+        gz_write_remaining_after_consumption, gz_write_state_is_usable,
+        gz_write_uses_buffered_path, gz_zero_apply_progress, gz_zero_chunk_len,
+        gz_zero_needs_initialization, gzclose_mode_is_writable, gzclose_w_result,
+        gzflush_mode_is_valid, gzfwrite_len, gzfwrite_result, gzputc_result, gzputs_len_fits_int,
+        gzputs_result, gzsetparams_settings_match, gzsetparams_state_is_usable,
+        gzwrite_len_fits_int, GzCompWriteFailure,
     };
 
     #[test]
@@ -1599,6 +1607,15 @@ mod tests {
     fn gz_write_advanced_pos_advances_by_consumed_input() {
         assert_eq!(gz_write_advanced_pos(100, 24), 124);
         assert_eq!(gz_write_advanced_pos(-1, 1), 0);
+    }
+
+    #[test]
+    fn gz_write_remaining_after_consumption_preserves_wrapping_subtraction() {
+        assert_eq!(gz_write_remaining_after_consumption(100, 24), 76);
+        assert_eq!(
+            gz_write_remaining_after_consumption(0, 1),
+            crate::stdlib::z_size_t::MAX
+        );
     }
 
     #[test]
