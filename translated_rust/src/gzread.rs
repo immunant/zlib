@@ -954,6 +954,10 @@ fn gz_decomp_input_action(load_failed: bool, avail_in: crate::stdlib::uInt) -> G
     }
 }
 
+fn gz_decomp_needs_input_load(avail_in: crate::stdlib::uInt) -> bool {
+    avail_in == 0
+}
+
 fn gz_decomp_reports_unexpected_eof(again: ::core::ffi::c_int) -> bool {
     again == 0
 }
@@ -1041,11 +1045,8 @@ unsafe fn gz_decomp(mut state: crate::gzguts_h::gz_statep) -> ::core::ffi::c_int
     let mut strm: crate::zlib_h::z_streamp = &raw mut (*state).strm;
     had = (*strm).avail_out as ::core::ffi::c_uint;
     loop {
-        let load_failed = if (*strm).avail_in == 0 as crate::stdlib::uInt {
-            gz_avail(state) == -1 as ::core::ffi::c_int
-        } else {
-            false
-        };
+        let load_failed = gz_decomp_needs_input_load((*strm).avail_in)
+            && gz_avail(state) == -1 as ::core::ffi::c_int;
         match gz_decomp_input_action(load_failed, (*strm).avail_in) {
             GzDecompInputAction::InputError => {
                 ret = (*state).err;
@@ -1675,6 +1676,13 @@ mod tests {
             gz_decomp_input_action(false, 1),
             GzDecompInputAction::Inflate
         );
+    }
+
+    #[test]
+    fn gz_decomp_needs_input_load_only_when_input_is_empty() {
+        assert!(gz_decomp_needs_input_load(0));
+        assert!(!gz_decomp_needs_input_load(1));
+        assert!(!gz_decomp_needs_input_load(crate::stdlib::uInt::MAX));
     }
 
     #[test]

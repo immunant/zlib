@@ -2216,7 +2216,7 @@ pub unsafe extern "C" fn inflate(
                 c2rust_current_block = 4315581362918593597;
             }
             9191988293914270845 => {
-                if (*state).flags & 0x1000 as ::core::ffi::c_int != 0 {
+                if inflate_gzip_header_has_comment((*state).flags) {
                     if have == 0 as ::core::ffi::c_uint {
                         break;
                     }
@@ -2619,6 +2619,10 @@ fn inflate_gzip_header_has_extra(flags: ::core::ffi::c_int) -> bool {
 
 fn inflate_gzip_header_has_name(flags: ::core::ffi::c_int) -> bool {
     flags & 0x800 != 0
+}
+
+fn inflate_gzip_header_has_comment(flags: ::core::ffi::c_int) -> bool {
+    flags & 0x1000 != 0
 }
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
@@ -3106,9 +3110,10 @@ mod tests {
         inflate_data_type_value, inflate_dictionary_id_from_hold, inflate_dictionary_is_allowed,
         inflate_get_dictionary_result, inflate_gzip_extra_progress, inflate_gzip_flags,
         inflate_gzip_flags_error, inflate_gzip_flags_validation, inflate_gzip_header_crc_is_valid,
-        inflate_gzip_header_has_extra, inflate_gzip_header_has_name, inflate_gzip_window_bits,
-        inflate_head_skip_mode, inflate_header_crc_enabled, inflate_header_wrap_allows_capture,
-        inflate_is_gzip_header, inflate_mark_progress, inflate_mark_value, inflate_match_copy_plan,
+        inflate_gzip_header_has_comment, inflate_gzip_header_has_extra,
+        inflate_gzip_header_has_name, inflate_gzip_window_bits, inflate_head_skip_mode,
+        inflate_header_crc_enabled, inflate_header_wrap_allows_capture, inflate_is_gzip_header,
+        inflate_mark_progress, inflate_mark_value, inflate_match_copy_plan,
         inflate_match_is_complete, inflate_mode_data_type_flags, inflate_mode_is_valid,
         inflate_mode_on_entry, inflate_needs_buffer_error, inflate_output_checksum,
         inflate_prime_update, inflate_reset2_discards_window, inflate_reset2_params,
@@ -3451,6 +3456,15 @@ mod tests {
         assert!(!inflate_gzip_header_has_name(0));
         assert!(!inflate_gzip_header_has_name(0x400));
         assert!(!inflate_gzip_header_has_name(0x1000));
+    }
+
+    #[test]
+    fn inflate_gzip_header_comment_flag_requires_the_comment_bit() {
+        assert!(inflate_gzip_header_has_comment(0x1000));
+        assert!(inflate_gzip_header_has_comment(0x1800));
+        assert!(!inflate_gzip_header_has_comment(0));
+        assert!(!inflate_gzip_header_has_comment(0x400));
+        assert!(!inflate_gzip_header_has_comment(0x800));
     }
 
     #[test]

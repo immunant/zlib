@@ -3713,6 +3713,10 @@ fn tree_parent_depth(
     left_depth.max(right_depth).wrapping_add(1)
 }
 
+fn tree_heap_has_pair(heap_len: ::core::ffi::c_int) -> bool {
+    heap_len >= 2 as ::core::ffi::c_int
+}
+
 fn supplemental_tree_node(max_code: &mut ::core::ffi::c_int) -> ::core::ffi::c_int {
     if *max_code < 2 {
         *max_code += 1;
@@ -4341,7 +4345,7 @@ unsafe fn build_tree(
         node = node + 1;
         (*s).heap[SMALLEST as usize] = c2rust_fresh57;
         pqdownheap(s, tree, SMALLEST);
-        if !((*s).heap_len >= 2 as ::core::ffi::c_int) {
+        if !tree_heap_has_pair((*s).heap_len) {
             break;
         }
     }
@@ -5532,10 +5536,10 @@ mod tests {
         supplemental_tree_node, supplemental_tree_opt_len, symbol_buffer_is_full,
         symbol_triplet_cursors, tally_match_tree_indices, tally_scan_tree_action,
         tally_symbol_bytes, tally_tree_update, tree_bit_length_cost,
-        tree_bit_length_totals_after_node, tree_next_cursor, tree_parent_depth, tree_run_continues,
-        tree_run_extra_bits, tree_run_limits, BlockEncoding, GenBitlenOverflowNode,
-        GenBitlenOverflowReassignment, HeapChild, ScanTreeAction, TallyTreeUpdate,
-        BL_CODE_ORDER_LEN, END_BLOCK, MAX_BITS, REPZ_11_138, REPZ_3_10, REP_3_6,
+        tree_bit_length_totals_after_node, tree_heap_has_pair, tree_next_cursor, tree_parent_depth,
+        tree_run_continues, tree_run_extra_bits, tree_run_limits, BlockEncoding,
+        GenBitlenOverflowNode, GenBitlenOverflowReassignment, HeapChild, ScanTreeAction,
+        TallyTreeUpdate, BL_CODE_ORDER_LEN, END_BLOCK, MAX_BITS, REPZ_11_138, REPZ_3_10, REP_3_6,
     };
 
     fn ltree_with_frequency(
@@ -6084,6 +6088,15 @@ mod tests {
         assert_eq!(tree_parent_depth(3, 7), 8);
         assert_eq!(tree_parent_depth(7, 3), 8);
         assert_eq!(tree_parent_depth(crate::zutil_h::uch::MAX, 4), 0);
+    }
+
+    #[test]
+    fn tree_heap_pair_check_requires_at_least_two_nodes() {
+        assert!(!tree_heap_has_pair(-1));
+        assert!(!tree_heap_has_pair(0));
+        assert!(!tree_heap_has_pair(1));
+        assert!(tree_heap_has_pair(2));
+        assert!(tree_heap_has_pair(3));
     }
 
     #[test]
