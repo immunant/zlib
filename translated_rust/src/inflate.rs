@@ -358,11 +358,8 @@ pub unsafe extern "C" fn inflateInit2_(
     if state.is_null() {
         return crate::zlib_h::Z_MEM_ERROR;
     }
-    crate::stdlib::memset(
-        state as *mut ::core::ffi::c_void,
-        0 as ::core::ffi::c_int,
-        ::core::mem::size_of::<crate::src::inflate::inflate_state>(),
-    );
+    // `inflateReset2()` below establishes every field before the new state is
+    // observed, so clearing allocator-provided storage here is dead work.
     (*strm).state = state as *mut crate::src::deflate::internal_state;
     (*state).stream_identity = strm.addr();
     (*state).window = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
