@@ -160,6 +160,15 @@ unsafe extern "C" fn gz_avail(mut state: crate::gzguts_h::gz_statep) -> ::core::
     return 0 as ::core::ffi::c_int;
 }
 
+fn gz_is_gzip_header(
+    first: ::core::ffi::c_uchar,
+    second: ::core::ffi::c_uchar,
+    third: ::core::ffi::c_uchar,
+    fourth: ::core::ffi::c_uchar,
+) -> bool {
+    first == 31 && second == 139 && third == 8 && fourth < 32
+}
+
 unsafe extern "C" fn gz_look(mut state: crate::gzguts_h::gz_statep) -> ::core::ffi::c_int {
     let mut strm: crate::zlib_h::z_streamp = &raw mut (*state).strm;
     if (*state).size == 0 as ::core::ffi::c_uint {
@@ -218,14 +227,12 @@ unsafe extern "C" fn gz_look(mut state: crate::gzguts_h::gz_statep) -> ::core::f
         return 0 as ::core::ffi::c_int;
     }
     if (*strm).avail_in > 3 as crate::stdlib::uInt
-        && *(*strm).next_in.offset(0 as ::core::ffi::c_int as isize) as ::core::ffi::c_int
-            == 31 as ::core::ffi::c_int
-        && *(*strm).next_in.offset(1 as ::core::ffi::c_int as isize) as ::core::ffi::c_int
-            == 139 as ::core::ffi::c_int
-        && *(*strm).next_in.offset(2 as ::core::ffi::c_int as isize) as ::core::ffi::c_int
-            == 8 as ::core::ffi::c_int
-        && (*(*strm).next_in.offset(3 as ::core::ffi::c_int as isize) as ::core::ffi::c_int)
-            < 32 as ::core::ffi::c_int
+        && gz_is_gzip_header(
+            *(*strm).next_in.offset(0 as ::core::ffi::c_int as isize),
+            *(*strm).next_in.offset(1 as ::core::ffi::c_int as isize),
+            *(*strm).next_in.offset(2 as ::core::ffi::c_int as isize),
+            *(*strm).next_in.offset(3 as ::core::ffi::c_int as isize),
+        )
     {
         crate::src::inflate::inflateReset(strm as *mut crate::zlib_h::z_stream_s);
         (*state).how = crate::gzguts_h::GZIP;
@@ -428,6 +435,17 @@ unsafe extern "C" fn gz_skip(mut state: crate::gzguts_h::gz_statep) -> ::core::f
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn gz_is_gzip_header_accepts_valid_header() {
+        assert!(gz_is_gzip_header(31, 139, 8, 31));
+    }
+
+    #[test]
+    fn gz_is_gzip_header_rejects_invalid_magic_or_flags() {
+        assert!(!gz_is_gzip_header(30, 139, 8, 0));
+        assert!(!gz_is_gzip_header(31, 139, 8, 32));
+    }
 
     #[test]
     fn gz_skip_core_consumes_only_remaining_skip() {

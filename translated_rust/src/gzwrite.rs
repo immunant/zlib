@@ -57,6 +57,19 @@ fn gz_init_core(state: &mut crate::gzguts_h::gz_state) {
     }
 }
 
+fn gz_zero_chunk_len(
+    size: ::core::ffi::c_uint,
+    skip: crate::stdlib::off64_t,
+    int_and_off64_are_same_size: bool,
+    int_max: ::core::ffi::c_uint,
+) -> ::core::ffi::c_uint {
+    if (int_and_off64_are_same_size && size > int_max) || size as crate::stdlib::off64_t > skip {
+        skip as ::core::ffi::c_uint
+    } else {
+        size
+    }
+}
+
 unsafe extern "C" fn gz_init(mut state: crate::gzguts_h::gz_statep) -> ::core::ffi::c_int {
     let state = &mut *state;
     state.in_0 = crate::stdlib::malloc(
@@ -241,15 +254,13 @@ unsafe extern "C" fn gz_zero(mut state: crate::gzguts_h::gz_statep) -> ::core::f
     }
     first = 1 as ::core::ffi::c_int;
     loop {
-        n = if ::core::mem::size_of::<::core::ffi::c_int>() as usize
-            == ::core::mem::size_of::<crate::stdlib::off64_t>() as usize
-            && (*state).size > crate::src::gzlib::gz_intmax()
-            || (*state).size as crate::stdlib::off64_t > (*state).skip
-        {
-            (*state).skip as ::core::ffi::c_uint
-        } else {
-            (*state).size
-        };
+        n = gz_zero_chunk_len(
+            (*state).size,
+            (*state).skip,
+            ::core::mem::size_of::<::core::ffi::c_int>()
+                == ::core::mem::size_of::<crate::stdlib::off64_t>(),
+            crate::src::gzlib::gz_intmax(),
+        );
         if first != 0 {
             crate::stdlib::memset(
                 (*state).in_0 as *mut ::core::ffi::c_void,
@@ -687,4 +698,30 @@ pub unsafe extern "C" fn gzclose_w(mut file: crate::zlib_h::gzFile) -> ::core::f
 
 pub unsafe extern "C" fn gzclose_w_ffi(mut file: crate::zlib_h::gzFile) -> ::core::ffi::c_int {
     gzclose_w(file)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::gz_zero_chunk_len;
+
+    #[test]
+    fn gz_zero_chunk_len_limits_to_remaining_skip() {
+        assert_eq!(gz_zero_chunk_len(1024, 99, false, 0), 99);
+    }
+
+    #[test]
+    fn gz_zero_chunk_len_uses_buffer_size_when_skip_is_sufficient() {
+        assert_eq!(gz_zero_chunk_len(1024, 1024, false, 0), 1024);
+        assert_eq!(gz_zero_chunk_len(1024, 2048, false, 0), 1024);
+    }
+
+    #[test]
+    fn gz_zero_chunk_len_limits_large_buffers_on_matching_widths() {
+        assert_eq!(gz_zero_chunk_len(1024, 4096, true, 1023), 4096);
+    }
+
+    #[test]
+    fn gz_zero_chunk_len_ignores_int_limit_on_different_widths() {
+        assert_eq!(gz_zero_chunk_len(1024, 4096, false, 1023), 1024);
+    }
 }

@@ -219,6 +219,37 @@ fn gz_apply_open_plan(state: &mut crate::gzguts_h::gz_state, plan: GzOpenPlan) {
     state.direct = plan.direct;
 }
 
+fn gz_post_open_metadata(
+    mode: ::core::ffi::c_int,
+    current_offset: crate::stdlib::off64_t,
+) -> (::core::ffi::c_int, Option<crate::stdlib::off64_t>) {
+    if mode == crate::gzguts_h::GZ_APPEND {
+        (crate::gzguts_h::GZ_WRITE, None)
+    } else if mode == crate::gzguts_h::GZ_READ {
+        (
+            mode,
+            Some(if current_offset == -1 {
+                0
+            } else {
+                current_offset
+            }),
+        )
+    } else {
+        (mode, None)
+    }
+}
+
+fn gz_apply_post_open_metadata(
+    state: &mut crate::gzguts_h::gz_state,
+    current_offset: crate::stdlib::off64_t,
+) {
+    let (mode, start) = gz_post_open_metadata(state.mode, current_offset);
+    state.mode = mode;
+    if let Some(start) = start {
+        state.start = start;
+    }
+}
+
 unsafe extern "C" fn gz_open(
     mut path: *const ::core::ffi::c_void,
     mut fd: ::core::ffi::c_int,
@@ -291,24 +322,23 @@ unsafe extern "C" fn gz_open(
         crate::stdlib::free(state as *mut ::core::ffi::c_void);
         return ::core::ptr::null_mut::<crate::zlib_h::gzFile_s>();
     }
-    if (*state).mode == crate::gzguts_h::GZ_APPEND {
+    let current_offset = if (*state).mode == crate::gzguts_h::GZ_APPEND {
         crate::stdlib::lseek64(
             (*state).fd,
             0 as crate::stdlib::__off64_t,
             crate::stdlib::SEEK_END,
         );
-        (*state).mode = crate::gzguts_h::GZ_WRITE;
-    }
-    if (*state).mode == crate::gzguts_h::GZ_READ {
-        (*state).start = crate::stdlib::lseek64(
+        0
+    } else if (*state).mode == crate::gzguts_h::GZ_READ {
+        crate::stdlib::lseek64(
             (*state).fd,
             0 as crate::stdlib::__off64_t,
             crate::stdlib::SEEK_CUR,
-        ) as crate::stdlib::off64_t;
-        if (*state).start == -1 as ::core::ffi::c_int as crate::stdlib::off64_t {
-            (*state).start = 0 as crate::stdlib::off64_t;
-        }
-    }
+        ) as crate::stdlib::off64_t
+    } else {
+        0
+    };
+    gz_apply_post_open_metadata(&mut *state, current_offset);
     gz_reset(state);
     return state as crate::zlib_h::gzFile;
 }
@@ -812,8 +842,8 @@ pub unsafe extern "C" fn gz_intmax_ffi() -> ::core::ffi::c_uint {
 #[cfg(test)]
 mod tests {
     use super::{
-        gz_clear_read_flags, gz_parse_open_mode, gz_prepare_open, gzerror_core,
-        gzoffset64_adjust_for_buffered_read, gztell64_core, GzErrorMessage,
+        gz_clear_read_flags, gz_parse_open_mode, gz_post_open_metadata, gz_prepare_open,
+        gzerror_core, gzoffset64_adjust_for_buffered_read, gztell64_core, GzErrorMessage,
     };
 
     #[test]
@@ -940,5 +970,25 @@ mod tests {
         assert_eq!(gz_prepare_open(gz_parse_open_mode(b"9").unwrap()), None);
         assert_eq!(gz_prepare_open(gz_parse_open_mode(b"rT").unwrap()), None);
         assert_eq!(gz_prepare_open(gz_parse_open_mode(b"wG").unwrap()), None);
+    }
+
+    #[test]
+    fn post_open_metadata_converts_append_without_setting_read_start() {
+        assert_eq!(
+            gz_post_open_metadata(crate::gzguts_h::GZ_APPEND, 91),
+            (crate::gzguts_h::GZ_WRITE, None)
+        );
+    }
+
+    #[test]
+    fn post_open_metadata_uses_zero_when_read_offset_is_unavailable() {
+        assert_eq!(
+            gz_post_open_metadata(crate::gzguts_h::GZ_READ, -1),
+            (crate::gzguts_h::GZ_READ, Some(0))
+        );
+        assert_eq!(
+            gz_post_open_metadata(crate::gzguts_h::GZ_READ, 19),
+            (crate::gzguts_h::GZ_READ, Some(19))
+        );
     }
 }

@@ -20,6 +20,21 @@ pub use crate::zlib_h::gzFile_s;
 pub use crate::zlib_h::z_stream;
 pub use crate::zlib_h::z_stream_s;
 pub use crate::zlib_h::Z_STREAM_ERROR;
+
+#[derive(Debug, PartialEq, Eq)]
+enum GzCloseMode {
+    Read,
+    Write,
+}
+
+fn gz_close_mode(mode: ::core::ffi::c_int) -> GzCloseMode {
+    if mode == crate::gzguts_h::GZ_READ {
+        GzCloseMode::Read
+    } else {
+        GzCloseMode::Write
+    }
+}
+
 #[export_name = "gzclose"]
 pub unsafe extern "C" fn gzclose_ffi(file: crate::zlib_h::gzFile) -> ::core::ffi::c_int {
     if file.is_null() {
@@ -27,9 +42,28 @@ pub unsafe extern "C" fn gzclose_ffi(file: crate::zlib_h::gzFile) -> ::core::ffi
     }
 
     let state = unsafe { &*(file as *const crate::gzguts_h::gz_state) };
-    if state.mode == crate::gzguts_h::GZ_READ {
-        unsafe { crate::src::gzread::gzclose_r(file as *mut crate::zlib_h::gzFile_s) }
-    } else {
-        unsafe { crate::src::gzwrite::gzclose_w(file as *mut crate::zlib_h::gzFile_s) }
+    match gz_close_mode(state.mode) {
+        GzCloseMode::Read => unsafe {
+            crate::src::gzread::gzclose_r(file as *mut crate::zlib_h::gzFile_s)
+        },
+        GzCloseMode::Write => unsafe {
+            crate::src::gzwrite::gzclose_w(file as *mut crate::zlib_h::gzFile_s)
+        },
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{gz_close_mode, GzCloseMode};
+
+    #[test]
+    fn selects_read_close_for_read_mode() {
+        assert_eq!(gz_close_mode(crate::gzguts_h::GZ_READ), GzCloseMode::Read);
+    }
+
+    #[test]
+    fn selects_write_close_for_non_read_modes() {
+        assert_eq!(gz_close_mode(crate::gzguts_h::GZ_WRITE), GzCloseMode::Write);
+        assert_eq!(gz_close_mode(crate::gzguts_h::GZ_NONE), GzCloseMode::Write);
     }
 }
