@@ -972,22 +972,47 @@ pub unsafe extern "C" fn inflateBack_ffi(
     }
     result
 }
-pub unsafe extern "C" fn inflateBackEnd(mut strm: crate::zlib_h::z_streamp) -> ::core::ffi::c_int {
-    if strm.is_null() || (*strm).state.is_null() || (*strm).zfree.is_none() {
-        return crate::zlib_h::Z_STREAM_ERROR;
-    }
-    ::core::ptr::drop_in_place((*strm).state as *mut crate::src::inflate::inflate_state);
-    Some((*strm).zfree.expect("non-null function pointer")).expect("non-null function pointer")(
-        (*strm).opaque,
-        (*strm).state as crate::stdlib::voidpf,
-    );
-    (*strm).state = ::core::ptr::null_mut::<crate::src::deflate::internal_state>();
-    return crate::zlib_h::Z_OK;
+/// Release the Rust-owned portions of a back-inflater state.
+///
+/// The allocation itself remains owned by the ABI allocator, so the exported
+/// boundary returns it only after this safe cleanup has released the window.
+fn inflate_back_end_impl(state: &mut crate::src::inflate::inflate_state) -> ::core::ffi::c_int {
+    state.window = None;
+    crate::zlib_h::Z_OK
 }
+
+/// Return the ABI-owned state allocation after the safe state cleanup.
+///
+/// This is intentionally separate from the exported wrapper: it is the one
+/// place that still knows the callback pair and raw allocation address.
+unsafe fn inflate_back_end_boundary(
+    strm: &mut crate::zlib_h::z_stream_s,
+) -> ::core::ffi::c_int {
+    let state_allocation = strm.state.cast::<crate::src::inflate::inflate_state>();
+    let Some(zfree) = strm.zfree else {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    };
+    let Some(state) = state_allocation.as_mut() else {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    };
+    let end = inflate_back_end_impl(state);
+    if end != crate::zlib_h::Z_STREAM_ERROR {
+        // The state was created by this callback pair, so destruction and
+        // deallocation must stay paired at the ABI boundary.
+        core::ptr::drop_in_place(state_allocation);
+        zfree(strm.opaque, state_allocation.cast());
+        strm.state = core::ptr::null_mut();
+    }
+    end
+}
+
 #[export_name = "inflateBackEnd"]
 
 pub unsafe extern "C" fn inflateBackEnd_ffi(
     mut strm: crate::zlib_h::z_streamp,
 ) -> ::core::ffi::c_int {
-    inflateBackEnd(strm)
+    let Some(strm) = strm.as_mut() else {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    };
+    inflate_back_end_boundary(strm)
 }
