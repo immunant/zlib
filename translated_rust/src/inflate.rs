@@ -363,13 +363,6 @@ pub unsafe extern "C" fn inflateInit2__ffi(
 ) -> ::core::ffi::c_int {
     inflateInit2_(strm, windowBits, version, stream_size)
 }
-pub unsafe extern "C" fn inflateInit_(
-    mut strm: crate::zlib_h::z_streamp,
-    mut version: *const ::core::ffi::c_char,
-    mut stream_size: ::core::ffi::c_int,
-) -> ::core::ffi::c_int {
-    return inflateInit2_(strm, crate::zutil_h::DEF_WBITS, version, stream_size);
-}
 #[export_name = "inflateInit_"]
 
 pub unsafe extern "C" fn inflateInit__ffi(
@@ -377,7 +370,7 @@ pub unsafe extern "C" fn inflateInit__ffi(
     mut version: *const ::core::ffi::c_char,
     mut stream_size: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
-    inflateInit_(strm, version, stream_size)
+    inflateInit2_(strm, crate::zutil_h::DEF_WBITS, version, stream_size)
 }
 pub fn inflatePrime(
     state: &mut crate::src::inflate::inflate_state,
@@ -2139,7 +2132,12 @@ pub unsafe extern "C" fn inflateSetDictionary_ffi(
 ) -> ::core::ffi::c_int {
     inflateSetDictionary(strm, dictionary, dictLength)
 }
-pub unsafe extern "C" fn inflateGetHeader(
+fn inflate_get_header_allowed(state: &crate::src::inflate::inflate_state) -> bool {
+    state.wrap & 2 as ::core::ffi::c_int != 0 as ::core::ffi::c_int
+}
+#[export_name = "inflateGetHeader"]
+
+pub unsafe extern "C" fn inflateGetHeader_ffi(
     mut strm: crate::zlib_h::z_streamp,
     mut head: crate::zlib_h::gz_headerp,
 ) -> ::core::ffi::c_int {
@@ -2155,18 +2153,6 @@ pub unsafe extern "C" fn inflateGetHeader(
     (*state).head = head;
     (*head).done = 0 as ::core::ffi::c_int;
     return crate::zlib_h::Z_OK;
-}
-
-fn inflate_get_header_allowed(state: &crate::src::inflate::inflate_state) -> bool {
-    state.wrap & 2 as ::core::ffi::c_int != 0 as ::core::ffi::c_int
-}
-#[export_name = "inflateGetHeader"]
-
-pub unsafe extern "C" fn inflateGetHeader_ffi(
-    mut strm: crate::zlib_h::z_streamp,
-    mut head: crate::zlib_h::gz_headerp,
-) -> ::core::ffi::c_int {
-    inflateGetHeader(strm, head)
 }
 fn syncsearch(
     mut got: ::core::ffi::c_uint,

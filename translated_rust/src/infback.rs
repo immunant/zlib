@@ -68,7 +68,9 @@ pub use crate::zlib_h::Z_OK;
 pub use crate::zlib_h::Z_STREAM_END;
 pub use crate::zlib_h::Z_STREAM_ERROR;
 pub use crate::zlib_h::Z_VERSION_ERROR;
-pub unsafe extern "C" fn inflateBackInit_(
+#[export_name = "inflateBackInit_"]
+
+pub unsafe extern "C" fn inflateBackInit__ffi(
     mut strm: crate::zlib_h::z_streamp,
     mut windowBits: ::core::ffi::c_int,
     mut window: *mut ::core::ffi::c_uchar,
@@ -127,17 +129,6 @@ pub unsafe extern "C" fn inflateBackInit_(
     (*state).whave = 0 as ::core::ffi::c_uint;
     (*state).sane = 1 as ::core::ffi::c_int;
     return crate::zlib_h::Z_OK;
-}
-#[export_name = "inflateBackInit_"]
-
-pub unsafe extern "C" fn inflateBackInit__ffi(
-    mut strm: crate::zlib_h::z_streamp,
-    mut windowBits: ::core::ffi::c_int,
-    mut window: *mut ::core::ffi::c_uchar,
-    mut version: *const ::core::ffi::c_char,
-    mut stream_size: ::core::ffi::c_int,
-) -> ::core::ffi::c_int {
-    inflateBackInit_(strm, windowBits, window, version, stream_size)
 }
 pub unsafe extern "C" fn inflateBack(
     mut strm: crate::zlib_h::z_streamp,

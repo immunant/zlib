@@ -3287,13 +3287,10 @@ pub unsafe extern "C" fn _tr_stored_block_ffi(
 ) {
     _tr_stored_block(s, buf, stored_len, last)
 }
-pub unsafe extern "C" fn _tr_flush_bits(mut s: *mut crate::src::deflate::deflate_state) {
-    bi_flush(s);
-}
 #[export_name = "_tr_flush_bits"]
 
 pub unsafe extern "C" fn _tr_flush_bits_ffi(mut s: *mut crate::src::deflate::deflate_state) {
-    _tr_flush_bits(s)
+    bi_flush(s);
 }
 pub unsafe extern "C" fn _tr_align(mut s: *mut crate::src::deflate::deflate_state) {
     let mut len: ::core::ffi::c_int = 3 as ::core::ffi::c_int;

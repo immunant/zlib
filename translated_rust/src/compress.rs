@@ -3,7 +3,6 @@ pub use crate::__stddef_size_t_h::size_t;
 
 pub use crate::src::deflate::deflate;
 pub use crate::src::deflate::deflateEnd;
-pub use crate::src::deflate::deflateInit_;
 pub use crate::src::deflate::internal_state;
 pub use crate::stdlib::uInt;
 pub use crate::stdlib::uLong;
@@ -62,7 +61,7 @@ pub unsafe extern "C" fn compress2_z_ffi(
     stream.zalloc = None;
     stream.zfree = None;
     stream.opaque = ::core::ptr::null_mut::<::core::ffi::c_void>();
-    err = crate::src::deflate::deflateInit_(
+    err = crate::src::deflate::deflateInit__ffi(
         &raw mut stream as *mut _ as *mut crate::zlib_h::z_stream_s,
         level,
         crate::zlib_h::ZLIB_VERSION.as_ptr(),
