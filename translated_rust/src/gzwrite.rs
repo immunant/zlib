@@ -285,6 +285,24 @@ enum GzZeroDirect {
     Invalid,
 }
 
+/// Commit one completed transparent sparse-write chunk. A successful file
+/// write must make progress here: accepting a zero-byte chunk would leave the
+/// pending seek unchanged and spin forever. Keep this scalar-only so the
+/// descriptor loop never needs to rely on wrapping progress arithmetic.
+fn gz_zero_direct_progress(
+    consumed: usize,
+    skip: crate::stdlib::off64_t,
+    written: usize,
+) -> Option<(usize, crate::stdlib::off64_t)> {
+    if written == 0 {
+        return None;
+    }
+    Some((
+        consumed.checked_add(written)?,
+        skip.checked_sub(written as crate::stdlib::off64_t)?,
+    ))
+}
+
 fn gz_zero_direct(
     file: &mut ::std::fs::File,
     input: &mut [u8],
@@ -308,15 +326,18 @@ fn gz_zero_direct(
         let written = match gz_direct_write_file(file, bytes) {
             Ok(written) => written,
             Err((written, code)) => {
-                return GzZeroDirect::IoError {
-                    consumed: consumed.wrapping_add(written),
-                    code,
+                let Some(consumed) = consumed.checked_add(written) else {
+                    return GzZeroDirect::Invalid;
                 };
+                return GzZeroDirect::IoError { consumed, code };
             }
         };
-        n = written as ::core::ffi::c_uint;
-        consumed = consumed.wrapping_add(n as usize);
-        skip = skip.wrapping_sub(n as crate::stdlib::off64_t);
+        let Some((next_consumed, next_skip)) = gz_zero_direct_progress(consumed, skip, written)
+        else {
+            return GzZeroDirect::Invalid;
+        };
+        consumed = next_consumed;
+        skip = next_skip;
         if skip == 0 {
             return GzZeroDirect::Complete(consumed);
         }
