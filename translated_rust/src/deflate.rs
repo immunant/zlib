@@ -1065,6 +1065,7 @@ pub unsafe extern "C" fn deflateInit2__ffi(
 // here, so ordinary deflater operations stay reference-based.
 fn deflateStateCheck<'a>(
     strm: &'a mut crate::zlib_h::z_stream,
+    initial: Option<&crate::src::deflate::deflate_state>,
 ) -> Option<(
     &'a mut crate::zlib_h::z_stream,
     &'a mut crate::src::deflate::deflate_state,
@@ -1076,8 +1077,13 @@ fn deflateStateCheck<'a>(
     }
     // SAFETY: the stream reference is already bound by the caller. Its
     // non-null state pointer is checked for the reciprocal stream link and
-    // state invariants before the reference is exposed.
+    // state invariants before the reference is exposed. The copy path may
+    // instead provide the complete initial state for a fresh allocation.
     let state = unsafe { &mut *state_ptr };
+    if let Some(initial) = initial {
+        state.clone_from(initial);
+        return Some((strm, state));
+    }
     if !deflate_state_is_valid(strm, state, state.strm == strm_ptr) {
         return None;
     }
@@ -1118,7 +1124,7 @@ pub fn deflateSetDictionary(
     if dictionary.len() > crate::stdlib::uInt::MAX as usize {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    let Some((stream, state)) = deflateStateCheck(strm) else {
+    let Some((stream, state)) = deflateStateCheck(strm, None) else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
     // `deflate_set_dictionary()` binds its (possibly shortened) dictionary
@@ -1332,7 +1338,7 @@ pub unsafe extern "C" fn deflateGetDictionary_ffi(
     let Some(strm) = (unsafe { strm.as_mut() }) else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
-    let Some((strm, state)) = deflateStateCheck(strm) else {
+    let Some((strm, state)) = deflateStateCheck(strm, None) else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
     // zlib requires a dictionary output buffer large enough for the complete
@@ -1355,7 +1361,7 @@ pub fn deflateResetKeep(
     strm: &mut crate::zlib_h::z_stream,
     initialize_matcher: bool,
 ) -> ::core::ffi::c_int {
-    let Some((strm, state)) = deflateStateCheck(strm) else {
+    let Some((strm, state)) = deflateStateCheck(strm, None) else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
     deflate_reset_bound(strm, state, initialize_matcher)
@@ -1463,7 +1469,7 @@ fn deflateSetHeader(
     let Some(strm) = strm else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
-    let Some((_strm, state)) = deflateStateCheck(strm) else {
+    let Some((_strm, state)) = deflateStateCheck(strm, None) else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
     let result = deflate_header_is_supported(state);
@@ -1553,7 +1559,7 @@ pub fn deflatePending(
     pending: Option<&mut ::core::ffi::c_uint>,
     bits: Option<&mut ::core::ffi::c_int>,
 ) -> ::core::ffi::c_int {
-    let Some((_strm, state)) = deflateStateCheck(strm) else {
+    let Some((_strm, state)) = deflateStateCheck(strm, None) else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
     deflate_pending(state, pending, bits)
@@ -1597,7 +1603,7 @@ pub fn deflateUsed(
     strm: &mut crate::zlib_h::z_stream,
     bits: Option<&mut ::core::ffi::c_int>,
 ) -> ::core::ffi::c_int {
-    let Some((_strm, state)) = deflateStateCheck(strm) else {
+    let Some((_strm, state)) = deflateStateCheck(strm, None) else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
     deflate_used(state, bits)
@@ -1702,7 +1708,7 @@ pub fn deflatePrime(
     bits: ::core::ffi::c_int,
     value: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
-    let Some((stream, state)) = deflateStateCheck(strm) else {
+    let Some((stream, state)) = deflateStateCheck(strm, None) else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
     flush_pending(state, stream, false, |state, _stream, pending, _output| {
@@ -1732,7 +1738,7 @@ pub fn deflateParams(
     if input.len() != strm.avail_in as usize {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    if deflateStateCheck(strm).is_none() {
+    if deflateStateCheck(strm, None).is_none() {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
     if level == crate::zlib_h::Z_DEFAULT_COMPRESSION {
@@ -1746,7 +1752,7 @@ pub fn deflateParams(
         return crate::zlib_h::Z_STREAM_ERROR;
     }
     let needs_flush = {
-        let (_, state) = deflateStateCheck(strm).expect("stream validated above");
+        let (_, state) = deflateStateCheck(strm, None).expect("stream validated above");
         let func = configuration_table[state.level as usize].func;
         (strategy != state.strategy || func != configuration_table[level as usize].func)
             && state.last_flush != -2 as ::core::ffi::c_int
@@ -1757,7 +1763,7 @@ pub fn deflateParams(
             return err;
         }
         let (stream, state) =
-            deflateStateCheck(strm).expect("stream remains valid after deflate");
+            deflateStateCheck(strm, None).expect("stream remains valid after deflate");
         if stream.avail_in != 0
             || state.strstart as ::core::ffi::c_long - state.block_start
                 + state.lookahead as ::core::ffi::c_long
@@ -1766,7 +1772,7 @@ pub fn deflateParams(
             return crate::zlib_h::Z_BUF_ERROR;
         }
     }
-    let (stream, state) = deflateStateCheck(strm).expect("stream validated above");
+    let (stream, state) = deflateStateCheck(strm, None).expect("stream validated above");
     // `fill_window()` already owns the one validated binding of these
     // deflater allocations. Reuse it here rather than creating a second raw
     // slice view solely for the parameter update.
@@ -1857,7 +1863,7 @@ pub fn deflateTune(
     nice_length: ::core::ffi::c_int,
     max_chain: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
-    let Some((_strm, state)) = deflateStateCheck(strm) else {
+    let Some((_strm, state)) = deflateStateCheck(strm, None) else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
     deflate_tune(state, good_length, max_lazy, nice_length, max_chain)
@@ -2058,7 +2064,7 @@ pub fn deflateBound_z(
     mut sourceLen: crate::stdlib::z_size_t,
 ) -> crate::stdlib::z_size_t {
     let state = match strm {
-        Some(strm) => deflateStateCheck(strm).map(|(_strm, state)| state),
+        Some(strm) => deflateStateCheck(strm, None).map(|(_strm, state)| state),
         None => None,
     };
     deflate_bound_from_state(sourceLen, state.as_deref())
@@ -2802,7 +2808,7 @@ fn deflate_dispatch(
     strm: &mut crate::zlib_h::z_stream,
     mut flush: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
-    let Some((stream, state)) = deflateStateCheck(strm) else {
+    let Some((stream, state)) = deflateStateCheck(strm, None) else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
     if flush > crate::zlib_h::Z_BLOCK
@@ -2844,7 +2850,7 @@ pub unsafe extern "C" fn deflate_ffi(
 // only needs the already-owned stream and state, so keep the release plan
 // reference-bound here.
 pub fn deflateEnd(stream: &mut crate::zlib_h::z_stream) -> ::core::ffi::c_int {
-    let Some((stream, state)) = deflateStateCheck(stream) else {
+    let Some((stream, state)) = deflateStateCheck(stream, None) else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
     // `deflateStateCheck()` has established both links. Snapshot the release
@@ -2890,7 +2896,7 @@ pub(crate) fn deflate_end_default_bound(
     stream: &mut crate::zlib_h::z_stream,
 ) -> ::core::ffi::c_int {
     let (status, pending_buf, head, prev, window, state_ptr) = {
-        let Some((bound_stream, state)) = deflateStateCheck(stream) else {
+        let Some((bound_stream, state)) = deflateStateCheck(stream, None) else {
             return crate::zlib_h::Z_STREAM_ERROR;
         };
         (
@@ -2953,13 +2959,13 @@ fn deflateCopy(
     // copy plan reference-bound instead of repeatedly dereferencing the
     // source state through the allocation sequence below.
     let (pending_offset, plan, zalloc, opaque) = {
-        let Some((source_stream, source_state)) = deflateStateCheck(source) else {
+        let Some((source_stream, source_state)) = deflateStateCheck(source, None) else {
             return crate::zlib_h::Z_STREAM_ERROR;
         };
         // Publish the source stream fields before the allocator callbacks, as
         // zlib's original whole-struct copy does. A typed copy preserves every
         // observable stream field without an untyped foreign-memory operation.
-        *dest = *source_stream;
+        dest.clone_from(source_stream);
         let pending_offset = source_state
             .pending_out
             .addr()
@@ -2985,29 +2991,28 @@ fn deflateCopy(
         return crate::zlib_h::Z_MEM_ERROR;
     }
     dest.state = destination_state_ptr as *mut crate::src::deflate::internal_state;
+    let dest_ptr = ::core::ptr::from_mut(dest);
     // Copy the state before invoking the allocator again: custom allocation
     // callbacks can inspect `dest->state`, just as they can in zlib's C
     // implementation.  The assignment avoids an untyped whole-struct copy.
     {
         // The allocation callback above may inspect either stream. Rebind the
         // source after it returns before publishing the copied state.
-        let Some((_source_stream, source_state)) = deflateStateCheck(source) else {
+        let Some((_source_stream, source_state)) = deflateStateCheck(source, None) else {
             return crate::zlib_h::Z_STREAM_ERROR;
         };
         let source_header = deflate_header_snapshot(source_state);
-        // SAFETY: the allocator returned a non-null allocation large enough
-        // for one deflate state. This is the sole raw state binding in the
-        // reference-based copy engine; no callback runs while it is used.
-        let destination_state = unsafe { &mut *destination_state_ptr };
-        deflate_copy_state(destination_state, source_state);
-        destination_state.strm = ::core::ptr::from_mut(dest);
+        let Some((_dest_stream, destination_state)) = deflateStateCheck(dest, Some(source_state)) else {
+            return crate::zlib_h::Z_STREAM_ERROR;
+        };
+        destination_state.strm = dest_ptr;
         deflate_replace_header_snapshot(destination_state, source_header);
     }
     // Re-read the destination callback and opaque argument before every
     // allocation. A user allocator can modify the published destination
     // stream, and zlib observes those changes on each subsequent request.
     let window = {
-        let Some((dest_stream, _destination_state)) = deflateStateCheck(dest) else {
+        let Some((dest_stream, _destination_state)) = deflateStateCheck(dest, None) else {
             return crate::zlib_h::Z_STREAM_ERROR;
         };
         Some(dest_stream.zalloc.expect("non-null function pointer"))
@@ -3019,7 +3024,7 @@ fn deflateCopy(
         ) as *mut crate::stdlib::Bytef
     };
     let prev = {
-        let Some((dest_stream, _destination_state)) = deflateStateCheck(dest) else {
+        let Some((dest_stream, _destination_state)) = deflateStateCheck(dest, None) else {
             return crate::zlib_h::Z_STREAM_ERROR;
         };
         Some(dest_stream.zalloc.expect("non-null function pointer"))
@@ -3030,7 +3035,7 @@ fn deflateCopy(
         ) as *mut crate::src::deflate::Posf
     };
     let head = {
-        let Some((dest_stream, _destination_state)) = deflateStateCheck(dest) else {
+        let Some((dest_stream, _destination_state)) = deflateStateCheck(dest, None) else {
             return crate::zlib_h::Z_STREAM_ERROR;
         };
         Some(dest_stream.zalloc.expect("non-null function pointer"))
@@ -3041,7 +3046,7 @@ fn deflateCopy(
         ) as *mut crate::src::deflate::Posf
     };
     let pending_buf = {
-        let Some((dest_stream, _destination_state)) = deflateStateCheck(dest) else {
+        let Some((dest_stream, _destination_state)) = deflateStateCheck(dest, None) else {
             return crate::zlib_h::Z_STREAM_ERROR;
         };
         Some(dest_stream.zalloc.expect("non-null function pointer"))
@@ -3052,7 +3057,7 @@ fn deflateCopy(
         ) as *mut crate::zutil_h::uchf as *mut crate::stdlib::Bytef
     };
     if window.is_null() || prev.is_null() || head.is_null() || pending_buf.is_null() {
-        if let Some((destination_stream, _destination_state)) = deflateStateCheck(dest) {
+        if let Some((destination_stream, _destination_state)) = deflateStateCheck(dest, None) {
             deflateEnd(destination_stream);
         }
         return crate::zlib_h::Z_MEM_ERROR;
@@ -3062,10 +3067,10 @@ fn deflateCopy(
     // ordinary reference and slice operations instead of repeated raw-state
     // dereferences. The initial state copy intentionally remains before the
     // callbacks above, where zlib makes it observable through `dest->state`.
-    let Some((source_stream, source_state)) = deflateStateCheck(source) else {
+    let Some((source_stream, source_state)) = deflateStateCheck(source, None) else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
-    let Some((destination_stream, destination_state)) = deflateStateCheck(dest) else {
+    let Some((destination_stream, destination_state)) = deflateStateCheck(dest, None) else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
     // `pending_out` is an offset into the source pending allocation. Retain
@@ -3120,20 +3125,13 @@ fn deflateCopy(
             );
         },
     );
-    destination_state.l_desc.dyn_tree = &raw mut destination_state.dyn_ltree as *mut crate::src::deflate::ct_data_s
+    destination_state.l_desc.dyn_tree = destination_state.dyn_ltree.as_mut_ptr()
         as *mut crate::src::deflate::ct_data;
-    destination_state.d_desc.dyn_tree = &raw mut destination_state.dyn_dtree as *mut crate::src::deflate::ct_data_s
+    destination_state.d_desc.dyn_tree = destination_state.dyn_dtree.as_mut_ptr()
         as *mut crate::src::deflate::ct_data;
-    destination_state.bl_desc.dyn_tree = &raw mut destination_state.bl_tree as *mut crate::src::deflate::ct_data_s
+    destination_state.bl_desc.dyn_tree = destination_state.bl_tree.as_mut_ptr()
         as *mut crate::src::deflate::ct_data;
     return crate::zlib_h::Z_OK;
-}
-
-fn deflate_copy_state(
-    destination_state: &mut crate::src::deflate::deflate_state,
-    source_state: &crate::src::deflate::deflate_state,
-) {
-    *destination_state = *source_state;
 }
 
 // The source state has passed `deflateStateCheck()` before this is called.
