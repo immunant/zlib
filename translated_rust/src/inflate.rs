@@ -1045,14 +1045,21 @@ impl<'a> WindowStorage<'a> {
             return None;
         }
 
-        destination
-            .get_mut(..plan.first.len)?
-            .copy_from_slice(self.bytes.get(plan.first.start..first_end)?);
+        // Establish every source and destination range before the first
+        // write.  Besides making the preflight guarantee explicit, this
+        // keeps a future owner-backed caller from observing a partly copied
+        // prefix if the wrapped suffix is malformed.
+        let first_source = self.bytes.get(plan.first.start..first_end)?;
+        let destination = destination.get_mut(..total)?;
+        let (first_destination, second_destination) = destination.split_at_mut(plan.first.len);
+
         if let Some(second) = plan.second {
             let second_end = second.start.checked_add(second.len)?;
-            destination
-                .get_mut(plan.first.len..total)?
-                .copy_from_slice(self.bytes.get(second.start..second_end)?);
+            let second_source = self.bytes.get(second.start..second_end)?;
+            first_destination.copy_from_slice(first_source);
+            second_destination.copy_from_slice(second_source);
+        } else {
+            first_destination.copy_from_slice(first_source);
         }
         Some(())
     }
@@ -6710,13 +6717,13 @@ mod tests {
     fn window_storage_copy_match_prefix_crosses_one_wrapped_boundary() {
         let window = *b"abcdefgh";
         let storage = super::WindowStorage::new(&window, 3, 8).unwrap();
-        let mut destination = *b"_____";
+        let mut destination = *b"_____++";
 
         assert_eq!(
             storage.copy_match_prefix_to(6, 5, &mut destination),
             Some(())
         );
-        assert_eq!(destination, *b"ghabc");
+        assert_eq!(destination, *b"ghabc++");
     }
 
     #[test]
