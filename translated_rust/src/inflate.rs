@@ -2358,35 +2358,31 @@ pub unsafe extern "C" fn inflateGetHeader_ffi(
 ) -> ::core::ffi::c_int {
     inflateGetHeader(strm, head)
 }
-unsafe extern "C" fn syncsearch(
-    mut have: *mut ::core::ffi::c_uint,
-    mut buf: *const ::core::ffi::c_uchar,
-    mut len: ::core::ffi::c_uint,
-) -> ::core::ffi::c_uint {
-    let mut got: ::core::ffi::c_uint = 0;
-    let mut next: ::core::ffi::c_uint = 0;
-    got = *have;
-    next = 0 as ::core::ffi::c_uint;
-    while next < len && got < 4 as ::core::ffi::c_uint {
-        if *buf.offset(next as isize) as ::core::ffi::c_int
-            == (if got < 2 as ::core::ffi::c_uint {
-                0 as ::core::ffi::c_int
-            } else {
-                0xff as ::core::ffi::c_int
-            })
-        {
-            got = got.wrapping_add(1);
-        } else if *buf.offset(next as isize) != 0 {
-            got = 0 as ::core::ffi::c_uint;
-        } else {
-            got = (4 as ::core::ffi::c_uint).wrapping_sub(got);
+/// Search a safe compressed-input view for zlib's sync marker.  The export
+/// boundary owns conversion of the ABI cursor into this call-scoped slice.
+fn syncsearch(have: &mut ::core::ffi::c_uint, buf: &[u8]) -> ::core::ffi::c_uint {
+    let mut got = *have;
+    let mut next = 0;
+    for &byte in buf {
+        if got == 4 {
+            break;
         }
-        next = next.wrapping_add(1);
+        if byte == if got < 2 { 0 } else { 0xff } {
+            got = got.wrapping_add(1);
+        } else if byte != 0 {
+            got = 0;
+        } else {
+            got = 4u32.wrapping_sub(got);
+        }
+        next += 1;
     }
     *have = got;
-    return next;
+    next
 }
-pub unsafe extern "C" fn inflateSync(mut strm: crate::zlib_h::z_streamp) -> ::core::ffi::c_int {
+pub unsafe fn inflateSync(
+    mut strm: crate::zlib_h::z_streamp,
+    input: &[u8],
+) -> ::core::ffi::c_int {
     let mut len: ::core::ffi::c_uint = 0;
     let mut flags: ::core::ffi::c_int = 0;
     let mut in_0: ::core::ffi::c_ulong = 0;
@@ -2418,17 +2414,9 @@ pub unsafe extern "C" fn inflateSync(mut strm: crate::zlib_h::z_streamp) -> ::co
             (*state).bits = (*state).bits.wrapping_sub(8 as ::core::ffi::c_uint);
         }
         (*state).have = 0 as ::core::ffi::c_uint;
-        syncsearch(
-            &raw mut (*state).have,
-            &raw mut buf as *mut ::core::ffi::c_uchar,
-            len,
-        );
+        syncsearch(&mut (*state).have, &buf[..len as usize]);
     }
-    len = syncsearch(
-        &raw mut (*state).have,
-        (*strm).next_in,
-        (*strm).avail_in as ::core::ffi::c_uint,
-    );
+    len = syncsearch(&mut (*state).have, input);
     (*strm).avail_in = (*strm).avail_in.wrapping_sub(len);
     (*strm).next_in = (*strm).next_in.offset(len as isize);
     (*strm).total_in = (*strm).total_in.wrapping_add(len as crate::stdlib::uLong);
@@ -2453,7 +2441,18 @@ pub unsafe extern "C" fn inflateSync(mut strm: crate::zlib_h::z_streamp) -> ::co
 #[export_name = "inflateSync"]
 
 pub unsafe extern "C" fn inflateSync_ffi(mut strm: crate::zlib_h::z_streamp) -> ::core::ffi::c_int {
-    inflateSync(strm)
+    if strm.is_null() {
+        return inflateSync(strm, &[]);
+    }
+    let len = (*strm).avail_in as usize;
+    let input = if len == 0 {
+        &[]
+    } else if (*strm).next_in.is_null() {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    } else {
+        ::core::slice::from_raw_parts((*strm).next_in as *const u8, len)
+    };
+    inflateSync(strm, input)
 }
 pub unsafe extern "C" fn inflateSyncPoint(
     mut strm: crate::zlib_h::z_streamp,
