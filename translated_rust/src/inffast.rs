@@ -187,9 +187,17 @@ fn output_cursor_after_write(
     output_produced: crate::stdlib::uInt,
     output_remaining: crate::stdlib::uInt,
 ) -> (crate::stdlib::uInt, crate::stdlib::uInt) {
+    output_cursor_after_writes(output_produced, output_remaining, 1)
+}
+
+fn output_cursor_after_writes(
+    output_produced: crate::stdlib::uInt,
+    output_remaining: crate::stdlib::uInt,
+    write_count: crate::stdlib::uInt,
+) -> (crate::stdlib::uInt, crate::stdlib::uInt) {
     (
-        output_produced.wrapping_add(1),
-        output_remaining.wrapping_sub(1),
+        output_produced.wrapping_add(write_count),
+        output_remaining.wrapping_sub(write_count),
     )
 }
 
@@ -650,23 +658,19 @@ pub unsafe extern "C" fn inflate_fast(
                             from = from.wrapping_add(1);
                             let c2rust_fresh27 = out;
                             out = out.wrapping_add(1);
-                            (output_produced, output_remaining) =
-                                output_cursor_after_write(output_produced, output_remaining);
                             *c2rust_fresh27 = *c2rust_fresh26;
                             let c2rust_fresh28 = from;
                             from = from.wrapping_add(1);
                             let c2rust_fresh29 = out;
                             out = out.wrapping_add(1);
-                            (output_produced, output_remaining) =
-                                output_cursor_after_write(output_produced, output_remaining);
                             *c2rust_fresh29 = *c2rust_fresh28;
                             let c2rust_fresh30 = from;
                             from = from.wrapping_add(1);
                             let c2rust_fresh31 = out;
                             out = out.wrapping_add(1);
-                            (output_produced, output_remaining) =
-                                output_cursor_after_write(output_produced, output_remaining);
                             *c2rust_fresh31 = *c2rust_fresh30;
+                            (output_produced, output_remaining) =
+                                output_cursor_after_writes(output_produced, output_remaining, 3);
                         }
                         let trailing_copy_byte_count =
                             trailing_match_copy_byte_count(copy_layout.final_trailing_bytes);
@@ -752,23 +756,19 @@ pub unsafe extern "C" fn inflate_fast(
                             from = from.wrapping_add(1);
                             let c2rust_fresh17 = out;
                             out = out.wrapping_add(1);
-                            (output_produced, output_remaining) =
-                                output_cursor_after_write(output_produced, output_remaining);
                             *c2rust_fresh17 = *c2rust_fresh16;
                             let c2rust_fresh18 = from;
                             from = from.wrapping_add(1);
                             let c2rust_fresh19 = out;
                             out = out.wrapping_add(1);
-                            (output_produced, output_remaining) =
-                                output_cursor_after_write(output_produced, output_remaining);
                             *c2rust_fresh19 = *c2rust_fresh18;
                             let c2rust_fresh20 = from;
                             from = from.wrapping_add(1);
                             let c2rust_fresh21 = out;
                             out = out.wrapping_add(1);
-                            (output_produced, output_remaining) =
-                                output_cursor_after_write(output_produced, output_remaining);
                             *c2rust_fresh21 = *c2rust_fresh20;
+                            (output_produced, output_remaining) =
+                                output_cursor_after_writes(output_produced, output_remaining, 3);
                         }
                         let trailing_copy_byte_count =
                             trailing_match_copy_byte_count(copy_layout.final_trailing_bytes);
@@ -841,7 +841,8 @@ mod tests {
         fast_litlen_action, fast_match_copy_layout, fast_match_uses_window, fast_window_copy_plan,
         fast_window_distance_back, fast_window_distance_is_invalid, finish_fast_distance,
         input_bytes_needed, input_remaining_after_read, low_bits, output_cursor_after_write,
-        output_produced_at_fast_path_start, refill_input_byte, subtable_index, table_index,
+        output_cursor_after_writes, output_produced_at_fast_path_start, refill_input_byte,
+        subtable_index, table_index,
         trailing_match_copy_byte_count, trailing_match_copy_needs_second_byte, unread_input_state,
         validate_fast_window_distance, FastCodeEntry, FastDecodeError, FastDecodeFailure,
         FastDistAction, FastDistance, FastDistanceSource, FastLitLenAction, FastMatchCopyLayout,
@@ -1137,6 +1138,16 @@ mod tests {
     fn input_remaining_after_read_preserves_wrapping_decrement() {
         assert_eq!(input_remaining_after_read(6), 5);
         assert_eq!(input_remaining_after_read(0), ::core::ffi::c_uint::MAX);
+    }
+
+    #[test]
+    fn output_cursor_after_writes_preserves_triplet_accounting_and_wrapping() {
+        assert_eq!(output_cursor_after_writes(7, 10, 3), (10, 7));
+        assert_eq!(
+            output_cursor_after_writes(::core::ffi::c_uint::MAX, 1, 3),
+            (2, ::core::ffi::c_uint::MAX - 1)
+        );
+        assert_eq!(output_cursor_after_write(7, 10), output_cursor_after_writes(7, 10, 1));
     }
 
     #[test]

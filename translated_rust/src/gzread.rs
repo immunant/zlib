@@ -1795,40 +1795,58 @@ fn gzclose_r_result(
     }
 }
 
-fn gz_skip_apply_step(state: &mut crate::gzguts_h::gz_state) -> GzSkipAction {
-    match gz_skip_step(
-        state.x.have,
-        state.x.pos,
-        state.skip,
-        state.eof,
-        state.strm.avail_in,
-        crate::src::gzlib::gz_intmax(),
-    ) {
+#[derive(Debug, Eq, PartialEq)]
+enum GzSkipApplyStep {
+    ConsumeBuffered { next_advance: usize },
+    StopAtEof,
+    Fetch,
+}
+
+fn gz_skip_apply_step(
+    have: &mut ::core::ffi::c_uint,
+    pos: &mut crate::stdlib::off64_t,
+    skip: &mut crate::stdlib::off64_t,
+    eof: ::core::ffi::c_int,
+    avail_in: crate::stdlib::uInt,
+    intmax: ::core::ffi::c_uint,
+) -> GzSkipApplyStep {
+    match gz_skip_step(*have, *pos, *skip, eof, avail_in, intmax) {
         GzSkipStep::ConsumeBuffered(progress) => {
-            gz_skip_apply_progress(
-                &mut state.x.have,
-                &mut state.x.pos,
-                &mut state.skip,
-                &progress,
-            );
-            state.x.next = state.x.next.wrapping_add(progress.consumed as usize);
-            GzSkipAction::ConsumeBuffered
+            gz_skip_apply_progress(have, pos, skip, &progress);
+            GzSkipApplyStep::ConsumeBuffered {
+                next_advance: progress.consumed as usize,
+            }
         }
-        GzSkipStep::StopAtEof => GzSkipAction::StopAtEof,
-        GzSkipStep::Fetch => GzSkipAction::Fetch,
+        GzSkipStep::StopAtEof => GzSkipApplyStep::StopAtEof,
+        GzSkipStep::Fetch => GzSkipApplyStep::Fetch,
     }
 }
 
 macro_rules! gz_skip {
     ($state:expr) => {{
         loop {
-            let action = gz_skip_apply_step($state);
+            let state = &mut *$state;
+            let action = match gz_skip_apply_step(
+                &mut state.x.have,
+                &mut state.x.pos,
+                &mut state.skip,
+                state.eof,
+                state.strm.avail_in,
+                crate::src::gzlib::gz_intmax(),
+            ) {
+                GzSkipApplyStep::ConsumeBuffered { next_advance } => {
+                    state.x.next = state.x.next.wrapping_add(next_advance);
+                    GzSkipAction::ConsumeBuffered
+                }
+                GzSkipApplyStep::StopAtEof => GzSkipAction::StopAtEof,
+                GzSkipApplyStep::Fetch => GzSkipAction::Fetch,
+            };
             let fetch_result = match action {
-                GzSkipAction::Fetch => Some(gz_fetch($state)),
+                GzSkipAction::Fetch => Some(gz_fetch(state)),
                 _ => None,
             };
             let fetch_failed = gz_skip_fetch_failed(&action, fetch_result);
-            match gz_skip_loop_decision(action, fetch_failed, $state.skip) {
+            match gz_skip_loop_decision(action, fetch_failed, state.skip) {
                 GzSkipLoopDecision::Error => break true,
                 GzSkipLoopDecision::Done => break false,
                 GzSkipLoopDecision::Continue => {}
@@ -3919,6 +3937,40 @@ mod tests {
             gzclose_r_result(crate::zlib_h::Z_BUF_ERROR, -1),
             crate::zlib_h::Z_ERRNO
         );
+    }
+
+    #[test]
+    fn gz_skip_apply_step_updates_only_scalar_skip_state() {
+        let mut have = 6;
+        let mut pos = 10;
+        let mut skip = 4;
+
+        assert_eq!(
+            gz_skip_apply_step(&mut have, &mut pos, &mut skip, 0, 0, 100),
+            GzSkipApplyStep::ConsumeBuffered { next_advance: 4 }
+        );
+        assert_eq!(have, 2);
+        assert_eq!(pos, 14);
+        assert_eq!(skip, 0);
+    }
+
+    #[test]
+    fn gz_skip_apply_step_preserves_non_buffered_actions() {
+        let mut have = 0;
+        let mut pos = 10;
+        let mut skip = 4;
+
+        assert_eq!(
+            gz_skip_apply_step(&mut have, &mut pos, &mut skip, 1, 0, 100),
+            GzSkipApplyStep::StopAtEof
+        );
+        assert_eq!(
+            gz_skip_apply_step(&mut have, &mut pos, &mut skip, 0, 1, 100),
+            GzSkipApplyStep::Fetch
+        );
+        assert_eq!(have, 0);
+        assert_eq!(pos, 10);
+        assert_eq!(skip, 4);
     }
 }
 

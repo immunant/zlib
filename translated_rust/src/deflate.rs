@@ -3291,6 +3291,13 @@ fn stored_block_buffered_len(
     (strstart as ::core::ffi::c_long - block_start) as ::core::ffi::c_uint
 }
 
+fn deflate_block_len(
+    strstart: crate::stdlib::uInt,
+    block_start: ::core::ffi::c_long,
+) -> crate::zutil_h::ulg {
+    (strstart as ::core::ffi::c_long - block_start) as crate::zutil_h::ulg
+}
+
 fn stored_block_available_output(
     bi_valid: ::core::ffi::c_int,
     avail_out: crate::stdlib::uInt,
@@ -3721,7 +3728,7 @@ unsafe extern "C" fn deflate_fast(
                 } else {
                     ::core::ptr::null_mut::<crate::stdlib::charf>()
                 },
-                ((*s).strstart as ::core::ffi::c_long - (*s).block_start) as crate::zutil_h::ulg,
+                deflate_block_len((*s).strstart, (*s).block_start),
                 0 as ::core::ffi::c_int,
             );
             (*s).block_start = (*s).strstart as ::core::ffi::c_long;
@@ -3744,7 +3751,7 @@ unsafe extern "C" fn deflate_fast(
             } else {
                 ::core::ptr::null_mut::<crate::stdlib::charf>()
             },
-            ((*s).strstart as ::core::ffi::c_long - (*s).block_start) as crate::zutil_h::ulg,
+            deflate_block_len((*s).strstart, (*s).block_start),
             1 as ::core::ffi::c_int,
         );
         (*s).block_start = (*s).strstart as ::core::ffi::c_long;
@@ -3764,7 +3771,7 @@ unsafe extern "C" fn deflate_fast(
             } else {
                 ::core::ptr::null_mut::<crate::stdlib::charf>()
             },
-            ((*s).strstart as ::core::ffi::c_long - (*s).block_start) as crate::zutil_h::ulg,
+            deflate_block_len((*s).strstart, (*s).block_start),
             0 as ::core::ffi::c_int,
         );
         (*s).block_start = (*s).strstart as ::core::ffi::c_long;
@@ -3939,8 +3946,7 @@ unsafe extern "C" fn deflate_slow(
                     } else {
                         ::core::ptr::null_mut::<crate::stdlib::charf>()
                     },
-                    ((*s).strstart as ::core::ffi::c_long - (*s).block_start)
-                        as crate::zutil_h::ulg,
+                    deflate_block_len((*s).strstart, (*s).block_start),
                     0 as ::core::ffi::c_int,
                 );
                 (*s).block_start = (*s).strstart as ::core::ffi::c_long;
@@ -3980,8 +3986,7 @@ unsafe extern "C" fn deflate_slow(
                     } else {
                         ::core::ptr::null_mut::<crate::stdlib::charf>()
                     },
-                    ((*s).strstart as ::core::ffi::c_long - (*s).block_start)
-                        as crate::zutil_h::ulg,
+                    deflate_block_len((*s).strstart, (*s).block_start),
                     0 as ::core::ffi::c_int,
                 );
                 (*s).block_start = (*s).strstart as ::core::ffi::c_long;
@@ -4027,7 +4032,7 @@ unsafe extern "C" fn deflate_slow(
             } else {
                 ::core::ptr::null_mut::<crate::stdlib::charf>()
             },
-            ((*s).strstart as ::core::ffi::c_long - (*s).block_start) as crate::zutil_h::ulg,
+            deflate_block_len((*s).strstart, (*s).block_start),
             1 as ::core::ffi::c_int,
         );
         (*s).block_start = (*s).strstart as ::core::ffi::c_long;
@@ -4047,7 +4052,7 @@ unsafe extern "C" fn deflate_slow(
             } else {
                 ::core::ptr::null_mut::<crate::stdlib::charf>()
             },
-            ((*s).strstart as ::core::ffi::c_long - (*s).block_start) as crate::zutil_h::ulg,
+            deflate_block_len((*s).strstart, (*s).block_start),
             0 as ::core::ffi::c_int,
         );
         (*s).block_start = (*s).strstart as ::core::ffi::c_long;
@@ -4171,7 +4176,7 @@ unsafe fn deflate_rle(
                 } else {
                     ::core::ptr::null_mut::<crate::stdlib::charf>()
                 },
-                ((*s).strstart as ::core::ffi::c_long - (*s).block_start) as crate::zutil_h::ulg,
+                deflate_block_len((*s).strstart, (*s).block_start),
                 0 as ::core::ffi::c_int,
             );
             (*s).block_start = (*s).strstart as ::core::ffi::c_long;
@@ -4195,7 +4200,7 @@ unsafe fn deflate_rle(
             } else {
                 ::core::ptr::null_mut::<crate::stdlib::charf>()
             },
-            ((*s).strstart as ::core::ffi::c_long - (*s).block_start) as crate::zutil_h::ulg,
+            deflate_block_len((*s).strstart, (*s).block_start),
             1 as ::core::ffi::c_int,
         );
         (*s).block_start = (*s).strstart as ::core::ffi::c_long;
@@ -4215,7 +4220,7 @@ unsafe fn deflate_rle(
             } else {
                 ::core::ptr::null_mut::<crate::stdlib::charf>()
             },
-            ((*s).strstart as ::core::ffi::c_long - (*s).block_start) as crate::zutil_h::ulg,
+            deflate_block_len((*s).strstart, (*s).block_start),
             0 as ::core::ffi::c_int,
         );
         (*s).block_start = (*s).strstart as ::core::ffi::c_long;
@@ -4278,7 +4283,7 @@ unsafe fn deflate_huff(
                 } else {
                     ::core::ptr::null_mut::<crate::stdlib::charf>()
                 },
-                ((*s).strstart as ::core::ffi::c_long - (*s).block_start) as crate::zutil_h::ulg,
+                deflate_block_len((*s).strstart, (*s).block_start),
                 0 as ::core::ffi::c_int,
             );
             (*s).block_start = (*s).strstart as ::core::ffi::c_long;
@@ -4302,7 +4307,7 @@ unsafe fn deflate_huff(
             } else {
                 ::core::ptr::null_mut::<crate::stdlib::charf>()
             },
-            ((*s).strstart as ::core::ffi::c_long - (*s).block_start) as crate::zutil_h::ulg,
+            deflate_block_len((*s).strstart, (*s).block_start),
             1 as ::core::ffi::c_int,
         );
         (*s).block_start = (*s).strstart as ::core::ffi::c_long;
@@ -4322,7 +4327,7 @@ unsafe fn deflate_huff(
             } else {
                 ::core::ptr::null_mut::<crate::stdlib::charf>()
             },
-            ((*s).strstart as ::core::ffi::c_long - (*s).block_start) as crate::zutil_h::ulg,
+            deflate_block_len((*s).strstart, (*s).block_start),
             0 as ::core::ffi::c_int,
         );
         (*s).block_start = (*s).strstart as ::core::ffi::c_long;
@@ -4341,7 +4346,7 @@ unsafe fn deflate_huff(
 #[cfg(test)]
 mod tests {
     use super::{
-        can_search_hash_match, clamped_copy_len, deflate_block_state_actions,
+        can_search_hash_match, clamped_copy_len, deflate_block_len, deflate_block_state_actions,
         deflate_bound_lengths, deflate_copy_prev_len, deflate_copyright, deflate_dictionary_len,
         deflate_dictionary_state_after_load, deflate_distance_tree_code, deflate_fast_match_codes,
         deflate_fast_match_progress, deflate_fast_should_insert_match, deflate_final_flush_action,
@@ -4412,6 +4417,13 @@ mod tests {
         assert_eq!(stored_block_buffered_len(17, 5), 12);
         assert_eq!(stored_block_buffered_len(5, 5), 0);
         assert_eq!(stored_block_buffered_len(0, 1), ::core::ffi::c_uint::MAX);
+    }
+
+    #[test]
+    fn deflate_block_len_preserves_signed_difference_conversion() {
+        assert_eq!(deflate_block_len(17, 5), 12);
+        assert_eq!(deflate_block_len(0, -1), 1);
+        assert_eq!(deflate_block_len(0, 1), crate::zutil_h::ulg::MAX);
     }
 
     #[test]
