@@ -139,6 +139,14 @@ impl<'a> GzBufferedCursor<'a> {
         Some((byte, self.start.checked_add(1)?))
     }
 
+    // Advance within the checked unread range.  This keeps skip paths from
+    // doing arithmetic on the ABI cursor after it has been validated.
+    pub(crate) fn advance(&self, len: usize) -> Option<(usize, u32)> {
+        let (_, next) = self.consume(len)?;
+        let have = self.have.checked_sub(len)?;
+        Some((next, u32::try_from(have).ok()?))
+    }
+
     // Prepend a byte to the owned output buffer.  For a nonempty cursor,
     // validate the entire advertised unread range before shifting or writing;
     // the caller only has to project the resulting checked index back to the

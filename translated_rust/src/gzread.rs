@@ -525,8 +525,21 @@ unsafe fn gz_skip(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
             } else {
                 state.x.have
             };
-            state.x.have = state.x.have.wrapping_sub(n);
-            state.x.next = state.x.next.wrapping_add(n as usize);
+            let Some((next, have)) = state.out.as_deref().and_then(|buffer| {
+                crate::src::gzlib::GzBufferedCursor::from_owned_buffer(
+                    buffer,
+                    state.x.next.addr(),
+                    state.x.have,
+                )
+                .and_then(|cursor| cursor.advance(n as usize))
+            }) else {
+                return -1 as ::core::ffi::c_int;
+            };
+            let Some(buffer) = state.out.as_deref() else {
+                return -1 as ::core::ffi::c_int;
+            };
+            state.x.have = have;
+            state.x.next = buffer.as_ptr().wrapping_add(next).cast_mut();
             state.x.pos += n as crate::stdlib::off64_t;
             state.skip -= n as crate::stdlib::off64_t;
         } else {
