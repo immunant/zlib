@@ -2484,6 +2484,63 @@ fn set_stored_block_length_state(
     true
 }
 
+/// Start a stored block whose bytes will be copied directly to the caller's
+/// output.  The block header is emitted through the same slice-only tree core
+/// as buffered blocks, then its advertised length is installed before the
+/// legacy adapter lends the caller output span.
+fn emit_stored_direct_header_state(
+    s: &mut crate::src::deflate::deflate_state,
+    pending_buf: &mut [crate::stdlib::Byte],
+    len: ::core::ffi::c_uint,
+    last: ::core::ffi::c_int,
+) -> bool {
+    if !crate::src::trees::tr_stored_block_state(
+        pending_buf,
+        &mut s.pending,
+        &mut s.bi_buf,
+        &mut s.bi_valid,
+        &mut s.bi_used,
+        &[],
+        last,
+    ) || !set_stored_block_length_state(pending_buf, s.pending, len)
+    {
+        return false;
+    }
+    if last != 0 {
+        s.bi_used = 8 as ::core::ffi::c_int;
+    }
+    true
+}
+
+/// Emit a stored block that is already buffered in the history window.
+/// Keeping the bit state, pending range, and block cursor transition together
+/// makes the tail path entirely slice/scalar based.
+fn emit_stored_window_block_state(
+    s: &mut crate::src::deflate::deflate_state,
+    pending_buf: &mut [crate::stdlib::Byte],
+    stored: &[crate::stdlib::Byte],
+    last: ::core::ffi::c_int,
+) -> bool {
+    if !crate::src::trees::tr_stored_block_state(
+        pending_buf,
+        &mut s.pending,
+        &mut s.bi_buf,
+        &mut s.bi_valid,
+        &mut s.bi_used,
+        stored,
+        last,
+    ) {
+        return false;
+    }
+    s.block_start = s
+        .block_start
+        .wrapping_add(stored.len() as ::core::ffi::c_long);
+    if last != 0 {
+        s.bi_used = 8 as ::core::ffi::c_int;
+    }
+    true
+}
+
 /// Flush pending output and return the stream's post-flush output capacity.
 ///
 /// The stream is adopted once here, so callers that need the capacity do not
@@ -4124,20 +4181,8 @@ fn deflate_stored(
             } else {
                 ::core::slice::from_raw_parts_mut(state.pending_buf, pending_len)
             };
-            let _ = crate::src::trees::tr_stored_block_state(
-                pending_buf,
-                &mut state.pending,
-                &mut state.bi_buf,
-                &mut state.bi_valid,
-                &mut state.bi_used,
-                &[],
-                last,
-            );
-            if !set_stored_block_length_state(pending_buf, state.pending, len) {
+            if !emit_stored_direct_header_state(state, pending_buf, len, last) {
                 return need_more;
-            }
-            if last != 0 {
-                state.bi_used = 8 as ::core::ffi::c_int;
             }
             flush_pending(state.strm);
             if left != 0 || len != 0 {
@@ -4317,18 +4362,8 @@ fn deflate_stored(
                     };
                     stored
                 };
-                let _ = crate::src::trees::tr_stored_block_state(
-                    pending_buf,
-                    &mut state.pending,
-                    &mut state.bi_buf,
-                    &mut state.bi_valid,
-                    &mut state.bi_used,
-                    stored,
-                    last,
-                );
-                state.block_start += len as ::core::ffi::c_long;
-                if last != 0 {
-                    state.bi_used = 8 as ::core::ffi::c_int;
+                if !emit_stored_window_block_state(state, pending_buf, stored, last) {
+                    return need_more;
                 }
                 flush_pending(state.strm);
             }
