@@ -64,7 +64,6 @@ pub const BAD: crate::src::inflate::inflate_mode = 16209;
 pub const MEM: crate::src::inflate::inflate_mode = 16210;
 
 pub const SYNC: crate::src::inflate::inflate_mode = 16211;
-#[derive(Copy, Clone)]
 #[repr(C)]
 
 pub struct inflate_state {
@@ -77,7 +76,7 @@ pub struct inflate_state {
     pub dmax: ::core::ffi::c_uint,
     pub check: ::core::ffi::c_ulong,
     pub total: ::core::ffi::c_ulong,
-    pub head: crate::zlib_h::gz_headerp,
+    pub head: Option<::std::rc::Rc<::std::cell::RefCell<crate::zlib_h::gz_header>>>,
     pub wbits: ::core::ffi::c_uint,
     pub wsize: ::core::ffi::c_uint,
     pub whave: ::core::ffi::c_uint,
@@ -122,7 +121,7 @@ impl Default for inflate_state {
             dmax: 0,
             check: 0,
             total: 0,
-            head: ::core::ptr::null_mut(),
+            head: None,
             wbits: 0,
             wsize: 0,
             whave: 0,
@@ -148,6 +147,48 @@ impl Default for inflate_state {
             sane: 0,
             back: 0,
             was: 0,
+        }
+    }
+}
+
+impl inflate_state {
+    fn copy_for_inflate_copy(&self) -> Self {
+        Self {
+            strm: self.strm,
+            mode: self.mode,
+            last: self.last,
+            wrap: self.wrap,
+            havedict: self.havedict,
+            flags: self.flags,
+            dmax: self.dmax,
+            check: self.check,
+            total: self.total,
+            head: self.head.clone(),
+            wbits: self.wbits,
+            wsize: self.wsize,
+            whave: self.whave,
+            wnext: self.wnext,
+            window: self.window,
+            hold: self.hold,
+            bits: self.bits,
+            length: self.length,
+            offset: self.offset,
+            extra: self.extra,
+            lencode: self.lencode,
+            distcode: self.distcode,
+            lenbits: self.lenbits,
+            distbits: self.distbits,
+            ncode: self.ncode,
+            nlen: self.nlen,
+            ndist: self.ndist,
+            have: self.have,
+            next: self.next,
+            lens: self.lens,
+            work: self.work,
+            codes: self.codes,
+            sane: self.sane,
+            back: self.back,
+            was: self.was,
         }
     }
 }
@@ -254,7 +295,7 @@ pub unsafe extern "C" fn inflateResetKeep(
     (*state).havedict = 0 as ::core::ffi::c_int;
     (*state).flags = -1 as ::core::ffi::c_int;
     (*state).dmax = 32768 as ::core::ffi::c_uint;
-    (*state).head = ::core::ptr::null_mut::<crate::zlib_h::gz_header>();
+    (*state).head = None;
     (*state).hold = 0 as ::core::ffi::c_ulong;
     (*state).bits = 0 as ::core::ffi::c_uint;
     (*state).next = &raw mut (*state).codes as *mut crate::src::inftrees::code;
@@ -646,8 +687,8 @@ pub unsafe extern "C" fn inflate(
                                                                                                             (*state).mode = crate::src::inflate::FLAGS;
                                                                                                             continue '_inf_leave;
                                                                                                         } else {
-                                                                                                            if !(*state).head.is_null() {
-                                                                                                                (*(*state).head).done = -1 as ::core::ffi::c_int;
+                                                                                                            if let Some(head) = (*state).head.clone() {
+                                                                                                                head.borrow_mut().done = -1 as ::core::ffi::c_int;
                                                                                                             }
                                                                                                             if (*state).wrap & 1 as ::core::ffi::c_int == 0
                                                                                                                 || (((hold as ::core::ffi::c_uint
@@ -733,8 +774,8 @@ pub unsafe extern "C" fn inflate(
                                                                                                         (*state).mode = crate::src::inflate::BAD;
                                                                                                         continue '_inf_leave;
                                                                                                     } else {
-                                                                                                        if !(*state).head.is_null() {
-                                                                                                            (*(*state).head).text = (hold >> 8 as ::core::ffi::c_int
+                                                                                                        if let Some(head) = (*state).head.clone() {
+                                                                                                            head.borrow_mut().text = (hold >> 8 as ::core::ffi::c_int
                                                                                                                 & 1 as ::core::ffi::c_ulong) as ::core::ffi::c_int;
                                                                                                         }
                                                                                                         if (*state).flags & 0x200 as ::core::ffi::c_int != 0
@@ -1158,14 +1199,8 @@ pub unsafe extern "C" fn inflate(
                                                                                         );
                                                                                     bits = bits.wrapping_add(8 as ::core::ffi::c_uint);
                                                                                 }
-                                                                                if !(*state)
-                                                                                    .head
-                                                                                    .is_null()
-                                                                                {
-                                                                                    (*(*state)
-                                                                                        .head)
-                                                                                        .time = hold
-                                                                                        as crate::stdlib::uLong;
+                                                                                if let Some(head) = (*state).head.clone() {
+                                                                                    head.borrow_mut().time = hold as crate::stdlib::uLong;
                                                                                 }
                                                                                 if (*state).flags & 0x200 as ::core::ffi::c_int != 0
                                                                                     && (*state).wrap & 4 as ::core::ffi::c_int != 0
@@ -1473,12 +1508,13 @@ pub unsafe extern "C" fn inflate(
                                                                         8 as ::core::ffi::c_uint,
                                                                     );
                                                                 }
-                                                                if !(*state).head.is_null() {
-                                                                    (*(*state).head).xflags = (hold
+                                                                if let Some(head) = (*state).head.clone() {
+                                                                    let mut head = head.borrow_mut();
+                                                                    head.xflags = (hold
                                                                         & 0xff
                                                                             as ::core::ffi::c_ulong)
                                                                         as ::core::ffi::c_int;
-                                                                    (*(*state).head).os = (hold
+                                                                    head.os = (hold
                                                                         >> 8 as ::core::ffi::c_int)
                                                                         as ::core::ffi::c_int;
                                                                 }
@@ -1624,8 +1660,8 @@ pub unsafe extern "C" fn inflate(
                                                             .wrapping_add(8 as ::core::ffi::c_uint);
                                                     }
                                                     (*state).length = hold as ::core::ffi::c_uint;
-                                                    if !(*state).head.is_null() {
-                                                        (*(*state).head).extra_len = hold
+                                                    if let Some(head) = (*state).head.clone() {
+                                                        head.borrow_mut().extra_len = hold
                                                             as ::core::ffi::c_uint
                                                             as crate::stdlib::uInt;
                                                     }
@@ -1647,8 +1683,8 @@ pub unsafe extern "C" fn inflate(
                                                     }
                                                     hold = 0 as ::core::ffi::c_ulong;
                                                     bits = 0 as ::core::ffi::c_uint;
-                                                } else if !(*state).head.is_null() {
-                                                    (*(*state).head).extra = None;
+                                                } else if let Some(head) = (*state).head.clone() {
+                                                    head.borrow_mut().extra = None;
                                                 }
                                                 (*state).mode = crate::src::inflate::EXTRA;
                                                 break 'c_2319;
@@ -1805,13 +1841,15 @@ pub unsafe extern "C" fn inflate(
                                             copy = have;
                                         }
                                         if copy != 0 {
-                                            if !(*state).head.is_null() {
-                                                let head = &mut *(*state).head;
+                                            if let Some(head) = (*state).head.clone() {
+                                                let mut head = head.borrow_mut();
+                                                let extra_len = head.extra_len;
+                                                let extra_max = head.extra_max;
                                                 if let Some(extra) = head.extra.as_mut() {
-                                                    len = (head.extra_len as ::core::ffi::c_uint)
+                                                    len = (extra_len as ::core::ffi::c_uint)
                                                         .wrapping_sub((*state).length);
                                                     let max =
-                                                        (head.extra_max as usize).min(extra.len());
+                                                        (extra_max as usize).min(extra.len());
                                                     if (len as usize) < max {
                                                         let copied =
                                                             (copy as usize).min(max - len as usize);
@@ -1886,10 +1924,11 @@ pub unsafe extern "C" fn inflate(
                                     copy = copy.wrapping_add(1);
                                     len =
                                         *next.offset(c2rust_fresh5 as isize) as ::core::ffi::c_uint;
-                                    if !(*state).head.is_null() {
-                                        let head = &mut *(*state).head;
+                                    if let Some(head) = (*state).head.clone() {
+                                        let mut head = head.borrow_mut();
+                                        let name_max = head.name_max;
                                         if let Some(name) = head.name.as_mut() {
-                                            let max = (head.name_max as usize).min(name.len());
+                                            let max = (name_max as usize).min(name.len());
                                             if ((*state).length as usize) < max {
                                                 let c2rust_fresh6 = (*state).length as usize;
                                                 (*state).length = (*state).length.wrapping_add(1);
@@ -1915,8 +1954,8 @@ pub unsafe extern "C" fn inflate(
                                 if len != 0 {
                                     break '_inf_leave;
                                 }
-                            } else if !(*state).head.is_null() {
-                                (*(*state).head).name = None;
+                            } else if let Some(head) = (*state).head.clone() {
+                                head.borrow_mut().name = None;
                             }
                             (*state).length = 0 as ::core::ffi::c_uint;
                             (*state).mode = crate::src::inflate::COMMENT;
@@ -2003,10 +2042,11 @@ pub unsafe extern "C" fn inflate(
                             let c2rust_fresh7 = copy;
                             copy = copy.wrapping_add(1);
                             len = *next.offset(c2rust_fresh7 as isize) as ::core::ffi::c_uint;
-                            if !(*state).head.is_null() {
-                                let head = &mut *(*state).head;
+                            if let Some(head) = (*state).head.clone() {
+                                let mut head = head.borrow_mut();
+                                let comm_max = head.comm_max;
                                 if let Some(comment) = head.comment.as_mut() {
-                                    let max = (head.comm_max as usize).min(comment.len());
+                                    let max = (comm_max as usize).min(comment.len());
                                     if ((*state).length as usize) < max {
                                         let c2rust_fresh8 = (*state).length as usize;
                                         (*state).length = (*state).length.wrapping_add(1);
@@ -2031,8 +2071,8 @@ pub unsafe extern "C" fn inflate(
                         if len != 0 {
                             break '_inf_leave;
                         }
-                    } else if !(*state).head.is_null() {
-                        (*(*state).head).comment = None;
+                    } else if let Some(head) = (*state).head.clone() {
+                        head.borrow_mut().comment = None;
                     }
                     (*state).mode = crate::src::inflate::HCRC;
                     break 'c_2327;
@@ -2084,10 +2124,11 @@ pub unsafe extern "C" fn inflate(
                     bits = 0 as ::core::ffi::c_uint;
                 }
             }
-            if !(*state).head.is_null() {
-                (*(*state).head).hcrc =
+            if let Some(head) = (*state).head.clone() {
+                let mut head = head.borrow_mut();
+                head.hcrc =
                     (*state).flags >> 9 as ::core::ffi::c_int & 1 as ::core::ffi::c_int;
-                (*(*state).head).done = 1 as ::core::ffi::c_int;
+                head.done = 1 as ::core::ffi::c_int;
             }
             (*state).check =
                 crate::src::crc32::crc32(0 as crate::stdlib::uLong, &[]) as ::core::ffi::c_ulong;
@@ -2347,22 +2388,22 @@ pub unsafe extern "C" fn inflateSetDictionary_ffi(
 ) -> ::core::ffi::c_int {
     inflateSetDictionary(strm, dictionary, dictLength)
 }
-pub unsafe extern "C" fn inflateGetHeader(
-    mut strm: crate::zlib_h::z_streamp,
-    mut head: crate::zlib_h::gz_headerp,
+pub fn inflate_get_header(
+    strm: &mut crate::zlib_h::z_stream,
+    head: ::std::rc::Rc<::std::cell::RefCell<crate::zlib_h::gz_header>>,
 ) -> ::core::ffi::c_int {
-    if inflateStateCheck(strm) != 0 {
+    if inflate_state_invalid(strm) {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    let state_handle = (&*strm)
+    let state_handle = strm
         .inflate_state()
         .expect("inflate state was checked above");
     let mut state = state_handle.borrow_mut();
     if (*state).wrap & 2 as ::core::ffi::c_int == 0 as ::core::ffi::c_int {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    (*state).head = head;
-    (*head).done = 0 as ::core::ffi::c_int;
+    head.borrow_mut().done = 0 as ::core::ffi::c_int;
+    (*state).head = Some(head);
     return crate::zlib_h::Z_OK;
 }
 #[export_name = "inflateGetHeader"]
@@ -2371,7 +2412,16 @@ pub unsafe extern "C" fn inflateGetHeader_ffi(
     mut strm: crate::zlib_h::z_streamp,
     mut head: crate::zlib_h::gz_headerp,
 ) -> ::core::ffi::c_int {
-    inflateGetHeader(strm, head)
+    let Some(strm) = strm.as_mut() else {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    };
+    let Some(head) = head.as_mut() else {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    };
+    inflate_get_header(
+        strm,
+        ::std::rc::Rc::new(::std::cell::RefCell::new(head.clone())),
+    )
 }
 unsafe extern "C" fn syncsearch(
     mut have: *mut ::core::ffi::c_uint,
@@ -2512,13 +2562,15 @@ pub unsafe extern "C" fn inflateCopy(
     if inflateStateCheck(source) != 0 || dest.is_null() {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
+    let dest_ptr = dest;
+    let dest = &mut *dest;
     let state_handle = (&*source)
         .inflate_state()
         .expect("source inflate state was checked above");
     let mut state = state_handle.borrow_mut();
-    let mut copy = Box::new(*state);
+    let mut copy = Box::new(state.copy_for_inflate_copy());
     window = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
-    if !(*state).window.is_null() {
+    if !state.window.is_null() {
         window = crate::src::zutil::zcalloc(
             (*source).opaque,
             (1 as crate::stdlib::uInt) << (*state).wbits,
@@ -2530,7 +2582,7 @@ pub unsafe extern "C" fn inflateCopy(
         }
     }
     *dest = (*source).clone();
-    (*copy).strm = dest;
+    (*copy).strm = dest_ptr;
     if (*state).lencode
         >= &raw mut (*state).codes as *mut crate::src::inftrees::code
             as *const crate::src::inftrees::code
@@ -2567,7 +2619,7 @@ pub unsafe extern "C" fn inflateCopy(
         );
     }
     (*copy).window = window;
-    (*dest).set_inflate_state(*copy);
+    dest.set_inflate_state(*copy);
     return crate::zlib_h::Z_OK;
 }
 #[export_name = "inflateCopy"]
