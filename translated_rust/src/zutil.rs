@@ -182,7 +182,7 @@ pub unsafe extern "C" fn zcalloc(
         None => return ::core::ptr::null_mut(),
     };
     let pointer = allocation.as_mut_ptr().cast::<::core::ffi::c_void>();
-    if zcalloc_store(pointer as usize, allocation) {
+    if zcalloc_store(pointer.addr(), allocation) {
         pointer
     } else {
         ::core::ptr::null_mut()

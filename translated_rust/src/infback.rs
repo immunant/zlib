@@ -106,9 +106,12 @@ pub unsafe extern "C" fn inflateBackInit_(
     mut version: *const ::core::ffi::c_char,
     mut stream_size: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
-    let version_matches = !version.is_null()
-        && *version.offset(0) as ::core::ffi::c_int
-            == crate::zlib_h::ZLIB_VERSION[0] as ::core::ffi::c_int;
+    // Initialization only compares zlib's leading version byte. Borrow that
+    // one byte directly instead of doing raw offset arithmetic (and without
+    // scanning the caller's C string).
+    let version_matches = version
+        .as_ref()
+        .is_some_and(|version| *version == crate::zlib_h::ZLIB_VERSION[0]);
     let plan = match InflateBackInitPlan::new(version_matches, windowBits, stream_size) {
         Ok(plan) => plan,
         Err(status) => return status,
