@@ -2598,24 +2598,35 @@ pub fn deflate(
         return result;
     }
     // SAFETY: `deflateSetHeader()` retains caller-owned header storage. The
-    // ABI requires those optional fields to remain valid through deflate().
-    let head = unsafe { &*state.gzhead };
-    let extra = if head.extra.is_null() || head.extra_len == 0 {
-        None
-    } else {
-        Some(unsafe {
-            ::core::slice::from_raw_parts(head.extra, (head.extra_len & 0xffff) as usize)
-        })
-    };
-    let name = if head.name.is_null() {
-        None
-    } else {
-        Some(unsafe { ::core::ffi::CStr::from_ptr(head.name as *const ::core::ffi::c_char) })
-    };
-    let comment = if head.comment.is_null() {
-        None
-    } else {
-        Some(unsafe { ::core::ffi::CStr::from_ptr(head.comment as *const ::core::ffi::c_char) })
+    // ABI requires its optional fields to remain valid through this call.
+    // Bind all of that one foreign header at once, so the rest of the gzip
+    // transition is reference- and slice-based rather than repeatedly
+    // entering separate unsafe operations for the same validated contract.
+    let (head, extra, name, comment) = unsafe {
+        let head = &*state.gzhead;
+        let extra = if head.extra.is_null() || head.extra_len == 0 {
+            None
+        } else {
+            Some(::core::slice::from_raw_parts(
+                head.extra,
+                (head.extra_len & 0xffff) as usize,
+            ))
+        };
+        let name = if head.name.is_null() {
+            None
+        } else {
+            Some(::core::ffi::CStr::from_ptr(
+                head.name as *const ::core::ffi::c_char,
+            ))
+        };
+        let comment = if head.comment.is_null() {
+            None
+        } else {
+            Some(::core::ffi::CStr::from_ptr(
+                head.comment as *const ::core::ffi::c_char,
+            ))
+        };
+        (head, extra, name, comment)
     };
     deflate_finish_bound_gzip_header(stream, state, flush, head, extra, name, comment)
 }
