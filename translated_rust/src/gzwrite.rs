@@ -439,7 +439,6 @@ pub unsafe extern "C" fn gzputc(
     state: &mut crate::gzguts_h::gz_state,
     mut c: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
-    let mut have: ::core::ffi::c_uint = 0;
     let mut buf: [::core::ffi::c_uchar; 1] = [0; 1];
     if !crate::src::gzlib::gz_write_state_is_usable(state) {
         return -1 as ::core::ffi::c_int;
@@ -448,13 +447,13 @@ pub unsafe extern "C" fn gzputc(
     if state.skip != 0 && gz_zero(state) == -1 as ::core::ffi::c_int {
         return -1 as ::core::ffi::c_int;
     }
-    if state.size != 0 {
-        have = crate::src::gzlib::gz_buffered_input_len(state);
-        if have < state.size {
-            *state.in_0.wrapping_add(have as usize) = c as ::core::ffi::c_uchar;
+    match crate::src::gzlib::gz_putc_plan(state) {
+        crate::src::gzlib::GzPutcPlan::Buffered { offset } => {
+            *state.in_0.wrapping_add(offset as usize) = c as ::core::ffi::c_uchar;
             crate::src::gzlib::gz_putc_buffered_progress(state);
             return c & 0xff as ::core::ffi::c_int;
         }
+        crate::src::gzlib::GzPutcPlan::Write => {}
     }
     buf[0 as ::core::ffi::c_int as usize] = c as ::core::ffi::c_uchar;
     if gz_write(
