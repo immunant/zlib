@@ -433,11 +433,12 @@ pub struct config_s {
 }
 #[no_mangle]
 
-pub static mut deflate_copyright: [::core::ffi::c_char; 70] = unsafe {
-    ::core::mem::transmute::<[u8; 70], [::core::ffi::c_char; 70]>(
-        *b" deflate 1.3.2.1 Copyright 1995-2026 Jean-loup Gailly and Mark Adler \0",
-    )
-};
+pub static deflate_copyright: [::core::ffi::c_char; 70] = [
+    32, 100, 101, 102, 108, 97, 116, 101, 32, 49, 46, 51, 46, 50, 46, 49, 32, 67, 111, 112, 121,
+    114, 105, 103, 104, 116, 32, 49, 57, 57, 53, 45, 50, 48, 50, 54, 32, 74, 101, 97, 110, 45, 108,
+    111, 117, 112, 32, 71, 97, 105, 108, 108, 121, 32, 97, 110, 100, 32, 77, 97, 114, 107, 32, 65,
+    100, 108, 101, 114, 32, 0,
+];
 
 pub const NIL: ::core::ffi::c_int = 0 as ::core::ffi::c_int;
 
