@@ -20,21 +20,20 @@ pub use crate::zlib_h::gzFile_s;
 pub use crate::zlib_h::z_stream;
 pub use crate::zlib_h::z_stream_s;
 pub use crate::zlib_h::Z_STREAM_ERROR;
-pub unsafe extern "C" fn gzclose(mut file: crate::zlib_h::gzFile) -> ::core::ffi::c_int {
-    let mut state: crate::gzguts_h::gz_statep =
-        ::core::ptr::null_mut::<crate::gzguts_h::gz_state>();
-    if file.is_null() {
+unsafe fn gzclose(
+    state: Option<::core::ptr::NonNull<crate::gzguts_h::gz_state>>,
+) -> ::core::ffi::c_int {
+    let Some(state) = state else {
         return crate::zlib_h::Z_STREAM_ERROR;
-    }
-    state = file as crate::gzguts_h::gz_statep;
-    return if (*state).mode == crate::gzguts_h::GZ_READ {
-        crate::src::gzread::gzclose_r(file as *mut crate::zlib_h::gzFile_s)
-    } else {
-        crate::src::gzwrite::gzclose_w(file as *mut crate::zlib_h::gzFile_s)
     };
+    if state.as_ref().mode == crate::gzguts_h::GZ_READ {
+        crate::src::gzread::gzclose_r(state.as_ptr().cast::<crate::zlib_h::gzFile_s>())
+    } else {
+        crate::src::gzwrite::gzclose_w(state.as_ptr().cast::<crate::zlib_h::gzFile_s>())
+    }
 }
 #[export_name = "gzclose"]
 
 pub unsafe extern "C" fn gzclose_ffi(mut file: crate::zlib_h::gzFile) -> ::core::ffi::c_int {
-    gzclose(file)
+    gzclose(::core::ptr::NonNull::new(file as crate::gzguts_h::gz_statep))
 }
