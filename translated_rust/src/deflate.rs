@@ -1372,6 +1372,19 @@ fn deflate_pending(
     }
     crate::zlib_h::Z_OK
 }
+
+// Keep the public operation reference-bound. The ABI adapter below only
+// converts its optional foreign output pointers before dispatching here.
+pub fn deflatePending(
+    strm: &mut crate::zlib_h::z_stream,
+    pending: Option<&mut ::core::ffi::c_uint>,
+    bits: Option<&mut ::core::ffi::c_int>,
+) -> ::core::ffi::c_int {
+    let Some((_strm, state)) = deflateStateCheckBound(strm) else {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    };
+    deflate_pending(state, pending, bits)
+}
 #[export_name = "deflatePending"]
 
 pub unsafe extern "C" fn deflatePending_ffi(
@@ -1380,9 +1393,6 @@ pub unsafe extern "C" fn deflatePending_ffi(
     mut bits: *mut ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
     let Some(strm) = (unsafe { strm.as_mut() }) else {
-        return crate::zlib_h::Z_STREAM_ERROR;
-    };
-    let Some((_strm, state)) = deflateStateCheckBound(strm) else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
     let pending = if pending.is_null() {
@@ -1395,7 +1405,7 @@ pub unsafe extern "C" fn deflatePending_ffi(
     } else {
         Some(&mut *bits)
     };
-    deflate_pending(state, pending, bits)
+    deflatePending(strm, pending, bits)
 }
 
 fn deflate_used(
@@ -1407,6 +1417,18 @@ fn deflate_used(
     }
     crate::zlib_h::Z_OK
 }
+
+// As with `deflatePending()`, keep state validation with the named
+// reference-based operation instead of in the raw ABI adapter.
+pub fn deflateUsed(
+    strm: &mut crate::zlib_h::z_stream,
+    bits: Option<&mut ::core::ffi::c_int>,
+) -> ::core::ffi::c_int {
+    let Some((_strm, state)) = deflateStateCheckBound(strm) else {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    };
+    deflate_used(state, bits)
+}
 #[export_name = "deflateUsed"]
 
 pub unsafe extern "C" fn deflateUsed_ffi(
@@ -1416,15 +1438,12 @@ pub unsafe extern "C" fn deflateUsed_ffi(
     let Some(strm) = (unsafe { strm.as_mut() }) else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
-    let Some((_strm, state)) = deflateStateCheckBound(strm) else {
-        return crate::zlib_h::Z_STREAM_ERROR;
-    };
     let bits = if bits.is_null() {
         None
     } else {
         Some(&mut *bits)
     };
-    deflate_used(state, bits)
+    deflateUsed(strm, bits)
 }
 // The checked operation is reference-based.  The exported ABI adapter below
 // binds the state-owned pending allocation once, leaving the reservation and
@@ -1640,6 +1659,21 @@ fn deflate_tune(
     state.max_chain_length = max_chain as crate::stdlib::uInt;
     crate::zlib_h::Z_OK
 }
+
+// Tuning only changes a validated deflater state. Keep that validation with
+// the named operation so the exported adapter remains a pointer binder.
+pub fn deflateTune(
+    strm: &mut crate::zlib_h::z_stream,
+    good_length: ::core::ffi::c_int,
+    max_lazy: ::core::ffi::c_int,
+    nice_length: ::core::ffi::c_int,
+    max_chain: ::core::ffi::c_int,
+) -> ::core::ffi::c_int {
+    let Some((_strm, state)) = deflateStateCheckBound(strm) else {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    };
+    deflate_tune(state, good_length, max_lazy, nice_length, max_chain)
+}
 #[export_name = "deflateTune"]
 
 pub unsafe extern "C" fn deflateTune_ffi(
@@ -1649,15 +1683,12 @@ pub unsafe extern "C" fn deflateTune_ffi(
     mut nice_length: ::core::ffi::c_int,
     mut max_chain: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
-    // This is the C ABI boundary: bind the validated stream/state pair once,
-    // then leave the tuning operation itself reference-bound.
+    // This ABI adapter only binds the caller's stream. The named operation
+    // retains deflater-state validation and the tuning update.
     let Some(strm) = (unsafe { strm.as_mut() }) else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
-    let Some((_strm, state)) = deflateStateCheckBound(strm) else {
-        return crate::zlib_h::Z_STREAM_ERROR;
-    };
-    deflate_tune(state, good_length, max_lazy, nice_length, max_chain)
+    deflateTune(strm, good_length, max_lazy, nice_length, max_chain)
 }
 struct DeflateBoundState {
     wrap: ::core::ffi::c_int,
