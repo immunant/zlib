@@ -457,16 +457,18 @@ pub unsafe extern "C" fn gzputc_ffi(
     }
     gzputc(&mut *(file as crate::gzguts_h::gz_statep), c)
 }
-pub unsafe extern "C" fn gzputs(
+// The ABI wrapper validates the caller's nul-terminated string before this
+// coordinator runs.  Keeping that conversion at the boundary means the write
+// operation itself only needs a safe C-string view and the existing caller
+// buffer forwarding performed by `gz_write()`.
+pub fn gzputs(
     state: &mut crate::gzguts_h::gz_state,
-    mut s: *const ::core::ffi::c_char,
+    s: &::core::ffi::CStr,
 ) -> ::core::ffi::c_int {
-    let mut len: crate::stdlib::z_size_t = 0;
-    let mut put: crate::stdlib::z_size_t = 0;
     if !crate::src::gzlib::gz_begin_write_operation(state) {
         return -1 as ::core::ffi::c_int;
     }
-    len = crate::stdlib::strlen(s) as crate::stdlib::z_size_t;
+    let len = s.to_bytes().len() as crate::stdlib::z_size_t;
     if !crate::src::gzlib::gz_string_len_fits_int(len) {
         crate::src::gzlib::gz_error(
             state,
@@ -475,7 +477,7 @@ pub unsafe extern "C" fn gzputs(
         );
         return -1 as ::core::ffi::c_int;
     }
-    put = gz_write(state, s as crate::stdlib::voidpc, len);
+    let put = gz_write(state, s.as_ptr() as crate::stdlib::voidpc, len);
     crate::src::gzlib::gz_puts_result(len, put)
 }
 #[export_name = "gzputs"]
@@ -487,7 +489,12 @@ pub unsafe extern "C" fn gzputs_ffi(
     if file.is_null() {
         return -1 as ::core::ffi::c_int;
     }
-    gzputs(&mut *(file as crate::gzguts_h::gz_statep), s)
+    // SAFETY: C's `gzputs` contract requires a valid nul-terminated string;
+    // retain that raw-pointer contract at the exported ABI boundary.
+    gzputs(
+        &mut *(file as crate::gzguts_h::gz_statep),
+        ::core::ffi::CStr::from_ptr(s),
+    )
 }
 fn gzflush(
     state: &mut crate::gzguts_h::gz_state,
