@@ -637,12 +637,7 @@ pub unsafe extern "C" fn deflateInit2__ffi(
     if s.is_null() {
         return crate::zlib_h::Z_MEM_ERROR;
     }
-    crate::stdlib::memset(
-        s as *mut ::core::ffi::c_void,
-        0 as ::core::ffi::c_int,
-        ::core::mem::size_of::<crate::src::deflate::deflate_state>()
-            as crate::__stddef_size_t_h::size_t,
-    );
+    ::core::ptr::write_bytes(s, 0, 1);
     (*strm).state = s as *mut crate::src::deflate::internal_state;
     (*s).strm = strm;
     (*s).status = crate::src::deflate::INIT_STATE;

@@ -997,12 +997,7 @@ macro_rules! inflate_init2_body {
         if state.is_null() {
             return crate::zlib_h::Z_MEM_ERROR;
         }
-        crate::stdlib::memset(
-            state as *mut ::core::ffi::c_void,
-            0 as ::core::ffi::c_int,
-            ::core::mem::size_of::<crate::src::inflate::inflate_state>()
-                as crate::__stddef_size_t_h::size_t,
-        );
+        ::core::ptr::write_bytes(state, 0, 1);
         (*strm).state = state as *mut crate::src::deflate::internal_state;
         (*state).strm = strm;
         (*state).window = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
