@@ -14,7 +14,6 @@ pub use crate::stdlib::ssize_t;
 pub use crate::src::deflate::deflate;
 pub use crate::src::deflate::deflateEnd;
 pub use crate::src::deflate::deflateInit2_;
-pub use crate::src::deflate::deflateParams;
 pub use crate::src::deflate::deflateReset;
 pub use crate::src::deflate::internal_state;
 pub use crate::stdlib::uInt;
@@ -291,14 +290,10 @@ unsafe extern "C" fn gz_write(
     // track progress as a checked slice offset.
     let input = ::core::slice::from_raw_parts(buf as *const u8, input_len);
     let state = &mut *state;
-    if state.size == 0 as ::core::ffi::c_uint
-        && gz_init(state) == -1 as ::core::ffi::c_int
-    {
+    if state.size == 0 as ::core::ffi::c_uint && gz_init(state) == -1 as ::core::ffi::c_int {
         return 0 as crate::stdlib::z_size_t;
     }
-    if state.skip != 0
-        && gz_zero(state) == -1 as ::core::ffi::c_int
-    {
+    if state.skip != 0 && gz_zero(state) == -1 as ::core::ffi::c_int {
         return 0 as crate::stdlib::z_size_t;
     }
     let Ok(capacity) = usize::try_from(state.size) else {
@@ -330,7 +325,10 @@ unsafe extern "C" fn gz_write(
             // initialized input allocation's usable prefix.
             ::core::slice::from_raw_parts_mut(state.in_0, capacity)[have..have + copy]
                 .copy_from_slice(&input[consumed..consumed + copy]);
-            state.strm.avail_in = state.strm.avail_in.wrapping_add(copy as crate::stdlib::uInt);
+            state.strm.avail_in = state
+                .strm
+                .avail_in
+                .wrapping_add(copy as crate::stdlib::uInt);
             state.x.pos += copy as crate::stdlib::off64_t;
             consumed += copy;
             if consumed == input.len() {
@@ -376,10 +374,7 @@ unsafe extern "C" fn gz_write(
     }
     return put;
 }
-unsafe fn gzwrite(
-    state: &mut crate::gzguts_h::gz_state,
-    buf: &[u8],
-) -> ::core::ffi::c_int {
+unsafe fn gzwrite(state: &mut crate::gzguts_h::gz_state, buf: &[u8]) -> ::core::ffi::c_int {
     let len = buf.len() as ::core::ffi::c_uint;
     if state.mode != crate::gzguts_h::GZ_WRITE
         || state.err != crate::zlib_h::Z_OK && state.again == 0
@@ -579,12 +574,10 @@ pub unsafe extern "C" fn gzsetparams(
 ) -> ::core::ffi::c_int {
     let mut state: crate::gzguts_h::gz_statep =
         ::core::ptr::null_mut::<crate::gzguts_h::gz_state>();
-    let mut strm: crate::zlib_h::z_streamp = ::core::ptr::null_mut::<crate::zlib_h::z_stream>();
     if file.is_null() {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
     state = file as crate::gzguts_h::gz_statep;
-    strm = &raw mut (*state).strm as crate::zlib_h::z_streamp;
     if (*state).mode != crate::gzguts_h::GZ_WRITE
         || (*state).err != crate::zlib_h::Z_OK && (*state).again == 0
         || (*state).direct != 0
@@ -600,12 +593,12 @@ pub unsafe extern "C" fn gzsetparams(
         return (*state).err;
     }
     if (*state).size != 0 {
-        if (*strm).avail_in != 0
+        if state.strm.avail_in != 0
             && gz_comp(state, crate::zlib_h::Z_BLOCK) == -1 as ::core::ffi::c_int
         {
             return (*state).err;
         }
-        crate::src::deflate::deflateParams(strm as *mut crate::zlib_h::z_stream_s, level, strategy);
+        crate::src::deflate::deflateParams(&mut state.strm, level, strategy);
     }
     (*state).level = level;
     (*state).strategy = strategy;

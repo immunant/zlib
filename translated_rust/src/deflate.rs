@@ -213,9 +213,7 @@ impl internal_state {
 
         // The state owns this allocation for its entire lifetime.  Bounds
         // above ensure that this temporary view remains within it.
-        Some(unsafe {
-            core::slice::from_raw_parts(self.pending_buf.add(start), end - start)
-        })
+        Some(unsafe { core::slice::from_raw_parts(self.pending_buf.add(start), end - start) })
     }
 
     /// Record one literal or match descriptor in the three-byte symbol
@@ -1269,8 +1267,8 @@ pub unsafe extern "C" fn deflatePrime(
         || bits > 16 as ::core::ffi::c_int
         || pending_state.sym_buf
             < pending_state.pending_out.wrapping_add(
-                (crate::src::deflate::Buf_size + 7 as ::core::ffi::c_int
-                    >> 3 as ::core::ffi::c_int) as usize,
+                (crate::src::deflate::Buf_size + 7 as ::core::ffi::c_int >> 3 as ::core::ffi::c_int)
+                    as usize,
             )
     {
         return crate::zlib_h::Z_BUF_ERROR;
@@ -1281,8 +1279,8 @@ pub unsafe extern "C" fn deflatePrime(
             put = bits;
         }
         s.bi_buf = (s.bi_buf as ::core::ffi::c_int
-            | ((value & ((1 as ::core::ffi::c_int) << put) - 1 as ::core::ffi::c_int)
-                << s.bi_valid) as crate::zutil_h::ush as ::core::ffi::c_int)
+            | ((value & ((1 as ::core::ffi::c_int) << put) - 1 as ::core::ffi::c_int) << s.bi_valid)
+                as crate::zutil_h::ush as ::core::ffi::c_int)
             as crate::zutil_h::ush;
         s.bi_valid += put;
         crate::src::trees::_tr_flush_bits(s);
@@ -1303,17 +1301,18 @@ pub unsafe extern "C" fn deflatePrime_ffi(
 ) -> ::core::ffi::c_int {
     deflatePrime(strm, bits, value)
 }
-pub unsafe extern "C" fn deflateParams(
-    mut strm: crate::zlib_h::z_streamp,
+pub unsafe fn deflateParams(
+    strm: &mut crate::zlib_h::z_stream_s,
     mut level: ::core::ffi::c_int,
     mut strategy: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
-    let mut s: *mut crate::src::deflate::deflate_state =
-        ::core::ptr::null_mut::<crate::src::deflate::deflate_state>();
-    if deflateStateCheck(strm) != 0 {
+    // Check the stream's raw state link before turning it into a Rust borrow.
+    // The link is maintained by the allocation lifecycle and is the only
+    // remaining raw boundary this parameter update needs to cross.
+    if deflateStateCheck(strm as *mut crate::zlib_h::z_stream_s) != 0 {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    s = (*strm).state as *mut crate::src::deflate::deflate_state;
+    let s = &mut *(strm.state as *mut crate::src::deflate::deflate_state);
     if level == crate::zlib_h::Z_DEFAULT_COMPRESSION {
         level = 6 as ::core::ffi::c_int;
     }
@@ -1324,50 +1323,45 @@ pub unsafe extern "C" fn deflateParams(
     {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    let func = configuration_table[(*s).level as usize].func;
-    if (strategy != (*s).strategy || func != configuration_table[level as usize].func)
-        && (*s).last_flush != -2 as ::core::ffi::c_int
+    let func = configuration_table[s.level as usize].func;
+    if (strategy != s.strategy || func != configuration_table[level as usize].func)
+        && s.last_flush != -2 as ::core::ffi::c_int
     {
-        let mut err: ::core::ffi::c_int = deflate(strm, crate::zlib_h::Z_BLOCK);
+        let err: ::core::ffi::c_int = deflate(
+            strm as *mut crate::zlib_h::z_stream_s,
+            crate::zlib_h::Z_BLOCK,
+        );
         if err == crate::zlib_h::Z_STREAM_ERROR {
             return err;
         }
-        if (*strm).avail_in != 0
-            || (*s).strstart as ::core::ffi::c_long - (*s).block_start
-                + (*s).lookahead as ::core::ffi::c_long
+        if strm.avail_in != 0
+            || s.strstart as ::core::ffi::c_long - s.block_start
+                + s.lookahead as ::core::ffi::c_long
                 != 0
         {
             return crate::zlib_h::Z_BUF_ERROR;
         }
     }
-    if (*s).level != level {
-        if (*s).level == 0 as ::core::ffi::c_int && (*s).matches != 0 as crate::stdlib::uInt {
-            if (*s).matches == 1 as crate::stdlib::uInt {
-                slide_hash(s);
+    if s.level != level {
+        if s.level == 0 as ::core::ffi::c_int && s.matches != 0 as crate::stdlib::uInt {
+            if s.matches == 1 as crate::stdlib::uInt {
+                slide_hash(s as *mut crate::src::deflate::deflate_state);
             } else {
-                *(*s)
-                    .head
-                    .offset((*s).hash_size.wrapping_sub(1 as crate::stdlib::uInt) as isize) =
-                    NIL as crate::src::deflate::Posf;
-                crate::stdlib::memset(
-                    (*s).head as *mut ::core::ffi::c_void,
-                    0 as ::core::ffi::c_int,
-                    ((*s).hash_size.wrapping_sub(1 as crate::stdlib::uInt)
-                        as crate::__stddef_size_t_h::size_t)
-                        .wrapping_mul(::core::mem::size_of::<crate::src::deflate::Posf>()),
-                );
-                (*s).slid = 0 as ::core::ffi::c_int;
+                let head_len = s.hash_size as usize;
+                let head = ::core::slice::from_raw_parts_mut(s.head, head_len);
+                head[..head_len - 1].fill(0 as crate::src::deflate::Posf);
+                head[head_len - 1] = NIL as crate::src::deflate::Posf;
+                s.slid = 0 as ::core::ffi::c_int;
             }
-            (*s).matches = 0 as crate::stdlib::uInt;
+            s.matches = 0 as crate::stdlib::uInt;
         }
-        (*s).level = level;
-        (*s).max_lazy_match = configuration_table[level as usize].max_lazy as crate::stdlib::uInt;
-        (*s).good_match = configuration_table[level as usize].good_length as crate::stdlib::uInt;
-        (*s).nice_match = configuration_table[level as usize].nice_length as ::core::ffi::c_int;
-        (*s).max_chain_length =
-            configuration_table[level as usize].max_chain as crate::stdlib::uInt;
+        s.level = level;
+        s.max_lazy_match = configuration_table[level as usize].max_lazy as crate::stdlib::uInt;
+        s.good_match = configuration_table[level as usize].good_length as crate::stdlib::uInt;
+        s.nice_match = configuration_table[level as usize].nice_length as ::core::ffi::c_int;
+        s.max_chain_length = configuration_table[level as usize].max_chain as crate::stdlib::uInt;
     }
-    (*s).strategy = strategy;
+    s.strategy = strategy;
     return crate::zlib_h::Z_OK;
 }
 #[export_name = "deflateParams"]
@@ -1377,6 +1371,9 @@ pub unsafe extern "C" fn deflateParams_ffi(
     mut level: ::core::ffi::c_int,
     mut strategy: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
+    let Some(strm) = strm.as_mut() else {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    };
     deflateParams(strm, level, strategy)
 }
 pub unsafe extern "C" fn deflateTune(
@@ -1434,12 +1431,10 @@ pub unsafe fn deflateBound_z(
         storelen = -1 as ::core::ffi::c_int as crate::stdlib::z_size_t;
     }
     let state = match strm {
-        Some(strm)
-            if strm.zalloc.is_some() && strm.zfree.is_some() && !strm.state.is_null() =>
-        {
+        Some(strm) if strm.zalloc.is_some() && strm.zfree.is_some() && !strm.state.is_null() => {
             let s = &*strm.state;
-            let stream_pointer = strm as *const crate::zlib_h::z_stream_s
-                as crate::zlib_h::z_streamp;
+            let stream_pointer =
+                strm as *const crate::zlib_h::z_stream_s as crate::zlib_h::z_streamp;
             if s.strm == stream_pointer
                 && (s.status == crate::src::deflate::INIT_STATE
                     || s.status == crate::src::deflate::GZIP_STATE
@@ -1507,8 +1502,7 @@ pub unsafe fn deflateBound_z(
         }
     }
     if s.w_bits != 15 as crate::stdlib::uInt
-        || s.hash_bits
-            != (8 as ::core::ffi::c_int + 7 as ::core::ffi::c_int) as crate::stdlib::uInt
+        || s.hash_bits != (8 as ::core::ffi::c_int + 7 as ::core::ffi::c_int) as crate::stdlib::uInt
     {
         bound = if s.w_bits <= s.hash_bits && s.level != 0 {
             fixedlen
@@ -2241,9 +2235,7 @@ pub unsafe fn deflateEnd(strm: &mut crate::zlib_h::z_stream_s) -> ::core::ffi::c
 /// The exported boundary converts the pointer directly; this adapter keeps
 /// those callers from spreading another raw-to-reference conversion around
 /// their cleanup paths.
-unsafe fn deflateEnd_from_stream_pointer(
-    strm: crate::zlib_h::z_streamp,
-) -> ::core::ffi::c_int {
+unsafe fn deflateEnd_from_stream_pointer(strm: crate::zlib_h::z_streamp) -> ::core::ffi::c_int {
     let Some(strm) = strm.as_mut() else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
@@ -2833,8 +2825,7 @@ unsafe extern "C" fn deflate_fast(
                         as isize,
                 ) as ::core::ffi::c_int
             }) as usize]
-                .fc = (*s).dyn_dtree[(if (dist as ::core::ffi::c_int) < 256 as ::core::ffi::c_int
-            {
+                .fc = (*s).dyn_dtree[(if (dist as ::core::ffi::c_int) < 256 as ::core::ffi::c_int {
                 *(&raw const crate::src::trees::_dist_code as *const crate::zutil_h::uch)
                     .offset(dist as isize) as ::core::ffi::c_int
             } else {
@@ -2895,8 +2886,7 @@ unsafe extern "C" fn deflate_fast(
             let c2rust_fresh49 = (*s).sym_next;
             (*s).sym_next = (*s).sym_next.wrapping_add(1);
             *sym_buf.offset(c2rust_fresh49 as isize) = cc as crate::zutil_h::uchf;
-            (*s).dyn_ltree[cc as usize].fc =
-                (*s).dyn_ltree[cc as usize].fc.wrapping_add(1);
+            (*s).dyn_ltree[cc as usize].fc = (*s).dyn_ltree[cc as usize].fc.wrapping_add(1);
             bflush = ((*s).sym_next == (*s).sym_end) as ::core::ffi::c_int;
             (*s).lookahead = (*s).lookahead.wrapping_sub(1);
             (*s).strstart = (*s).strstart.wrapping_add(1);
@@ -3085,8 +3075,7 @@ unsafe extern "C" fn deflate_slow(
                         as isize,
                 ) as ::core::ffi::c_int
             }) as usize]
-                .fc = (*s).dyn_dtree[(if (dist as ::core::ffi::c_int) < 256 as ::core::ffi::c_int
-            {
+                .fc = (*s).dyn_dtree[(if (dist as ::core::ffi::c_int) < 256 as ::core::ffi::c_int {
                 *(&raw const crate::src::trees::_dist_code as *const crate::zutil_h::uch)
                     .offset(dist as isize) as ::core::ffi::c_int
             } else {
@@ -3166,8 +3155,7 @@ unsafe extern "C" fn deflate_slow(
             let c2rust_fresh40 = (*s).sym_next;
             (*s).sym_next = (*s).sym_next.wrapping_add(1);
             *sym_buf.offset(c2rust_fresh40 as isize) = cc as crate::zutil_h::uchf;
-            (*s).dyn_ltree[cc as usize].fc =
-                (*s).dyn_ltree[cc as usize].fc.wrapping_add(1);
+            (*s).dyn_ltree[cc as usize].fc = (*s).dyn_ltree[cc as usize].fc.wrapping_add(1);
             bflush = ((*s).sym_next == (*s).sym_end) as ::core::ffi::c_int;
             if bflush != 0 {
                 crate::src::trees::_tr_flush_block(
@@ -3211,8 +3199,7 @@ unsafe extern "C" fn deflate_slow(
         let c2rust_fresh43 = (*s).sym_next;
         (*s).sym_next = (*s).sym_next.wrapping_add(1);
         *sym_buf.offset(c2rust_fresh43 as isize) = cc_0 as crate::zutil_h::uchf;
-        (*s).dyn_ltree[cc_0 as usize].fc =
-            (*s).dyn_ltree[cc_0 as usize].fc.wrapping_add(1);
+        (*s).dyn_ltree[cc_0 as usize].fc = (*s).dyn_ltree[cc_0 as usize].fc.wrapping_add(1);
         bflush = ((*s).sym_next == (*s).sym_end) as ::core::ffi::c_int;
         (*s).match_available = 0 as ::core::ffi::c_int;
     }
@@ -3400,8 +3387,7 @@ unsafe extern "C" fn deflate_rle(
                         as isize,
                 ) as ::core::ffi::c_int
             }) as usize]
-                .fc = (*s).dyn_dtree[(if (dist as ::core::ffi::c_int) < 256 as ::core::ffi::c_int
-            {
+                .fc = (*s).dyn_dtree[(if (dist as ::core::ffi::c_int) < 256 as ::core::ffi::c_int {
                 *(&raw const crate::src::trees::_dist_code as *const crate::zutil_h::uch)
                     .offset(dist as isize) as ::core::ffi::c_int
             } else {
@@ -3429,8 +3415,7 @@ unsafe extern "C" fn deflate_rle(
             let c2rust_fresh55 = (*s).sym_next;
             (*s).sym_next = (*s).sym_next.wrapping_add(1);
             *sym_buf.offset(c2rust_fresh55 as isize) = cc as crate::zutil_h::uchf;
-            (*s).dyn_ltree[cc as usize].fc =
-                (*s).dyn_ltree[cc as usize].fc.wrapping_add(1);
+            (*s).dyn_ltree[cc as usize].fc = (*s).dyn_ltree[cc as usize].fc.wrapping_add(1);
             bflush = ((*s).sym_next == (*s).sym_end) as ::core::ffi::c_int;
             (*s).lookahead = (*s).lookahead.wrapping_sub(1);
             (*s).strstart = (*s).strstart.wrapping_add(1);
