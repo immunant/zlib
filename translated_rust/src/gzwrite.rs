@@ -107,6 +107,56 @@ fn clear_buffered_input(buffer: &mut [u8]) {
     buffer.fill(0);
 }
 
+// A forward seek on a write handle is materialized as zero-filled input fed
+// through the normal compression path.  Keep the byte-range proof and the
+// scalar accounting outside the ABI-shaped gzip state so the eventual owned
+// gzip facade can drive the same transaction without retaining stream
+// pointers.  `input_len` deliberately follows zlib's c_int/off64_t chunk
+// selection, including its truncating cast when the remaining skip is less
+// than one buffer.
+struct GzZeroStep {
+    input_len: crate::stdlib::uInt,
+}
+
+struct GzZeroProgress {
+    position: crate::stdlib::off64_t,
+    skip: crate::stdlib::off64_t,
+}
+
+impl GzZeroStep {
+    fn new(size: crate::stdlib::uInt, skip: crate::stdlib::off64_t) -> Self {
+        let input_len = if ::core::mem::size_of::<::core::ffi::c_int>()
+            == ::core::mem::size_of::<crate::stdlib::off64_t>()
+            && size > crate::src::gzlib::gz_intmax()
+            || size as crate::stdlib::off64_t > skip
+        {
+            skip as crate::stdlib::uInt
+        } else {
+            size
+        };
+        Self { input_len }
+    }
+
+    fn zero_input<'a>(&self, input: &'a mut [u8]) -> Option<&'a mut [u8]> {
+        let input = input.get_mut(..self.input_len as usize)?;
+        clear_buffered_input(input);
+        Some(input)
+    }
+
+    fn finish(
+        &self,
+        remaining: crate::stdlib::uInt,
+        position: crate::stdlib::off64_t,
+        skip: crate::stdlib::off64_t,
+    ) -> GzZeroProgress {
+        let written = self.input_len.wrapping_sub(remaining);
+        GzZeroProgress {
+            position: position + written as crate::stdlib::off64_t,
+            skip: skip - written as crate::stdlib::off64_t,
+        }
+    }
+}
+
 // The write side's owned buffers are allocated as one pointer-free
 // transaction.  In particular, a failed output allocation drops the input
 // allocation before any ABI-shaped gzip state is changed.  Keeping this owner
@@ -354,7 +404,6 @@ unsafe fn gz_comp(
 unsafe fn gz_zero(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
     let mut first: ::core::ffi::c_int = 0;
     let mut ret: ::core::ffi::c_int = 0;
-    let mut n: ::core::ffi::c_uint = 0;
     if state.strm.avail_in != 0
         && gz_comp(state, crate::zlib_h::Z_NO_FLUSH) == -1 as ::core::ffi::c_int
     {
@@ -362,26 +411,24 @@ unsafe fn gz_zero(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
     }
     first = 1 as ::core::ffi::c_int;
     loop {
-        n = if ::core::mem::size_of::<::core::ffi::c_int>()
-            == ::core::mem::size_of::<crate::stdlib::off64_t>()
-            && state.size > crate::src::gzlib::gz_intmax()
-            || state.size as crate::stdlib::off64_t > state.skip
-        {
-            state.skip as ::core::ffi::c_uint
-        } else {
-            state.size
-        };
+        let step = GzZeroStep::new(state.size, state.skip);
         if first != 0 {
-            let input = &mut state.in_0.as_deref_mut().unwrap()[..n as usize];
-            clear_buffered_input(input);
+            if state
+                .in_0
+                .as_deref_mut()
+                .and_then(|input| step.zero_input(input))
+                .is_none()
+            {
+                return -1;
+            }
             first = 0 as ::core::ffi::c_int;
         }
-        state.strm.avail_in = n as crate::stdlib::uInt;
+        state.strm.avail_in = step.input_len;
         state.strm.next_in = state.in_0.as_deref_mut().unwrap().as_mut_ptr();
         ret = gz_comp(state, crate::zlib_h::Z_NO_FLUSH);
-        n = n.wrapping_sub(state.strm.avail_in as ::core::ffi::c_uint);
-        state.x.pos += n as crate::stdlib::off64_t;
-        state.skip -= n as crate::stdlib::off64_t;
+        let progress = step.finish(state.strm.avail_in, state.x.pos, state.skip);
+        state.x.pos = progress.position;
+        state.skip = progress.skip;
         if ret == -1 as ::core::ffi::c_int {
             return -1 as ::core::ffi::c_int;
         }
