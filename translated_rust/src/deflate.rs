@@ -1239,13 +1239,10 @@ pub unsafe extern "C" fn deflateParams(
     mut level: ::core::ffi::c_int,
     mut strategy: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
-    let mut s: *mut crate::src::deflate::deflate_state =
-        ::core::ptr::null_mut::<crate::src::deflate::deflate_state>();
-    let mut func: compress_func = None;
     if deflateStateCheck(strm) != 0 {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    s = (*strm).state as *mut crate::src::deflate::deflate_state;
+    let state = &mut *((*strm).state as *mut crate::src::deflate::deflate_state);
     if level == crate::zlib_h::Z_DEFAULT_COMPRESSION {
         level = 6 as ::core::ffi::c_int;
     }
@@ -1256,51 +1253,54 @@ pub unsafe extern "C" fn deflateParams(
     {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    func = configuration_table[(*s).level as usize].func;
-    if (strategy != (*s).strategy || func != configuration_table[level as usize].func)
-        && (*s).last_flush != -2 as ::core::ffi::c_int
+    let func = configuration_table[state.level as usize].func;
+    if (strategy != state.strategy || func != configuration_table[level as usize].func)
+        && state.last_flush != -2 as ::core::ffi::c_int
     {
         let mut err: ::core::ffi::c_int = deflate(strm, crate::zlib_h::Z_BLOCK);
         if err == crate::zlib_h::Z_STREAM_ERROR {
             return err;
         }
         if (*strm).avail_in != 0
-            || (*s).strstart as ::core::ffi::c_long - (*s).block_start
-                + (*s).lookahead as ::core::ffi::c_long
+            || state.strstart as ::core::ffi::c_long - state.block_start
+                + state.lookahead as ::core::ffi::c_long
                 != 0
         {
             return crate::zlib_h::Z_BUF_ERROR;
         }
     }
-    if (*s).level != level {
-        if (*s).level == 0 as ::core::ffi::c_int && (*s).matches != 0 as crate::stdlib::uInt {
-            if (*s).matches == 1 as crate::stdlib::uInt {
-                slide_hash(s);
-            } else {
-                *(*s)
-                    .head
-                    .offset((*s).hash_size.wrapping_sub(1 as crate::stdlib::uInt) as isize) =
-                    NIL as crate::src::deflate::Posf;
-                crate::stdlib::memset(
-                    (*s).head as *mut ::core::ffi::c_void,
-                    0 as ::core::ffi::c_int,
-                    ((*s).hash_size.wrapping_sub(1 as crate::stdlib::uInt)
-                        as crate::__stddef_size_t_h::size_t)
-                        .wrapping_mul(::core::mem::size_of::<crate::src::deflate::Posf>()),
-                );
-                (*s).slid = 0 as ::core::ffi::c_int;
+    let head = ::core::slice::from_raw_parts_mut(state.head, state.hash_size as usize);
+    let prev = ::core::slice::from_raw_parts_mut(state.prev, state.w_size as usize);
+    deflate_params(state, head, prev, level, strategy)
+}
+
+fn deflate_params(
+    state: &mut crate::src::deflate::deflate_state,
+    head: &mut [crate::src::deflate::Posf],
+    prev: &mut [crate::src::deflate::Posf],
+    level: ::core::ffi::c_int,
+    strategy: ::core::ffi::c_int,
+) -> ::core::ffi::c_int {
+    if state.level != level {
+        if state.level == 0 && state.matches != 0 {
+            if state.matches == 1 {
+                slide_hash_tables(head, prev, state.w_size);
+                state.slid = 1;
+            } else if let Some((last, entries)) = head.split_last_mut() {
+                *last = NIL as crate::src::deflate::Posf;
+                entries.fill(0);
+                state.slid = 0;
             }
-            (*s).matches = 0 as crate::stdlib::uInt;
+            state.matches = 0;
         }
-        (*s).level = level;
-        (*s).max_lazy_match = configuration_table[level as usize].max_lazy as crate::stdlib::uInt;
-        (*s).good_match = configuration_table[level as usize].good_length as crate::stdlib::uInt;
-        (*s).nice_match = configuration_table[level as usize].nice_length as ::core::ffi::c_int;
-        (*s).max_chain_length =
-            configuration_table[level as usize].max_chain as crate::stdlib::uInt;
+        state.level = level;
+        state.max_lazy_match = configuration_table[level as usize].max_lazy as crate::stdlib::uInt;
+        state.good_match = configuration_table[level as usize].good_length as crate::stdlib::uInt;
+        state.nice_match = configuration_table[level as usize].nice_length as ::core::ffi::c_int;
+        state.max_chain_length = configuration_table[level as usize].max_chain as crate::stdlib::uInt;
     }
-    (*s).strategy = strategy;
-    return crate::zlib_h::Z_OK;
+    state.strategy = strategy;
+    crate::zlib_h::Z_OK
 }
 #[export_name = "deflateParams"]
 
@@ -1318,17 +1318,25 @@ pub unsafe extern "C" fn deflateTune(
     mut nice_length: ::core::ffi::c_int,
     mut max_chain: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
-    let mut s: *mut crate::src::deflate::deflate_state =
-        ::core::ptr::null_mut::<crate::src::deflate::deflate_state>();
     if deflateStateCheck(strm) != 0 {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    s = (*strm).state as *mut crate::src::deflate::deflate_state;
-    (*s).good_match = good_length as crate::stdlib::uInt;
-    (*s).max_lazy_match = max_lazy as crate::stdlib::uInt;
-    (*s).nice_match = nice_length;
-    (*s).max_chain_length = max_chain as crate::stdlib::uInt;
-    return crate::zlib_h::Z_OK;
+    let state = &mut *((*strm).state as *mut crate::src::deflate::deflate_state);
+    deflate_tune(state, good_length, max_lazy, nice_length, max_chain)
+}
+
+fn deflate_tune(
+    state: &mut crate::src::deflate::deflate_state,
+    good_length: ::core::ffi::c_int,
+    max_lazy: ::core::ffi::c_int,
+    nice_length: ::core::ffi::c_int,
+    max_chain: ::core::ffi::c_int,
+) -> ::core::ffi::c_int {
+    state.good_match = good_length as crate::stdlib::uInt;
+    state.max_lazy_match = max_lazy as crate::stdlib::uInt;
+    state.nice_match = nice_length;
+    state.max_chain_length = max_chain as crate::stdlib::uInt;
+    crate::zlib_h::Z_OK
 }
 #[export_name = "deflateTune"]
 
