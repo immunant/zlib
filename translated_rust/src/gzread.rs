@@ -4380,6 +4380,26 @@ mod tests {
         assert_eq!(gz_output_cursor_offset(100, 99, 8), None);
         assert_eq!(gz_output_cursor_offset(100, 109, 8), None);
     }
+
+    #[test]
+    fn read_entry_points_reject_misaligned_handles_before_dispatch() {
+        let alignment = core::mem::align_of::<crate::gzguts_h::gz_state>();
+        assert!(alignment > 1);
+        let mut storage = vec![0_u8; alignment + 1];
+        let file = unsafe { storage.as_mut_ptr().add(1) as crate::zlib_h::gzFile };
+        let mut output = [0_i8; 1];
+
+        assert_ne!((file as usize) % alignment, 0);
+        unsafe {
+            assert_eq!(gzread_ffi(file, output.as_mut_ptr().cast(), 1), -1);
+            assert_eq!(gzfread_ffi(output.as_mut_ptr().cast(), 1, 1, file), 0);
+            assert_eq!(gzgetc_ffi(file), -1);
+            assert_eq!(gzungetc_ffi(b'x'.into(), file), -1);
+            assert!(gzgets_ffi(file, output.as_mut_ptr(), 1).is_null());
+            assert_eq!(gzdirect_ffi(file), 0);
+            assert_eq!(gzclose_r_ffi(file), crate::zlib_h::Z_STREAM_ERROR);
+        }
+    }
 }
 
 fn gz_read(
@@ -4474,7 +4494,9 @@ pub unsafe extern "C" fn gzread_ffi(
 ) -> ::core::ffi::c_int {
     let mut state: crate::gzguts_h::gz_statep =
         ::core::ptr::null_mut::<crate::gzguts_h::gz_state>();
-    if file.is_null() {
+    if file.is_null()
+        || file.align_offset(::core::mem::align_of::<crate::gzguts_h::gz_state>()) != 0
+    {
         return -1 as ::core::ffi::c_int;
     }
     state = file as crate::gzguts_h::gz_statep;
@@ -4518,7 +4540,9 @@ pub unsafe extern "C" fn gzfread_ffi(
     let mut len: crate::stdlib::z_size_t = 0;
     let mut state: crate::gzguts_h::gz_statep =
         ::core::ptr::null_mut::<crate::gzguts_h::gz_state>();
-    if file.is_null() {
+    if file.is_null()
+        || file.align_offset(::core::mem::align_of::<crate::gzguts_h::gz_state>()) != 0
+    {
         return 0 as crate::stdlib::z_size_t;
     }
     state = file as crate::gzguts_h::gz_statep;
@@ -4549,7 +4573,9 @@ pub unsafe extern "C" fn gzgetc_ffi(mut file: crate::zlib_h::gzFile) -> ::core::
     let mut buf: [::core::ffi::c_uchar; 1] = [0; 1];
     let mut state: crate::gzguts_h::gz_statep =
         ::core::ptr::null_mut::<crate::gzguts_h::gz_state>();
-    if file.is_null() {
+    if file.is_null()
+        || file.align_offset(::core::mem::align_of::<crate::gzguts_h::gz_state>()) != 0
+    {
         return -1 as ::core::ffi::c_int;
     }
     state = file as crate::gzguts_h::gz_statep;
@@ -4595,7 +4621,9 @@ pub unsafe extern "C" fn gzungetc_ffi(
 ) -> ::core::ffi::c_int {
     let mut state: crate::gzguts_h::gz_statep =
         ::core::ptr::null_mut::<crate::gzguts_h::gz_state>();
-    if file.is_null() {
+    if file.is_null()
+        || file.align_offset(::core::mem::align_of::<crate::gzguts_h::gz_state>()) != 0
+    {
         return -1 as ::core::ffi::c_int;
     }
     state = file as crate::gzguts_h::gz_statep;
@@ -4672,7 +4700,9 @@ pub unsafe extern "C" fn gzgets_ffi(
     let mut eol: *mut ::core::ffi::c_uchar = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
     let mut state: crate::gzguts_h::gz_statep =
         ::core::ptr::null_mut::<crate::gzguts_h::gz_state>();
-    if !gzgets_has_valid_inputs(!file.is_null(), !buf.is_null(), len) {
+    if !gzgets_has_valid_inputs(!file.is_null(), !buf.is_null(), len)
+        || file.align_offset(::core::mem::align_of::<crate::gzguts_h::gz_state>()) != 0
+    {
         return ::core::ptr::null_mut::<::core::ffi::c_char>();
     }
     state = file as crate::gzguts_h::gz_statep;
@@ -4742,7 +4772,9 @@ pub unsafe extern "C" fn gzgets_ffi(
 }
 #[export_name = "gzdirect"]
 pub unsafe extern "C" fn gzdirect_ffi(mut file: crate::zlib_h::gzFile) -> ::core::ffi::c_int {
-    if file.is_null() {
+    if file.is_null()
+        || file.align_offset(::core::mem::align_of::<crate::gzguts_h::gz_state>()) != 0
+    {
         return 0 as ::core::ffi::c_int;
     }
     let state = file as crate::gzguts_h::gz_statep;
@@ -4757,7 +4789,9 @@ pub unsafe extern "C" fn gzclose_r_ffi(mut file: crate::zlib_h::gzFile) -> ::cor
     let stream_err: ::core::ffi::c_int;
     let mut state: crate::gzguts_h::gz_statep =
         ::core::ptr::null_mut::<crate::gzguts_h::gz_state>();
-    if file.is_null() {
+    if file.is_null()
+        || file.align_offset(::core::mem::align_of::<crate::gzguts_h::gz_state>()) != 0
+    {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
     state = file as crate::gzguts_h::gz_statep;
