@@ -220,6 +220,46 @@ fn gz_open_plan(mode: &[u8]) -> Option<GzOpenPlan> {
     })
 }
 
+/// Extract the scalar state settings from a parsed plan before the raw open
+/// boundary writes them to its newly allocated ABI state.
+fn gz_open_option_values(
+    options: GzOpenOptions,
+) -> (
+    ::core::ffi::c_int,
+    ::core::ffi::c_int,
+    ::core::ffi::c_int,
+    ::core::ffi::c_int,
+) {
+    (
+        options.mode,
+        options.level,
+        options.strategy,
+        options.direct,
+    )
+}
+
+/// Record the result of the descriptor positioning performed while opening a
+/// gzip stream.  `Append` ignores the seek result just as zlib does, whereas
+/// an unseekable read descriptor starts at logical offset zero.
+enum GzOpenDescriptorPosition {
+    Append,
+    Read(crate::stdlib::off64_t),
+    Unchanged,
+}
+
+fn gz_open_apply_descriptor_position(
+    state: &mut crate::gzguts_h::gz_state,
+    position: GzOpenDescriptorPosition,
+) {
+    match position {
+        GzOpenDescriptorPosition::Append => state.mode = crate::gzguts_h::GZ_WRITE,
+        GzOpenDescriptorPosition::Read(start) => {
+            state.start = if start == -1 { 0 } else { start };
+        }
+        GzOpenDescriptorPosition::Unchanged => {}
+    }
+}
+
 /// The synthetic path reported by `gzdopen`.  It is kept in fixed storage so
 /// constructing it cannot introduce a second allocation failure before the
 /// gzip state itself is opened.
@@ -292,10 +332,11 @@ unsafe extern "C" fn gz_open(
             return ::core::ptr::null_mut::<crate::zlib_h::gzFile_s>();
         }
     };
-    (*state).mode = plan.options.mode;
-    (*state).level = plan.options.level;
-    (*state).strategy = plan.options.strategy;
-    (*state).direct = plan.options.direct;
+    let (mode, level, strategy, direct) = gz_open_option_values(plan.options);
+    (*state).mode = mode;
+    (*state).level = level;
+    (*state).strategy = strategy;
+    (*state).direct = direct;
     len = crate::stdlib::strlen(path as *const ::core::ffi::c_char) as crate::stdlib::z_size_t;
     (*state).path = crate::stdlib::malloc(
         (len as crate::__stddef_size_t_h::size_t)
@@ -342,24 +383,23 @@ unsafe extern "C" fn gz_open(
         return ::core::ptr::null_mut::<crate::zlib_h::gzFile_s>();
     }
     let state = &mut *state;
-    if state.mode == crate::gzguts_h::GZ_APPEND {
+    let descriptor_position = if state.mode == crate::gzguts_h::GZ_APPEND {
         crate::stdlib::lseek64(
             state.fd,
             0 as crate::stdlib::__off64_t,
             crate::stdlib::SEEK_END,
         );
-        state.mode = crate::gzguts_h::GZ_WRITE;
-    }
-    if state.mode == crate::gzguts_h::GZ_READ {
-        state.start = crate::stdlib::lseek64(
+        GzOpenDescriptorPosition::Append
+    } else if state.mode == crate::gzguts_h::GZ_READ {
+        GzOpenDescriptorPosition::Read(crate::stdlib::lseek64(
             state.fd,
             0 as crate::stdlib::__off64_t,
             crate::stdlib::SEEK_CUR,
-        ) as crate::stdlib::off64_t;
-        if state.start == -1 as crate::stdlib::off64_t {
-            state.start = 0 as crate::stdlib::off64_t;
-        }
-    }
+        ) as crate::stdlib::off64_t)
+    } else {
+        GzOpenDescriptorPosition::Unchanged
+    };
+    gz_open_apply_descriptor_position(state, descriptor_position);
     gz_reset_state(state);
     gz_error(
         state as *mut crate::gzguts_h::gz_state,
