@@ -110,12 +110,25 @@ impl CompressProgress {
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 struct CompressChunk {
+    input_start: usize,
     input_len: usize,
+    output_start: usize,
     output_len: usize,
     flush: ::core::ffi::c_int,
 }
 
 impl CompressChunk {
+    fn slices<'a>(
+        self,
+        source: &'a [crate::stdlib::Bytef],
+        dest: &'a mut [crate::stdlib::Bytef],
+    ) -> (&'a [crate::stdlib::Bytef], &'a mut [crate::stdlib::Bytef]) {
+        (
+            &source[self.input_start..self.input_start + self.input_len],
+            &mut dest[self.output_start..self.output_start + self.output_len],
+        )
+    }
+
     fn record_progress(
         self,
         source_progress: &mut CompressProgress,
@@ -135,23 +148,12 @@ fn next_compress_chunk(
     let input_len = source_progress.next_chunk_len();
 
     CompressChunk {
+        input_start: source_progress.used,
         input_len,
+        output_start: dest_progress.used,
         output_len: dest_progress.next_chunk_len(),
         flush: source_progress.flush_mode(input_len),
     }
-}
-
-fn next_compress_chunk_slices<'a>(
-    source: &'a [crate::stdlib::Bytef],
-    dest: &'a mut [crate::stdlib::Bytef],
-    source_progress: CompressProgress,
-    dest_progress: CompressProgress,
-    chunk: CompressChunk,
-) -> (&'a [crate::stdlib::Bytef], &'a mut [crate::stdlib::Bytef]) {
-    (
-        &source[source_progress.used..source_progress.used + chunk.input_len],
-        &mut dest[dest_progress.used..dest_progress.used + chunk.output_len],
-    )
 }
 
 fn compress_bound_z_impl(source_len: crate::stdlib::z_size_t) -> crate::stdlib::z_size_t {
@@ -237,13 +239,7 @@ pub unsafe extern "C" fn compress2_z_ffi(
     let mut dest_progress = CompressProgress::new(dest_slice.len());
     let status = loop {
         let chunk = next_compress_chunk(source_progress, dest_progress);
-        let (input, output) = next_compress_chunk_slices(
-            source_slice,
-            dest_slice,
-            source_progress,
-            dest_progress,
-            chunk,
-        );
+        let (input, output) = chunk.slices(source_slice, dest_slice);
 
         stream.next_in = if input.is_empty() {
             source as *mut crate::stdlib::Bytef
@@ -351,8 +347,7 @@ pub unsafe extern "C" fn compressBound_ffi(
 mod tests {
     use super::{
         compress_bound, compress_bound_z_impl, finish_compress, next_compress_chunk,
-        next_compress_chunk_slices, plan_compress2_buffers, CompressBufferPlan, CompressProgress,
-        MAX_CHUNK,
+        plan_compress2_buffers, CompressBufferPlan, CompressProgress, MAX_CHUNK,
     };
 
     #[test]
@@ -415,8 +410,7 @@ mod tests {
             used: 3,
         };
         let chunk = next_compress_chunk(source_progress, dest_progress);
-        let (input, output) =
-            next_compress_chunk_slices(source, &mut dest, source_progress, dest_progress, chunk);
+        let (input, output) = chunk.slices(source, &mut dest);
         assert_eq!(input, b"cdef");
         assert_eq!(output.len(), 5);
         output[0] = b'x';
@@ -432,8 +426,7 @@ mod tests {
             used: dest_len,
         };
         let chunk = next_compress_chunk(source_progress, dest_progress);
-        let (input, output) =
-            next_compress_chunk_slices(source, &mut dest, source_progress, dest_progress, chunk);
+        let (input, output) = chunk.slices(source, &mut dest);
         assert!(input.is_empty());
         assert!(output.is_empty());
     }
@@ -445,7 +438,9 @@ mod tests {
         assert_eq!(
             next_compress_chunk(source_progress, dest_progress),
             super::CompressChunk {
+                input_start: 2,
                 input_len: 3,
+                output_start: 3,
                 output_len: 5,
                 flush: crate::zlib_h::Z_FINISH,
             }
@@ -465,7 +460,9 @@ mod tests {
         let mut source_progress = CompressProgress::new(10);
         let mut dest_progress = CompressProgress::new(12);
         let chunk = super::CompressChunk {
+            input_start: 0,
             input_len: 7,
+            output_start: 0,
             output_len: 9,
             flush: crate::zlib_h::Z_NO_FLUSH,
         };

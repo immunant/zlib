@@ -93,13 +93,22 @@ impl UncompressBufferLengths {
         Self { dest, source }
     }
 
-    fn has_invalid_pointers(self, dest_is_null: bool, source_is_null: bool) -> bool {
-        self.source > 0 && source_is_null || self.dest > 0 && dest_is_null
+    fn buffer_setup(self, dest_is_null: bool, source_is_null: bool) -> UncompressBufferSetup {
+        if self.source > 0 && source_is_null || self.dest > 0 && dest_is_null {
+            UncompressBufferSetup::Invalid
+        } else if self.dest == 0 && dest_is_null {
+            UncompressBufferSetup::DummyOutput
+        } else {
+            UncompressBufferSetup::Direct
+        }
     }
+}
 
-    fn needs_dummy_output(self, dest_is_null: bool) -> bool {
-        self.dest == 0 && dest_is_null
-    }
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+enum UncompressBufferSetup {
+    Invalid,
+    Direct,
+    DummyOutput,
 }
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
@@ -161,7 +170,8 @@ pub unsafe extern "C" fn uncompress2_z_ffi(
         return crate::zlib_h::Z_STREAM_ERROR;
     }
     let lengths = UncompressBufferLengths::new(*destLen, *sourceLen);
-    if lengths.has_invalid_pointers(dest.is_null(), source.is_null()) {
+    let buffer_setup = lengths.buffer_setup(dest.is_null(), source.is_null());
+    if buffer_setup == UncompressBufferSetup::Invalid {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
 
@@ -182,7 +192,7 @@ pub unsafe extern "C" fn uncompress2_z_ffi(
         reserved: 0,
     };
     let mut dummy = 0 as crate::stdlib::Bytef;
-    if lengths.needs_dummy_output(dest.is_null()) {
+    if buffer_setup == UncompressBufferSetup::DummyOutput {
         dest = &raw mut dummy;
     }
 
@@ -271,22 +281,31 @@ mod tests {
     use super::{
         has_missing_uncompress_lengths, normalize_uncompress_status, replenish_scalar,
         uncompress_outcome, ChunkedProgress, LegacyUncompressLengths, UncompressBufferLengths,
+        UncompressBufferSetup,
     };
 
     #[test]
-    fn buffer_validation_allows_null_pointers_for_empty_buffers() {
-        assert!(!UncompressBufferLengths::new(0, 0).has_invalid_pointers(true, true));
-    }
-
-    #[test]
-    fn buffer_validation_rejects_null_pointer_for_nonempty_buffer() {
-        assert!(UncompressBufferLengths::new(1, 0).has_invalid_pointers(true, false));
-        assert!(UncompressBufferLengths::new(0, 1).has_invalid_pointers(false, true));
-    }
-
-    #[test]
-    fn buffer_validation_accepts_present_nonempty_buffers() {
-        assert!(!UncompressBufferLengths::new(1, 1).has_invalid_pointers(false, false));
+    fn buffer_setup_preserves_validation_and_dummy_output_rules() {
+        assert_eq!(
+            UncompressBufferLengths::new(0, 0).buffer_setup(true, true),
+            UncompressBufferSetup::DummyOutput
+        );
+        assert_eq!(
+            UncompressBufferLengths::new(1, 0).buffer_setup(true, false),
+            UncompressBufferSetup::Invalid
+        );
+        assert_eq!(
+            UncompressBufferLengths::new(0, 1).buffer_setup(false, true),
+            UncompressBufferSetup::Invalid
+        );
+        assert_eq!(
+            UncompressBufferLengths::new(1, 1).buffer_setup(false, false),
+            UncompressBufferSetup::Direct
+        );
+        assert_eq!(
+            UncompressBufferLengths::new(0, 0).buffer_setup(false, false),
+            UncompressBufferSetup::Direct
+        );
     }
 
     #[test]
@@ -294,13 +313,6 @@ mod tests {
         assert!(has_missing_uncompress_lengths(true, false));
         assert!(has_missing_uncompress_lengths(false, true));
         assert!(!has_missing_uncompress_lengths(false, false));
-    }
-
-    #[test]
-    fn dummy_output_is_used_only_for_a_null_empty_destination() {
-        assert!(UncompressBufferLengths::new(0, 0).needs_dummy_output(true));
-        assert!(!UncompressBufferLengths::new(0, 0).needs_dummy_output(false));
-        assert!(!UncompressBufferLengths::new(1, 0).needs_dummy_output(true));
     }
 
     #[test]

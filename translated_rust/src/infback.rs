@@ -133,6 +133,20 @@ fn inflate_back_consume_input_byte(
     )
 }
 
+fn inflate_back_take_bits(
+    hold: ::core::ffi::c_ulong,
+    bits: ::core::ffi::c_uint,
+    count: ::core::ffi::c_uint,
+) -> (
+    ::core::ffi::c_uint,
+    ::core::ffi::c_ulong,
+    ::core::ffi::c_uint,
+) {
+    let value = hold as ::core::ffi::c_uint
+        & ((1 as ::core::ffi::c_uint) << count).wrapping_sub(1 as ::core::ffi::c_uint);
+    (value, hold >> count, bits.wrapping_sub(count))
+}
+
 fn inflate_back_align_to_byte_boundary(
     hold: ::core::ffi::c_ulong,
     bits: ::core::ffi::c_uint,
@@ -666,23 +680,19 @@ pub unsafe extern "C" fn inflateBack(
                                             .wrapping_sub(1 as ::core::ffi::c_uint)
                                             as usize]
                                             as ::core::ffi::c_uint;
-                                        copy = (3 as ::core::ffi::c_uint).wrapping_add(
-                                            hold as ::core::ffi::c_uint
-                                                & ((1 as ::core::ffi::c_uint) << extra_bits)
-                                                    .wrapping_sub(1 as ::core::ffi::c_uint),
-                                        );
-                                        hold >>= extra_bits;
-                                        bits = bits.wrapping_sub(extra_bits);
+                                        let (extra, remaining_hold, remaining_bits) =
+                                            inflate_back_take_bits(hold, bits, extra_bits);
+                                        copy = (3 as ::core::ffi::c_uint).wrapping_add(extra);
+                                        hold = remaining_hold;
+                                        bits = remaining_bits;
                                     }
                                     InflateBackCodeLengthRepeat::Zero { extra_bits, base } => {
                                         len = 0 as ::core::ffi::c_uint;
-                                        copy = base.wrapping_add(
-                                            hold as ::core::ffi::c_uint
-                                                & ((1 as ::core::ffi::c_uint) << extra_bits)
-                                                    .wrapping_sub(1 as ::core::ffi::c_uint),
-                                        );
-                                        hold >>= extra_bits;
-                                        bits = bits.wrapping_sub(extra_bits);
+                                        let (extra, remaining_hold, remaining_bits) =
+                                            inflate_back_take_bits(hold, bits, extra_bits);
+                                        copy = base.wrapping_add(extra);
+                                        hold = remaining_hold;
+                                        bits = remaining_bits;
                                     }
                                 }
                                 if (*state).have.wrapping_add(copy)
@@ -914,13 +924,11 @@ pub unsafe extern "C" fn inflateBack(
                             (have, hold, bits) =
                                 inflate_back_consume_input_byte(have, hold, bits, input_byte);
                         }
-                        (*state).length = (*state).length.wrapping_add(
-                            hold as ::core::ffi::c_uint
-                                & ((1 as ::core::ffi::c_uint) << (*state).extra)
-                                    .wrapping_sub(1 as ::core::ffi::c_uint),
-                        );
-                        hold >>= (*state).extra;
-                        bits = bits.wrapping_sub((*state).extra);
+                        let (extra, remaining_hold, remaining_bits) =
+                            inflate_back_take_bits(hold, bits, (*state).extra);
+                        (*state).length = (*state).length.wrapping_add(extra);
+                        hold = remaining_hold;
+                        bits = remaining_bits;
                     }
                     loop {
                         here = *(*state).distcode.wrapping_add(
@@ -1013,13 +1021,11 @@ pub unsafe extern "C" fn inflateBack(
                                 (have, hold, bits) =
                                     inflate_back_consume_input_byte(have, hold, bits, input_byte);
                             }
-                            (*state).offset = (*state).offset.wrapping_add(
-                                hold as ::core::ffi::c_uint
-                                    & ((1 as ::core::ffi::c_uint) << (*state).extra)
-                                        .wrapping_sub(1 as ::core::ffi::c_uint),
-                            );
-                            hold >>= (*state).extra;
-                            bits = bits.wrapping_sub((*state).extra);
+                            let (extra, remaining_hold, remaining_bits) =
+                                inflate_back_take_bits(hold, bits, (*state).extra);
+                            (*state).offset = (*state).offset.wrapping_add(extra);
+                            hold = remaining_hold;
+                            bits = remaining_bits;
                         }
                         if inflate_back_distance_exceeds_window(
                             (*state).offset,
@@ -1128,7 +1134,7 @@ mod tests {
         inflate_back_code_length_repeat, inflate_back_consume_input_byte, inflate_back_copy_count,
         inflate_back_distance_exceeds_window, inflate_back_finish_flush_status,
         inflate_back_init_metadata_is_valid, inflate_back_litlen_action,
-        inflate_back_match_copy_plan, inflate_back_stored_block_length,
+        inflate_back_match_copy_plan, inflate_back_stored_block_length, inflate_back_take_bits,
         inflate_back_window_bits_are_valid, inflate_back_window_size, InflateBackBlockKind,
         InflateBackCodeLengthRepeat, InflateBackLitLenAction, InflateBackMatchSource,
     };
@@ -1171,6 +1177,12 @@ mod tests {
             inflate_back_consume_input_byte(0, 0, 60, 0xff),
             (::core::ffi::c_uint::MAX, 0xf000_0000_0000_0000, 68),
         );
+    }
+
+    #[test]
+    fn inflate_back_take_bits_returns_low_bits_and_advances_buffer() {
+        assert_eq!(inflate_back_take_bits(0b101101, 6, 3), (0b101, 0b101, 3));
+        assert_eq!(inflate_back_take_bits(0x1234, 16, 4), (0x4, 0x123, 12));
     }
 
     #[test]
