@@ -114,6 +114,26 @@ fn gz_zero_chunk_step(
     }
 }
 
+fn gz_zero_initial_step(
+    pending_input: crate::stdlib::uInt,
+    first: ::core::ffi::c_int,
+    size: ::core::ffi::c_uint,
+    skip: crate::stdlib::off64_t,
+    int_and_off64_are_same_size: bool,
+    int_max: ::core::ffi::c_uint,
+) -> GzZeroStep {
+    match gz_zero_pending_step(pending_input) {
+        GzZeroStep::FlushPending => GzZeroStep::FlushPending,
+        GzZeroStep::WriteChunk { .. } => gz_zero_chunk_step(
+            first,
+            size,
+            skip,
+            int_and_off64_are_same_size,
+            int_max,
+        ),
+    }
+}
+
 enum GzZeroAction {
     Error,
     Done,
@@ -785,16 +805,25 @@ unsafe fn gz_comp(
 }
 
 unsafe fn gz_zero(mut state: crate::gzguts_h::gz_statep) -> ::core::ffi::c_int {
+    let state = &mut *state;
     let mut first: ::core::ffi::c_int = 0;
     let mut ret: ::core::ffi::c_int = 0;
     let mut n: ::core::ffi::c_uint = 0;
-    let mut strm: crate::zlib_h::z_streamp = &raw mut (*state).strm;
-    if matches!(
-        gz_zero_pending_step((*strm).avail_in),
-        GzZeroStep::FlushPending
-    ) && gz_comp(state, crate::zlib_h::Z_NO_FLUSH) == -1 as ::core::ffi::c_int
-    {
-        return -1 as ::core::ffi::c_int;
+    match gz_zero_initial_step(
+        state.strm.avail_in,
+        first,
+        state.size,
+        state.skip,
+        ::core::mem::size_of::<::core::ffi::c_int>()
+            == ::core::mem::size_of::<crate::stdlib::off64_t>(),
+        crate::src::gzlib::gz_intmax(),
+    ) {
+        GzZeroStep::FlushPending => {
+            if gz_comp(state, crate::zlib_h::Z_NO_FLUSH) == -1 as ::core::ffi::c_int {
+                return -1 as ::core::ffi::c_int;
+            }
+        }
+        GzZeroStep::WriteChunk { .. } => {}
     }
     first = 1 as ::core::ffi::c_int;
     loop {
@@ -803,8 +832,8 @@ unsafe fn gz_zero(mut state: crate::gzguts_h::gz_statep) -> ::core::ffi::c_int {
             initialize_buffer,
         } = gz_zero_chunk_step(
             first,
-            (*state).size,
-            (*state).skip,
+            state.size,
+            state.skip,
             ::core::mem::size_of::<::core::ffi::c_int>()
                 == ::core::mem::size_of::<crate::stdlib::off64_t>(),
             crate::src::gzlib::gz_intmax(),
@@ -815,18 +844,16 @@ unsafe fn gz_zero(mut state: crate::gzguts_h::gz_statep) -> ::core::ffi::c_int {
         n = len;
         if initialize_buffer {
             crate::stdlib::memset(
-                (*state).in_0 as *mut ::core::ffi::c_void,
+                state.in_0 as *mut ::core::ffi::c_void,
                 0 as ::core::ffi::c_int,
                 n as crate::__stddef_size_t_h::size_t,
             );
             first = 0 as ::core::ffi::c_int;
         }
-        (*strm).avail_in = n as crate::stdlib::uInt;
-        (*strm).next_in = (*state).in_0;
+        state.strm.avail_in = n as crate::stdlib::uInt;
+        state.strm.next_in = state.in_0;
         ret = gz_comp(state, crate::zlib_h::Z_NO_FLUSH);
-        let remaining_avail_in = (*strm).avail_in;
-        let state = &mut *state;
-        let progress = gz_zero_progress(state.x.pos, state.skip, n, remaining_avail_in, ret);
+        let progress = gz_zero_progress(state.x.pos, state.skip, n, state.strm.avail_in, ret);
         state.x.pos = progress.pos;
         state.skip = progress.skip;
         match progress.action {
@@ -1268,7 +1295,8 @@ mod tests {
         gz_write_error_result, gz_write_is_empty, gz_write_progress,
         gz_write_remaining_after_consumption, gz_write_state_is_usable,
         gz_write_uses_buffered_path, gz_zero_action, gz_zero_apply_progress, gz_zero_chunk_len,
-        gz_zero_chunk_step, gz_zero_needs_initialization, gz_zero_pending_step, gz_zero_progress,
+        gz_zero_chunk_step, gz_zero_initial_step, gz_zero_needs_initialization,
+        gz_zero_pending_step, gz_zero_progress,
         gzclose_buffer_action, gzclose_mode_is_writable, gzclose_w_result, gzflush_action,
         gzflush_mode_is_valid, gzfwrite_result, gzputc_result, gzputc_write_action,
         gzputs_len_fits_int, gzputs_result, gzsetparams_buffer_action, gzsetparams_settings_match,
@@ -1401,6 +1429,21 @@ mod tests {
             GzZeroStep::WriteChunk {
                 len: 1024,
                 initialize_buffer: false,
+            }
+        ));
+    }
+
+    #[test]
+    fn gz_zero_initial_step_prioritizes_pending_input_over_chunk_setup() {
+        assert!(matches!(
+            gz_zero_initial_step(1, 1, 1024, 99, false, 0),
+            GzZeroStep::FlushPending
+        ));
+        assert!(matches!(
+            gz_zero_initial_step(0, 1, 1024, 99, false, 0),
+            GzZeroStep::WriteChunk {
+                len: 99,
+                initialize_buffer: true,
             }
         ));
     }
