@@ -2751,6 +2751,18 @@ pub struct InflateEndState<'a> {
     state_address: usize,
 }
 
+fn inflate_end_state(
+    state: &mut crate::src::inflate::inflate_state,
+) -> InflateEndState<'_> {
+    let state_address = inflate_state_address(state);
+    InflateEndState {
+        mode: state.mode,
+        window: &mut state.window,
+        header_registered: &mut state.head,
+        state_address,
+    }
+}
+
 pub fn inflateEnd(mut state: InflateEndState<'_>) -> ::core::ffi::c_int {
     if state.mode < crate::src::inflate::HEAD || state.mode > crate::src::inflate::SYNC {
         return crate::zlib_h::Z_STREAM_ERROR;
@@ -2774,39 +2786,6 @@ fn inflate_end_impl(
     inflateEnd(state)
 }
 
-/// Return an ABI-allocated inflater state after its safe owners are released.
-///
-/// The allocation and callback pair originate at the C boundary.  Keep their
-/// raw handoff together here, while `inflate_end_impl()` receives only the
-/// pointer-free state view it needs for validation and cleanup.
-unsafe fn inflate_end_boundary(
-    strm: &mut crate::zlib_h::z_stream_s,
-) -> ::core::ffi::c_int {
-    let state_allocation = strm.state.cast::<::core::ffi::c_void>();
-    let zfree = strm.zfree;
-    let opaque = strm.opaque;
-    let Some(inflate_state) = strm
-        .state
-        .cast::<crate::src::inflate::inflate_state>()
-        .as_mut()
-    else {
-        return crate::zlib_h::Z_STREAM_ERROR;
-    };
-    let state_address = inflate_state_address(inflate_state);
-    let state = InflateEndState {
-        mode: inflate_state.mode,
-        window: &mut inflate_state.window,
-        header_registered: &mut inflate_state.head,
-        state_address,
-    };
-    let end = inflate_end_impl(state, strm.zalloc.is_some() && zfree.is_some());
-    if end != crate::zlib_h::Z_STREAM_ERROR {
-        zfree.expect("inflate_end_impl validates zfree")(opaque, state_allocation);
-        clear_inflate_state(strm);
-    }
-    end
-}
-
 fn clear_inflate_state(strm: &mut crate::zlib_h::z_stream_s) {
     strm.state = ::core::ptr::null_mut::<crate::src::deflate::internal_state>();
 }
@@ -2817,7 +2796,28 @@ pub unsafe extern "C" fn inflateEnd_ffi(mut strm: crate::zlib_h::z_streamp) -> :
     let Some(strm) = strm.as_mut() else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
-    inflate_end_boundary(strm)
+    let Some(state) = strm
+        .state
+        .cast::<crate::src::inflate::inflate_state>()
+        .as_mut()
+    else {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    };
+    let end = inflate_end_impl(
+        inflate_end_state(state),
+        strm.zalloc.is_some() && strm.zfree.is_some(),
+    );
+    if end != crate::zlib_h::Z_STREAM_ERROR {
+        // The safe implementation released the Rust owners and validated the
+        // allocator pair.  Return precisely the allocation from which the
+        // checked state reference was made to its ABI allocator.
+        strm.zfree.expect("inflate_end_impl validates zfree")(
+            strm.opaque,
+            core::ptr::from_mut(state).cast(),
+        );
+        clear_inflate_state(strm);
+    }
+    end
 }
 pub fn inflateGetDictionary(
     whave: crate::stdlib::uInt,
