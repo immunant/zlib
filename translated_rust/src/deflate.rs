@@ -1040,30 +1040,6 @@ fn fill_window_state(
     }
 }
 
-#[export_name = "deflateInit_"]
-
-pub unsafe extern "C" fn deflateInit__ffi(
-    mut strm: crate::zlib_h::z_streamp,
-    mut level: ::core::ffi::c_int,
-    mut version: *const ::core::ffi::c_char,
-    mut stream_size: ::core::ffi::c_int,
-) -> ::core::ffi::c_int {
-    if version.is_null() || !deflate_init_version_matches(*version, stream_size) {
-        return crate::zlib_h::Z_VERSION_ERROR;
-    }
-    if strm.is_null() {
-        return crate::zlib_h::Z_STREAM_ERROR;
-    }
-    deflateInit2_(
-        &mut *strm,
-        level,
-        crate::zlib_h::Z_DEFLATED,
-        crate::stdlib::MAX_WBITS,
-        crate::zutil_h::DEF_MEM_LEVEL,
-        crate::zlib_h::Z_DEFAULT_STRATEGY,
-    )
-}
-
 /// Validate the scalar portion of zlib's init ABI at the export boundary.
 /// Internal callers use the implementation directly and therefore never need
 /// to manufacture a C version pointer or stream-size argument.
@@ -1080,7 +1056,7 @@ fn deflate_init_version_matches(
 /// The checked scalar choices needed to construct a deflate state.  Keeping
 /// these separate from callback allocation lets the initialization state
 /// machine remain ordinary Rust once the ABI boundary has obtained storage.
-struct DeflateInitSettings {
+pub(crate) struct DeflateInitSettings {
     level: ::core::ffi::c_int,
     method: crate::stdlib::Byte,
     wrap: ::core::ffi::c_int,
@@ -1089,7 +1065,7 @@ struct DeflateInitSettings {
     strategy: ::core::ffi::c_int,
 }
 
-fn deflate_init_settings(
+pub(crate) fn deflate_init_settings(
     mut level: ::core::ffi::c_int,
     method: ::core::ffi::c_int,
     mut window_bits: ::core::ffi::c_int,
@@ -1137,13 +1113,13 @@ fn deflate_init_settings(
 /// Sizes for the four callback-owned allocations.  They are derived while a
 /// state is safely borrowed, then used after that borrow ends for each foreign
 /// allocator callback.
-struct DeflateAllocationSizes {
-    window: crate::stdlib::uInt,
-    hash: crate::stdlib::uInt,
-    pending: crate::stdlib::uInt,
+pub(crate) struct DeflateAllocationSizes {
+    pub(crate) window: crate::stdlib::uInt,
+    pub(crate) hash: crate::stdlib::uInt,
+    pub(crate) pending: crate::stdlib::uInt,
 }
 
-fn deflate_prepare_initial_state(
+pub(crate) fn deflate_prepare_initial_state(
     state: &mut deflate_state,
     stream_identity: usize,
     settings: &DeflateInitSettings,
@@ -1173,7 +1149,7 @@ fn deflate_prepare_initial_state(
     }
 }
 
-fn deflate_complete_initial_state(
+pub(crate) fn deflate_complete_initial_state(
     strm: &mut crate::zlib_h::z_stream,
     state: &mut deflate_state,
     settings: &DeflateInitSettings,
@@ -1191,7 +1167,7 @@ fn deflate_complete_initial_state(
     ret
 }
 
-fn deflate_mark_initialization_memory_error(
+pub(crate) fn deflate_mark_initialization_memory_error(
     strm: &mut crate::zlib_h::z_stream,
     state: &mut deflate_state,
 ) {
@@ -1203,7 +1179,7 @@ fn deflate_mark_initialization_memory_error(
 /// Apply zlib's stream defaults before validating init settings.  This is
 /// ordinary stream bookkeeping; allocation callbacks remain at the ABI
 /// boundary below.
-fn deflate_prepare_init_stream(strm: &mut crate::zlib_h::z_stream) {
+pub(crate) fn deflate_prepare_init_stream(strm: &mut crate::zlib_h::z_stream) {
     strm.msg = ::core::ptr::null_mut::<::core::ffi::c_char>();
     if strm.zalloc.is_none() {
         strm.zalloc = Some(
@@ -1224,103 +1200,141 @@ fn deflate_prepare_init_stream(strm: &mut crate::zlib_h::z_stream) {
     }
 }
 
-pub fn deflateInit2_(
-    strm_ref: &mut crate::zlib_h::z_stream,
-    level: ::core::ffi::c_int,
-    method: ::core::ffi::c_int,
-    windowBits: ::core::ffi::c_int,
-    memLevel: ::core::ffi::c_int,
-    strategy: ::core::ffi::c_int,
+// This expands only at exported codec boundaries.  Callback allocation and
+// adoption of the C-compatible state record cannot cross into the safe codec
+// core; all scalar setup and post-allocation initialization stay in the safe
+// helpers above.
+macro_rules! deflate_init2_at_boundary {
+    ($strm:expr, $level:expr, $method:expr, $window_bits:expr, $mem_level:expr, $strategy:expr $(,)?) => {{
+        let strm = $strm;
+        if strm.is_null() {
+            crate::zlib_h::Z_STREAM_ERROR
+        } else {
+            'deflate_init_result: {
+                let strm_ref = &mut *strm;
+                let level = $level;
+                let method = $method;
+                let window_bits = $window_bits;
+                let mem_level = $mem_level;
+                let strategy = $strategy;
+                // zlib applies these defaults even when scalar validation fails.
+                crate::src::deflate::deflate_prepare_init_stream(strm_ref);
+                let Some(settings) = crate::src::deflate::deflate_init_settings(
+                    level,
+                    method,
+                    window_bits,
+                    mem_level,
+                    strategy,
+                ) else {
+                    break 'deflate_init_result crate::zlib_h::Z_STREAM_ERROR;
+                };
+                let Some(zalloc) = strm_ref.zalloc else {
+                    break 'deflate_init_result crate::zlib_h::Z_STREAM_ERROR;
+                };
+                let s = zalloc(
+                    strm_ref.opaque,
+                    1 as crate::stdlib::uInt,
+                    ::core::mem::size_of::<crate::src::deflate::deflate_state>()
+                        as crate::stdlib::uInt,
+                ) as *mut crate::src::deflate::deflate_state;
+                if s.is_null() {
+                    break 'deflate_init_result crate::zlib_h::Z_MEM_ERROR;
+                }
+                let allocation_sizes = {
+                    let state = &mut *s;
+                    strm_ref.state = s as *mut crate::src::deflate::internal_state;
+                    crate::src::deflate::deflate_prepare_initial_state(
+                        state,
+                        strm_ref as *mut crate::zlib_h::z_stream as usize,
+                        &settings,
+                    )
+                };
+                // Do not retain the state borrow across a custom allocator callback.
+                // Publish each allocation immediately, matching zlib's observable
+                // partial-initialization state for allocator hooks.
+                let Some(zalloc) = strm_ref.zalloc else {
+                    let _ = crate::src::deflate::deflateEnd(strm_ref);
+                    break 'deflate_init_result crate::zlib_h::Z_STREAM_ERROR;
+                };
+                let window = zalloc(
+                    strm_ref.opaque,
+                    allocation_sizes.window,
+                    (2 as usize).wrapping_mul(::core::mem::size_of::<crate::stdlib::Byte>())
+                        as crate::stdlib::uInt,
+                ) as *mut crate::stdlib::Bytef;
+                (&mut *s).window = ::core::ptr::NonNull::new(window);
+                let Some(zalloc) = strm_ref.zalloc else {
+                    let _ = crate::src::deflate::deflateEnd(strm_ref);
+                    break 'deflate_init_result crate::zlib_h::Z_STREAM_ERROR;
+                };
+                let prev = zalloc(
+                    strm_ref.opaque,
+                    allocation_sizes.window,
+                    ::core::mem::size_of::<crate::src::deflate::Pos>() as crate::stdlib::uInt,
+                ) as *mut crate::src::deflate::Posf;
+                (&mut *s).prev = ::core::ptr::NonNull::new(prev);
+                let Some(zalloc) = strm_ref.zalloc else {
+                    let _ = crate::src::deflate::deflateEnd(strm_ref);
+                    break 'deflate_init_result crate::zlib_h::Z_STREAM_ERROR;
+                };
+                let head = zalloc(
+                    strm_ref.opaque,
+                    allocation_sizes.hash,
+                    ::core::mem::size_of::<crate::src::deflate::Pos>() as crate::stdlib::uInt,
+                ) as *mut crate::src::deflate::Posf;
+                (&mut *s).head = ::core::ptr::NonNull::new(head);
+                let Some(zalloc) = strm_ref.zalloc else {
+                    let _ = crate::src::deflate::deflateEnd(strm_ref);
+                    break 'deflate_init_result crate::zlib_h::Z_STREAM_ERROR;
+                };
+                let pending_buf = zalloc(
+                    strm_ref.opaque,
+                    allocation_sizes.pending,
+                    4 as crate::stdlib::uInt,
+                ) as *mut crate::zutil_h::uchf
+                    as *mut crate::stdlib::Bytef;
+                (&mut *s).pending_buf = ::core::ptr::NonNull::new(pending_buf);
+                if window.is_null() || prev.is_null() || head.is_null() || pending_buf.is_null() {
+                    crate::src::deflate::deflate_mark_initialization_memory_error(
+                        strm_ref, &mut *s,
+                    );
+                    crate::src::deflate::deflateEnd(strm_ref);
+                    break 'deflate_init_result crate::zlib_h::Z_MEM_ERROR;
+                }
+                let state = &mut *s;
+                let Ok(head_len) = usize::try_from(state.hash_size) else {
+                    break 'deflate_init_result crate::zlib_h::Z_STREAM_ERROR;
+                };
+                let head = ::core::slice::from_raw_parts_mut(
+                    state.head.expect("allocated deflate hash table").as_ptr(),
+                    head_len,
+                );
+                crate::src::deflate::deflate_complete_initial_state(
+                    strm_ref, state, &settings, head,
+                )
+            }
+        }
+    }};
+}
+pub(crate) use deflate_init2_at_boundary;
+#[export_name = "deflateInit_"]
+pub unsafe extern "C" fn deflateInit__ffi(
+    mut strm: crate::zlib_h::z_streamp,
+    mut level: ::core::ffi::c_int,
+    mut version: *const ::core::ffi::c_char,
+    mut stream_size: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
-    // zlib applies these defaults even when scalar validation fails.
-    deflate_prepare_init_stream(strm_ref);
-    let Some(settings) = deflate_init_settings(level, method, windowBits, memLevel, strategy)
-    else {
-        return crate::zlib_h::Z_STREAM_ERROR;
-    };
-    // Allocation callbacks and the C-compatible stream/state records remain
-    // an ABI boundary.  Keep their adoption confined here so callers use the
-    // normal safe implementation interface.
-    unsafe {
-        let Some(zalloc) = strm_ref.zalloc else {
-            return crate::zlib_h::Z_STREAM_ERROR;
-        };
-        let s = zalloc(
-            strm_ref.opaque,
-            1 as crate::stdlib::uInt,
-            ::core::mem::size_of::<crate::src::deflate::deflate_state>() as crate::stdlib::uInt,
-        ) as *mut crate::src::deflate::deflate_state;
-        if s.is_null() {
-            return crate::zlib_h::Z_MEM_ERROR;
-        }
-        let allocation_sizes = {
-            let state = &mut *s;
-            strm_ref.state = s as *mut crate::src::deflate::internal_state;
-            deflate_prepare_initial_state(
-                state,
-                strm_ref as *mut crate::zlib_h::z_stream as usize,
-                &settings,
-            )
-        };
-        // Do not retain the state borrow across a custom allocator callback.
-        // Publish each allocation immediately, matching zlib's observable
-        // partial-initialization state for allocator hooks.
-        let Some(zalloc) = strm_ref.zalloc else {
-            let _ = deflateEnd(strm_ref);
-            return crate::zlib_h::Z_STREAM_ERROR;
-        };
-        let window = zalloc(
-            strm_ref.opaque,
-            allocation_sizes.window,
-            (2 as usize).wrapping_mul(::core::mem::size_of::<crate::stdlib::Byte>())
-                as crate::stdlib::uInt,
-        ) as *mut crate::stdlib::Bytef;
-        (&mut *s).window = ::core::ptr::NonNull::new(window);
-        let Some(zalloc) = strm_ref.zalloc else {
-            let _ = deflateEnd(strm_ref);
-            return crate::zlib_h::Z_STREAM_ERROR;
-        };
-        let prev = zalloc(
-            strm_ref.opaque,
-            allocation_sizes.window,
-            ::core::mem::size_of::<crate::src::deflate::Pos>() as crate::stdlib::uInt,
-        ) as *mut crate::src::deflate::Posf;
-        (&mut *s).prev = ::core::ptr::NonNull::new(prev);
-        let Some(zalloc) = strm_ref.zalloc else {
-            let _ = deflateEnd(strm_ref);
-            return crate::zlib_h::Z_STREAM_ERROR;
-        };
-        let head = zalloc(
-            strm_ref.opaque,
-            allocation_sizes.hash,
-            ::core::mem::size_of::<crate::src::deflate::Pos>() as crate::stdlib::uInt,
-        ) as *mut crate::src::deflate::Posf;
-        (&mut *s).head = ::core::ptr::NonNull::new(head);
-        let Some(zalloc) = strm_ref.zalloc else {
-            let _ = deflateEnd(strm_ref);
-            return crate::zlib_h::Z_STREAM_ERROR;
-        };
-        let pending_buf = zalloc(
-            strm_ref.opaque,
-            allocation_sizes.pending,
-            4 as crate::stdlib::uInt,
-        ) as *mut crate::zutil_h::uchf as *mut crate::stdlib::Bytef;
-        (&mut *s).pending_buf = ::core::ptr::NonNull::new(pending_buf);
-        if window.is_null() || prev.is_null() || head.is_null() || pending_buf.is_null() {
-            deflate_mark_initialization_memory_error(strm_ref, &mut *s);
-            deflateEnd(strm_ref);
-            return crate::zlib_h::Z_MEM_ERROR;
-        }
-        let state = &mut *s;
-        let Ok(head_len) = usize::try_from(state.hash_size) else {
-            return crate::zlib_h::Z_STREAM_ERROR;
-        };
-        let head = ::core::slice::from_raw_parts_mut(
-            state.head.expect("allocated deflate hash table").as_ptr(),
-            head_len,
-        );
-        deflate_complete_initial_state(strm_ref, state, &settings, head)
+    if version.is_null() || !deflate_init_version_matches(*version, stream_size) {
+        return crate::zlib_h::Z_VERSION_ERROR;
     }
+    deflate_init2_at_boundary!(
+        strm,
+        level,
+        crate::zlib_h::Z_DEFLATED,
+        crate::stdlib::MAX_WBITS,
+        crate::zutil_h::DEF_MEM_LEVEL,
+        crate::zlib_h::Z_DEFAULT_STRATEGY,
+    )
 }
 #[export_name = "deflateInit2_"]
 
@@ -1337,10 +1351,7 @@ pub unsafe extern "C" fn deflateInit2__ffi(
     if version.is_null() || !deflate_init_version_matches(*version, stream_size) {
         return crate::zlib_h::Z_VERSION_ERROR;
     }
-    if strm.is_null() {
-        return crate::zlib_h::Z_STREAM_ERROR;
-    }
-    deflateInit2_(&mut *strm, level, method, windowBits, memLevel, strategy)
+    deflate_init2_at_boundary!(strm, level, method, windowBits, memLevel, strategy)
 }
 pub(crate) fn deflate_state_values_are_valid(
     has_zalloc: bool,

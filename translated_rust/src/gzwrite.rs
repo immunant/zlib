@@ -15,7 +15,6 @@ pub use crate::stdlib::ssize_t;
 
 pub use crate::src::deflate::deflate;
 pub use crate::src::deflate::deflateEnd;
-pub use crate::src::deflate::deflateInit2_;
 pub use crate::src::deflate::internal_state;
 
 pub use crate::stdlib::uInt;
@@ -78,8 +77,8 @@ macro_rules! gz_init_at_boundary {
                 state_ref.strm.zalloc = None;
                 state_ref.strm.zfree = None;
                 state_ref.strm.opaque = ::core::ptr::null_mut::<::core::ffi::c_void>();
-                if crate::src::deflate::deflateInit2_(
-                    &mut state_ref.strm,
+                if crate::src::deflate::deflate_init2_at_boundary!(
+                    &raw mut state_ref.strm,
                     state_ref.level,
                     8 as ::core::ffi::c_int,
                     15 as ::core::ffi::c_int + 16 as ::core::ffi::c_int,

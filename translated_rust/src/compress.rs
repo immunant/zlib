@@ -2,7 +2,6 @@ pub use crate::__stddef_null_h::NULL;
 pub use crate::__stddef_size_t_h::size_t;
 
 pub use crate::src::deflate::deflate;
-pub use crate::src::deflate::deflateInit2_;
 pub use crate::src::deflate::internal_state;
 pub use crate::stdlib::uInt;
 pub use crate::stdlib::uLong;
@@ -82,8 +81,8 @@ macro_rules! compress2_z_at_boundary {
         stream.zalloc = None;
         stream.zfree = None;
         stream.opaque = ::core::ptr::null_mut::<::core::ffi::c_void>();
-        err = crate::src::deflate::deflateInit2_(
-            &mut stream,
+        err = crate::src::deflate::deflate_init2_at_boundary!(
+            &raw mut stream,
             level,
             crate::zlib_h::Z_DEFLATED,
             crate::stdlib::MAX_WBITS,
