@@ -592,6 +592,36 @@ fn copy_inflate_match(
     }
 }
 
+// Updating normal-inflate history is independent of the ABI stream cursor.
+// Keep allocation, ring initialization, and copying in this slice-based core
+// so callers that already own a bounded input view do not need to re-enter the
+// raw cursor adapter.
+fn update_window_from_slice(
+    owned_window: &mut Option<Box<[u8]>>,
+    wbits: ::core::ffi::c_uint,
+    wsize: &mut ::core::ffi::c_uint,
+    wnext: &mut ::core::ffi::c_uint,
+    whave: &mut ::core::ffi::c_uint,
+    input: &[u8],
+) -> ::core::ffi::c_int {
+    if owned_window.is_none() {
+        *owned_window = allocate_inflate_window((1usize) << wbits);
+        if owned_window.is_none() {
+            return 1;
+        }
+    }
+    if *wsize == 0 {
+        *wsize = 1u32 << wbits;
+        *wnext = 0;
+        *whave = 0;
+    }
+    let window = owned_window
+        .as_deref_mut()
+        .expect("normal inflate owns its history window");
+    copy_history_window(window, input, wnext, whave);
+    0
+}
+
 #[inline]
 fn inflate_pull_byte(
     input: &[u8],
@@ -620,28 +650,19 @@ unsafe extern "C" fn updatewindow(
     // works through ordinary Rust references.
     let strm = &mut *strm;
     let state = &mut *(strm.state as *mut crate::src::inflate::inflate_state);
-    if (*state).owned_window.is_none() {
-        (*state).owned_window = allocate_inflate_window((1usize) << (*state).wbits);
-        if (*state).owned_window.is_none() {
-            return 1 as ::core::ffi::c_int;
-        }
-    }
-    if (*state).wsize == 0 as ::core::ffi::c_uint {
-        (*state).wsize = (1 as ::core::ffi::c_uint) << (*state).wbits;
-        (*state).wnext = 0 as ::core::ffi::c_uint;
-        (*state).whave = 0 as ::core::ffi::c_uint;
-    }
-    let window = (*state)
-        .owned_window
-        .as_deref_mut()
-        .expect("normal inflate owns its history window");
     let input = if copy == 0 {
         &[]
     } else {
         ::core::slice::from_raw_parts(end.sub(copy as usize), copy as usize)
     };
-    copy_history_window(window, input, &mut (*state).wnext, &mut (*state).whave);
-    return 0 as ::core::ffi::c_int;
+    update_window_from_slice(
+        &mut state.owned_window,
+        state.wbits,
+        &mut state.wsize,
+        &mut state.wnext,
+        &mut state.whave,
+        input,
+    )
 }
 pub unsafe extern "C" fn inflate(
     mut strm: crate::zlib_h::z_streamp,
@@ -2505,35 +2526,44 @@ pub unsafe extern "C" fn inflateSetDictionary(
         return crate::zlib_h::Z_STREAM_ERROR;
     }
     state = (*strm).state as *mut crate::src::inflate::inflate_state;
-    if (*state).wrap != 0 as ::core::ffi::c_int
-        && (*state).mode as ::core::ffi::c_uint
+    let state = &mut *state;
+    let dictionary = if dictLength == 0 {
+        &[]
+    } else {
+        ::core::slice::from_raw_parts(dictionary, dictLength as usize)
+    };
+    if state.wrap != 0 as ::core::ffi::c_int
+        && state.mode as ::core::ffi::c_uint
             != crate::src::inflate::DICT as ::core::ffi::c_int as ::core::ffi::c_uint
     {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    if (*state).mode as ::core::ffi::c_uint
+    if state.mode as ::core::ffi::c_uint
         == crate::src::inflate::DICT as ::core::ffi::c_int as ::core::ffi::c_uint
     {
         dictid =
             crate::src::adler32::adler32_z(0 as crate::stdlib::uLong, None) as ::core::ffi::c_ulong;
         dictid = crate::src::adler32::adler32(
             dictid as crate::stdlib::uLong,
-            ::core::slice::from_raw_parts(dictionary, dictLength as usize),
+            dictionary,
         ) as ::core::ffi::c_ulong;
-        if dictid != (*state).check {
+        if dictid != state.check {
             return crate::zlib_h::Z_DATA_ERROR;
         }
     }
-    ret = updatewindow(
-        strm,
-        dictionary.offset(dictLength as isize),
-        dictLength as ::core::ffi::c_uint,
+    ret = update_window_from_slice(
+        &mut state.owned_window,
+        state.wbits,
+        &mut state.wsize,
+        &mut state.wnext,
+        &mut state.whave,
+        dictionary,
     );
     if ret != 0 {
-        (*state).mode = crate::src::inflate::MEM;
+        state.mode = crate::src::inflate::MEM;
         return crate::zlib_h::Z_MEM_ERROR;
     }
-    (*state).havedict = 1 as ::core::ffi::c_int;
+    state.havedict = 1 as ::core::ffi::c_int;
     return crate::zlib_h::Z_OK;
 }
 #[export_name = "inflateSetDictionary"]
