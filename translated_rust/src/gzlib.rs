@@ -195,6 +195,48 @@ pub(crate) fn gz_clear_error(
     *error = crate::zlib_h::Z_OK;
 }
 
+// Keep the error-state transition independent of the ABI-shaped gzip handle.
+// The callers that still hold that handle only provide the scalar fields and
+// owned byte views; a later gzip owner facade can use this directly.
+pub(crate) fn gz_set_error(
+    stored_message: &mut Option<Box<[u8]>>,
+    error: &mut ::core::ffi::c_int,
+    buffered: &mut ::core::ffi::c_uint,
+    again: ::core::ffi::c_int,
+    path: Option<&[u8]>,
+    err: ::core::ffi::c_int,
+    message: Option<&[u8]>,
+) {
+    *stored_message = None;
+    if err != crate::zlib_h::Z_OK && err != crate::zlib_h::Z_BUF_ERROR && again == 0 {
+        *buffered = 0;
+    }
+    *error = err;
+    let Some(message) = message else {
+        return;
+    };
+    if err == crate::zlib_h::Z_MEM_ERROR {
+        return;
+    }
+    let Some(len) = path
+        .and_then(|path| path.len().checked_add(message.len()))
+        .and_then(|len| len.checked_add(3))
+    else {
+        *error = crate::zlib_h::Z_MEM_ERROR;
+        return;
+    };
+    let mut text = Vec::new();
+    if text.try_reserve_exact(len).is_err() {
+        *error = crate::zlib_h::Z_MEM_ERROR;
+        return;
+    }
+    text.extend_from_slice(path.unwrap());
+    text.extend_from_slice(b": ");
+    text.extend_from_slice(message);
+    text.push(0);
+    *stored_message = Some(text.into_boxed_slice());
+}
+
 fn gzbuffer_want(
     mode: ::core::ffi::c_int,
     current_size: ::core::ffi::c_uint,
@@ -881,37 +923,16 @@ pub unsafe extern "C" fn gz_error(
     mut msg: *const ::core::ffi::c_char,
 ) {
     let state = &mut *state;
-    state.msg = None;
-    if err != crate::zlib_h::Z_OK && err != crate::zlib_h::Z_BUF_ERROR && state.again == 0 {
-        state.x.have = 0 as ::core::ffi::c_uint;
-    }
-    state.err = err;
-    if msg.is_null() {
-        return;
-    }
-    if err == crate::zlib_h::Z_MEM_ERROR {
-        return;
-    }
-    let msg_bytes = ::core::ffi::CStr::from_ptr(msg).to_bytes();
-    let Some(len) = state
-        .path
-        .as_ref()
-        .and_then(|path| path.len().checked_add(msg_bytes.len()))
-        .and_then(|len| len.checked_add(3))
-    else {
-        state.err = crate::zlib_h::Z_MEM_ERROR;
-        return;
-    };
-    let mut text = Vec::new();
-    if text.try_reserve_exact(len).is_err() {
-        state.err = crate::zlib_h::Z_MEM_ERROR;
-        return;
-    }
-    text.extend_from_slice(state.path.as_deref().unwrap());
-    text.extend_from_slice(b": ");
-    text.extend_from_slice(msg_bytes);
-    text.push(0);
-    state.msg = Some(text.into_boxed_slice());
+    let message = (!msg.is_null()).then(|| ::core::ffi::CStr::from_ptr(msg).to_bytes());
+    gz_set_error(
+        &mut state.msg,
+        &mut state.err,
+        &mut state.x.have,
+        state.again,
+        state.path.as_deref(),
+        err,
+        message,
+    );
 }
 #[export_name = "gz_error"]
 
