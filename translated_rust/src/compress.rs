@@ -136,14 +136,6 @@ pub unsafe extern "C" fn compress2_z_ffi(
     *destLen = written;
     ret
 }
-pub unsafe fn compress2(
-    dest: Option<&mut [crate::stdlib::Bytef]>,
-    source: Option<&[crate::stdlib::Bytef]>,
-    mut level: ::core::ffi::c_int,
-) -> (::core::ffi::c_int, crate::stdlib::uLongf) {
-    let (ret, written) = compress2_z(dest, source, level);
-    (ret, written as crate::stdlib::uLong as crate::stdlib::uLongf)
-}
 #[export_name = "compress2"]
 
 pub unsafe extern "C" fn compress2_ffi(
@@ -166,8 +158,8 @@ pub unsafe extern "C" fn compress2_ffi(
     } else {
         Some(unsafe { ::core::slice::from_raw_parts(source, sourceLen as usize) })
     };
-    let (ret, written) = compress2(dest, source, level);
-    *destLen = written;
+    let (ret, written) = compress2_z(dest, source, level);
+    *destLen = written as crate::stdlib::uLong as crate::stdlib::uLongf;
     ret
 }
 #[export_name = "compress_z"]
@@ -216,8 +208,8 @@ pub unsafe extern "C" fn compress_ffi(
     } else {
         Some(unsafe { ::core::slice::from_raw_parts(source, sourceLen as usize) })
     };
-    let (ret, written) = compress2(dest, source, crate::zlib_h::Z_DEFAULT_COMPRESSION);
-    *destLen = written;
+    let (ret, written) = compress2_z(dest, source, crate::zlib_h::Z_DEFAULT_COMPRESSION);
+    *destLen = written as crate::stdlib::uLong as crate::stdlib::uLongf;
     ret
 }
 pub fn compressBound_z(
