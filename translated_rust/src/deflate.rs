@@ -974,16 +974,19 @@ pub fn deflateInit2_(
         stream,
         1 as crate::stdlib::uInt,
         ::core::mem::size_of::<crate::src::deflate::deflate_state>() as crate::stdlib::uInt,
-    ) as *mut ::core::mem::MaybeUninit<crate::src::deflate::deflate_state>;
-    let Some(mut state_storage) = ::core::ptr::NonNull::new(state_storage) else {
+    ) as *mut crate::src::deflate::internal_state;
+    if state_storage.is_null() {
         return crate::zlib_h::Z_MEM_ERROR;
+    }
+    // Publish the new allocation, then use the established fresh-state path
+    // to write the complete safe zero value. That binder already owns the
+    // sole raw state reference for fresh allocations (including deflateCopy),
+    // so initialization does not need a second raw dereference here.
+    stream.state = state_storage;
+    let initial_state = deflate_state_zero_value();
+    let Some((stream, state)) = deflateStateCheck(stream, Some(&initial_state)) else {
+        unreachable!("a just-published non-null deflate state always binds");
     };
-    // SAFETY: the allocator returned a non-null allocation large enough for
-    // one `deflate_state`. Bind it as uninitialized storage only long enough
-    // to write the complete safe zero value, then retain the initialized
-    // reference for the rest of this function.
-    let state = unsafe { (&mut *state_storage.as_ptr()).write(deflate_state_zero_value()) };
-    stream.state = ::core::ptr::from_mut(state).cast::<crate::src::deflate::internal_state>();
     // The allocator returned a non-null `deflate_state` above. It is owned by
     // this stream until `deflateEnd()` handles the failure path below.
     state.strm = stream;
