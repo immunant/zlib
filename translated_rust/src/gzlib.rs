@@ -104,13 +104,14 @@ fn gzclearerr_core(
     eof: &mut ::core::ffi::c_int,
     past: &mut ::core::ffi::c_int,
 ) -> bool {
-    if !gz_is_read_or_write_mode(mode) {
-        return false;
+    if gz_is_read_or_write_mode(mode) {
+        if gz_is_read_mode(mode) {
+            gz_clear_read_flags(eof, past);
+        }
+        true
+    } else {
+        false
     }
-    if gz_is_read_mode(mode) {
-        gz_clear_read_flags(eof, past);
-    }
-    true
 }
 
 fn gz_error_clears_buffer(err: ::core::ffi::c_int, again: ::core::ffi::c_int) -> bool {

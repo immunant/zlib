@@ -3004,6 +3004,10 @@ fn table_entry_for_symbol(
     }
 }
 
+fn normalized_root_bits(requested_root: u32, min: u32, max: u32) -> u32 {
+    requested_root.min(max).max(min)
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 struct LengthState {
     counts: [u16; MAXBITS as usize + 1],
@@ -3039,10 +3043,7 @@ impl LengthState {
             min += 1;
         }
 
-        let mut root = requested_root.min(max);
-        if root < min {
-            root = min;
-        }
+        let root = normalized_root_bits(requested_root, min, max);
 
         let mut left = 1i32;
         for length in 1..=MAXBITS as usize {
@@ -3481,6 +3482,13 @@ mod tests {
             DBASE[29],
         );
         assert!(table_entry_for_symbol(CodeType::Dists, 32, 3).is_none());
+    }
+
+    #[test]
+    fn normalized_root_bits_clamps_to_observed_length_range() {
+        assert_eq!(normalized_root_bits(2, 3, 7), 3);
+        assert_eq!(normalized_root_bits(5, 3, 7), 5);
+        assert_eq!(normalized_root_bits(9, 3, 7), 7);
     }
 
     #[test]
