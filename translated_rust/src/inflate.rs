@@ -168,6 +168,41 @@ fn inflate_stream_has_allocator_callbacks(has_zalloc: bool, has_zfree: bool) -> 
 }
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
+enum InflateBlockKind {
+    Stored,
+    Fixed,
+    Dynamic,
+    Invalid,
+}
+
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+struct InflateBlockHeader {
+    last: ::core::ffi::c_int,
+    kind: InflateBlockKind,
+    hold: crate::stdlib::uLong,
+    bits: ::core::ffi::c_uint,
+}
+
+fn inflate_block_header(
+    hold: crate::stdlib::uLong,
+    bits: ::core::ffi::c_uint,
+) -> InflateBlockHeader {
+    let kind = match (hold >> 1) as ::core::ffi::c_uint & 3 {
+        0 => InflateBlockKind::Stored,
+        1 => InflateBlockKind::Fixed,
+        2 => InflateBlockKind::Dynamic,
+        _ => InflateBlockKind::Invalid,
+    };
+
+    InflateBlockHeader {
+        last: (hold & 1) as ::core::ffi::c_int,
+        kind,
+        hold: hold >> 3,
+        bits: bits.wrapping_sub(3),
+    }
+}
+
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub(crate) struct DynamicHeaderCounts {
     pub nlen: ::core::ffi::c_uint,
     pub ndist: ::core::ffi::c_uint,
@@ -1586,41 +1621,31 @@ pub unsafe extern "C" fn inflate(
                         hold = hold.wrapping_add((*c2rust_fresh11 as ::core::ffi::c_ulong) << bits);
                         bits = bits.wrapping_add(8 as ::core::ffi::c_uint);
                     }
-                    (*state).last = (hold as ::core::ffi::c_uint
-                        & ((1 as ::core::ffi::c_uint) << 1 as ::core::ffi::c_int)
-                            .wrapping_sub(1 as ::core::ffi::c_uint))
-                        as ::core::ffi::c_int;
-                    hold >>= 1 as ::core::ffi::c_int;
-                    bits = bits.wrapping_sub(1 as ::core::ffi::c_int as ::core::ffi::c_uint);
-                    match hold as ::core::ffi::c_uint
-                        & ((1 as ::core::ffi::c_uint) << 2 as ::core::ffi::c_int)
-                            .wrapping_sub(1 as ::core::ffi::c_uint)
-                    {
-                        0 => {
+                    let header = inflate_block_header(hold, bits);
+                    (*state).last = header.last;
+                    hold = header.hold;
+                    bits = header.bits;
+                    match header.kind {
+                        InflateBlockKind::Stored => {
                             (*state).mode = crate::src::inflate::STORED;
                         }
-                        1 => {
+                        InflateBlockKind::Fixed => {
                             crate::src::inftrees::inflate_fixed(&mut *state);
                             (*state).mode = crate::src::inflate::LEN_;
                             if flush == crate::zlib_h::Z_TREES {
-                                hold >>= 2 as ::core::ffi::c_int;
-                                bits = bits
-                                    .wrapping_sub(2 as ::core::ffi::c_int as ::core::ffi::c_uint);
                                 break;
                             }
                         }
-                        2 => {
+                        InflateBlockKind::Dynamic => {
                             (*state).mode = crate::src::inflate::TABLE;
                         }
-                        _ => {
+                        InflateBlockKind::Invalid => {
                             (*strm).msg = b"invalid block type\0".as_ptr()
                                 as *const ::core::ffi::c_char
                                 as *mut ::core::ffi::c_char;
                             (*state).mode = crate::src::inflate::BAD;
                         }
                     }
-                    hold >>= 2 as ::core::ffi::c_int;
-                    bits = bits.wrapping_sub(2 as ::core::ffi::c_int as ::core::ffi::c_uint);
                     continue;
                 }
             }
@@ -2673,16 +2698,16 @@ pub unsafe extern "C" fn inflateCodesUsed_ffi(
 mod tests {
     use super::{
         apply_window_update, copy_dictionary_from_window, dynamic_code_length_repeat_fits,
-        dynamic_header_counts, inflateSyncPoint_ffi, inflate_copy_progress, inflate_data_type_value,
-        inflate_header_wrap_allows_capture, inflate_mark_progress, inflate_mark_value,
-        inflate_mode_data_type_flags, inflate_mode_is_valid, inflate_needs_buffer_error,
-        inflate_prime_update, inflate_reset2_params, inflate_should_update_window,
-        inflate_state_metadata_is_valid, inflate_stream_has_allocator_callbacks,
-        inflate_sync_point_value, inflate_sync_search_core, inflate_undermine_core,
-        inflate_validate_wrap, initial_window_metadata, stored_block_length,
-        syncsearch_safe, window_needs_allocation, window_update_plan, InflatePrimeUpdate,
-        InflateCopyProgress, InflateSyncSearch, BAD, CHECK, CODE_LENGTH_ORDER, COPY_, COPY_1,
-        HEAD, LEN_, MATCH, STORED, SYNC, TYPE,
+        dynamic_header_counts, inflateSyncPoint_ffi, inflate_block_header, inflate_copy_progress,
+        inflate_data_type_value, inflate_header_wrap_allows_capture, inflate_mark_progress,
+        inflate_mark_value, inflate_mode_data_type_flags, inflate_mode_is_valid,
+        inflate_needs_buffer_error, inflate_prime_update, inflate_reset2_params,
+        inflate_should_update_window, inflate_state_metadata_is_valid,
+        inflate_stream_has_allocator_callbacks, inflate_sync_point_value, inflate_sync_search_core,
+        inflate_undermine_core, inflate_validate_wrap, initial_window_metadata,
+        stored_block_length, syncsearch_safe, window_needs_allocation, window_update_plan,
+        InflateBlockKind, InflateCopyProgress, InflatePrimeUpdate, InflateSyncSearch, BAD, CHECK,
+        CODE_LENGTH_ORDER, COPY_, COPY_1, HEAD, LEN_, MATCH, STORED, SYNC, TYPE,
     };
 
     #[test]
@@ -2700,6 +2725,38 @@ mod tests {
         assert_eq!(inflate_mode_data_type_flags(TYPE), 128);
         assert_eq!(inflate_mode_data_type_flags(LEN_), 256);
         assert_eq!(inflate_mode_data_type_flags(COPY_), 256);
+    }
+
+    #[test]
+    fn inflate_block_header_classifies_and_consumes_three_bits() {
+        let stored = inflate_block_header(0b000, 3);
+        assert_eq!(stored.last, 0);
+        assert_eq!(stored.kind, InflateBlockKind::Stored);
+        assert_eq!(stored.hold, 0);
+        assert_eq!(stored.bits, 0);
+
+        let fixed = inflate_block_header(0b011, 3);
+        assert_eq!(fixed.last, 1);
+        assert_eq!(fixed.kind, InflateBlockKind::Fixed);
+
+        assert_eq!(
+            inflate_block_header(0b100, 3).kind,
+            InflateBlockKind::Dynamic
+        );
+        assert_eq!(
+            inflate_block_header(0b111, 3).kind,
+            InflateBlockKind::Invalid
+        );
+    }
+
+    #[test]
+    fn inflate_block_header_preserves_remaining_bit_buffer() {
+        let header = inflate_block_header(0b101_101, 9);
+
+        assert_eq!(header.last, 1);
+        assert_eq!(header.kind, InflateBlockKind::Dynamic);
+        assert_eq!(header.hold, 0b101);
+        assert_eq!(header.bits, 6);
     }
 
     #[test]

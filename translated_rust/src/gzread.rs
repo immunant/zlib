@@ -668,8 +668,8 @@ fn gz_decomp_output_len(
     (had as crate::stdlib::uInt).wrapping_sub(avail_out) as ::core::ffi::c_uint
 }
 
-fn gz_decomp_output_start_offset(have: ::core::ffi::c_uint) -> isize {
-    -(have as isize)
+fn gz_decomp_output_rewind_len(have: ::core::ffi::c_uint) -> usize {
+    have as usize
 }
 
 enum GzDecompResult {
@@ -798,7 +798,7 @@ unsafe extern "C" fn gz_decomp(mut state: crate::gzguts_h::gz_statep) -> ::core:
     (*state).x.have = gz_decomp_output_len(had, (*strm).avail_out);
     (*state).x.next = (*strm)
         .next_out
-        .offset(gz_decomp_output_start_offset((*state).x.have))
+        .wrapping_sub(gz_decomp_output_rewind_len((*state).x.have))
         as *mut ::core::ffi::c_uchar;
     match gz_decomp_result(ret) {
         GzDecompResult::RestartLook => {
@@ -1109,14 +1109,18 @@ mod tests {
     }
 
     #[test]
-    fn gz_decomp_output_start_offset_preserves_the_cursor_without_output() {
-        assert_eq!(gz_decomp_output_start_offset(0), 0);
+    fn gz_decomp_output_rewind_len_preserves_the_cursor_without_output() {
+        assert_eq!(gz_decomp_output_rewind_len(0), 0);
     }
 
     #[test]
-    fn gz_decomp_output_start_offset_rewinds_by_produced_output() {
-        assert_eq!(gz_decomp_output_start_offset(1), -1);
-        assert_eq!(gz_decomp_output_start_offset(42), -42);
+    fn gz_decomp_output_rewind_len_matches_produced_output() {
+        assert_eq!(gz_decomp_output_rewind_len(1), 1);
+        assert_eq!(gz_decomp_output_rewind_len(42), 42);
+        assert_eq!(
+            gz_decomp_output_rewind_len(::core::ffi::c_uint::MAX),
+            ::core::ffi::c_uint::MAX as usize,
+        );
     }
 
     #[test]

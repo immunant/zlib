@@ -4017,6 +4017,19 @@ unsafe extern "C" fn build_tree(
     gen_codes(tree, max_code, &(*s).bl_count);
 }
 
+fn tree_run_limits(
+    current_len: ::core::ffi::c_int,
+    next_len: ::core::ffi::c_int,
+) -> (::core::ffi::c_int, ::core::ffi::c_int) {
+    if next_len == 0 {
+        (138, 3)
+    } else if current_len == next_len {
+        (6, 3)
+    } else {
+        (7, 4)
+    }
+}
+
 unsafe extern "C" fn scan_tree(
     mut s: *mut crate::src::deflate::deflate_state,
     mut tree: *mut crate::src::deflate::ct_data,
@@ -4028,12 +4041,7 @@ unsafe extern "C" fn scan_tree(
     let mut nextlen: ::core::ffi::c_int =
         (*tree.offset(0 as ::core::ffi::c_int as isize)).dl.len as ::core::ffi::c_int;
     let mut count: ::core::ffi::c_int = 0 as ::core::ffi::c_int;
-    let mut max_count: ::core::ffi::c_int = 7 as ::core::ffi::c_int;
-    let mut min_count: ::core::ffi::c_int = 4 as ::core::ffi::c_int;
-    if nextlen == 0 as ::core::ffi::c_int {
-        max_count = 138 as ::core::ffi::c_int;
-        min_count = 3 as ::core::ffi::c_int;
-    }
+    let (mut max_count, mut min_count) = tree_run_limits(0, nextlen);
     (*tree.offset((max_code + 1 as ::core::ffi::c_int) as isize))
         .dl
         .len = 0xffff as ::core::ffi::c_int as crate::zutil_h::ush;
@@ -4066,16 +4074,7 @@ unsafe extern "C" fn scan_tree(
             }
             count = 0 as ::core::ffi::c_int;
             prevlen = curlen;
-            if nextlen == 0 as ::core::ffi::c_int {
-                max_count = 138 as ::core::ffi::c_int;
-                min_count = 3 as ::core::ffi::c_int;
-            } else if curlen == nextlen {
-                max_count = 6 as ::core::ffi::c_int;
-                min_count = 3 as ::core::ffi::c_int;
-            } else {
-                max_count = 7 as ::core::ffi::c_int;
-                min_count = 4 as ::core::ffi::c_int;
-            }
+            (max_count, min_count) = tree_run_limits(curlen, nextlen);
         }
         n += 1;
     }
@@ -4092,12 +4091,7 @@ unsafe extern "C" fn send_tree(
     let mut nextlen: ::core::ffi::c_int =
         (*tree.offset(0 as ::core::ffi::c_int as isize)).dl.len as ::core::ffi::c_int;
     let mut count: ::core::ffi::c_int = 0 as ::core::ffi::c_int;
-    let mut max_count: ::core::ffi::c_int = 7 as ::core::ffi::c_int;
-    let mut min_count: ::core::ffi::c_int = 4 as ::core::ffi::c_int;
-    if nextlen == 0 as ::core::ffi::c_int {
-        max_count = 138 as ::core::ffi::c_int;
-        min_count = 3 as ::core::ffi::c_int;
-    }
+    let (mut max_count, mut min_count) = tree_run_limits(0, nextlen);
     n = 0 as ::core::ffi::c_int;
     while n <= max_code {
         curlen = nextlen;
@@ -4357,16 +4351,7 @@ unsafe extern "C" fn send_tree(
             }
             count = 0 as ::core::ffi::c_int;
             prevlen = curlen;
-            if nextlen == 0 as ::core::ffi::c_int {
-                max_count = 138 as ::core::ffi::c_int;
-                min_count = 3 as ::core::ffi::c_int;
-            } else if curlen == nextlen {
-                max_count = 6 as ::core::ffi::c_int;
-                min_count = 3 as ::core::ffi::c_int;
-            } else {
-                max_count = 7 as ::core::ffi::c_int;
-                min_count = 4 as ::core::ffi::c_int;
-            }
+            (max_count, min_count) = tree_run_limits(curlen, nextlen);
         }
         n += 1;
     }
@@ -5126,7 +5111,8 @@ pub unsafe extern "C" fn _tr_tally_ffi(
 mod tests {
     use super::{
         bi_flush_core, bi_reverse, bi_windup_core, bl_order, detect_data_type_from_ltree,
-        dist_code_index, next_code_for_len, next_codes, pending_cursor_after_bytes, MAX_BITS,
+        dist_code_index, next_code_for_len, next_codes, pending_cursor_after_bytes,
+        tree_run_limits, MAX_BITS,
     };
 
     fn ltree_with_frequency(
@@ -5167,6 +5153,15 @@ mod tests {
             bl_order,
             [16, 17, 18, 0, 8, 7, 9, 6, 10, 5, 11, 4, 12, 3, 13, 2, 14, 1, 15]
         );
+    }
+
+    #[test]
+    fn tree_run_limits_prioritize_zero_length_runs() {
+        assert_eq!(tree_run_limits(0, 0), (138, 3));
+        assert_eq!(tree_run_limits(5, 0), (138, 3));
+        assert_eq!(tree_run_limits(7, 7), (6, 3));
+        assert_eq!(tree_run_limits(7, 8), (7, 4));
+        assert_eq!(tree_run_limits(0, 1), (7, 4));
     }
 
     #[test]
