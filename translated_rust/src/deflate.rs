@@ -716,10 +716,14 @@ fn slide_window_state(
 
 fn read_buf(
     mut strm: crate::zlib_h::z_streamp,
-    mut buf: *mut crate::stdlib::Bytef,
+    buf: &mut [crate::stdlib::Bytef],
     mut size: ::core::ffi::c_uint,
     wrap: ::core::ffi::c_int,
 ) -> ReadBufProgress {
+    // The caller already owns the exact writable destination span. Keep that
+    // ownership in the type instead of lending the output cursor again here.
+    // The ABI input cursor remains the one transitional raw boundary in this
+    // adapter.
     unsafe {
         if strm.is_null() {
             return ReadBufProgress::default();
@@ -732,14 +736,25 @@ fn read_buf(
                 avail_in: strm.avail_in,
             };
         }
-        if strm.next_in.is_null() || buf.is_null() {
+        let Ok(len_usize) = usize::try_from(len) else {
+            return ReadBufProgress {
+                copied: 0,
+                avail_in: strm.avail_in,
+            };
+        };
+        if strm.next_in.is_null() || len_usize > buf.len() {
             return ReadBufProgress {
                 copied: 0,
                 avail_in: strm.avail_in,
             };
         }
-        let input = ::core::slice::from_raw_parts(strm.next_in, len as usize);
-        let output = ::core::slice::from_raw_parts_mut(buf, len as usize);
+        let input = ::core::slice::from_raw_parts(strm.next_in, len_usize);
+        let Some(output) = buf.get_mut(..len_usize) else {
+            return ReadBufProgress {
+                copied: 0,
+                avail_in: strm.avail_in,
+            };
+        };
         let (len, adler, avail_in, total_in) = read_buf_progress_state(
             input,
             output,
@@ -880,7 +895,7 @@ fn fill_window(s: &mut crate::src::deflate::deflate_state) {
             let Some(output) = window.get_mut(write_span) else {
                 return;
             };
-            let progress = read_buf(state.strm, output.as_mut_ptr(), more, state.wrap);
+            let progress = read_buf(state.strm, output, more, state.wrap);
             n = progress.copied;
             state.lookahead = state.lookahead.wrapping_add(n);
             if state.lookahead.wrapping_add(state.insert)
@@ -4047,7 +4062,8 @@ fn deflate_stored(
         loop {
             let (initial_avail_in, initial_input, plan) = {
                 let state = &mut *s;
-                let strm = &mut *state.strm;
+                let stream = state.strm;
+                let strm = &mut *stream;
                 (
                     strm.avail_in,
                     strm.next_in,
@@ -4107,60 +4123,69 @@ fn deflate_stored(
                 state.bi_used = 8 as ::core::ffi::c_int;
             }
             flush_pending(state.strm);
-            if left != 0 {
+            if left != 0 || len != 0 {
                 let state = &mut *s;
-                let strm = &mut *state.strm;
-                let (Ok(window_len), Ok(output_len)) = (
-                    usize::try_from(state.window_size),
-                    usize::try_from(strm.avail_out),
-                ) else {
+                let stream = state.strm;
+                let strm = &mut *stream;
+                let Ok(output_len) = usize::try_from(strm.avail_out) else {
                     return need_more;
                 };
-                if (window_len != 0 && state.window.is_null())
-                    || (output_len != 0 && strm.next_out.is_null())
-                {
+                if output_len != 0 && strm.next_out.is_null() {
                     return need_more;
                 }
-                let window = if window_len == 0 {
-                    &[]
-                } else {
-                    ::core::slice::from_raw_parts(state.window, window_len)
-                };
                 let output = if output_len == 0 {
                     &mut []
                 } else {
                     ::core::slice::from_raw_parts_mut(strm.next_out, output_len)
                 };
-                let Some(copy) = copy_stored_window_to_output_state(
-                    window,
-                    output,
-                    state.block_start,
-                    left,
-                    len,
-                ) else {
-                    return need_more;
-                };
-                // `copy.copied` is bounded by the output view above.  Preserve
-                // the ABI cursor advance without unsafe pointer arithmetic.
-                strm.next_out = strm.next_out.wrapping_add(copy.copied as usize);
-                strm.avail_out = strm.avail_out.wrapping_sub(copy.copied);
-                strm.total_out = strm
-                    .total_out
-                    .wrapping_add(copy.copied as crate::stdlib::uLong);
-                state.block_start = copy.block_start;
-                len = copy.remaining;
-            }
-            if len != 0 {
-                let state = &mut *s;
-                let stream = state.strm;
-                let strm = &mut *stream;
-                let progress = read_buf(stream, strm.next_out, len, state.wrap);
-                remaining_avail_in = progress.avail_in;
-                // `read_buf()` consumed at most the requested `len` bytes, so
-                // this is a cursor update only; no pointer dereference is needed.
-                strm.next_out = strm.next_out.wrapping_add(len as usize);
-                strm.avail_out = strm.avail_out.wrapping_sub(len);
-                strm.total_out = strm.total_out.wrapping_add(len as crate::stdlib::uLong);
+                let mut output_used = 0usize;
+                if left != 0 {
+                    let Ok(window_len) = usize::try_from(state.window_size) else {
+                        return need_more;
+                    };
+                    if window_len != 0 && state.window.is_null() {
+                        return need_more;
+                    }
+                    let window = if window_len == 0 {
+                        &[]
+                    } else {
+                        ::core::slice::from_raw_parts(state.window, window_len)
+                    };
+                    let Some(copy) = copy_stored_window_to_output_state(
+                        window,
+                        output,
+                        state.block_start,
+                        left,
+                        len,
+                    ) else {
+                        return need_more;
+                    };
+                    let Ok(copied) = usize::try_from(copy.copied) else {
+                        return need_more;
+                    };
+                    output_used = copied;
+                    // `copy.copied` is bounded by the output view above. Preserve
+                    // the ABI cursor advance without unsafe pointer arithmetic.
+                    strm.next_out = strm.next_out.wrapping_add(copied);
+                    strm.avail_out = strm.avail_out.wrapping_sub(copy.copied);
+                    strm.total_out = strm
+                        .total_out
+                        .wrapping_add(copy.copied as crate::stdlib::uLong);
+                    state.block_start = copy.block_start;
+                    len = copy.remaining;
+                }
+                if len != 0 {
+                    let Some(destination) = output.get_mut(output_used..) else {
+                        return need_more;
+                    };
+                    let progress = read_buf(stream, destination, len, state.wrap);
+                    remaining_avail_in = progress.avail_in;
+                    // `read_buf()` consumed at most the requested `len` bytes, so
+                    // this is a cursor update only; no pointer dereference is needed.
+                    strm.next_out = strm.next_out.wrapping_add(len as usize);
+                    strm.avail_out = strm.avail_out.wrapping_sub(len);
+                    strm.total_out = strm.total_out.wrapping_add(len as crate::stdlib::uLong);
+                }
             }
             if last != 0 as ::core::ffi::c_int {
                 break;
@@ -4230,7 +4255,7 @@ fn deflate_stored(
                 let Some(output) = window.get_mut(write_span) else {
                     return need_more;
                 };
-                read_buf(stream, output.as_mut_ptr(), have, state.wrap);
+                read_buf(stream, output, have, state.wrap);
                 record_stored_input_state(state, have);
             }
             let tail_plan = stored_tail_block_plan(
