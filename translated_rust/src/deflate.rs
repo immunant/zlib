@@ -1619,16 +1619,20 @@ fn lm_apply_reset(state: &mut crate::src::deflate::deflate_state, plan: LmResetP
     state.ins_h = 0 as crate::stdlib::uInt;
 }
 
+fn lm_reset_after_head_clear(state: &mut crate::src::deflate::deflate_state) {
+    let plan = lm_reset_plan(state.w_size, state.level);
+    lm_apply_reset(state, plan);
+}
+
 unsafe fn lm_init(mut s: *mut crate::src::deflate::deflate_state) {
     let state = &mut *s;
-    let plan = lm_reset_plan(state.w_size, state.level);
     let head_reset = lm_head_reset_plan(state.hash_size);
     crate::stdlib::memset(
         state.head as *mut ::core::ffi::c_void,
         0 as ::core::ffi::c_int,
         head_reset.clear_len,
     );
-    lm_apply_reset(state, plan);
+    lm_reset_after_head_clear(state);
 }
 pub unsafe extern "C" fn deflateReset(mut strm: crate::zlib_h::z_streamp) -> ::core::ffi::c_int {
     let mut ret: ::core::ffi::c_int = 0;
