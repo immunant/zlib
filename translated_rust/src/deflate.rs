@@ -299,6 +299,28 @@ pub(crate) fn pending_storage_layout(lit_bufsize: crate::stdlib::uInt) -> Pendin
     )
 }
 
+/// Validate the scalar metadata that describes a callback-backed pending
+/// allocation before an FFI boundary turns its raw pointer into a slice.
+///
+/// The pending bytes and the symbol triplets are two temporal views of one
+/// allocation.  Keeping their geometry in sync here prevents a later safe
+/// view from silently trusting stale or hand-written state fields.
+pub(crate) fn pending_storage_layout_from_metadata(
+    lit_bufsize: crate::stdlib::uInt,
+    pending_buf_size: crate::zutil_h::ulg,
+    sym_buf_offset: usize,
+    sym_end: crate::stdlib::uInt,
+) -> Option<PendingStorageLayout> {
+    let layout = pending_storage_allocation_plan(lit_bufsize)?.layout();
+    if usize::try_from(pending_buf_size).ok()? != layout.total_len
+        || sym_buf_offset != layout.symbol_offset
+        || sym_end != layout.symbol_flush_threshold
+    {
+        return None;
+    }
+    Some(layout)
+}
+
 pub(crate) struct PendingStorageView<'a> {
     bytes: &'a mut [crate::stdlib::Bytef],
     layout: PendingStorageLayout,
@@ -2270,9 +2292,19 @@ pub unsafe extern "C" fn deflatePrime_ffi(
     }
 
     let state = &mut *(*strm).state;
+    let Some(layout) = pending_storage_layout_from_metadata(
+        state.lit_bufsize,
+        state.pending_buf_size,
+        state.sym_buf_offset,
+        state.sym_end,
+    ) else {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    };
+    if state.pending_buf.is_null() {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    }
     let pending_buffer =
         core::slice::from_raw_parts_mut(state.pending_buf, state.pending_buf_size as usize);
-    let layout = pending_storage_layout(state.lit_bufsize);
     with_pending_storage(pending_buffer, layout, |storage| {
         deflatePrime(state, storage, bits, value)
     })
@@ -3089,10 +3121,19 @@ pub unsafe extern "C" fn deflate_ffi(
         return crate::zlib_h::Z_STREAM_ERROR;
     }
     s = (*strm).state as *mut crate::src::deflate::deflate_state;
-    let pending_buffer = if (*s).pending_buf.is_null() {
-        &[]
-    } else {
-        core::slice::from_raw_parts((*s).pending_buf, (*s).pending_buf_size as usize)
+    let Some(pending_layout) = pending_storage_layout_from_metadata(
+        (*s).lit_bufsize,
+        (*s).pending_buf_size,
+        (*s).sym_buf_offset,
+        (*s).sym_end,
+    ) else {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    };
+    if (*s).pending_buf.is_null() {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    }
+    let pending_buffer = {
+        core::slice::from_raw_parts((*s).pending_buf, pending_layout.total_len)
     };
     match deflate_preflight(
         (*strm).next_out.is_null(),
@@ -3595,6 +3636,17 @@ pub unsafe extern "C" fn deflateCopy_ffi(
     let Some(pending_plan) = pending_storage_allocation_plan((*ss).lit_bufsize) else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
+    let Some(source_pending_layout) = pending_storage_layout_from_metadata(
+        (*ss).lit_bufsize,
+        (*ss).pending_buf_size,
+        (*ss).sym_buf_offset,
+        (*ss).sym_end,
+    ) else {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    };
+    if (*ss).pending_buf.is_null() {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    }
     crate::stdlib::memcpy(
         dest as *mut ::core::ffi::c_void,
         source as *const ::core::ffi::c_void,
@@ -3673,6 +3725,7 @@ pub unsafe extern "C" fn deflateCopy_ffi(
                 as crate::__stddef_size_t_h::size_t),
     );
     let pending_layout = pending_plan.layout();
+    debug_assert_eq!(source_pending_layout, pending_layout);
     let Some(pending_copy) = pending_storage_copy_plan(
         pending_layout,
         (*ss).pending_out_offset,
@@ -5017,7 +5070,8 @@ mod tests {
         longest_match_candidate_update, longest_match_clamp_length, longest_match_limit,
         longest_match_next_chain_length, longest_match_search_parameters, normalize_deflate_params,
         pending_buffer_needs_flush, pending_output_len, pending_short_cursors,
-        pending_storage_copy_plan, pending_storage_layout, put_short_msb_core, read_buf_checksum, read_buf_core,
+        pending_storage_copy_plan, pending_storage_layout,
+        pending_storage_layout_from_metadata, put_short_msb_core, read_buf_checksum, read_buf_core,
         read_buf_input_progress_after_copy, read_buf_len, read_buf_total_in_after_copy,
         short_msb_bytes, slide_hash_core, slide_hash_entry, stored_block_available_output,
         stored_block_buffered_len, stored_block_can_emit, stored_block_copy_lengths,
@@ -6213,6 +6267,56 @@ mod tests {
                 symbol_len: plan.total_len - plan.items as usize,
                 symbol_flush_threshold: plan.items.wrapping_sub(1).wrapping_mul(3),
             }
+        );
+    }
+
+    #[test]
+    fn pending_storage_metadata_accepts_only_the_allocation_plan_geometry() {
+        let layout = pending_storage_layout(16);
+
+        assert_eq!(
+            pending_storage_layout_from_metadata(
+                16,
+                layout.total_len as crate::zutil_h::ulg,
+                layout.symbol_offset,
+                layout.symbol_flush_threshold,
+            ),
+            Some(layout)
+        );
+        assert_eq!(
+            pending_storage_layout_from_metadata(
+                16,
+                layout.total_len as crate::zutil_h::ulg - 1,
+                layout.symbol_offset,
+                layout.symbol_flush_threshold,
+            ),
+            None
+        );
+        assert_eq!(
+            pending_storage_layout_from_metadata(
+                16,
+                layout.total_len as crate::zutil_h::ulg,
+                layout.symbol_offset + 1,
+                layout.symbol_flush_threshold,
+            ),
+            None
+        );
+        assert_eq!(
+            pending_storage_layout_from_metadata(
+                16,
+                layout.total_len as crate::zutil_h::ulg,
+                layout.symbol_offset,
+                layout.symbol_flush_threshold.wrapping_add(1),
+            ),
+            None
+        );
+    }
+
+    #[test]
+    fn pending_storage_metadata_rejects_unrepresentable_allocation_plans() {
+        assert_eq!(
+            pending_storage_layout_from_metadata(crate::stdlib::uInt::MAX, 0, 0, 0),
+            None
         );
     }
 
