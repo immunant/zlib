@@ -735,7 +735,11 @@ fn inflate_back_init_state(
     state.sane = 1;
 }
 
-pub unsafe fn inflateBackInit_(
+// This is deliberately the private implementation target for the exported
+// initializer below.  The ABI wrapper binds only its version-byte argument
+// and dispatches here; validation, stream binding, allocation, and state
+// setup remain outside the exported entry point.
+unsafe fn inflateBackInit_(
     mut strm: crate::zlib_h::z_streamp,
     mut windowBits: ::core::ffi::c_int,
     mut window: *mut ::core::ffi::c_uchar,
