@@ -1250,19 +1250,22 @@ pub unsafe extern "C" fn inflateBack_ffi(
     let Some(strm) = (unsafe { strm.as_mut() }) else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
-    let callback_window = if strm.state.is_null() {
+    // Reuse the shared state binder to validate and snapshot the configured
+    // callback window before binding its caller-owned storage.  This keeps
+    // the raw `strm.state` conversion in the established inflater boundary.
+    let (window, wbits, wsize) = {
+        let Some((_bound_strm, state)) = crate::src::inflate::inflateStateCheck(strm, None) else {
+            return crate::zlib_h::Z_STREAM_ERROR;
+        };
+        (state.window, state.wbits, state.wsize)
+    };
+    let callback_window = if !(8..=15).contains(&wbits)
+        || 1usize.checked_shl(wbits) != Some(wsize as usize)
+        || window.is_null()
+    {
         None
     } else {
-        let state = unsafe { &*(strm.state as *const crate::src::inflate::inflate_state) };
-        let len = 1usize.checked_shl(state.wbits);
-        if !(8..=15).contains(&state.wbits)
-            || len != Some(state.wsize as usize)
-            || state.window.is_null()
-        {
-            None
-        } else {
-            Some(unsafe { ::core::slice::from_raw_parts_mut(state.window, state.wsize as usize) })
-        }
+        Some(unsafe { ::core::slice::from_raw_parts_mut(window, wsize as usize) })
     };
     inflateBack(Some(strm), callback_window, in_0, in_desc, out, out_desc)
 }
