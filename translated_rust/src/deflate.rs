@@ -2723,6 +2723,7 @@ fn deflate_stored(
     mut flush: ::core::ffi::c_int,
 ) -> block_state {
     unsafe {
+        let window = ::core::slice::from_raw_parts_mut(s.window, s.window_size as usize);
         let min_block = deflate_stored_min_block(s.pending_buf_size, s.w_size);
         let mut last: ::core::ffi::c_int = 0 as ::core::ffi::c_int;
         let mut len: ::core::ffi::c_uint = 0;
@@ -2771,13 +2772,15 @@ fn deflate_stored(
                 let strm = &mut *state.strm;
                 let copy_len = left as usize;
                 let output = ::core::slice::from_raw_parts_mut(strm.next_out, copy_len);
-                let stored_base = if state.block_start >= 0 as ::core::ffi::c_long {
-                    state.window.wrapping_add(state.block_start as usize)
+                if state.block_start >= 0 as ::core::ffi::c_long {
+                    let stored_start = state.block_start as usize;
+                    let stored = &window[stored_start..stored_start + copy_len];
+                    copy_deflate_bytes(output, stored);
                 } else {
-                    state.window.wrapping_offset(state.block_start as isize)
-                };
-                let stored = ::core::slice::from_raw_parts(stored_base, copy_len);
-                copy_deflate_bytes(output, stored);
+                    let stored_base = state.window.wrapping_offset(state.block_start as isize);
+                    let stored = ::core::slice::from_raw_parts(stored_base, copy_len);
+                    copy_deflate_bytes(output, stored);
+                }
                 strm.next_out = strm.next_out.wrapping_add(copy_len);
                 strm.avail_out = strm.avail_out.wrapping_sub(left);
                 strm.total_out = strm.total_out.wrapping_add(left as crate::stdlib::uLong);
@@ -2807,16 +2810,14 @@ fn deflate_stored(
                 s.matches = 2 as crate::stdlib::uInt;
                 let state = &mut *s;
                 let copy_len = state.w_size as usize;
-                let window = ::core::slice::from_raw_parts_mut(state.window, copy_len);
                 let input = ::core::slice::from_raw_parts(
                     post_loop_next_in.wrapping_sub(copy_len),
                     copy_len,
                 );
-                copy_deflate_bytes(window, input);
+                copy_deflate_bytes(&mut window[..copy_len], input);
                 state.strstart = state.w_size;
                 state.insert = state.strstart;
             } else {
-                let window = ::core::slice::from_raw_parts_mut(s.window, s.window_size as usize);
                 if s.window_size
                     .wrapping_sub(s.strstart as crate::zutil_h::ulg)
                     <= used as crate::zutil_h::ulg
@@ -2866,7 +2867,6 @@ fn deflate_stored(
         if avail_in > have && s.block_start >= s.w_size as ::core::ffi::c_long {
             s.block_start -= s.w_size as ::core::ffi::c_long;
             s.strstart = s.strstart.wrapping_sub(s.w_size);
-            let window = ::core::slice::from_raw_parts_mut(s.window, s.window_size as usize);
             let source_start = s.w_size as usize;
             let source_end = source_start + s.strstart as usize;
             window.copy_within(source_start..source_end, 0);
@@ -2884,10 +2884,8 @@ fn deflate_stored(
         if have != 0 {
             let state = &mut *s;
             let strm = &mut *state.strm;
-            let out = ::core::slice::from_raw_parts_mut(
-                state.window.wrapping_add(state.strstart as usize),
-                have as usize,
-            );
+            let out_start = state.strstart as usize;
+            let out = &mut window[out_start..out_start + have as usize];
             read_buf(strm, state.wrap, out);
             state.strstart = state.strstart.wrapping_add(have);
             state.insert = deflate_stored_advance_insert(state.insert, state.w_size, have);
@@ -2913,10 +2911,8 @@ fn deflate_stored(
                     state.pending_buf,
                     state.pending_buf_size as usize,
                 );
-                let stored = ::core::slice::from_raw_parts(
-                    state.window.wrapping_add(state.block_start as usize),
-                    len as usize,
-                );
+                let stored_start = state.block_start as usize;
+                let stored = &window[stored_start..stored_start + len as usize];
                 crate::src::trees::tr_stored_block_impl(
                     state,
                     pending_buf,
@@ -2944,7 +2940,6 @@ fn deflate_fast(
     mut flush: ::core::ffi::c_int,
 ) -> block_state {
     let state = s;
-    let s = state as *mut crate::src::deflate::deflate_state;
     unsafe {
         let mut hash_head: crate::src::deflate::IPos = 0;
         let mut bflush: ::core::ffi::c_int = 0;
@@ -3069,7 +3064,7 @@ fn deflate_fast(
             }
             if bflush != 0 {
                 crate::src::trees::_tr_flush_block_ffi(
-                    s as *mut crate::src::deflate::internal_state,
+                    state,
                     if state.block_start >= 0 as ::core::ffi::c_long {
                         state
                             .window
@@ -3092,7 +3087,7 @@ fn deflate_fast(
         state.insert = deflate_insert_limit(state.strstart);
         if flush == crate::zlib_h::Z_FINISH {
             crate::src::trees::_tr_flush_block_ffi(
-                s as *mut crate::src::deflate::internal_state,
+                state,
                 if state.block_start >= 0 as ::core::ffi::c_long {
                     state
                         .window
@@ -3113,7 +3108,7 @@ fn deflate_fast(
         }
         if state.sym_next != 0 {
             crate::src::trees::_tr_flush_block_ffi(
-                s as *mut crate::src::deflate::internal_state,
+                state,
                 if state.block_start >= 0 as ::core::ffi::c_long {
                     state
                         .window
@@ -3140,7 +3135,6 @@ fn deflate_slow(
     mut flush: ::core::ffi::c_int,
 ) -> block_state {
     let state = s;
-    let s = state as *mut crate::src::deflate::deflate_state;
     unsafe {
         let mut hash_head: crate::src::deflate::IPos = 0;
         let mut bflush: ::core::ffi::c_int = 0;
@@ -3264,7 +3258,7 @@ fn deflate_slow(
                 state.strstart = state.strstart.wrapping_add(1);
                 if bflush != 0 {
                     crate::src::trees::_tr_flush_block_ffi(
-                        s as *mut crate::src::deflate::internal_state,
+                        state,
                         if state.block_start >= 0 as ::core::ffi::c_long {
                             state
                                 .window
@@ -3296,7 +3290,7 @@ fn deflate_slow(
                 bflush = (state.sym_next == state.sym_end) as ::core::ffi::c_int;
                 if bflush != 0 {
                     crate::src::trees::_tr_flush_block_ffi(
-                        s as *mut crate::src::deflate::internal_state,
+                        state,
                         if state.block_start >= 0 as ::core::ffi::c_long {
                             state
                                 .window
@@ -3340,7 +3334,7 @@ fn deflate_slow(
         state.insert = deflate_insert_limit(state.strstart);
         if flush == crate::zlib_h::Z_FINISH {
             crate::src::trees::_tr_flush_block_ffi(
-                s as *mut crate::src::deflate::internal_state,
+                state,
                 if state.block_start >= 0 as ::core::ffi::c_long {
                     state
                         .window
@@ -3361,7 +3355,7 @@ fn deflate_slow(
         }
         if state.sym_next != 0 {
             crate::src::trees::_tr_flush_block_ffi(
-                s as *mut crate::src::deflate::internal_state,
+                state,
                 if state.block_start >= 0 as ::core::ffi::c_long {
                     state
                         .window
@@ -3388,7 +3382,6 @@ fn deflate_rle(
     mut flush: ::core::ffi::c_int,
 ) -> block_state {
     let state = s;
-    let s = state as *mut crate::src::deflate::deflate_state;
     unsafe {
         let mut bflush: ::core::ffi::c_int = 0;
         loop {
@@ -3460,7 +3453,7 @@ fn deflate_rle(
                 let stored_len = (state.strstart as ::core::ffi::c_long - state.block_start)
                     as crate::zutil_h::ulg;
                 crate::src::trees::_tr_flush_block_ffi(
-                    s as *mut crate::src::deflate::internal_state,
+                    state,
                     buf,
                     stored_len,
                     0 as ::core::ffi::c_int,
@@ -3484,12 +3477,7 @@ fn deflate_rle(
             };
             let stored_len =
                 (state.strstart as ::core::ffi::c_long - state.block_start) as crate::zutil_h::ulg;
-            crate::src::trees::_tr_flush_block_ffi(
-                s as *mut crate::src::deflate::internal_state,
-                buf,
-                stored_len,
-                1 as ::core::ffi::c_int,
-            );
+            crate::src::trees::_tr_flush_block_ffi(state, buf, stored_len, 1 as ::core::ffi::c_int);
             state.block_start = state.strstart as ::core::ffi::c_long;
             let avail_out = flush_pending(state);
             if avail_out == 0 as crate::stdlib::uInt {
@@ -3508,12 +3496,7 @@ fn deflate_rle(
             };
             let stored_len =
                 (state.strstart as ::core::ffi::c_long - state.block_start) as crate::zutil_h::ulg;
-            crate::src::trees::_tr_flush_block_ffi(
-                s as *mut crate::src::deflate::internal_state,
-                buf,
-                stored_len,
-                0 as ::core::ffi::c_int,
-            );
+            crate::src::trees::_tr_flush_block_ffi(state, buf, stored_len, 0 as ::core::ffi::c_int);
             state.block_start = state.strstart as ::core::ffi::c_long;
             let avail_out = flush_pending(state);
             if avail_out == 0 as crate::stdlib::uInt {
@@ -3529,7 +3512,6 @@ fn deflate_huff(
     mut flush: ::core::ffi::c_int,
 ) -> block_state {
     let state = s;
-    let s = state as *mut crate::src::deflate::deflate_state;
     unsafe {
         let mut bflush: ::core::ffi::c_int = 0;
         loop {
@@ -3566,7 +3548,7 @@ fn deflate_huff(
                 let stored_len = (state.strstart as ::core::ffi::c_long - state.block_start)
                     as crate::zutil_h::ulg;
                 crate::src::trees::_tr_flush_block_ffi(
-                    s as *mut crate::src::deflate::internal_state,
+                    state,
                     buf,
                     stored_len,
                     0 as ::core::ffi::c_int,
@@ -3590,12 +3572,7 @@ fn deflate_huff(
             };
             let stored_len =
                 (state.strstart as ::core::ffi::c_long - state.block_start) as crate::zutil_h::ulg;
-            crate::src::trees::_tr_flush_block_ffi(
-                s as *mut crate::src::deflate::internal_state,
-                buf,
-                stored_len,
-                1 as ::core::ffi::c_int,
-            );
+            crate::src::trees::_tr_flush_block_ffi(state, buf, stored_len, 1 as ::core::ffi::c_int);
             state.block_start = state.strstart as ::core::ffi::c_long;
             let avail_out = flush_pending(state);
             if avail_out == 0 as crate::stdlib::uInt {
@@ -3614,12 +3591,7 @@ fn deflate_huff(
             };
             let stored_len =
                 (state.strstart as ::core::ffi::c_long - state.block_start) as crate::zutil_h::ulg;
-            crate::src::trees::_tr_flush_block_ffi(
-                s as *mut crate::src::deflate::internal_state,
-                buf,
-                stored_len,
-                0 as ::core::ffi::c_int,
-            );
+            crate::src::trees::_tr_flush_block_ffi(state, buf, stored_len, 0 as ::core::ffi::c_int);
             state.block_start = state.strstart as ::core::ffi::c_long;
             let avail_out = flush_pending(state);
             if avail_out == 0 as crate::stdlib::uInt {
