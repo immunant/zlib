@@ -105,6 +105,17 @@ fn inflate_back_copy_count(
     requested.min(available_input).min(available_output)
 }
 
+fn inflate_back_finish_flush_status(
+    ret: ::core::ffi::c_int,
+    output_failed: bool,
+) -> ::core::ffi::c_int {
+    if output_failed && ret == crate::zlib_h::Z_STREAM_END {
+        crate::zlib_h::Z_BUF_ERROR
+    } else {
+        ret
+    }
+}
+
 fn inflate_back_consume_input_byte(
     have: ::core::ffi::c_uint,
     hold: ::core::ffi::c_ulong,
@@ -1077,15 +1088,12 @@ pub unsafe extern "C" fn inflateBack(
         }
     }
     if left < (*state).wsize {
-        if out.expect("non-null function pointer")(
+        let output_failed = out.expect("non-null function pointer")(
             out_desc,
             (*state).window,
             (*state).wsize.wrapping_sub(left),
-        ) != 0
-            && ret == crate::zlib_h::Z_STREAM_END
-        {
-            ret = crate::zlib_h::Z_BUF_ERROR;
-        }
+        ) != 0;
+        ret = inflate_back_finish_flush_status(ret, output_failed);
     }
     (*strm).next_in = next as *mut crate::stdlib::Bytef;
     (*strm).avail_in = have as crate::stdlib::uInt;
@@ -1123,10 +1131,10 @@ mod tests {
     use super::{
         inflate_back_align_to_byte_boundary, inflate_back_block_header,
         inflate_back_consume_input_byte, inflate_back_copy_count,
-        inflate_back_distance_exceeds_window, inflate_back_init_metadata_is_valid,
-        inflate_back_match_copy_plan, inflate_back_stored_block_length,
-        inflate_back_window_bits_are_valid, inflate_back_window_size, InflateBackBlockKind,
-        InflateBackMatchSource,
+        inflate_back_distance_exceeds_window, inflate_back_finish_flush_status,
+        inflate_back_init_metadata_is_valid, inflate_back_match_copy_plan,
+        inflate_back_stored_block_length, inflate_back_window_bits_are_valid,
+        inflate_back_window_size, InflateBackBlockKind, InflateBackMatchSource,
     };
 
     #[test]
@@ -1211,6 +1219,30 @@ mod tests {
         assert_eq!(inflate_back_copy_count(20, 12, 16), 12);
         assert_eq!(inflate_back_copy_count(20, 24, 16), 16);
         assert_eq!(inflate_back_copy_count(20, 0, 16), 0);
+    }
+
+    #[test]
+    fn inflate_back_finish_flush_status_preserves_stream_end_after_successful_output() {
+        assert_eq!(
+            inflate_back_finish_flush_status(crate::zlib_h::Z_STREAM_END, false),
+            crate::zlib_h::Z_STREAM_END
+        );
+    }
+
+    #[test]
+    fn inflate_back_finish_flush_status_maps_stream_end_output_failure_to_buffer_error() {
+        assert_eq!(
+            inflate_back_finish_flush_status(crate::zlib_h::Z_STREAM_END, true),
+            crate::zlib_h::Z_BUF_ERROR
+        );
+    }
+
+    #[test]
+    fn inflate_back_finish_flush_status_preserves_non_stream_end_errors() {
+        assert_eq!(
+            inflate_back_finish_flush_status(crate::zlib_h::Z_DATA_ERROR, true),
+            crate::zlib_h::Z_DATA_ERROR
+        );
     }
 
     #[test]

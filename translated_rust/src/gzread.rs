@@ -1047,7 +1047,8 @@ unsafe fn gz_fetch(mut state: crate::gzguts_h::gz_statep) -> ::core::ffi::c_int 
                 if gz_look(state) == -1 as ::core::ffi::c_int {
                     return -1 as ::core::ffi::c_int;
                 }
-                if (*state).how == crate::gzguts_h::LOOK {
+                let how = (*state).how;
+                if gz_fetch_after_look(how) == GzFetchAfterLook::Return {
                     return 0 as ::core::ffi::c_int;
                 }
             }
@@ -1089,6 +1090,20 @@ enum GzFetchAction {
     Copy,
     Gzip,
     StateCorrupt,
+}
+
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+enum GzFetchAfterLook {
+    Return,
+    Continue,
+}
+
+fn gz_fetch_after_look(how: ::core::ffi::c_int) -> GzFetchAfterLook {
+    if how == crate::gzguts_h::LOOK {
+        GzFetchAfterLook::Return
+    } else {
+        GzFetchAfterLook::Continue
+    }
 }
 
 fn gz_fetch_action(how: ::core::ffi::c_int) -> GzFetchAction {
@@ -2249,6 +2264,27 @@ mod tests {
     fn gz_fetch_action_rejects_unknown_read_modes() {
         assert_eq!(gz_fetch_action(-1), GzFetchAction::StateCorrupt);
         assert_eq!(gz_fetch_action(99), GzFetchAction::StateCorrupt);
+    }
+
+    #[test]
+    fn gz_fetch_after_look_returns_when_look_remains_selected() {
+        assert_eq!(
+            gz_fetch_after_look(crate::gzguts_h::LOOK),
+            GzFetchAfterLook::Return
+        );
+    }
+
+    #[test]
+    fn gz_fetch_after_look_continues_for_copy_gzip_or_unknown_modes() {
+        assert_eq!(
+            gz_fetch_after_look(crate::gzguts_h::COPY),
+            GzFetchAfterLook::Continue
+        );
+        assert_eq!(
+            gz_fetch_after_look(crate::gzguts_h::GZIP),
+            GzFetchAfterLook::Continue
+        );
+        assert_eq!(gz_fetch_after_look(99), GzFetchAfterLook::Continue);
     }
 
     #[test]
