@@ -439,11 +439,13 @@ unsafe fn gz_decomp(
                 break;
             }
             let input = &state.in_0[input_start..input_start + input_len];
+            let mut inflate_message = None;
             ret = crate::src::inflate::inflate(
                 &mut state.strm,
                 crate::zlib_h::Z_NO_FLUSH,
                 input,
                 &mut output[..output_len],
+                &mut inflate_message,
             );
             if state.strm.avail_out < had {
                 state.junk = 0 as ::core::ffi::c_int;
@@ -470,11 +472,7 @@ unsafe fn gz_decomp(
                     ret = crate::zlib_h::Z_OK;
                     break;
                 } else {
-                    let message = if state.strm.msg.is_null() {
-                        c"compressed data error"
-                    } else {
-                        ::core::ffi::CStr::from_ptr(state.strm.msg)
-                    };
+                    let message = inflate_message.unwrap_or(c"compressed data error");
                     crate::src::gzlib::gz_error_state(
                         state,
                         crate::zlib_h::Z_DATA_ERROR,

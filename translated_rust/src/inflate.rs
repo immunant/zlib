@@ -209,7 +209,11 @@ pub(crate) fn new_inflate_state() -> inflate_state {
         next: 0,
         lens: [0; 320],
         work: [0; 288],
-        codes: [crate::src::inftrees::code { op: 0, bits: 0, val: 0 }; 1444],
+        codes: [crate::src::inftrees::code {
+            op: 0,
+            bits: 0,
+            val: 0,
+        }; 1444],
         sane: 0,
         back: 0,
         was: 0,
@@ -750,13 +754,28 @@ impl ::core::ops::Deref for InflateInput<'_> {
     }
 }
 
+/// Set the ABI-visible diagnostic and retain a borrowed safe view for the
+/// current decode call.  Inflater diagnostics are static C strings, so the
+/// view does not borrow caller memory.
+fn inflate_set_message(
+    strm: &mut InflateStream,
+    error_message: &mut Option<&'static ::core::ffi::CStr>,
+    message: &'static ::core::ffi::CStr,
+) {
+    strm.msg = message.as_ptr().cast_mut();
+    *error_message = Some(message);
+}
+
 pub unsafe fn inflate(
     strm: &mut crate::zlib_h::z_stream_s,
     mut flush: ::core::ffi::c_int,
     input: &[crate::stdlib::Bytef],
     output: &mut [crate::stdlib::Bytef],
+    message: &mut Option<&'static ::core::ffi::CStr>,
 ) -> ::core::ffi::c_int {
     let mut strm = InflateStream(strm);
+    *message = None;
+    let mut error_message = None;
     let mut next = InflateInput::new(input);
     let mut put = 0usize;
     let mut have: ::core::ffi::c_uint = 0;
@@ -906,8 +925,7 @@ pub unsafe fn inflate(
                                                                                                                     .wrapping_add(hold >> 8 as ::core::ffi::c_int)
                                                                                                                     .wrapping_rem(31 as ::core::ffi::c_ulong) != 0
                                                                                                             {
-                                                                                                                (*strm).msg = b"incorrect header check\0".as_ptr()
-                                                                                                                    as *const ::core::ffi::c_char as *mut ::core::ffi::c_char;
+                                                                                                                inflate_set_message(&mut strm, &mut error_message, c"incorrect header check");
                                                                                                                 (*state).mode = crate::src::inflate::BAD;
                                                                                                                 continue '_inf_leave;
                                                                                                             } else if hold as ::core::ffi::c_uint
@@ -915,8 +933,7 @@ pub unsafe fn inflate(
                                                                                                                     .wrapping_sub(1 as ::core::ffi::c_uint)
                                                                                                                 != crate::zlib_h::Z_DEFLATED as ::core::ffi::c_uint
                                                                                                             {
-                                                                                                                (*strm).msg = b"unknown compression method\0".as_ptr()
-                                                                                                                    as *const ::core::ffi::c_char as *mut ::core::ffi::c_char;
+                                                                                                                inflate_set_message(&mut strm, &mut error_message, c"unknown compression method");
                                                                                                                 (*state).mode = crate::src::inflate::BAD;
                                                                                                                 continue '_inf_leave;
                                                                                                             } else {
@@ -933,8 +950,7 @@ pub unsafe fn inflate(
                                                                                                                     (*state).wbits = len;
                                                                                                                 }
                                                                                                                 if len > 15 as ::core::ffi::c_uint || len > (*state).wbits {
-                                                                                                                    (*strm).msg = b"invalid window size\0".as_ptr()
-                                                                                                                        as *const ::core::ffi::c_char as *mut ::core::ffi::c_char;
+                                                                                                                    inflate_set_message(&mut strm, &mut error_message, c"invalid window size");
                                                                                                                     (*state).mode = crate::src::inflate::BAD;
                                                                                                                     continue '_inf_leave;
                                                                                                                 } else {
@@ -978,14 +994,12 @@ pub unsafe fn inflate(
                                                                                                     (*state).flags = hold as ::core::ffi::c_int;
                                                                                                     if (*state).flags & 0xff as ::core::ffi::c_int != crate::zlib_h::Z_DEFLATED
                                                                                                     {
-                                                                                                        (*strm).msg = b"unknown compression method\0".as_ptr()
-                                                                                                            as *const ::core::ffi::c_char as *mut ::core::ffi::c_char;
+                                                                                                        inflate_set_message(&mut strm, &mut error_message, c"unknown compression method");
                                                                                                         (*state).mode = crate::src::inflate::BAD;
                                                                                                         continue '_inf_leave;
                                                                                                     } else if (*state).flags & 0xe000 as ::core::ffi::c_int != 0
                                                                                                     {
-                                                                                                        (*strm).msg = b"unknown header flags set\0".as_ptr()
-                                                                                                            as *const ::core::ffi::c_char as *mut ::core::ffi::c_char;
+                                                                                                        inflate_set_message(&mut strm, &mut error_message, c"unknown header flags set");
                                                                                                         (*state).mode = crate::src::inflate::BAD;
                                                                                                         continue '_inf_leave;
                                                                                                     } else {
@@ -1096,8 +1110,7 @@ pub unsafe fn inflate(
                                                                                                         != hold >> 16 as ::core::ffi::c_int
                                                                                                             ^ 0xffff as ::core::ffi::c_ulong
                                                                                                     {
-                                                                                                        (*strm).msg = b"invalid stored block lengths\0".as_ptr()
-                                                                                                            as *const ::core::ffi::c_char as *mut ::core::ffi::c_char;
+                                                                                                        inflate_set_message(&mut strm, &mut error_message, c"invalid stored block lengths");
                                                                                                         (*state).mode = crate::src::inflate::BAD;
                                                                                                         continue '_inf_leave;
                                                                                                     } else {
@@ -1164,9 +1177,7 @@ pub unsafe fn inflate(
                                                                                                     if (*state).nlen > 286 as ::core::ffi::c_uint
                                                                                                         || (*state).ndist > 30 as ::core::ffi::c_uint
                                                                                                     {
-                                                                                                        (*strm).msg = b"too many length or distance symbols\0"
-                                                                                                            .as_ptr() as *const ::core::ffi::c_char
-                                                                                                            as *mut ::core::ffi::c_char;
+                                                                                                        inflate_set_message(&mut strm, &mut error_message, c"too many length or distance symbols");
                                                                                                         (*state).mode = crate::src::inflate::BAD;
                                                                                                         continue '_inf_leave;
                                                                                                     } else {
@@ -1268,8 +1279,7 @@ pub unsafe fn inflate(
                                                                                                                     )
                                                                                                             }) != (*state).check
                                                                                                         {
-                                                                                                            (*strm).msg = b"incorrect data check\0".as_ptr()
-                                                                                                                as *const ::core::ffi::c_char as *mut ::core::ffi::c_char;
+                                                                                                        inflate_set_message(&mut strm, &mut error_message, c"incorrect data check");
                                                                                                             (*state).mode = crate::src::inflate::BAD;
                                                                                                             continue '_inf_leave;
                                                                                                         } else {
@@ -1309,8 +1319,7 @@ pub unsafe fn inflate(
                                                                                                     && hold
                                                                                                         != (*state).total & 0xffffffff as ::core::ffi::c_ulong
                                                                                                 {
-                                                                                                    (*strm).msg = b"incorrect length check\0".as_ptr()
-                                                                                                        as *const ::core::ffi::c_char as *mut ::core::ffi::c_char;
+                                                                                                    inflate_set_message(&mut strm, &mut error_message, c"incorrect length check");
                                                                                                     (*state).mode = crate::src::inflate::BAD;
                                                                                                     continue '_inf_leave;
                                                                                                 } else {
@@ -1366,16 +1375,15 @@ pub unsafe fn inflate(
                                                                                             crate::src::inftrees::CODES,
                                                                                             &raw mut (*state).lens as *mut ::core::ffi::c_ushort,
                                                                                             19 as ::core::ffi::c_uint,
-                                                                                            
-                                                                                            &raw mut table,
+
+                                                                                                                    &raw mut table,
                                                                                             &raw mut (*state).lenbits,
                                                                                             &raw mut (*state).work as *mut ::core::ffi::c_ushort,
                                                                                         );
                                                                                         (*state).next = table.addr().wrapping_sub((&raw mut (*state).codes as *mut crate::src::inftrees::code).addr()) / ::core::mem::size_of::<crate::src::inftrees::code>();
                                                                                         if ret != 0
                                                                                         {
-                                                                                            (*strm).msg = b"invalid code lengths set\0".as_ptr()
-                                                                                                as *const ::core::ffi::c_char as *mut ::core::ffi::c_char;
+                                                                                            inflate_set_message(&mut strm, &mut error_message, c"invalid code lengths set");
                                                                                             (*state).mode = crate::src::inflate::BAD;
                                                                                             continue '_inf_leave;
                                                                                         } else {
@@ -1515,8 +1523,7 @@ pub unsafe fn inflate(
                                                                                     hold >>= here.bits as ::core::ffi::c_int;
                                                                                     bits = bits.wrapping_sub(here.bits as ::core::ffi::c_uint);
                                                                                     if (*state).have == 0 as ::core::ffi::c_uint {
-                                                                                        (*strm).msg = b"invalid bit length repeat\0".as_ptr()
-                                                                                            as *const ::core::ffi::c_char as *mut ::core::ffi::c_char;
+                                                                                        inflate_set_message(&mut strm, &mut error_message, c"invalid bit length repeat");
                                                                                         (*state).mode = crate::src::inflate::BAD;
                                                                                         break;
                                                                                     } else {
@@ -1603,8 +1610,7 @@ pub unsafe fn inflate(
                                                                                 if (*state).have.wrapping_add(copy)
                                                                                     > (*state).nlen.wrapping_add((*state).ndist)
                                                                                 {
-                                                                                    (*strm).msg = b"invalid bit length repeat\0".as_ptr()
-                                                                                        as *const ::core::ffi::c_char as *mut ::core::ffi::c_char;
+                                                                                    inflate_set_message(&mut strm, &mut error_message, c"invalid bit length repeat");
                                                                                     (*state).mode = crate::src::inflate::BAD;
                                                                                     break;
                                                                                 } else {
@@ -1630,9 +1636,7 @@ pub unsafe fn inflate(
                                                                         if (*state).lens[256 as usize] as ::core::ffi::c_int
                                                                             == 0 as ::core::ffi::c_int
                                                                         {
-                                                                            (*strm).msg = b"invalid code -- missing end-of-block\0"
-                                                                                .as_ptr() as *const ::core::ffi::c_char
-                                                                                as *mut ::core::ffi::c_char;
+                                                                            inflate_set_message(&mut strm, &mut error_message, c"invalid code -- missing end-of-block");
                                                                             (*state).mode = crate::src::inflate::BAD;
                                                                             continue '_inf_leave;
                                                                         } else {
@@ -1644,15 +1648,14 @@ pub unsafe fn inflate(
                                                                                 crate::src::inftrees::LENS,
                                                                                 &raw mut (*state).lens as *mut ::core::ffi::c_ushort,
                                                                                 (*state).nlen,
-                                                                                
-                                                                                &raw mut table,
+
+                                                                            &raw mut table,
                                                                                 &raw mut (*state).lenbits,
                                                                                 &raw mut (*state).work as *mut ::core::ffi::c_ushort,
                                                                             );
                                                                             (*state).next = table.addr().wrapping_sub((&raw mut (*state).codes as *mut crate::src::inftrees::code).addr()) / ::core::mem::size_of::<crate::src::inftrees::code>();
                                                                             if ret != 0 {
-                                                                                (*strm).msg = b"invalid literal/lengths set\0".as_ptr()
-                                                                                    as *const ::core::ffi::c_char as *mut ::core::ffi::c_char;
+                                                                                inflate_set_message(&mut strm, &mut error_message, c"invalid literal/lengths set");
                                                                                 (*state).mode = crate::src::inflate::BAD;
                                                                                 continue '_inf_leave;
                                                                             } else {
@@ -1663,15 +1666,14 @@ pub unsafe fn inflate(
                                                                                     (&raw mut (*state).lens as *mut ::core::ffi::c_ushort)
                                                                                         .wrapping_offset((*state).nlen as isize),
                                                                                     (*state).ndist,
-                                                                                    
-                                                                                    &raw mut table,
+
+                                                                                &raw mut table,
                                                                                     &raw mut (*state).distbits,
                                                                                     &raw mut (*state).work as *mut ::core::ffi::c_ushort,
                                                                                 );
                                                                                 (*state).next = table.addr().wrapping_sub((&raw mut (*state).codes as *mut crate::src::inftrees::code).addr()) / ::core::mem::size_of::<crate::src::inftrees::code>();
                                                                                 if ret != 0 {
-                                                                                    (*strm).msg = b"invalid distances set\0".as_ptr()
-                                                                                        as *const ::core::ffi::c_char as *mut ::core::ffi::c_char;
+                                                                                    inflate_set_message(&mut strm, &mut error_message, c"invalid distances set");
                                                                                     (*state).mode = crate::src::inflate::BAD;
                                                                                     continue '_inf_leave;
                                                                                 } else {
@@ -1861,8 +1863,11 @@ pub unsafe fn inflate(
                                                                     crate::src::inflate::TABLE;
                                                             }
                                                             _ => {
-                                                                (*strm).msg = b"invalid block type\0".as_ptr()
-                                                                    as *const ::core::ffi::c_char as *mut ::core::ffi::c_char;
+                                                                inflate_set_message(
+                                                                    &mut strm,
+                                                                    &mut error_message,
+                                                                    c"invalid block type",
+                                                                );
                                                                 (*state).mode =
                                                                     crate::src::inflate::BAD;
                                                             }
@@ -2024,9 +2029,11 @@ pub unsafe fn inflate(
                                             & 64 as ::core::ffi::c_int
                                             != 0
                                         {
-                                            (*strm).msg = b"invalid literal/length code\0".as_ptr()
-                                                as *const ::core::ffi::c_char
-                                                as *mut ::core::ffi::c_char;
+                                            inflate_set_message(
+                                                &mut strm,
+                                                &mut error_message,
+                                                c"invalid literal/length code",
+                                            );
                                             (*state).mode = crate::src::inflate::BAD;
                                             continue '_inf_leave;
                                         } else {
@@ -2227,9 +2234,11 @@ pub unsafe fn inflate(
                         bits = bits.wrapping_sub(here.bits as ::core::ffi::c_uint);
                         (*state).back += here.bits as ::core::ffi::c_int;
                         if here.op as ::core::ffi::c_int & 64 as ::core::ffi::c_int != 0 {
-                            (*strm).msg = b"invalid distance code\0".as_ptr()
-                                as *const ::core::ffi::c_char
-                                as *mut ::core::ffi::c_char;
+                            inflate_set_message(
+                                &mut strm,
+                                &mut error_message,
+                                c"invalid distance code",
+                            );
                             (*state).mode = crate::src::inflate::BAD;
                             continue '_inf_leave;
                         } else {
@@ -2320,8 +2329,7 @@ pub unsafe fn inflate(
                 if (*state).wrap & 4 as ::core::ffi::c_int != 0
                     && hold != (*state).check & 0xffff as ::core::ffi::c_ulong
                 {
-                    (*strm).msg = b"header crc mismatch\0".as_ptr() as *const ::core::ffi::c_char
-                        as *mut ::core::ffi::c_char;
+                    inflate_set_message(&mut strm, &mut error_message, c"header crc mismatch");
                     (*state).mode = crate::src::inflate::BAD;
                     continue '_inf_leave;
                 } else {
@@ -2347,9 +2355,11 @@ pub unsafe fn inflate(
             copy = (*state).offset.wrapping_sub(copy);
             if copy > (*state).whave {
                 if (*state).sane != 0 {
-                    (*strm).msg = b"invalid distance too far back\0".as_ptr()
-                        as *const ::core::ffi::c_char
-                        as *mut ::core::ffi::c_char;
+                    inflate_set_message(
+                        &mut strm,
+                        &mut error_message,
+                        c"invalid distance too far back",
+                    );
                     (*state).mode = crate::src::inflate::BAD;
                     continue;
                 }
@@ -2413,8 +2423,7 @@ pub unsafe fn inflate(
                 || flush != crate::zlib_h::Z_FINISH)
     {
         let copied = out.wrapping_sub((*strm).avail_out as ::core::ffi::c_uint) as usize;
-        if updatewindow(&mut *state, &output[put - copied..put]) != 0
-        {
+        if updatewindow(&mut *state, &output[put - copied..put]) != 0 {
             (*state).mode = crate::src::inflate::MEM;
             return crate::zlib_h::Z_MEM_ERROR;
         }
@@ -2466,6 +2475,7 @@ pub unsafe fn inflate(
     {
         ret = crate::zlib_h::Z_BUF_ERROR;
     }
+    *message = error_message;
     return ret;
 }
 /// Converts the ABI stream's current buffers once before entering the
@@ -2488,7 +2498,8 @@ fn inflate_from_stream(
     // zlib requires `next_out` even for a zero-sized output range.
     let output =
         unsafe { ::core::slice::from_raw_parts_mut(strm.next_out, strm.avail_out as usize) };
-    unsafe { inflate(strm, flush, input, output) }
+    let mut message = None;
+    unsafe { inflate(strm, flush, input, output, &mut message) }
 }
 
 #[export_name = "inflate"]

@@ -430,7 +430,14 @@ pub unsafe extern "C" fn uncompress2_z(
             ::core::slice::from_raw_parts(stream.next_in, stream.avail_in as usize)
         };
         let output = ::core::slice::from_raw_parts_mut(stream.next_out, stream.avail_out as usize);
-        err = crate::src::inflate::inflate(&mut stream, crate::zlib_h::Z_NO_FLUSH, input, output);
+        let mut inflate_message = None;
+        err = crate::src::inflate::inflate(
+            &mut stream,
+            crate::zlib_h::Z_NO_FLUSH,
+            input,
+            output,
+            &mut inflate_message,
+        );
         if err != crate::zlib_h::Z_OK {
             break;
         }
