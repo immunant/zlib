@@ -751,6 +751,19 @@ fn inflate_back_take_bits(
     value
 }
 
+// Loading a byte is part of the raw input-cursor boundary, but incorporating
+// that already-read value into the inflater's bit buffer is ordinary decoder
+// bookkeeping. Keep the latter value-only so every refill site has the same
+// bit-buffer transition without widening the raw-pointer surface.
+fn inflate_back_append_input_byte(
+    hold: &mut ::core::ffi::c_ulong,
+    bits: &mut ::core::ffi::c_uint,
+    byte: ::core::ffi::c_uchar,
+) {
+    *hold = hold.wrapping_add((byte as ::core::ffi::c_ulong) << *bits);
+    *bits = bits.wrapping_add(8);
+}
+
 fn inflate_back_table_index(hold: ::core::ffi::c_ulong, bits: ::core::ffi::c_uint) -> isize {
     inflate_back_low_bits(hold, bits) as isize
 }
@@ -1063,8 +1076,7 @@ pub unsafe extern "C" fn inflateBack(
                         have = have.wrapping_sub(1);
                         let c2rust_fresh0 = next;
                         next = next.wrapping_add(1);
-                        hold = hold.wrapping_add((*c2rust_fresh0 as ::core::ffi::c_ulong) << bits);
-                        bits = bits.wrapping_add(8 as ::core::ffi::c_uint);
+                        inflate_back_append_input_byte(&mut hold, &mut bits, *c2rust_fresh0);
                     }
                     if inflate_back_apply_block_header(state_ref, &mut hold, &mut bits) {
                         inflate_back_report_error(
@@ -1091,8 +1103,7 @@ pub unsafe extern "C" fn inflateBack(
                     have = have.wrapping_sub(1);
                     let c2rust_fresh1 = next;
                     next = next.wrapping_add(1);
-                    hold = hold.wrapping_add((*c2rust_fresh1 as ::core::ffi::c_ulong) << bits);
-                    bits = bits.wrapping_add(8 as ::core::ffi::c_uint);
+                    inflate_back_append_input_byte(&mut hold, &mut bits, *c2rust_fresh1);
                 }
                 if let Some(length) = inflate_back_stored_length(hold) {
                     inflate_back_begin_stored_copy(state_ref, length, &mut hold, &mut bits);
@@ -1148,8 +1159,7 @@ pub unsafe extern "C" fn inflateBack(
                     have = have.wrapping_sub(1);
                     let c2rust_fresh2 = next;
                     next = next.wrapping_add(1);
-                    hold = hold.wrapping_add((*c2rust_fresh2 as ::core::ffi::c_ulong) << bits);
-                    bits = bits.wrapping_add(8 as ::core::ffi::c_uint);
+                    inflate_back_append_input_byte(&mut hold, &mut bits, *c2rust_fresh2);
                 }
                 let header = inflate_back_apply_dynamic_header(state_ref, &mut hold, &mut bits);
                 if !inflate_back_dynamic_header_is_valid(header) {
@@ -1174,9 +1184,7 @@ pub unsafe extern "C" fn inflateBack(
                             have = have.wrapping_sub(1);
                             let c2rust_fresh3 = next;
                             next = next.wrapping_add(1);
-                            hold =
-                                hold.wrapping_add((*c2rust_fresh3 as ::core::ffi::c_ulong) << bits);
-                            bits = bits.wrapping_add(8 as ::core::ffi::c_uint);
+                            inflate_back_append_input_byte(&mut hold, &mut bits, *c2rust_fresh3);
                         }
                         inflate_back_set_code_length_order(
                             &mut state_ref.lens,
@@ -1227,9 +1235,11 @@ pub unsafe extern "C" fn inflateBack(
                                 have = have.wrapping_sub(1);
                                 let c2rust_fresh6 = next;
                                 next = next.wrapping_add(1);
-                                hold = hold
-                                    .wrapping_add((*c2rust_fresh6 as ::core::ffi::c_ulong) << bits);
-                                bits = bits.wrapping_add(8 as ::core::ffi::c_uint);
+                                inflate_back_append_input_byte(
+                                    &mut hold,
+                                    &mut bits,
+                                    *c2rust_fresh6,
+                                );
                             }
                             if here.val >= 16 {
                                 while bits < inflate_back_code_length_bits_required(here) {
@@ -1244,10 +1254,11 @@ pub unsafe extern "C" fn inflateBack(
                                     have = have.wrapping_sub(1);
                                     let c2rust_fresh8 = next;
                                     next = next.wrapping_add(1);
-                                    hold = hold.wrapping_add(
-                                        (*c2rust_fresh8 as ::core::ffi::c_ulong) << bits,
+                                    inflate_back_append_input_byte(
+                                        &mut hold,
+                                        &mut bits,
+                                        *c2rust_fresh8,
                                     );
-                                    bits = bits.wrapping_add(8 as ::core::ffi::c_uint);
                                 }
                             }
                             if let Err(error) = inflate_back_apply_code_length(
@@ -1374,8 +1385,7 @@ pub unsafe extern "C" fn inflateBack(
                 have = have.wrapping_sub(1);
                 let c2rust_fresh13 = next;
                 next = next.wrapping_add(1);
-                hold = hold.wrapping_add((*c2rust_fresh13 as ::core::ffi::c_ulong) << bits);
-                bits = bits.wrapping_add(8 as ::core::ffi::c_uint);
+                inflate_back_append_input_byte(&mut hold, &mut bits, *c2rust_fresh13);
             }
             if inflate_back_length_code_needs_subtable(here) {
                 last = here;
@@ -1402,8 +1412,7 @@ pub unsafe extern "C" fn inflateBack(
                     have = have.wrapping_sub(1);
                     let c2rust_fresh14 = next;
                     next = next.wrapping_add(1);
-                    hold = hold.wrapping_add((*c2rust_fresh14 as ::core::ffi::c_ulong) << bits);
-                    bits = bits.wrapping_add(8 as ::core::ffi::c_uint);
+                    inflate_back_append_input_byte(&mut hold, &mut bits, *c2rust_fresh14);
                 }
                 inflate_back_drop_bits(&mut hold, &mut bits, last.bits as ::core::ffi::c_uint);
             }
@@ -1446,9 +1455,11 @@ pub unsafe extern "C" fn inflateBack(
                             have = have.wrapping_sub(1);
                             let c2rust_fresh16 = next;
                             next = next.wrapping_add(1);
-                            hold = hold
-                                .wrapping_add((*c2rust_fresh16 as ::core::ffi::c_ulong) << bits);
-                            bits = bits.wrapping_add(8 as ::core::ffi::c_uint);
+                            inflate_back_append_input_byte(
+                                &mut hold,
+                                &mut bits,
+                                *c2rust_fresh16,
+                            );
                         }
                         let extra = inflate_back_take_bits(&mut hold, &mut bits, state_ref.extra);
                         inflate_back_add_length_extra(state_ref, extra);
@@ -1473,8 +1484,7 @@ pub unsafe extern "C" fn inflateBack(
                         have = have.wrapping_sub(1);
                         let c2rust_fresh17 = next;
                         next = next.wrapping_add(1);
-                        hold = hold.wrapping_add((*c2rust_fresh17 as ::core::ffi::c_ulong) << bits);
-                        bits = bits.wrapping_add(8 as ::core::ffi::c_uint);
+                        inflate_back_append_input_byte(&mut hold, &mut bits, *c2rust_fresh17);
                     }
                     if inflate_back_distance_code_needs_subtable(here) {
                         last = here;
@@ -1501,9 +1511,11 @@ pub unsafe extern "C" fn inflateBack(
                             have = have.wrapping_sub(1);
                             let c2rust_fresh18 = next;
                             next = next.wrapping_add(1);
-                            hold = hold
-                                .wrapping_add((*c2rust_fresh18 as ::core::ffi::c_ulong) << bits);
-                            bits = bits.wrapping_add(8 as ::core::ffi::c_uint);
+                            inflate_back_append_input_byte(
+                                &mut hold,
+                                &mut bits,
+                                *c2rust_fresh18,
+                            );
                         }
                         inflate_back_drop_bits(
                             &mut hold,
@@ -1534,10 +1546,11 @@ pub unsafe extern "C" fn inflateBack(
                                     have = have.wrapping_sub(1);
                                     let c2rust_fresh19 = next;
                                     next = next.wrapping_add(1);
-                                    hold = hold.wrapping_add(
-                                        (*c2rust_fresh19 as ::core::ffi::c_ulong) << bits,
+                                    inflate_back_append_input_byte(
+                                        &mut hold,
+                                        &mut bits,
+                                        *c2rust_fresh19,
                                     );
-                                    bits = bits.wrapping_add(8 as ::core::ffi::c_uint);
                                 }
                                 let extra =
                                     inflate_back_take_bits(&mut hold, &mut bits, state_ref.extra);
