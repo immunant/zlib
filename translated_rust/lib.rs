@@ -45,7 +45,6 @@ pub mod gzguts_h {
 
     pub const GZIP: ::core::ffi::c_int = 2;
 
-    #[derive(Copy, Clone)]
     #[repr(C)]
 
     pub struct gz_state {

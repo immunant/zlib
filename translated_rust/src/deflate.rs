@@ -1188,18 +1188,17 @@ pub unsafe extern "C" fn deflatePrime_ffi(
     if deflate_state_check_raw!(strm) != 0 {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    let s = (*strm).state as *mut crate::src::deflate::deflate_state;
+    let state = &mut *((*strm).state as *mut crate::src::deflate::deflate_state);
     if bits < 0 as ::core::ffi::c_int
         || bits > 16 as ::core::ffi::c_int
-        || ((*s).lit_bufsize as crate::zutil_h::ulg)
-            < (*s).pending_out_offset.wrapping_add(
+        || (state.lit_bufsize as crate::zutil_h::ulg)
+            < state.pending_out_offset.wrapping_add(
                 (crate::src::deflate::Buf_size + 7 as ::core::ffi::c_int >> 3 as ::core::ffi::c_int)
                     as crate::zutil_h::ulg,
             )
     {
         return crate::zlib_h::Z_BUF_ERROR;
     }
-    let state = &mut *s;
     let pending_buf =
         ::core::slice::from_raw_parts_mut(state.pending_buf, state.pending_buf_size as usize);
     loop {

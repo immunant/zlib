@@ -2509,14 +2509,13 @@ pub unsafe extern "C" fn inflateSetDictionary_ffi(
     mut dictionary: *const crate::stdlib::Bytef,
     mut dictLength: crate::stdlib::uInt,
 ) -> ::core::ffi::c_int {
-    let mut state: *mut crate::src::inflate::inflate_state =
-        ::core::ptr::null_mut::<crate::src::inflate::inflate_state>();
     let mut dictid: ::core::ffi::c_ulong = 0;
     if inflate_state_check_raw!(strm) != 0 {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    state = (*strm).state as *mut crate::src::inflate::inflate_state;
-    match inflate_dictionary_state((*state).wrap, (*state).mode as ::core::ffi::c_uint) {
+    let strm_ref = &mut *strm;
+    let state_ref = &mut *(strm_ref.state as *mut crate::src::inflate::inflate_state);
+    match inflate_dictionary_state(state_ref.wrap, state_ref.mode as ::core::ffi::c_uint) {
         InflateDictionaryState::Reject => {
             return crate::zlib_h::Z_STREAM_ERROR;
         }
@@ -2530,17 +2529,16 @@ pub unsafe extern "C" fn inflateSetDictionary_ffi(
                     dictionary_slice,
                 ) as ::core::ffi::c_ulong;
             }
-            if !inflate_dictionary_id_matches(dictid, (*state).check) {
+            if !inflate_dictionary_id_matches(dictid, state_ref.check) {
                 return crate::zlib_h::Z_DATA_ERROR;
             }
         }
         InflateDictionaryState::Accept => {}
     }
-    let state_ref = &mut *state;
     if state_ref.window.is_null() {
-        state_ref.window = Some((*strm).zalloc.expect("non-null function pointer"))
+        state_ref.window = Some(strm_ref.zalloc.expect("non-null function pointer"))
             .expect("non-null function pointer")(
-            (*strm).opaque,
+            strm_ref.opaque,
             (1 as crate::stdlib::uInt) << state_ref.wbits,
             ::core::mem::size_of::<::core::ffi::c_uchar>() as crate::stdlib::uInt,
         ) as *mut ::core::ffi::c_uchar;
