@@ -1941,43 +1941,45 @@ pub unsafe extern "C" fn deflateParams_ffi(
     };
     deflateParams(strm, level, strategy)
 }
-pub unsafe fn deflateTune(
-    strm: crate::zlib_h::z_streamp,
-    mut good_length: ::core::ffi::c_int,
-    mut max_lazy: ::core::ffi::c_int,
-    mut nice_length: ::core::ffi::c_int,
-    mut max_chain: ::core::ffi::c_int,
+/// Tune an already-validated deflate state.  This state-only operation has no
+/// ABI pointers, so stream validation and the one state-link crossing stay in
+/// its caller.
+fn deflate_tune_state(
+    state: &mut crate::src::deflate::deflate_state,
+    good_length: ::core::ffi::c_int,
+    max_lazy: ::core::ffi::c_int,
+    nice_length: ::core::ffi::c_int,
+    max_chain: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
-    let Some(strm) = strm.as_mut() else {
-        return crate::zlib_h::Z_STREAM_ERROR;
-    };
-    if strm.zalloc.is_none() || strm.zfree.is_none() {
+    if !deflate_params_state_is_valid(state) {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    // The state pointer is installed by initialization.  Validate its
-    // backlink and state machine before allowing the parameter update to
-    // borrow it.
-    if strm.state.is_null() {
-        return crate::zlib_h::Z_STREAM_ERROR;
-    }
-    let s = unsafe { &mut *strm.state };
-    if s.status != crate::src::deflate::INIT_STATE
-            && s.status != crate::src::deflate::GZIP_STATE
-            && s.status != crate::src::deflate::EXTRA_STATE
-            && s.status != crate::src::deflate::NAME_STATE
-            && s.status != crate::src::deflate::COMMENT_STATE
-            && s.status != crate::src::deflate::HCRC_STATE
-            && s.status != crate::src::deflate::BUSY_STATE
-            && s.status != crate::src::deflate::FINISH_STATE
-    {
-        return crate::zlib_h::Z_STREAM_ERROR;
-    }
-    s.good_match = good_length as crate::stdlib::uInt;
-    s.max_lazy_match = max_lazy as crate::stdlib::uInt;
-    s.nice_match = nice_length;
-    s.max_chain_length = max_chain as crate::stdlib::uInt;
+    state.good_match = good_length as crate::stdlib::uInt;
+    state.max_lazy_match = max_lazy as crate::stdlib::uInt;
+    state.nice_match = nice_length;
+    state.max_chain_length = max_chain as crate::stdlib::uInt;
     return crate::zlib_h::Z_OK;
 }
+
+/// Validate the ABI stream before borrowing the deflate state it owns.
+///
+/// The exported wrapper only converts its raw stream argument and dispatches
+/// here; this adapter retains the state-specific validation outside the FFI
+/// entry point.
+pub unsafe fn deflateTune(
+    strm: &mut crate::zlib_h::z_stream_s,
+    good_length: ::core::ffi::c_int,
+    max_lazy: ::core::ffi::c_int,
+    nice_length: ::core::ffi::c_int,
+    max_chain: ::core::ffi::c_int,
+) -> ::core::ffi::c_int {
+    if !deflate_params_stream_is_valid(strm) {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    }
+    let state = &mut *strm.state;
+    deflate_tune_state(state, good_length, max_lazy, nice_length, max_chain)
+}
+
 #[export_name = "deflateTune"]
 
 pub unsafe extern "C" fn deflateTune_ffi(
@@ -1987,6 +1989,9 @@ pub unsafe extern "C" fn deflateTune_ffi(
     mut nice_length: ::core::ffi::c_int,
     mut max_chain: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
+    let Some(strm) = strm.as_mut() else {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    };
     deflateTune(strm, good_length, max_lazy, nice_length, max_chain)
 }
 /// Compute a deflate bound after the ABI stream link has been converted at
