@@ -65,7 +65,6 @@ pub type tree_desc = crate::src::deflate::tree_desc_s;
 #[repr(C)]
 
 pub struct tree_desc_s {
-    pub dyn_tree: *mut crate::src::deflate::ct_data,
     pub max_code: ::core::ffi::c_int,
     pub stat_desc: &'static crate::src::deflate::static_tree_desc,
 }
@@ -957,17 +956,18 @@ pub unsafe extern "C" fn deflateResetKeep(
     (*strm).msg = ::core::ptr::null_mut::<::core::ffi::c_char>();
     (*strm).data_type = crate::zlib_h::Z_UNKNOWN;
     s = (*strm).state as *mut crate::src::deflate::deflate_state;
-    (*s).pending = 0 as crate::zutil_h::ulg;
-    (*s).pending_out = (*s).pending_buf;
-    if (*s).wrap < 0 as ::core::ffi::c_int {
-        (*s).wrap = -(*s).wrap;
+    let s = &mut *s;
+    s.pending = 0 as crate::zutil_h::ulg;
+    s.pending_out = s.pending_buf;
+    if s.wrap < 0 as ::core::ffi::c_int {
+        s.wrap = -s.wrap;
     }
-    (*s).status = if (*s).wrap == 2 as ::core::ffi::c_int {
+    s.status = if s.wrap == 2 as ::core::ffi::c_int {
         crate::src::deflate::GZIP_STATE
     } else {
         crate::src::deflate::INIT_STATE
     };
-    (*strm).adler = if (*s).wrap == 2 as ::core::ffi::c_int {
+    (*strm).adler = if s.wrap == 2 as ::core::ffi::c_int {
         crate::src::crc32::crc32(
             0 as crate::stdlib::uLong,
             ::core::ptr::null::<crate::stdlib::Bytef>(),
@@ -980,8 +980,8 @@ pub unsafe extern "C" fn deflateResetKeep(
             0 as crate::stdlib::uInt,
         )
     };
-    (*s).last_flush = -2 as ::core::ffi::c_int;
-    crate::src::trees::_tr_init(s as *mut crate::src::deflate::internal_state);
+    s.last_flush = -2 as ::core::ffi::c_int;
+    crate::src::trees::_tr_init(s);
     return crate::zlib_h::Z_OK;
 }
 #[export_name = "deflateResetKeep"]
@@ -2208,12 +2208,6 @@ pub unsafe extern "C" fn deflateCopy(
         (*ss).sym_buf as *const ::core::ffi::c_void,
         (*ss).sym_next as crate::__stddef_size_t_h::size_t,
     );
-    (*ds).l_desc.dyn_tree = &raw mut (*ds).dyn_ltree as *mut crate::src::deflate::ct_data_s
-        as *mut crate::src::deflate::ct_data;
-    (*ds).d_desc.dyn_tree = &raw mut (*ds).dyn_dtree as *mut crate::src::deflate::ct_data_s
-        as *mut crate::src::deflate::ct_data;
-    (*ds).bl_desc.dyn_tree = &raw mut (*ds).bl_tree as *mut crate::src::deflate::ct_data_s
-        as *mut crate::src::deflate::ct_data;
     return crate::zlib_h::Z_OK;
 }
 #[export_name = "deflateCopy"]

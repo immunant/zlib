@@ -3711,66 +3711,37 @@ fn gen_codes_safe(
 
 fn tr_static_init() {}
 
-fn init_block_safe(s: &mut crate::src::deflate::deflate_state) {
-    let mut n: ::core::ffi::c_int = 0;
-    n = 0 as ::core::ffi::c_int;
-    while n < crate::src::deflate::L_CODES {
-        s.dyn_ltree[n as usize].fc.freq = 0 as crate::zutil_h::ush;
-        n += 1;
-    }
-    n = 0 as ::core::ffi::c_int;
-    while n < crate::src::deflate::D_CODES {
-        s.dyn_dtree[n as usize].fc.freq = 0 as crate::zutil_h::ush;
-        n += 1;
-    }
-    n = 0 as ::core::ffi::c_int;
-    while n < crate::src::deflate::BL_CODES {
-        s.bl_tree[n as usize].fc.freq = 0 as crate::zutil_h::ush;
-        n += 1;
-    }
-    s.dyn_ltree[END_BLOCK as usize].fc.freq = 1 as crate::zutil_h::ush;
-    s.static_len = 0 as crate::zutil_h::ulg;
-    s.opt_len = s.static_len;
-    s.matches = 0 as crate::stdlib::uInt;
-    s.sym_next = s.matches;
-}
-unsafe extern "C" fn init_block(s: *mut crate::src::deflate::deflate_state) {
+fn init_block(s: &mut crate::src::deflate::deflate_state) {
     for n in 0..crate::src::deflate::L_CODES {
-        (*s).dyn_ltree[n as usize].fc.freq = 0;
+        s.dyn_ltree[n as usize].fc.freq = 0;
     }
     for n in 0..crate::src::deflate::D_CODES {
-        (*s).dyn_dtree[n as usize].fc.freq = 0;
+        s.dyn_dtree[n as usize].fc.freq = 0;
     }
     for n in 0..crate::src::deflate::BL_CODES {
-        (*s).bl_tree[n as usize].fc.freq = 0;
+        s.bl_tree[n as usize].fc.freq = 0;
     }
-    (*s).dyn_ltree[END_BLOCK as usize].fc.freq = 1;
-    (*s).static_len = 0;
-    (*s).opt_len = (*s).static_len;
-    (*s).matches = 0;
-    (*s).sym_next = (*s).matches;
+    s.dyn_ltree[END_BLOCK as usize].fc.freq = 1;
+    s.static_len = 0;
+    s.opt_len = s.static_len;
+    s.matches = 0;
+    s.sym_next = s.matches;
 }
 
-pub unsafe extern "C" fn _tr_init(s: *mut crate::src::deflate::deflate_state) {
+pub fn _tr_init(s: &mut crate::src::deflate::deflate_state) {
     tr_static_init();
-    (*s).l_desc.dyn_tree = &raw mut (*s).dyn_ltree as *mut crate::src::deflate::ct_data_s
-        as *mut crate::src::deflate::ct_data;
-    (*s).l_desc.stat_desc = &static_l_desc;
-    (*s).d_desc.dyn_tree = &raw mut (*s).dyn_dtree as *mut crate::src::deflate::ct_data_s
-        as *mut crate::src::deflate::ct_data;
-    (*s).d_desc.stat_desc = &static_d_desc;
-    (*s).bl_desc.dyn_tree = &raw mut (*s).bl_tree as *mut crate::src::deflate::ct_data_s
-        as *mut crate::src::deflate::ct_data;
-    (*s).bl_desc.stat_desc = &static_bl_desc;
-    (*s).bi_buf = 0 as crate::zutil_h::ush;
-    (*s).bi_valid = 0 as ::core::ffi::c_int;
-    (*s).bi_used = 0 as ::core::ffi::c_int;
+    s.l_desc.stat_desc = &static_l_desc;
+    s.d_desc.stat_desc = &static_d_desc;
+    s.bl_desc.stat_desc = &static_bl_desc;
+    s.bi_buf = 0 as crate::zutil_h::ush;
+    s.bi_valid = 0 as ::core::ffi::c_int;
+    s.bi_used = 0 as ::core::ffi::c_int;
     init_block(s);
 }
 #[export_name = "_tr_init"]
 
 pub unsafe extern "C" fn _tr_init_ffi(mut s: *mut crate::src::deflate::deflate_state) {
-    _tr_init(s)
+    _tr_init(&mut *s)
 }
 pub const SMALLEST: ::core::ffi::c_int = 1 as ::core::ffi::c_int;
 
@@ -4514,7 +4485,7 @@ pub unsafe extern "C" fn _tr_flush_block(
         let dtree = s.dyn_dtree;
         compress_block(s, pending_buf, &ltree, &dtree, sym_buf);
     }
-    init_block_safe(s);
+    init_block(s);
     if last != 0 {
         bi_windup(s, pending_buf);
     }
