@@ -3687,6 +3687,10 @@ fn tally_match_tree_indices(dist: ::core::ffi::c_uint, lc: ::core::ffi::c_uint) 
     (length_code as usize, distance_code as usize)
 }
 
+fn block_bit_length_bytes(bit_length: crate::zutil_h::ulg) -> crate::zutil_h::ulg {
+    bit_length.wrapping_add(3).wrapping_add(7) >> 3
+}
+
 fn bi_windup_core(
     bi_buf: &mut crate::zutil_h::ush,
     bi_valid: &mut ::core::ffi::c_int,
@@ -4983,16 +4987,8 @@ pub unsafe extern "C" fn _tr_flush_block(
             &raw mut (*s).d_desc as *mut crate::src::deflate::tree_desc,
         );
         max_blindex = build_bl_tree(s);
-        opt_lenb = (*s)
-            .opt_len
-            .wrapping_add(3 as crate::zutil_h::ulg)
-            .wrapping_add(7 as crate::zutil_h::ulg)
-            >> 3 as ::core::ffi::c_int;
-        static_lenb = (*s)
-            .static_len
-            .wrapping_add(3 as crate::zutil_h::ulg)
-            .wrapping_add(7 as crate::zutil_h::ulg)
-            >> 3 as ::core::ffi::c_int;
+        opt_lenb = block_bit_length_bytes((*s).opt_len);
+        static_lenb = block_bit_length_bytes((*s).static_len);
         if static_lenb <= opt_lenb || (*s).strategy == crate::zlib_h::Z_FIXED {
             opt_lenb = static_lenb;
         }
@@ -5131,9 +5127,9 @@ pub unsafe extern "C" fn _tr_tally_ffi(
 #[cfg(test)]
 mod tests {
     use super::{
-        bi_flush_core, bi_reverse, bi_windup_core, bl_order, detect_data_type_from_ltree,
-        dist_code_index, heap_node_precedes, next_code_for_len, next_codes,
-        pending_cursor_after_bytes, reset_block_trees, static_bl_desc, static_d_desc,
+        bi_flush_core, bi_reverse, bi_windup_core, bl_order, block_bit_length_bytes,
+        detect_data_type_from_ltree, dist_code_index, heap_node_precedes, next_code_for_len,
+        next_codes, pending_cursor_after_bytes, reset_block_trees, static_bl_desc, static_d_desc,
         static_l_desc, symbol_triplet_cursors, tally_match_tree_indices, tally_symbol_bytes,
         tree_next_cursor, tree_run_limits, END_BLOCK, MAX_BITS,
     };
@@ -5338,5 +5334,19 @@ mod tests {
         assert_eq!(tally_match_tree_indices(256, 255), (285, 15));
         assert_eq!(tally_match_tree_indices(257, 255), (285, 16));
         assert_eq!(tally_match_tree_indices(32_768, 255), (285, 29));
+    }
+
+    #[test]
+    fn block_bit_length_bytes_includes_header_and_rounds_up() {
+        assert_eq!(block_bit_length_bytes(0), 1);
+        assert_eq!(block_bit_length_bytes(5), 1);
+        assert_eq!(block_bit_length_bytes(6), 2);
+        assert_eq!(block_bit_length_bytes(13), 2);
+    }
+
+    #[test]
+    fn block_bit_length_bytes_preserves_ulong_wrapping() {
+        assert_eq!(block_bit_length_bytes(crate::zutil_h::ulg::MAX - 2), 0);
+        assert_eq!(block_bit_length_bytes(crate::zutil_h::ulg::MAX - 9), 0);
     }
 }

@@ -444,6 +444,13 @@ fn read_buf_len(
     )
 }
 
+fn read_buf_total_in_after_copy(
+    total_in: crate::stdlib::uLong,
+    copied: ::core::ffi::c_uint,
+) -> crate::stdlib::uLong {
+    total_in.wrapping_add(copied as crate::stdlib::uLong)
+}
+
 unsafe extern "C" fn read_buf(
     mut strm: crate::zlib_h::z_streamp,
     mut buf: *mut crate::stdlib::Bytef,
@@ -467,7 +474,7 @@ unsafe extern "C" fn read_buf(
             crate::src::crc32::crc32_ffi((*strm).adler, buf, len as crate::stdlib::uInt);
     }
     (*strm).next_in = (*strm).next_in.wrapping_add(len as usize);
-    (*strm).total_in = (*strm).total_in.wrapping_add(len as crate::stdlib::uLong);
+    (*strm).total_in = read_buf_total_in_after_copy((*strm).total_in, len);
     return len;
 }
 
@@ -3642,7 +3649,8 @@ mod tests {
         deflate_state_status_valid, deflate_version_matches, fill_window_available_space,
         fill_window_cursor, fill_window_insert_after_slide, gzip_header_crc,
         gzip_header_crc_pending, gzip_header_crc_pending_range, normalize_deflate_params,
-        pending_output_len, read_buf_len, short_msb_bytes, slide_hash_entry, stored_block_min_size,
+        pending_output_len, read_buf_len, read_buf_total_in_after_copy, short_msb_bytes,
+        slide_hash_entry, stored_block_min_size,
         stored_insert_after_input, symbol_triplet_cursors, zlib_header,
     };
 
@@ -3816,6 +3824,16 @@ mod tests {
         assert_eq!(
             read_buf_len(::core::ffi::c_uint::MAX, ::core::ffi::c_uint::MAX - 1),
             ::core::ffi::c_uint::MAX - 1,
+        );
+    }
+
+    #[test]
+    fn read_buf_total_in_after_copy_preserves_wrapping_accounting() {
+        assert_eq!(read_buf_total_in_after_copy(0, 0), 0);
+        assert_eq!(read_buf_total_in_after_copy(12, 20), 32);
+        assert_eq!(
+            read_buf_total_in_after_copy(crate::stdlib::uLong::MAX, 1),
+            0,
         );
     }
 

@@ -2303,7 +2303,8 @@ fn inflate_header_wrap_allows_capture(wrap: ::core::ffi::c_int) -> bool {
     wrap & 2 as ::core::ffi::c_int != 0
 }
 
-pub unsafe extern "C" fn inflateGetHeader(
+#[export_name = "inflateGetHeader"]
+pub unsafe extern "C" fn inflateGetHeader_ffi(
     mut strm: crate::zlib_h::z_streamp,
     mut head: crate::zlib_h::gz_headerp,
 ) -> ::core::ffi::c_int {
@@ -2319,14 +2320,6 @@ pub unsafe extern "C" fn inflateGetHeader(
     (*state).head = head;
     (*head).done = 0 as ::core::ffi::c_int;
     return crate::zlib_h::Z_OK;
-}
-#[export_name = "inflateGetHeader"]
-
-pub unsafe extern "C" fn inflateGetHeader_ffi(
-    mut strm: crate::zlib_h::z_streamp,
-    mut head: crate::zlib_h::gz_headerp,
-) -> ::core::ffi::c_int {
-    inflateGetHeader(strm, head)
 }
 
 fn inflate_mode_data_type_flags(mode: inflate_mode) -> ::core::ffi::c_int {
