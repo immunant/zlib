@@ -314,7 +314,7 @@ impl GzFetchState {
 // the state-machine ordering (in particular COPY's immediate return) in the
 // pointer-free core, leaving the current boundary responsible only for
 // projecting and publishing the selected operation.
-fn gz_fetch_loop(
+fn gz_fetch(
     mut fetch: GzFetchState,
     mut dispatch: impl FnMut(GzFetchAction) -> Result<GzFetchState, ()>,
 ) -> Result<(), ()> {
@@ -971,8 +971,10 @@ unsafe fn gz_decomp(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int
     finish.result
 }
 
-unsafe fn gz_fetch(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
-    let result = gz_fetch_loop(
+unsafe fn gz_fetch_from_state(
+    state: &mut crate::gzguts_h::gz_state,
+) -> ::core::ffi::c_int {
+    let result = gz_fetch(
         GzFetchState::new(state.how, state.x.have, state.eof, state.strm.avail_in),
         |action| {
             match action {
@@ -1269,7 +1271,7 @@ unsafe fn gzread(state: &mut crate::gzguts_h::gz_state, output: &mut [u8]) -> ::
             match action {
                 GzReadAction::Fetch => GzReadStep {
                     count: 0,
-                    failed: gz_fetch(state) == -1,
+                    failed: gz_fetch_from_state(state) == -1,
                 },
                 GzReadAction::Copy => match gz_copy_load_into(
                     state.fd.as_ref().expect("gzip state has an open file"),
@@ -1526,7 +1528,7 @@ unsafe fn gzungetc(
             };
             match gz_skip_step(&mut skip) {
                 Ok(GzSkipStep::Fetch) => {
-                    if gz_fetch(state) == -1 as ::core::ffi::c_int {
+                    if gz_fetch_from_state(state) == -1 as ::core::ffi::c_int {
                         return -1;
                     }
                 }
@@ -1810,7 +1812,7 @@ unsafe fn gzgets_from_state(
                 return Err(());
             }
         }
-        let fetched = gz_fetch(state);
+        let fetched = gz_fetch_from_state(state);
         read.buffers =
             ::core::mem::replace(&mut state.buffers, crate::gzguts_h::GzBuffers::empty());
         read.have = state.x.have;
