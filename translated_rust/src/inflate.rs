@@ -169,6 +169,54 @@ impl InflateWindowLayout {
     }
 }
 
+/// Construct the initialized state value installed into an allocator-provided
+/// state slot.  This replaces byte-wise zeroing of a Rust value (whose table
+/// selector is an enum) with ordinary Rust initialization before reset fills
+/// in the stream-specific fields.
+fn empty_inflate_state() -> inflate_state {
+    inflate_state {
+        strm: 0,
+        mode: crate::src::inflate::HEAD,
+        last: 0,
+        wrap: 0,
+        havedict: 0,
+        flags: 0,
+        dmax: 0,
+        check: 0,
+        total: 0,
+        head: ::core::ptr::null_mut(),
+        wbits: 0,
+        wsize: 0,
+        whave: 0,
+        wnext: 0,
+        window: ::core::ptr::null_mut(),
+        hold: 0,
+        bits: 0,
+        length: 0,
+        offset: 0,
+        extra: 0,
+        lencode: InflateTableRef::Dynamic(0),
+        distcode: InflateTableRef::Dynamic(0),
+        lenbits: 0,
+        distbits: 0,
+        ncode: 0,
+        nlen: 0,
+        ndist: 0,
+        have: 0,
+        next: 0,
+        lens: [0; 320],
+        work: [0; 288],
+        codes: ::core::array::from_fn(|_| crate::src::inftrees::code {
+            op: 0,
+            bits: 0,
+            val: 0,
+        }),
+        sane: 0,
+        back: 0,
+        was: 0,
+    }
+}
+
 fn copy_inflate_state(source: &inflate_state) -> inflate_state {
     inflate_state {
         strm: source.strm,
@@ -433,11 +481,9 @@ fn initialize_allocated_inflate_state(
     if state.is_null() {
         return crate::zlib_h::Z_MEM_ERROR;
     }
-    unsafe {
-        state.write_bytes(0, 1);
-    }
     strm.state = state.cast::<crate::src::deflate::internal_state>();
     let state_ref = unsafe { &mut *state };
+    *state_ref = empty_inflate_state();
     initialize_inflate_state_base(state_ref, strm);
     let ret = inflateReset2(strm, state_ref, window_bits);
     if ret != crate::zlib_h::Z_OK {
