@@ -74,6 +74,38 @@ impl GzWritePolicy {
     }
 }
 
+// Closing a writer has a small, but externally visible, error-precedence
+// policy: both pending zero-fill and the final codec flush are attempted, and
+// a later descriptor-close failure wins over either codec result.  Keep those
+// scalar decisions independent from the embedded stream/resource boundary so
+// the eventual gzip resource owner can reuse them without retaining ABI
+// pointers.
+struct GzWriteCloseResult {
+    result: ::core::ffi::c_int,
+}
+
+impl GzWriteCloseResult {
+    fn begin(mode: ::core::ffi::c_int) -> Option<Self> {
+        (mode == crate::gzguts_h::GZ_WRITE).then_some(Self {
+            result: crate::zlib_h::Z_OK,
+        })
+    }
+
+    fn record_codec_result(&mut self, status: ::core::ffi::c_int, error: ::core::ffi::c_int) {
+        if status == -1 {
+            self.result = error;
+        }
+    }
+
+    fn finish(self, close_failed: bool) -> ::core::ffi::c_int {
+        if close_failed {
+            crate::zlib_h::Z_ERRNO
+        } else {
+            self.result
+        }
+    }
+}
+
 fn gzwrite_length_fits_int(len: usize) -> bool {
     (len as ::core::ffi::c_uint as ::core::ffi::c_int) >= 0
 }
@@ -1012,16 +1044,15 @@ pub unsafe extern "C" fn gzsetparams_ffi(
     gzsetparams(state, level, strategy)
 }
 pub unsafe fn gzclose_w(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
-    let mut ret: ::core::ffi::c_int = crate::zlib_h::Z_OK;
-    if state.mode != crate::gzguts_h::GZ_WRITE {
+    let Some(mut result) = GzWriteCloseResult::begin(state.mode) else {
         return crate::zlib_h::Z_STREAM_ERROR;
+    };
+    if state.skip != 0 {
+        let status = gz_zero(state);
+        result.record_codec_result(status, state.err);
     }
-    if state.skip != 0 && gz_zero(state) == -1 as ::core::ffi::c_int {
-        ret = state.err;
-    }
-    if gz_comp(state, crate::zlib_h::Z_FINISH, None) == -1 as ::core::ffi::c_int {
-        ret = state.err;
-    }
+    let status = gz_comp(state, crate::zlib_h::Z_FINISH, None);
+    result.record_codec_result(status, state.err);
     if state.buffers.size != 0 {
         if state.direct == 0 {
             crate::src::deflate::deflateEnd(
@@ -1034,16 +1065,12 @@ pub unsafe fn gzclose_w(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c
     crate::src::gzlib::gz_clear_error(&mut state.msg, &mut state.err);
     state.path = None;
     state.msg = None;
-    if state
+    result.finish(state
         .fd
         .take()
         .map(crate::src::gzlib::gz_close_fd)
         .transpose()
-        .is_err()
-    {
-        ret = crate::zlib_h::Z_ERRNO;
-    }
-    return ret;
+        .is_err())
 }
 #[export_name = "gzclose_w"]
 
