@@ -145,6 +145,30 @@ fn inflate_fast_mask(bits: u32) -> Option<u64> {
     1u64.checked_shl(bits).map(|mask| mask.wrapping_sub(1))
 }
 
+/// Pull one byte into the bit accumulator without permitting an invalid
+/// shift.  A malformed bounded decoder state can otherwise ask a later
+/// refill to shift by 64 or more; the legacy raw path relies on its ABI
+/// invariants, while this safe core must reject that state explicitly.
+fn inflate_fast_pull_byte(
+    input: &[u8],
+    input_at: &mut usize,
+    hold: &mut u64,
+    bits: &mut u32,
+) -> Result<bool, ()> {
+    // Adding a byte at bit 56 or later would leave no valid representation
+    // for the accumulator's low-bit mask on the next decode step.
+    if *bits > 55 {
+        return Err(());
+    }
+    let Some(&byte) = input.get(*input_at) else {
+        return Ok(false);
+    };
+    *input_at += 1;
+    *hold = hold.wrapping_add((byte as u64) << *bits);
+    *bits += 8;
+    Ok(true)
+}
+
 /// Decode the fast-path portion of a deflate stream using only bounded
 /// buffers.  The ABI adapter owns construction of these views and commits the
 /// resulting cursors, so this core cannot retain or dereference foreign
@@ -178,12 +202,15 @@ fn inflate_fast_core(mut views: InflateFastViews<'_>) -> InflateFastProgress {
     'fast: loop {
         if bits < 15 {
             for _ in 0..2 {
-                let Some(&byte) = input.get(input_at) else {
-                    break 'fast;
-                };
-                input_at += 1;
-                hold = hold.wrapping_add((byte as u64) << bits);
-                bits += 8;
+                match inflate_fast_pull_byte(input, &mut input_at, &mut hold, &mut bits) {
+                    Ok(true) => {}
+                    Ok(false) => break 'fast,
+                    Err(()) => {
+                        mode = Some(crate::src::inflate::BAD);
+                        error = Some(14);
+                        break 'fast;
+                    }
+                }
             }
         }
         let Some(&mut_here) = lcode.get((hold & lmask) as usize) else {
@@ -215,12 +242,15 @@ fn inflate_fast_core(mut views: InflateFastViews<'_>) -> InflateFastProgress {
                 op &= 15;
                 if op != 0 {
                     while bits < op {
-                        let Some(&byte) = input.get(input_at) else {
-                            break 'fast;
-                        };
-                        input_at += 1;
-                        hold = hold.wrapping_add((byte as u64) << bits);
-                        bits += 8;
+                        match inflate_fast_pull_byte(input, &mut input_at, &mut hold, &mut bits) {
+                            Ok(true) => {}
+                            Ok(false) => break 'fast,
+                            Err(()) => {
+                                mode = Some(crate::src::inflate::BAD);
+                                error = Some(14);
+                                break 'fast;
+                            }
+                        }
                     }
                     let Some(mask) = inflate_fast_mask(op) else {
                         mode = Some(crate::src::inflate::BAD);
@@ -233,12 +263,15 @@ fn inflate_fast_core(mut views: InflateFastViews<'_>) -> InflateFastProgress {
                 }
                 if bits < 15 {
                     for _ in 0..2 {
-                        let Some(&byte) = input.get(input_at) else {
-                            break 'fast;
-                        };
-                        input_at += 1;
-                        hold = hold.wrapping_add((byte as u64) << bits);
-                        bits += 8;
+                        match inflate_fast_pull_byte(input, &mut input_at, &mut hold, &mut bits) {
+                            Ok(true) => {}
+                            Ok(false) => break 'fast,
+                            Err(()) => {
+                                mode = Some(crate::src::inflate::BAD);
+                                error = Some(15);
+                                break 'fast;
+                            }
+                        }
                     }
                 }
                 let Some(&mut_dist_here) = dcode.get((hold & dmask) as usize) else {
@@ -261,12 +294,16 @@ fn inflate_fast_core(mut views: InflateFastViews<'_>) -> InflateFastProgress {
                         let mut dist = dist_here.val as usize;
                         dist_op &= 15;
                         while bits < dist_op {
-                            let Some(&byte) = input.get(input_at) else {
-                                break 'fast;
-                            };
-                            input_at += 1;
-                            hold = hold.wrapping_add((byte as u64) << bits);
-                            bits += 8;
+                            match inflate_fast_pull_byte(input, &mut input_at, &mut hold, &mut bits)
+                            {
+                                Ok(true) => {}
+                                Ok(false) => break 'fast,
+                                Err(()) => {
+                                    mode = Some(crate::src::inflate::BAD);
+                                    error = Some(15);
+                                    break 'fast;
+                                }
+                            }
                         }
                         let Some(mask) = inflate_fast_mask(dist_op) else {
                             mode = Some(crate::src::inflate::BAD);
