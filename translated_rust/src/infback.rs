@@ -159,8 +159,6 @@ pub unsafe extern "C" fn inflateBackInit_(
     mut version: *const ::core::ffi::c_char,
     mut stream_size: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
-    let mut state: *mut crate::src::inflate::inflate_state =
-        ::core::ptr::null_mut::<crate::src::inflate::inflate_state>();
     let version_matches = !version.is_null()
         && *version.offset(0) as ::core::ffi::c_int
             == crate::zlib_h::ZLIB_VERSION[0] as ::core::ffi::c_int;
@@ -171,9 +169,14 @@ pub unsafe extern "C" fn inflateBackInit_(
     if strm.is_null() || window.is_null() {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    (*strm).msg = ::core::ptr::null_mut::<::core::ffi::c_char>();
-    if (*strm).zalloc.is_none() {
-        (*strm).zalloc = Some(
+    // Keep the ABI stream projection at the allocation boundary.  All
+    // subsequent setup uses this scoped Rust borrow, rather than repeatedly
+    // dereferencing the caller's raw stream pointer.
+    let strm = &mut *strm;
+    let stream_identity = ::core::ptr::from_mut(strm).addr();
+    strm.msg = ::core::ptr::null_mut::<::core::ffi::c_char>();
+    if strm.zalloc.is_none() {
+        strm.zalloc = Some(
             crate::src::zutil::zcalloc
                 as unsafe extern "C" fn(
                     crate::stdlib::voidpf,
@@ -181,30 +184,30 @@ pub unsafe extern "C" fn inflateBackInit_(
                     ::core::ffi::c_uint,
                 ) -> crate::stdlib::voidpf,
         ) as crate::zlib_h::alloc_func;
-        (*strm).opaque = ::core::ptr::null_mut::<::core::ffi::c_void>();
+        strm.opaque = ::core::ptr::null_mut::<::core::ffi::c_void>();
     }
-    if (*strm).zfree.is_none() {
-        (*strm).zfree = Some(
+    if strm.zfree.is_none() {
+        strm.zfree = Some(
             crate::src::zutil::zcfree
                 as unsafe extern "C" fn(crate::stdlib::voidpf, crate::stdlib::voidpf) -> (),
         ) as crate::zlib_h::free_func;
     }
-    state = Some((*strm).zalloc.expect("non-null function pointer"))
+    let state = Some(strm.zalloc.expect("non-null function pointer"))
         .expect("non-null function pointer")(
-        (*strm).opaque,
+        strm.opaque,
         1 as crate::stdlib::uInt,
         ::core::mem::size_of::<crate::src::inflate::inflate_state>() as crate::stdlib::uInt,
     ) as *mut crate::src::inflate::inflate_state;
     if state.is_null() {
         return crate::zlib_h::Z_MEM_ERROR;
     }
-    (*strm).state = state as *mut crate::src::deflate::internal_state;
+    strm.state = state as *mut crate::src::deflate::internal_state;
     // Back-mode state uses the same allocation/release contract as normal
     // inflate.  Publish one fully initialized value into the callback-owned
     // allocation, whose returned bytes need not have been initialized.
     ::core::ptr::write(
         state,
-        inflate_back_initial_state(&plan, strm.addr(), window),
+        inflate_back_initial_state(&plan, stream_identity, window),
     );
     return crate::zlib_h::Z_OK;
 }
