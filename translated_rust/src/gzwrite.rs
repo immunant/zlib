@@ -129,6 +129,11 @@ fn gz_init(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
         crate::src::gzlib::gz_error_safe(state, crate::zlib_h::Z_MEM_ERROR, Some(c"out of memory"));
         return -1 as ::core::ffi::c_int;
     }
+    state.deflate_state_key = crate::src::deflate::take_last_deflate_state_key();
+    if state.deflate_state_key.is_none() {
+        crate::src::gzlib::gz_error_safe(state, crate::zlib_h::Z_MEM_ERROR, Some(c"out of memory"));
+        return -1 as ::core::ffi::c_int;
+    }
     state.strm.next_in = ::core::ptr::null_mut::<crate::stdlib::Bytef>();
     state.size = state.want;
     state.out_start = 0;
@@ -158,7 +163,11 @@ fn gz_comp(
         if state.strm.avail_in == 0 as crate::stdlib::uInt && flush == crate::zlib_h::Z_NO_FLUSH {
             return 0 as ::core::ffi::c_int;
         }
-        crate::src::deflate::deflateReset(&mut state.strm);
+        if let Some(state_key) = state.deflate_state_key {
+            crate::src::deflate::deflateReset(&mut state.strm, state_key);
+        } else {
+            return -1;
+        }
         state.reset = 0 as ::core::ffi::c_int;
     }
     ret = crate::zlib_h::Z_OK;

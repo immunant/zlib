@@ -164,6 +164,7 @@ unsafe extern "C" fn gz_open(
             adler: 0,
             reserved: 0,
         },
+        deflate_state_key: None,
     }));
     while *mode != 0 {
         if *mode as ::core::ffi::c_int >= '0' as ::core::ffi::c_int

@@ -73,6 +73,9 @@ pub mod gzguts_h {
         pub err: ::core::ffi::c_int,
         pub msg: Option<std::ffi::CString>,
         pub strm: crate::zlib_h::z_stream,
+        // The deflater is Rust-owned; retain its registry key so gzip
+        // implementation code never needs to follow `strm.state`.
+        pub deflate_state_key: Option<usize>,
     }
 
     pub type gz_statep = *mut crate::gzguts_h::gz_state;

@@ -1,6 +1,6 @@
 // =============== BEGIN deflate_h ================
 use std::collections::HashMap;
-use std::sync::{LazyLock, Mutex};
+use std::sync::{Arc, LazyLock, Mutex};
 
 pub use crate::src::trees::static_tree_desc_s;
 
@@ -140,6 +140,9 @@ pub struct internal_state {
     pub bi_used: ::core::ffi::c_int,
     pub high_water: crate::zutil_h::ulg,
     pub slid: ::core::ffi::c_int,
+    // Registry identity is Rust-only state; the ABI exposes this structure
+    // only through the opaque `z_stream::state` pointer.
+    registry_key: usize,
     // `z_stream::state` is opaque at the ABI boundary.  Keep the translated
     // cursors above while code is migrated, but make their backing allocation
     // Rust-owned so implementations can borrow slices instead of rebuilding
@@ -151,10 +154,22 @@ pub struct internal_state {
 // shares that field.  Deflate allocations are nevertheless owned here, keyed
 // by their stable allocation address, so safe implementation code can release
 // them without rebuilding a `Box` from the ABI pointer.
-static DEFLATE_STATES: LazyLock<Mutex<HashMap<usize, (::core::ffi::c_int, Box<internal_state>)>>> =
+static DEFLATE_STATES: LazyLock<Mutex<HashMap<usize, (::core::ffi::c_int, Arc<internal_state>)>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
 
-fn retain_deflate_state(state_key: usize, status: ::core::ffi::c_int, state: Box<internal_state>) {
+// `gzwrite` initializes and immediately records its Rust-owned state on the
+// same thread. The key avoids re-reading the ABI pointer in safe code.
+static LAST_DEFLATE_STATE_KEYS: LazyLock<Mutex<HashMap<std::thread::ThreadId, usize>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
+
+pub fn take_last_deflate_state_key() -> Option<usize> {
+    LAST_DEFLATE_STATE_KEYS
+        .lock()
+        .expect("deflate initialization registry lock poisoned")
+        .remove(&std::thread::current().id())
+}
+
+fn retain_deflate_state(state_key: usize, status: ::core::ffi::c_int, state: Arc<internal_state>) {
     DEFLATE_STATES
         .lock()
         .expect("deflate state registry lock poisoned")
@@ -171,7 +186,7 @@ fn update_tracked_deflate_status(state_key: usize, status: ::core::ffi::c_int) {
     }
 }
 
-fn take_deflate_state(state_key: usize) -> Option<Box<internal_state>> {
+fn take_deflate_state(state_key: usize) -> Option<Arc<internal_state>> {
     DEFLATE_STATES
         .lock()
         .expect("deflate state registry lock poisoned")
@@ -185,6 +200,20 @@ fn tracked_deflate_state_status(state_key: usize) -> Option<::core::ffi::c_int> 
         .expect("deflate state registry lock poisoned")
         .get(&state_key)
         .map(|(status, _)| *status)
+}
+
+fn deflate_status_is_valid(status: ::core::ffi::c_int) -> bool {
+    matches!(
+        status,
+        crate::src::deflate::INIT_STATE
+            | crate::src::deflate::GZIP_STATE
+            | crate::src::deflate::EXTRA_STATE
+            | crate::src::deflate::NAME_STATE
+            | crate::src::deflate::COMMENT_STATE
+            | crate::src::deflate::HCRC_STATE
+            | crate::src::deflate::BUSY_STATE
+            | crate::src::deflate::FINISH_STATE
+    )
 }
 
 #[derive(Clone)]
@@ -411,6 +440,7 @@ impl Default for internal_state {
             bi_used: 0,
             high_water: 0,
             slid: 0,
+            registry_key: 0,
             buffers: None,
         }
     }
@@ -941,6 +971,10 @@ pub fn deflateInit2_(
     mut memLevel: ::core::ffi::c_int,
     mut strategy: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
+    LAST_DEFLATE_STATE_KEYS
+        .lock()
+        .expect("deflate initialization registry lock poisoned")
+        .remove(&std::thread::current().id());
     let mut wrap: ::core::ffi::c_int = 1 as ::core::ffi::c_int;
     strm.msg = ::core::ptr::null_mut::<::core::ffi::c_char>();
     if strm.zalloc.is_none() {
@@ -1028,9 +1062,18 @@ pub fn deflateInit2_(
     owned.strategy = strategy;
     owned.method = method as crate::stdlib::Byte;
     let result = deflateResetKeep(strm, &mut owned, true);
-    let state_pointer = std::ptr::from_mut(owned.as_mut());
-    retain_deflate_state(state_pointer.addr(), crate::src::deflate::INIT_STATE, owned);
+    let mut owned: Arc<internal_state> = Arc::from(owned);
+    let state_pointer = Arc::as_ptr(&owned).cast_mut();
+    let state_key = state_pointer.addr();
+    Arc::get_mut(&mut owned)
+        .expect("new deflate state must have one owner")
+        .registry_key = state_key;
+    retain_deflate_state(state_key, crate::src::deflate::INIT_STATE, owned);
     strm.state = state_pointer;
+    LAST_DEFLATE_STATE_KEYS
+        .lock()
+        .expect("deflate initialization registry lock poisoned")
+        .insert(std::thread::current().id(), state_key);
     result
 }
 #[export_name = "deflateInit2_"]
@@ -1084,17 +1127,7 @@ fn deflate_state_is_valid(
 ) -> bool {
     strm.zalloc.is_some()
         && strm.zfree.is_some()
-        && matches!(
-            state.status,
-            crate::src::deflate::INIT_STATE
-                | crate::src::deflate::GZIP_STATE
-                | crate::src::deflate::EXTRA_STATE
-                | crate::src::deflate::NAME_STATE
-                | crate::src::deflate::COMMENT_STATE
-                | crate::src::deflate::HCRC_STATE
-                | crate::src::deflate::BUSY_STATE
-                | crate::src::deflate::FINISH_STATE
-        )
+        && deflate_status_is_valid(state.status)
 }
 pub fn deflateSetDictionary(
     strm: &mut crate::zlib_h::z_stream,
@@ -1236,7 +1269,6 @@ pub fn deflateResetKeep(
     } else {
         crate::src::deflate::INIT_STATE
     };
-    update_tracked_deflate_status(strm.state.addr(), s.status);
     strm.adler = if s.wrap == 2 as ::core::ffi::c_int {
         crc32_slice(0, &[])
     } else {
@@ -1249,17 +1281,44 @@ pub fn deflateResetKeep(
     }
     return crate::zlib_h::Z_OK;
 }
+
+pub fn deflateReset(
+    strm: &mut crate::zlib_h::z_stream,
+    state_key: usize,
+) -> ::core::ffi::c_int {
+    let mut states = DEFLATE_STATES
+        .lock()
+        .expect("deflate state registry lock poisoned");
+    let Some((tracked_status, state)) = states.get_mut(&state_key) else {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    };
+    let Some(state) = Arc::get_mut(state) else {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    };
+    if !deflate_status_is_valid(*tracked_status) || state.status != *tracked_status {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    }
+    let result = deflateResetKeep(strm, state, true);
+    *tracked_status = state.status;
+    result
+}
+
 #[export_name = "deflateResetKeep"]
 
 pub unsafe extern "C" fn deflateResetKeep_ffi(
     mut strm: crate::zlib_h::z_streamp,
 ) -> ::core::ffi::c_int {
-    if deflateStateCheck(strm) != 0 {
+    if strm.is_null() {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
     let strm = &mut *strm;
+    if deflateStateCheck(strm) != 0 {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    }
     let state = &mut *strm.state;
-    deflateResetKeep(strm, state, false)
+    let result = deflateResetKeep(strm, state, false);
+    update_tracked_deflate_status(state.registry_key, state.status);
+    result
 }
 fn lm_init(s: &mut crate::src::deflate::deflate_state) {
     s.pending_buf_size = s.buffers().pending.len() as crate::zutil_h::ulg;
@@ -1285,17 +1344,6 @@ fn lm_init(s: &mut crate::src::deflate::deflate_state) {
     s.match_available = 0 as ::core::ffi::c_int;
     s.ins_h = 0 as crate::stdlib::uInt;
 }
-pub fn deflateReset(strm: &mut crate::zlib_h::z_stream) -> ::core::ffi::c_int {
-    if strm.zalloc.is_none() || strm.zfree.is_none() {
-        return crate::zlib_h::Z_STREAM_ERROR;
-    }
-    unsafe {
-        let Some(state) = strm.state.as_mut() else {
-            return crate::zlib_h::Z_STREAM_ERROR;
-        };
-        deflateResetKeep(strm, state, true)
-    }
-}
 #[export_name = "deflateReset"]
 
 pub unsafe extern "C" fn deflateReset_ffi(
@@ -1304,7 +1352,12 @@ pub unsafe extern "C" fn deflateReset_ffi(
     if strm.is_null() {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    deflateReset(&mut *strm)
+    if deflateStateCheck(strm) != 0 {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    }
+    let strm = &mut *strm;
+    let state = &mut *strm.state;
+    deflateReset(strm, state.registry_key)
 }
 
 #[derive(Clone)]
@@ -2511,11 +2564,16 @@ pub unsafe extern "C" fn deflateCopy_ffi(
         return crate::zlib_h::Z_STREAM_ERROR;
     }
 
-    let mut copied = deflateCopy(source_state);
+    let copied: Arc<internal_state> = Arc::from(deflateCopy(source_state));
     let dest = &mut *dest;
     *dest = *source;
-    let state_pointer = std::ptr::from_mut(copied.as_mut());
-    retain_deflate_state(state_pointer.addr(), source_state.status, copied);
+    let mut copied = copied;
+    let state_pointer = Arc::as_ptr(&copied).cast_mut();
+    let state_key = state_pointer.addr();
+    Arc::get_mut(&mut copied)
+        .expect("copied deflate state must have one owner")
+        .registry_key = state_key;
+    retain_deflate_state(state_key, source_state.status, copied);
     dest.state = state_pointer;
     crate::zlib_h::Z_OK
 }
