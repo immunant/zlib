@@ -356,15 +356,14 @@ unsafe fn gz_look(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
         if state.in_0.is_none() || state.out.is_none() {
             state.out = None;
             state.in_0 = None;
-            crate::src::gzlib::gz_set_error(
-                &mut state.msg,
-                &mut state.err,
-                &mut state.x.have,
-                state.again,
-                state.path.as_deref(),
-                crate::zlib_h::Z_MEM_ERROR,
-                Some(b"out of memory"),
-            );
+            crate::src::gzlib::GzErrorState {
+                message: &mut state.msg,
+                error: &mut state.err,
+                buffered: &mut state.x.have,
+                again: state.again,
+                path: state.path.as_deref(),
+            }
+            .set(crate::zlib_h::Z_MEM_ERROR, Some(b"out of memory"));
             return -1 as ::core::ffi::c_int;
         }
         state.size = state.want;
@@ -383,15 +382,14 @@ unsafe fn gz_look(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
             state.out = None;
             state.in_0 = None;
             state.size = 0 as ::core::ffi::c_uint;
-            crate::src::gzlib::gz_set_error(
-                &mut state.msg,
-                &mut state.err,
-                &mut state.x.have,
-                state.again,
-                state.path.as_deref(),
-                crate::zlib_h::Z_MEM_ERROR,
-                Some(b"out of memory"),
-            );
+            crate::src::gzlib::GzErrorState {
+                message: &mut state.msg,
+                error: &mut state.err,
+                buffered: &mut state.x.have,
+                again: state.again,
+                path: state.path.as_deref(),
+            }
+            .set(crate::zlib_h::Z_MEM_ERROR, Some(b"out of memory"));
             return -1 as ::core::ffi::c_int;
         }
     }
@@ -490,15 +488,14 @@ unsafe fn gz_decomp(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int
         }
         if (*strm).avail_in == 0 as crate::stdlib::uInt {
             if state.again == 0 {
-                crate::src::gzlib::gz_set_error(
-                    &mut state.msg,
-                    &mut state.err,
-                    &mut state.x.have,
-                    state.again,
-                    state.path.as_deref(),
-                    crate::zlib_h::Z_BUF_ERROR,
-                    Some(b"unexpected end of file"),
-                );
+                crate::src::gzlib::GzErrorState {
+                    message: &mut state.msg,
+                    error: &mut state.err,
+                    buffered: &mut state.x.have,
+                    again: state.again,
+                    path: state.path.as_deref(),
+                }
+                .set(crate::zlib_h::Z_BUF_ERROR, Some(b"unexpected end of file"));
             }
             break;
         } else {
@@ -510,26 +507,27 @@ unsafe fn gz_decomp(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int
                 state.junk = 0 as ::core::ffi::c_int;
             }
             if ret == crate::zlib_h::Z_STREAM_ERROR || ret == crate::zlib_h::Z_NEED_DICT {
-                crate::src::gzlib::gz_set_error(
-                    &mut state.msg,
-                    &mut state.err,
-                    &mut state.x.have,
-                    state.again,
-                    state.path.as_deref(),
+                crate::src::gzlib::GzErrorState {
+                    message: &mut state.msg,
+                    error: &mut state.err,
+                    buffered: &mut state.x.have,
+                    again: state.again,
+                    path: state.path.as_deref(),
+                }
+                .set(
                     crate::zlib_h::Z_STREAM_ERROR,
                     Some(b"internal error: inflate stream corrupt"),
                 );
                 break;
             } else if ret == crate::zlib_h::Z_MEM_ERROR {
-                crate::src::gzlib::gz_set_error(
-                    &mut state.msg,
-                    &mut state.err,
-                    &mut state.x.have,
-                    state.again,
-                    state.path.as_deref(),
-                    crate::zlib_h::Z_MEM_ERROR,
-                    Some(b"out of memory"),
-                );
+                crate::src::gzlib::GzErrorState {
+                    message: &mut state.msg,
+                    error: &mut state.err,
+                    buffered: &mut state.x.have,
+                    again: state.again,
+                    path: state.path.as_deref(),
+                }
+                .set(crate::zlib_h::Z_MEM_ERROR, Some(b"out of memory"));
                 break;
             } else if ret == crate::zlib_h::Z_DATA_ERROR {
                 if state.junk == 1 as ::core::ffi::c_int {
