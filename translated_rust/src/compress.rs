@@ -42,7 +42,7 @@ pub unsafe extern "C" fn compress2_z(
         state: ::core::ptr::null_mut::<crate::src::deflate::internal_state>(),
         zalloc: None,
         zfree: None,
-        opaque: ::core::ptr::null_mut::<::core::ffi::c_void>(),
+        opaque: crate::zlib_h::Opaque::default(),
         data_type: 0,
         adler: 0,
         reserved: 0,
@@ -60,7 +60,7 @@ pub unsafe extern "C" fn compress2_z(
     *destLen = 0 as crate::stdlib::z_size_t;
     stream.zalloc = None;
     stream.zfree = None;
-    stream.opaque = ::core::ptr::null_mut::<::core::ffi::c_void>();
+    stream.opaque = crate::zlib_h::Opaque::default();
     err = crate::src::deflate::deflateInit_(&mut stream, level);
     if err != crate::zlib_h::Z_OK {
         return err;

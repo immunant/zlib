@@ -113,7 +113,7 @@ fn gz_init(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
     }
     state.strm.zalloc = None;
     state.strm.zfree = None;
-    state.strm.opaque = ::core::ptr::null_mut::<::core::ffi::c_void>();
+    state.strm.opaque = crate::zlib_h::Opaque::default();
     ret = crate::src::deflate::deflateInit2_(
         &mut state.strm,
         state.level,

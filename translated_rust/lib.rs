@@ -136,13 +136,13 @@ pub mod zlib_h {
 
     pub type alloc_func = Option<
         extern "C" fn(
-            crate::stdlib::voidpf,
+            Opaque,
             crate::stdlib::uInt,
             crate::stdlib::uInt,
         ) -> crate::stdlib::voidpf,
     >;
 
-    pub type free_func = Option<extern "C" fn(crate::stdlib::voidpf, crate::stdlib::voidpf) -> ()>;
+    pub type free_func = Option<extern "C" fn(Opaque, crate::stdlib::voidpf) -> ()>;
 
     pub type z_stream = crate::zlib_h::z_stream_s;
 
@@ -153,6 +153,19 @@ pub mod zlib_h {
     #[repr(transparent)]
     #[derive(Copy, Clone, Default)]
     pub struct InputBuffer(pub Option<::core::num::NonZeroUsize>);
+
+    /// A nullable, ABI-compatible allocator context.  C can still store its
+    /// `void *` context in this pointer-sized field, while Rust allocator
+    /// calls carry an explicit non-pointer value.
+    #[repr(transparent)]
+    #[derive(Copy, Clone, Default)]
+    pub struct Opaque(pub Option<::core::num::NonZeroUsize>);
+
+    impl Opaque {
+        pub fn from_address(address: usize) -> Self {
+            Self(::core::num::NonZeroUsize::new(address))
+        }
+    }
 
     #[derive(Copy, Clone)]
     #[repr(C)]
@@ -168,7 +181,7 @@ pub mod zlib_h {
         pub state: *mut crate::src::deflate::internal_state,
         pub zalloc: crate::zlib_h::alloc_func,
         pub zfree: crate::zlib_h::free_func,
-        pub opaque: crate::stdlib::voidpf,
+        pub opaque: Opaque,
         pub data_type: ::core::ffi::c_int,
         pub adler: crate::stdlib::uLong,
         pub reserved: crate::stdlib::uLong,

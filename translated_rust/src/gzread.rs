@@ -167,7 +167,7 @@ unsafe extern "C" fn gz_look(mut state: crate::gzguts_h::gz_statep) -> ::core::f
         (*state).size = (*state).want;
         (*state).strm.zalloc = None;
         (*state).strm.zfree = None;
-        (*state).strm.opaque = ::core::ptr::null_mut::<::core::ffi::c_void>();
+        (*state).strm.opaque = crate::zlib_h::Opaque::default();
         (*state).strm.avail_in = 0 as crate::stdlib::uInt;
         (*state).strm.next_in = crate::zlib_h::InputBuffer::default();
         if crate::src::inflate::inflateInit2_(

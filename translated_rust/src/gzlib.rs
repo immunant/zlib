@@ -159,7 +159,7 @@ unsafe extern "C" fn gz_open(
             state: ::core::ptr::null_mut(),
             zalloc: None,
             zfree: None,
-            opaque: ::core::ptr::null_mut(),
+            opaque: crate::zlib_h::Opaque::default(),
             data_type: 0,
             adler: 0,
             reserved: 0,

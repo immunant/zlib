@@ -977,7 +977,7 @@ pub fn deflateInit2_(
     strm.msg = ::core::ptr::null_mut::<::core::ffi::c_char>();
     if strm.zalloc.is_none() {
         strm.zalloc = Some(crate::src::zutil::zcalloc);
-        strm.opaque = ::core::ptr::null_mut::<::core::ffi::c_void>();
+        strm.opaque = crate::zlib_h::Opaque::default();
     }
     if strm.zfree.is_none() {
         strm.zfree = Some(crate::src::zutil::zcfree);
