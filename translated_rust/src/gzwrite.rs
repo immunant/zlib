@@ -410,11 +410,7 @@ pub unsafe extern "C" fn gzfwrite(
     {
         return 0 as crate::stdlib::z_size_t;
     }
-    crate::src::gzlib::gz_error(
-        state as *mut crate::gzguts_h::gz_state,
-        crate::zlib_h::Z_OK,
-        ::core::ptr::null::<::core::ffi::c_char>(),
-    );
+    crate::src::gzlib::gz_clear_error(&mut state.msg, &mut state.err);
     len = nitems.wrapping_mul(size);
     if size != 0 && len.wrapping_div(size) != nitems {
         crate::src::gzlib::gz_error(
@@ -530,11 +526,7 @@ unsafe fn gzputs(
     {
         return -1 as ::core::ffi::c_int;
     }
-    crate::src::gzlib::gz_error(
-        state,
-        crate::zlib_h::Z_OK,
-        ::core::ptr::null::<::core::ffi::c_char>(),
-    );
+    crate::src::gzlib::gz_clear_error(&mut state.msg, &mut state.err);
     len = text.len() as crate::stdlib::z_size_t;
     if (len as ::core::ffi::c_int) < 0 as ::core::ffi::c_int
         || len as ::core::ffi::c_uint as crate::stdlib::z_size_t != len
@@ -581,11 +573,7 @@ unsafe fn gzflush(
     {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    crate::src::gzlib::gz_error(
-        state,
-        crate::zlib_h::Z_OK,
-        ::core::ptr::null::<::core::ffi::c_char>(),
-    );
+    crate::src::gzlib::gz_clear_error(&mut state.msg, &mut state.err);
     if flush < 0 as ::core::ffi::c_int || flush > crate::zlib_h::Z_FINISH {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
@@ -621,11 +609,7 @@ unsafe fn gzsetparams(
     {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    crate::src::gzlib::gz_error(
-        state,
-        crate::zlib_h::Z_OK,
-        ::core::ptr::null::<::core::ffi::c_char>(),
-    );
+    crate::src::gzlib::gz_clear_error(&mut state.msg, &mut state.err);
     if level == state.level && strategy == state.strategy {
         return crate::zlib_h::Z_OK;
     }
@@ -686,11 +670,7 @@ pub unsafe extern "C" fn gzclose_w(mut file: crate::zlib_h::gzFile) -> ::core::f
         }
         state.in_0 = None;
     }
-    crate::src::gzlib::gz_error(
-        state,
-        crate::zlib_h::Z_OK,
-        ::core::ptr::null::<::core::ffi::c_char>(),
-    );
+    crate::src::gzlib::gz_clear_error(&mut state.msg, &mut state.err);
     state.path = None;
     state.msg = None;
     if crate::stdlib::close(state.fd) == -1 as ::core::ffi::c_int {

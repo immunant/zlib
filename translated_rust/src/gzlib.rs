@@ -273,11 +273,7 @@ unsafe fn gz_reset(state: crate::gzguts_h::gz_statep) {
     }
     state.again = fields.again;
     state.skip = fields.skip;
-    gz_error(
-        state,
-        crate::zlib_h::Z_OK,
-        ::core::ptr::null::<::core::ffi::c_char>(),
-    );
+    gz_clear_error(&mut state.msg, &mut state.err);
     state.x.pos = fields.pos;
     state.strm.avail_in = fields.avail_in;
 }
@@ -659,11 +655,7 @@ pub unsafe extern "C" fn gzseek64(
             state.eof = 0 as ::core::ffi::c_int;
             state.past = 0 as ::core::ffi::c_int;
             state.skip = 0 as crate::stdlib::off64_t;
-            gz_error(
-                state as *mut crate::gzguts_h::gz_state,
-                crate::zlib_h::Z_OK,
-                ::core::ptr::null::<::core::ffi::c_char>(),
-            );
+            gz_clear_error(&mut state.msg, &mut state.err);
             state.strm.avail_in = 0 as crate::stdlib::uInt;
             state.x.pos = position;
             return state.x.pos;
@@ -876,11 +868,7 @@ unsafe fn gzclearerr(mut state: Option<::core::ptr::NonNull<crate::gzguts_h::gz_
         state.eof = 0 as ::core::ffi::c_int;
         state.past = 0 as ::core::ffi::c_int;
     }
-    gz_error(
-        state as *mut crate::gzguts_h::gz_state,
-        crate::zlib_h::Z_OK,
-        ::core::ptr::null::<::core::ffi::c_char>(),
-    );
+    gz_clear_error(&mut state.msg, &mut state.err);
 }
 #[export_name = "gzclearerr"]
 
