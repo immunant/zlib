@@ -1649,6 +1649,23 @@ pub(crate) fn deflate_reset_legacy_stream(
     if !deflate_stream_state_valid(Some(stream), Some(state)) || state.head.is_null() {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
+    // Fully default-allocated streams retain their hash table in an owned
+    // vector.  Borrow that vector directly for reset instead of recreating a
+    // raw slice from the compatibility handle.  Take/reinstall the owner so
+    // the state and the vector can be borrowed independently; the handle
+    // stays stable for the legacy engine between calls.
+    if let Some(mut owned) = state.owned_storage.take() {
+        let result = if owned.matches_state(state) {
+            deflate_reset(stream, state, &mut owned.head)
+        } else {
+            crate::zlib_h::Z_STREAM_ERROR
+        };
+        state.owned_storage = Some(owned);
+        return result;
+    }
+    // Custom and mixed allocator streams retain callback-owned storage. Keep
+    // their one raw borrowing boundary here until the allocator facade can
+    // represent that ownership without changing callback observations.
     let head = unsafe { ::core::slice::from_raw_parts_mut(state.head, state.hash_size as usize) };
     deflate_reset(stream, state, head)
 }
