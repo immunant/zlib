@@ -369,17 +369,24 @@ pub unsafe extern "C" fn inflateBack_ffi(
                         &mut (*state).lens,
                         &mut (*state).have,
                     );
-                    (*state).next = &raw mut (*state).codes as *mut crate::src::inftrees::code;
-                    (*state).lencode = (*state).next as *const crate::src::inftrees::code;
-                    (*state).lenbits = 7 as ::core::ffi::c_uint;
-                    ret = crate::src::inftrees::inflate_table_ffi(
+                    let state_ref = &mut *state;
+                    let codes_base = state_ref.codes.as_mut_ptr();
+                    state_ref.next = codes_base;
+                    state_ref.lencode = codes_base as *const crate::src::inftrees::code;
+                    state_ref.lenbits = 7 as ::core::ffi::c_uint;
+                    let mut table_used = 0usize;
+                    ret = crate::src::inftrees::inflate_table_impl(
                         crate::src::inftrees::CODES,
-                        &raw mut (*state).lens as *mut ::core::ffi::c_ushort,
+                        &state_ref.lens,
                         19 as ::core::ffi::c_uint,
-                        &raw mut (*state).next as *mut _ as *mut *mut crate::src::inftrees::code,
-                        &raw mut (*state).lenbits,
-                        &raw mut (*state).work as *mut ::core::ffi::c_ushort,
+                        &mut state_ref.codes,
+                        &mut table_used,
+                        &mut state_ref.lenbits,
+                        &mut state_ref.work,
                     );
+                    if ret == 0 {
+                        state_ref.next = codes_base.wrapping_add(table_used);
+                    }
                     if ret != 0 {
                         (*strm).msg = b"invalid code lengths set\0".as_ptr()
                             as *const ::core::ffi::c_char
