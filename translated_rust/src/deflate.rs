@@ -1915,45 +1915,97 @@ fn deflate_prime_bits_valid(bits: ::core::ffi::c_int) -> bool {
     bits >= 0 as ::core::ffi::c_int && bits <= 16 as ::core::ffi::c_int
 }
 
-pub unsafe extern "C" fn deflatePrime(
-    mut strm: crate::zlib_h::z_streamp,
+fn deflate_prime_has_pending_space(symbol_offset: usize, pending_out_offset: usize) -> bool {
+    pending_out_offset
+        .checked_add(((crate::src::deflate::Buf_size + 7) >> 3) as usize)
+        .is_some_and(|required| symbol_offset >= required)
+}
+
+fn deflate_prime_flush_bits(
+    storage: &mut PendingStorageView<'_>,
+    pending: &mut crate::zutil_h::ulg,
+    bi_buf: &mut crate::zutil_h::ush,
+    bi_valid: &mut ::core::ffi::c_int,
+) -> bool {
+    let bytes = [
+        (*bi_buf as ::core::ffi::c_int & 0xff as ::core::ffi::c_int) as crate::zutil_h::uch,
+        (*bi_buf as ::core::ffi::c_int >> 8 as ::core::ffi::c_int) as crate::zutil_h::uch,
+    ];
+    let (count, next_bi_buf, next_bi_valid) = if *bi_valid == crate::src::deflate::Buf_size {
+        (2, 0, 0)
+    } else if *bi_valid >= 8 {
+        (
+            1,
+            (*bi_buf as ::core::ffi::c_int >> 8) as crate::zutil_h::ush,
+            *bi_valid - 8,
+        )
+    } else {
+        (0, *bi_buf, *bi_valid)
+    };
+
+    if !storage.append_pending(pending, &bytes[..count]) {
+        return false;
+    }
+
+    *bi_buf = next_bi_buf;
+    *bi_valid = next_bi_valid;
+    true
+}
+
+fn deflate_prime_insert_bits(
+    storage: &mut PendingStorageView<'_>,
+    pending: &mut crate::zutil_h::ulg,
+    bi_buf: &mut crate::zutil_h::ush,
+    bi_valid: &mut ::core::ffi::c_int,
     mut bits: ::core::ffi::c_int,
     mut value: ::core::ffi::c_int,
-) -> ::core::ffi::c_int {
-    let mut s: *mut crate::src::deflate::deflate_state =
-        ::core::ptr::null_mut::<crate::src::deflate::deflate_state>();
-    let mut put: ::core::ffi::c_int = 0;
-    if deflateStateCheck(strm) != 0 {
-        return crate::zlib_h::Z_STREAM_ERROR;
-    }
-    s = (*strm).state as *mut crate::src::deflate::deflate_state;
-    if !deflate_prime_bits_valid(bits)
-        || (*s).sym_buf
-            < (*s).pending_out.offset(
-                (crate::src::deflate::Buf_size + 7 as ::core::ffi::c_int >> 3 as ::core::ffi::c_int)
-                    as isize,
-            )
-    {
-        return crate::zlib_h::Z_BUF_ERROR;
-    }
+) -> bool {
     loop {
-        put = crate::src::deflate::Buf_size - (*s).bi_valid;
+        let mut put = crate::src::deflate::Buf_size - *bi_valid;
         if put > bits {
             put = bits;
         }
-        (*s).bi_buf = ((*s).bi_buf as ::core::ffi::c_int
-            | ((value & ((1 as ::core::ffi::c_int) << put) - 1 as ::core::ffi::c_int)
-                << (*s).bi_valid) as crate::zutil_h::ush as ::core::ffi::c_int)
-            as crate::zutil_h::ush;
-        (*s).bi_valid += put;
-        crate::src::trees::_tr_flush_bits_ffi(s as *mut crate::src::deflate::internal_state);
+        let inserted = ((value & ((1 as ::core::ffi::c_int) << put) - 1 as ::core::ffi::c_int)
+            << *bi_valid) as crate::zutil_h::ush as ::core::ffi::c_int;
+        *bi_buf = (*bi_buf as ::core::ffi::c_int | inserted) as crate::zutil_h::ush;
+        *bi_valid += put;
+        if !deflate_prime_flush_bits(storage, pending, bi_buf, bi_valid) {
+            return false;
+        }
         value >>= put;
         bits -= put;
         if !(bits != 0) {
             break;
         }
     }
-    return crate::zlib_h::Z_OK;
+    true
+}
+
+fn deflatePrime(
+    state: &mut crate::src::deflate::deflate_state,
+    storage: &mut PendingStorageView<'_>,
+    bits: ::core::ffi::c_int,
+    value: ::core::ffi::c_int,
+) -> ::core::ffi::c_int {
+    let layout = pending_storage_layout(state.lit_bufsize);
+    if !deflate_prime_bits_valid(bits)
+        || !deflate_prime_has_pending_space(layout.symbol_offset, state.pending_out_offset)
+    {
+        return crate::zlib_h::Z_BUF_ERROR;
+    }
+
+    if deflate_prime_insert_bits(
+        storage,
+        &mut state.pending,
+        &mut state.bi_buf,
+        &mut state.bi_valid,
+        bits,
+        value,
+    ) {
+        crate::zlib_h::Z_OK
+    } else {
+        crate::zlib_h::Z_BUF_ERROR
+    }
 }
 #[export_name = "deflatePrime"]
 
@@ -1962,7 +2014,18 @@ pub unsafe extern "C" fn deflatePrime_ffi(
     mut bits: ::core::ffi::c_int,
     mut value: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
-    deflatePrime(strm, bits, value)
+    if deflate_state_check_at_ffi_boundary!(strm) {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    }
+
+    let state = &mut *(*strm).state;
+    let pending_buffer =
+        core::slice::from_raw_parts_mut(state.pending_buf, state.pending_buf_size as usize);
+    let layout = pending_storage_layout(state.lit_bufsize);
+    with_pending_storage(pending_buffer, layout, |storage| {
+        deflatePrime(state, storage, bits, value)
+    })
+    .unwrap_or(crate::zlib_h::Z_BUF_ERROR)
 }
 
 fn normalize_deflate_params(
@@ -4548,8 +4611,9 @@ mod tests {
         deflate_flush_block_state_after_output, deflate_flush_rank, deflate_huff_literal_progress,
         deflate_insert_after_block, deflate_literal_state_after_emit, deflate_literal_tally_plan,
         deflate_match_refill_action, deflate_pending_value, deflate_preflight,
-        deflate_prime_bits_valid, deflate_request_is_invalid, deflate_reset_status_and_adler,
-        deflate_rle_can_scan_match, deflate_rle_clamp_match_length, deflate_rle_match_length,
+        deflate_prime_bits_valid, deflate_prime_has_pending_space, deflate_prime_insert_bits,
+        deflate_request_is_invalid, deflate_reset_status_and_adler, deflate_rle_can_scan_match,
+        deflate_rle_clamp_match_length, deflate_rle_match_length,
         deflate_rle_match_state_after_emit, deflate_rle_match_tally_plan,
         deflate_rle_next_scan_indices, deflate_rle_refill_action, deflate_rle_scan_indices,
         deflate_rle_tally_plan, deflate_set_dictionary_allowed, deflate_should_return_buf_error,
@@ -4572,8 +4636,8 @@ mod tests {
         stored_block_min_size, stored_block_payload_len, stored_block_should_wait,
         stored_insert_after_input, symbol_buffer_is_full, symbol_triplet_cursors, zlib_header,
         DeflateFastMatchProgress, DeflateFinalFlushAction, DeflateMatchRefillAction,
-        DeflatePreflight, DeflateRleRefillAction, DeflateRleTallyPlan, ReadBufChecksum,
-        ReadBufResult,
+        DeflatePreflight, DeflateRleRefillAction, DeflateRleTallyPlan, PendingStorageView,
+        ReadBufChecksum, ReadBufResult,
     };
 
     #[test]
@@ -5554,6 +5618,38 @@ mod tests {
         assert!(deflate_prime_bits_valid(0));
         assert!(deflate_prime_bits_valid(16));
         assert!(!deflate_prime_bits_valid(17));
+    }
+
+    #[test]
+    fn deflate_prime_requires_two_pending_bytes_before_symbol_storage() {
+        assert!(deflate_prime_has_pending_space(8, 6));
+        assert!(!deflate_prime_has_pending_space(8, 7));
+        assert!(!deflate_prime_has_pending_space(8, usize::MAX));
+    }
+
+    #[test]
+    fn deflate_prime_inserts_and_flushes_sixteen_bits() {
+        let layout = pending_storage_layout(2);
+        let mut bytes = [0; 8];
+        let mut storage = PendingStorageView::new(&mut bytes, layout).unwrap();
+        let mut pending = 0;
+        let mut bi_buf = 0;
+        let mut bi_valid = 0;
+
+        assert!(deflate_prime_insert_bits(
+            &mut storage,
+            &mut pending,
+            &mut bi_buf,
+            &mut bi_valid,
+            16,
+            0xbeef,
+        ));
+        drop(storage);
+
+        assert_eq!(pending, 2);
+        assert_eq!(bi_buf, 0);
+        assert_eq!(bi_valid, 0);
+        assert_eq!(&bytes[..2], &[0xef, 0xbe]);
     }
 
     #[test]

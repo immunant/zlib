@@ -100,7 +100,7 @@ pub struct inflate_state {
     pub nlen: ::core::ffi::c_uint,
     pub ndist: ::core::ffi::c_uint,
     pub have: ::core::ffi::c_uint,
-    pub next: *mut crate::src::inftrees::code,
+    pub next: usize,
     pub lens: [::core::ffi::c_ushort; 320],
     pub work: [::core::ffi::c_ushort; 288],
     pub codes: [crate::src::inftrees::code; 1444],
@@ -912,8 +912,8 @@ pub unsafe extern "C" fn inflateResetKeep_ffi(
     let strm = &mut *strm;
     let state = &mut *(strm.state as *mut crate::src::inflate::inflate_state);
     inflate_reset_keep_core(strm, state);
-    state.next = &raw mut state.codes as *mut crate::src::inftrees::code;
-    state.distcode = state.next;
+    state.next = 0;
+    state.distcode = state.codes.as_ptr();
     state.lencode = state.distcode;
     return crate::zlib_h::Z_OK;
 }
@@ -928,8 +928,8 @@ pub unsafe extern "C" fn inflateReset_ffi(
     let strm = &mut *strm;
     let state = &mut *(strm.state as *mut crate::src::inflate::inflate_state);
     inflate_reset_core(strm, state);
-    state.next = &raw mut state.codes as *mut crate::src::inftrees::code;
-    state.distcode = state.next;
+    state.next = 0;
+    state.distcode = state.codes.as_ptr();
     state.lencode = state.distcode;
     crate::zlib_h::Z_OK
 }
@@ -1704,8 +1704,8 @@ pub unsafe extern "C" fn inflate(
                 }
                 let state = &mut *state;
                 let mut table_cursor = 0usize;
-                state.next = state.codes.as_mut_ptr();
-                state.distcode = state.next as *const crate::src::inftrees::code;
+                state.next = 0;
+                state.distcode = state.codes.as_ptr();
                 state.lencode = state.distcode;
                 state.lenbits = 7 as ::core::ffi::c_uint;
                 ret = crate::src::inftrees::inflate_table_safe(
@@ -1717,7 +1717,7 @@ pub unsafe extern "C" fn inflate(
                     &mut state.work[..19],
                 );
                 if ret == 0 {
-                    state.next = state.codes.as_mut_ptr().wrapping_add(table_cursor);
+                    state.next = table_cursor;
                 }
                 if ret != 0 {
                     (*strm).msg = b"invalid code lengths set\0".as_ptr()
@@ -1886,8 +1886,8 @@ pub unsafe extern "C" fn inflate(
                 } else {
                     let state = &mut *state;
                     let mut table_cursor = 0usize;
-                    state.next = state.codes.as_mut_ptr();
-                    state.lencode = state.next as *const crate::src::inftrees::code;
+                    state.next = 0;
+                    state.lencode = state.codes.as_ptr();
                     state.lenbits = 9 as ::core::ffi::c_uint;
                     ret = crate::src::inftrees::inflate_table_safe(
                         crate::src::inftrees::LENS,
@@ -1898,7 +1898,7 @@ pub unsafe extern "C" fn inflate(
                         &mut state.work[..state.nlen as usize],
                     );
                     if ret == 0 {
-                        state.next = state.codes.as_mut_ptr().wrapping_add(table_cursor);
+                        state.next = table_cursor;
                     }
                     if ret != 0 {
                         (*strm).msg = b"invalid literal/lengths set\0".as_ptr()
@@ -1907,7 +1907,7 @@ pub unsafe extern "C" fn inflate(
                         (*state).mode = crate::src::inflate::BAD;
                         continue;
                     } else {
-                        state.distcode = state.next as *const crate::src::inftrees::code;
+                        state.distcode = state.codes.as_ptr().wrapping_add(state.next);
                         state.distbits = 6 as ::core::ffi::c_uint;
                         ret = crate::src::inftrees::inflate_table_safe(
                             crate::src::inftrees::DISTS,
@@ -1919,7 +1919,7 @@ pub unsafe extern "C" fn inflate(
                             &mut state.work[..state.ndist as usize],
                         );
                         if ret == 0 {
-                            state.next = state.codes.as_mut_ptr().wrapping_add(table_cursor);
+                            state.next = table_cursor;
                         }
                         if ret != 0 {
                             (*strm).msg = b"invalid distances set\0".as_ptr()
@@ -3267,12 +3267,7 @@ pub unsafe extern "C" fn inflateCopy(
                     as usize,
             );
     }
-    (*copy).next = (&raw mut (*copy).codes as *mut crate::src::inftrees::code).wrapping_add(
-        (*state)
-            .next
-            .offset_from(&raw mut (*state).codes as *mut crate::src::inftrees::code)
-            as usize,
-    );
+    (*copy).next = (*state).next;
     if !window.is_null() {
         crate::stdlib::memcpy(
             window as *mut ::core::ffi::c_void,
@@ -3366,12 +3361,7 @@ pub unsafe extern "C" fn inflateCodesUsed_ffi(
         return -1 as ::core::ffi::c_int as ::core::ffi::c_ulong;
     }
     let state = (*strm).state as *mut crate::src::inflate::inflate_state;
-    inflate_codes_used_offset_value(
-        (*state)
-            .next
-            .offset_from(&raw mut (*state).codes as *mut crate::src::inftrees::code)
-            as ::core::ffi::c_long,
-    )
+    inflate_codes_used_offset_value((*state).next as ::core::ffi::c_long)
 }
 
 #[cfg(test)]
@@ -4979,7 +4969,7 @@ mod tests {
             nlen: 0,
             ndist: 0,
             have: 0,
-            next: ::core::ptr::null_mut(),
+            next: 0,
             lens: [0; 320],
             work: [0; 288],
             codes: [crate::src::inftrees::code {

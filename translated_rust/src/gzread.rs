@@ -403,6 +403,20 @@ impl<'a> GzInputStorage<'a> {
             prior_avail_in: plan.prior_avail_in,
         })
     }
+
+    fn gzip_header(&self) -> Result<Option<[crate::stdlib::Byte; 4]>, ()> {
+        if self.avail_in < 4 {
+            return Ok(None);
+        }
+        let header_end = self.next_in.checked_add(4).ok_or(())?;
+        let header = self.input.get(self.next_in..header_end).ok_or(())?;
+        Ok(Some([header[0], header[1], header[2], header[3]]))
+    }
+
+    fn set_cursor(&mut self, next_in: usize, avail_in: crate::stdlib::uInt) {
+        self.next_in = next_in;
+        self.avail_in = avail_in;
+    }
 }
 
 fn gzread_request(len: ::core::ffi::c_uint) -> Option<crate::stdlib::z_size_t> {
@@ -955,41 +969,55 @@ unsafe fn gz_load(
     }
 }
 
-unsafe fn gz_avail(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
+unsafe fn gz_avail(
+    state: &mut crate::gzguts_h::gz_state,
+    header: Option<&mut Option<[crate::stdlib::Byte; 4]>>,
+) -> ::core::ffi::c_int {
     let action = gz_avail_action(state.err, state.eof, state.strm.avail_in);
     match action {
         GzAvailAction::Error => return -1 as ::core::ffi::c_int,
-        GzAvailAction::Done => return 0 as ::core::ffi::c_int,
-        GzAvailAction::Refill { compact_input } => {
-            let (buf, len, prior_avail_in) = {
-                let p = state.in_0;
-                let q = state.strm.next_in;
-                if p.is_null() {
-                    return -1 as ::core::ffi::c_int;
-                }
-                let input = core::slice::from_raw_parts_mut(p, state.size as usize);
-                let input_offset = (q as usize).wrapping_sub(p as usize);
-                let mut input = GzInputStorage::new(input, input_offset, state.strm.avail_in);
-                let refill = match input.prepare_refill(state.size, compact_input) {
-                    Some(plan) => plan,
-                    None => return -1 as ::core::ffi::c_int,
-                };
-                (
-                    refill.buffer.as_mut_ptr(),
-                    refill.buffer.len() as ::core::ffi::c_uint,
-                    refill.prior_avail_in,
-                )
+        GzAvailAction::Done if header.is_none() => return 0 as ::core::ffi::c_int,
+        _ => {}
+    }
+
+    let p = state.in_0;
+    if p.is_null() {
+        return -1 as ::core::ffi::c_int;
+    }
+    let q = state.strm.next_in;
+    let input = core::slice::from_raw_parts_mut(p, state.size as usize);
+    let input_offset = (q as usize).wrapping_sub(p as usize);
+    let mut input = GzInputStorage::new(input, input_offset, state.strm.avail_in);
+
+    if let GzAvailAction::Refill { compact_input } = action {
+        let (buf, len, prior_avail_in) = {
+            let refill = match input.prepare_refill(state.size, compact_input) {
+                Some(plan) => plan,
+                None => return -1 as ::core::ffi::c_int,
             };
-            let load = gz_load(state, buf, len);
-            match gz_avail_finish_refill(prior_avail_in, &load, &mut state.strm.avail_in) {
-                Err(()) => return -1 as ::core::ffi::c_int,
-                Ok(GzAvailNextInAction::ResetToInputStart) => {
-                    state.strm.next_in = state.in_0;
-                }
+            (
+                refill.buffer.as_mut_ptr(),
+                refill.buffer.len() as ::core::ffi::c_uint,
+                refill.prior_avail_in,
+            )
+        };
+        let load = gz_load(state, buf, len);
+        match gz_avail_finish_refill(prior_avail_in, &load, &mut state.strm.avail_in) {
+            Err(()) => return -1 as ::core::ffi::c_int,
+            Ok(GzAvailNextInAction::ResetToInputStart) => {
+                state.strm.next_in = state.in_0;
+                input.set_cursor(0, state.strm.avail_in);
             }
         }
     }
-    return 0 as ::core::ffi::c_int;
+
+    if let Some(header) = header {
+        *header = match input.gzip_header() {
+            Ok(header) => header,
+            Err(()) => return -1 as ::core::ffi::c_int,
+        };
+    }
+    0 as ::core::ffi::c_int
 }
 
 fn gz_is_gzip_header(
@@ -1164,22 +1192,12 @@ unsafe fn gz_look(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
         );
         return 0 as ::core::ffi::c_int;
     }
-    let avail = gz_avail(state);
+    let mut header = None;
+    let avail = gz_avail(state, Some(&mut header));
     let again = state.again;
     if avail == -1 as ::core::ffi::c_int {
         return -1 as ::core::ffi::c_int;
     }
-    let header = if gz_look_header_is_available(state.strm.avail_in) {
-        let next_in = state.strm.next_in;
-        Some([
-            *next_in,
-            *next_in.wrapping_add(1),
-            *next_in.wrapping_add(2),
-            *next_in.wrapping_add(3),
-        ])
-    } else {
-        None
-    };
     match gz_look_action(state.strm.avail_in, again, header) {
         GzLookAction::NeedMoreInput => return 0 as ::core::ffi::c_int,
         GzLookAction::Gzip => {
@@ -1403,7 +1421,7 @@ unsafe fn gz_decomp(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int
     loop {
         let needs_input_load =
             gz_decomp_needs_input_load(gz_decomp_stream_state(&state.strm).avail_in);
-        let load_failed = needs_input_load && gz_decomp_input_load_failed(gz_avail(state));
+        let load_failed = needs_input_load && gz_decomp_input_load_failed(gz_avail(state, None));
         let stream_state = gz_decomp_stream_state(&state.strm);
         match gz_decomp_input_action(load_failed, stream_state.avail_in) {
             GzDecompInputAction::InputError => {
@@ -2171,6 +2189,25 @@ mod tests {
         let mut storage = GzInputStorage::new(&mut input, 3, 6);
 
         assert!(storage.prepare_refill(8, true).is_none());
+    }
+
+    #[test]
+    fn gz_input_storage_peeks_a_complete_gzip_header_without_moving_its_cursor() {
+        let mut input = *b"xx\x1f\x8b\x08\x1fyy";
+        let storage = GzInputStorage::new(&mut input, 2, 4);
+
+        assert_eq!(storage.gzip_header(), Ok(Some([31, 139, 8, 31])));
+    }
+
+    #[test]
+    fn gz_input_storage_defers_short_or_invalid_gzip_header_probes() {
+        let mut short_input = *b"abc";
+        let short_storage = GzInputStorage::new(&mut short_input, 0, 3);
+        assert_eq!(short_storage.gzip_header(), Ok(None));
+
+        let mut input = *b"abcdefgh";
+        let invalid_storage = GzInputStorage::new(&mut input, 5, 4);
+        assert_eq!(invalid_storage.gzip_header(), Err(()));
     }
 
     #[test]
