@@ -517,46 +517,65 @@ macro_rules! inflate_init2_at_boundary {
         } else if strm.is_null() {
             crate::zlib_h::Z_STREAM_ERROR
         } else {
-            (*strm).msg = ::core::ptr::null_mut::<::core::ffi::c_char>();
-            if (*strm).zalloc.is_none() {
-                (*strm).zalloc = Some(
-                    crate::src::zutil::zcalloc_ffi
-                        as unsafe extern "C" fn(
-                            crate::stdlib::voidpf,
-                            ::core::ffi::c_uint,
-                            ::core::ffi::c_uint,
-                        ) -> crate::stdlib::voidpf,
-                ) as crate::zlib_h::alloc_func;
-                (*strm).opaque = ::core::ptr::null_mut::<::core::ffi::c_void>();
-            }
-            if (*strm).zfree.is_none() {
-                (*strm).zfree = Some(
-                    crate::src::zutil::zcfree_ffi
-                        as unsafe extern "C" fn(crate::stdlib::voidpf, crate::stdlib::voidpf) -> (),
-                ) as crate::zlib_h::free_func;
-            }
-            let state = Some((*strm).zalloc.expect("non-null function pointer"))
-                .expect("non-null function pointer")(
-                (*strm).opaque,
-                1 as crate::stdlib::uInt,
-                ::core::mem::size_of::<crate::src::inflate::inflate_state>() as crate::stdlib::uInt,
-            ) as *mut crate::src::inflate::inflate_state;
-            if state.is_null() {
-                crate::zlib_h::Z_MEM_ERROR
-            } else {
-                ::core::ptr::write(state, crate::src::inflate::inflate_initial_state());
-                (*strm).state = state as *mut crate::src::deflate::internal_state;
-                (*state).strm = strm;
-                let ret = crate::src::inflate::inflate_reset2_at_boundary!(strm, window_bits);
-                if ret != crate::zlib_h::Z_OK {
-                    Some((*strm).zfree.expect("non-null function pointer"))
-                        .expect("non-null function pointer")(
-                        (*strm).opaque,
-                        state as crate::stdlib::voidpf,
-                    );
-                    (*strm).state = ::core::ptr::null_mut::<crate::src::deflate::internal_state>();
+            // Snapshot callbacks before invoking either of them.  A custom
+            // allocator is allowed to observe the public stream, so no Rust
+            // borrow of it may remain live across the callback.
+            let callbacks = {
+                let strm_ref = &mut *strm;
+                strm_ref.msg = ::core::ptr::null_mut::<::core::ffi::c_char>();
+                if strm_ref.zalloc.is_none() {
+                    strm_ref.zalloc = Some(
+                        crate::src::zutil::zcalloc_ffi
+                            as unsafe extern "C" fn(
+                                crate::stdlib::voidpf,
+                                ::core::ffi::c_uint,
+                                ::core::ffi::c_uint,
+                            )
+                                -> crate::stdlib::voidpf,
+                    ) as crate::zlib_h::alloc_func;
+                    strm_ref.opaque = ::core::ptr::null_mut::<::core::ffi::c_void>();
                 }
-                ret
+                if strm_ref.zfree.is_none() {
+                    strm_ref.zfree = Some(
+                        crate::src::zutil::zcfree_ffi
+                            as unsafe extern "C" fn(
+                                crate::stdlib::voidpf,
+                                crate::stdlib::voidpf,
+                            ) -> (),
+                    ) as crate::zlib_h::free_func;
+                }
+                match (strm_ref.zalloc, strm_ref.zfree) {
+                    (Some(zalloc), Some(zfree)) => Some((zalloc, zfree, strm_ref.opaque)),
+                    _ => None,
+                }
+            };
+            if let Some((zalloc, zfree, opaque)) = callbacks {
+                let state = zalloc(
+                    opaque,
+                    1 as crate::stdlib::uInt,
+                    ::core::mem::size_of::<crate::src::inflate::inflate_state>()
+                        as crate::stdlib::uInt,
+                ) as *mut crate::src::inflate::inflate_state;
+                if state.is_null() {
+                    crate::zlib_h::Z_MEM_ERROR
+                } else {
+                    ::core::ptr::write(state, crate::src::inflate::inflate_initial_state());
+                    {
+                        let strm_ref = &mut *strm;
+                        let state_ref = &mut *state;
+                        strm_ref.state = state as *mut crate::src::deflate::internal_state;
+                        state_ref.strm = strm;
+                    }
+                    let ret = crate::src::inflate::inflate_reset2_at_boundary!(strm, window_bits);
+                    if ret != crate::zlib_h::Z_OK {
+                        zfree(opaque, state as crate::stdlib::voidpf);
+                        (&mut *strm).state =
+                            ::core::ptr::null_mut::<crate::src::deflate::internal_state>();
+                    }
+                    ret
+                }
+            } else {
+                crate::zlib_h::Z_STREAM_ERROR
             }
         }
     }};
