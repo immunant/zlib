@@ -2608,7 +2608,6 @@ pub unsafe extern "C" fn inflateSetDictionary_ffi(
 ) -> ::core::ffi::c_int {
     let mut state: *mut crate::src::inflate::inflate_state =
         ::core::ptr::null_mut::<crate::src::inflate::inflate_state>();
-    let mut dictid: ::core::ffi::c_ulong = 0;
     if inflateStateCheck(strm) != 0 {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
@@ -2616,18 +2615,13 @@ pub unsafe extern "C" fn inflateSetDictionary_ffi(
     if !inflate_dictionary_is_allowed((*state).wrap, (*state).mode) {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    if (*state).mode as ::core::ffi::c_uint
-        == crate::src::inflate::DICT as ::core::ffi::c_int as ::core::ffi::c_uint
-    {
-        dictid = crate::src::adler32::ADLER32_INITIAL as ::core::ffi::c_ulong;
-        dictid = crate::src::adler32::adler32_ffi(
-            dictid as crate::stdlib::uLong,
-            dictionary,
-            dictLength,
-        ) as ::core::ffi::c_ulong;
-        if dictid != (*state).check {
-            return crate::zlib_h::Z_DATA_ERROR;
-        }
+    let dictionary_bytes = if dictionary.is_null() || dictLength == 0 {
+        &[]
+    } else {
+        core::slice::from_raw_parts(dictionary, dictLength as usize)
+    };
+    if inflate_dictionary_checksum((*state).mode, (*state).check, dictionary_bytes).is_err() {
+        return crate::zlib_h::Z_DATA_ERROR;
     }
     if updatewindow(
         strm,
@@ -2647,6 +2641,24 @@ fn inflate_dictionary_is_allowed(
     mode: crate::src::inflate::inflate_mode,
 ) -> bool {
     wrap == 0 || mode == crate::src::inflate::DICT
+}
+
+fn inflate_dictionary_checksum(
+    mode: crate::src::inflate::inflate_mode,
+    expected_check: ::core::ffi::c_ulong,
+    dictionary: &[crate::stdlib::Bytef],
+) -> Result<(), ()> {
+    if mode != crate::src::inflate::DICT {
+        return Ok(());
+    }
+
+    let check = crate::src::adler32::adler32_z(crate::src::adler32::ADLER32_INITIAL, dictionary)
+        as ::core::ffi::c_ulong;
+    if check == expected_check {
+        Ok(())
+    } else {
+        Err(())
+    }
 }
 
 fn inflate_header_wrap_allows_capture(wrap: ::core::ffi::c_int) -> bool {
@@ -3343,11 +3355,12 @@ mod tests {
         inflate_align_to_byte_boundary, inflate_apply_gzip_header_completion,
         inflate_assign_data_type, inflate_block_header, inflate_call_progress,
         inflate_can_use_fast_path, inflate_codes_used_offset_value, inflate_copy_match_from_output,
-        inflate_copy_progress, inflate_data_type_value, inflate_dictionary_id_from_hold,
-        inflate_dictionary_is_allowed, inflate_distance_extra_update,
-        inflate_flush_stops_after_fixed_trees, inflate_flush_stops_at_block_boundary,
-        inflate_get_dictionary_result, inflate_gzip_extra_progress, inflate_gzip_flags,
-        inflate_gzip_flags_error, inflate_gzip_flags_validation, inflate_gzip_header_completion,
+        inflate_copy_progress, inflate_data_type_value, inflate_dictionary_checksum,
+        inflate_dictionary_id_from_hold, inflate_dictionary_is_allowed,
+        inflate_distance_extra_update, inflate_flush_stops_after_fixed_trees,
+        inflate_flush_stops_at_block_boundary, inflate_get_dictionary_result,
+        inflate_gzip_extra_progress, inflate_gzip_flags, inflate_gzip_flags_error,
+        inflate_gzip_flags_validation, inflate_gzip_header_completion,
         inflate_gzip_header_crc_bytes, inflate_gzip_header_crc_is_valid,
         inflate_gzip_header_has_comment, inflate_gzip_header_has_crc,
         inflate_gzip_header_has_extra, inflate_gzip_header_has_name,
@@ -3765,6 +3778,20 @@ mod tests {
         assert!(inflate_dictionary_is_allowed(1, DICT));
         assert!(!inflate_dictionary_is_allowed(1, HEAD));
         assert!(!inflate_dictionary_is_allowed(4, BAD));
+    }
+
+    #[test]
+    fn inflate_dictionary_checksum_requires_a_matching_dictid_only_in_dict_mode() {
+        let dictionary = b"preset dictionary";
+        let check = crate::src::adler32::adler32_z(crate::src::adler32::ADLER32_INITIAL, dictionary)
+            as ::core::ffi::c_ulong;
+
+        assert_eq!(inflate_dictionary_checksum(DICT, check, dictionary), Ok(()));
+        assert_eq!(
+            inflate_dictionary_checksum(DICT, check.wrapping_add(1), dictionary),
+            Err(())
+        );
+        assert_eq!(inflate_dictionary_checksum(HEAD, 0, dictionary), Ok(()));
     }
 
     #[test]
