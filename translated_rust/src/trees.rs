@@ -3749,43 +3749,45 @@ pub unsafe extern "C" fn _tr_init_ffi(mut s: *mut crate::src::deflate::deflate_s
 }
 pub const SMALLEST: ::core::ffi::c_int = 1 as ::core::ffi::c_int;
 
-unsafe extern "C" fn pqdownheap(
-    mut s: *mut crate::src::deflate::deflate_state,
-    mut tree: *mut crate::src::deflate::ct_data,
+fn pqdownheap(
+    heap: &mut [::core::ffi::c_int],
+    heap_len: ::core::ffi::c_int,
+    depth: &[crate::zutil_h::uch],
+    tree: &[crate::src::deflate::ct_data],
     mut k: ::core::ffi::c_int,
 ) {
-    let mut v: ::core::ffi::c_int = (*s).heap[k as usize];
+    let mut v: ::core::ffi::c_int = heap[k as usize];
     let mut j: ::core::ffi::c_int = k << 1 as ::core::ffi::c_int;
-    while j <= (*s).heap_len {
-        if j < (*s).heap_len
-            && (((*tree.offset((*s).heap[(j + 1 as ::core::ffi::c_int) as usize] as isize))
+    while j <= heap_len {
+        if j < heap_len
+            && ((tree[heap[(j + 1 as ::core::ffi::c_int) as usize] as usize]
                 .fc
                 .freq as ::core::ffi::c_int)
-                < (*tree.offset((*s).heap[j as usize] as isize)).fc.freq as ::core::ffi::c_int
-                || (*tree.offset((*s).heap[(j + 1 as ::core::ffi::c_int) as usize] as isize))
+                < tree[heap[j as usize] as usize].fc.freq as ::core::ffi::c_int
+                || tree[heap[(j + 1 as ::core::ffi::c_int) as usize] as usize]
                     .fc
                     .freq as ::core::ffi::c_int
-                    == (*tree.offset((*s).heap[j as usize] as isize)).fc.freq as ::core::ffi::c_int
-                    && (*s).depth[(*s).heap[(j + 1 as ::core::ffi::c_int) as usize] as usize]
+                    == tree[heap[j as usize] as usize].fc.freq as ::core::ffi::c_int
+                    && depth[heap[(j + 1 as ::core::ffi::c_int) as usize] as usize]
                         as ::core::ffi::c_int
-                        <= (*s).depth[(*s).heap[j as usize] as usize] as ::core::ffi::c_int)
+                        <= depth[heap[j as usize] as usize] as ::core::ffi::c_int)
         {
             j += 1;
         }
-        if ((*tree.offset(v as isize)).fc.freq as ::core::ffi::c_int)
-            < (*tree.offset((*s).heap[j as usize] as isize)).fc.freq as ::core::ffi::c_int
-            || (*tree.offset(v as isize)).fc.freq as ::core::ffi::c_int
-                == (*tree.offset((*s).heap[j as usize] as isize)).fc.freq as ::core::ffi::c_int
-                && (*s).depth[v as usize] as ::core::ffi::c_int
-                    <= (*s).depth[(*s).heap[j as usize] as usize] as ::core::ffi::c_int
+        if (tree[v as usize].fc.freq as ::core::ffi::c_int)
+            < tree[heap[j as usize] as usize].fc.freq as ::core::ffi::c_int
+            || tree[v as usize].fc.freq as ::core::ffi::c_int
+                == tree[heap[j as usize] as usize].fc.freq as ::core::ffi::c_int
+                && depth[v as usize] as ::core::ffi::c_int
+                    <= depth[heap[j as usize] as usize] as ::core::ffi::c_int
         {
             break;
         }
-        (*s).heap[k as usize] = (*s).heap[j as usize];
+        heap[k as usize] = heap[j as usize];
         k = j;
         j <<= 1 as ::core::ffi::c_int;
     }
-    (*s).heap[k as usize] = v;
+    heap[k as usize] = v;
 }
 
 unsafe extern "C" fn gen_bitlen(
@@ -3939,7 +3941,13 @@ unsafe extern "C" fn build_tree(
     (*desc).max_code = max_code;
     n = (*s).heap_len / 2 as ::core::ffi::c_int;
     while n >= 1 as ::core::ffi::c_int {
-        pqdownheap(s, tree, n);
+        pqdownheap(
+            &mut (*s).heap,
+            (*s).heap_len,
+            &(*s).depth,
+            ::core::slice::from_raw_parts(tree, (elems * 2 - 1) as usize),
+            n,
+        );
         n -= 1;
     }
     node = elems;
@@ -3948,7 +3956,13 @@ unsafe extern "C" fn build_tree(
         let c2rust_fresh55 = (*s).heap_len;
         (*s).heap_len = (*s).heap_len - 1;
         (*s).heap[SMALLEST as usize] = (*s).heap[c2rust_fresh55 as usize];
-        pqdownheap(s, tree, SMALLEST);
+        pqdownheap(
+            &mut (*s).heap,
+            (*s).heap_len,
+            &(*s).depth,
+            ::core::slice::from_raw_parts(tree, (elems * 2 - 1) as usize),
+            SMALLEST,
+        );
         m = (*s).heap[SMALLEST as usize];
         (*s).heap_max -= 1;
         (*s).heap[(*s).heap_max as usize] = n;
@@ -3970,7 +3984,13 @@ unsafe extern "C" fn build_tree(
         let c2rust_fresh56 = node;
         node = node + 1;
         (*s).heap[SMALLEST as usize] = c2rust_fresh56;
-        pqdownheap(s, tree, SMALLEST);
+        pqdownheap(
+            &mut (*s).heap,
+            (*s).heap_len,
+            &(*s).depth,
+            ::core::slice::from_raw_parts(tree, (elems * 2 - 1) as usize),
+            SMALLEST,
+        );
         if (*s).heap_len < 2 as ::core::ffi::c_int {
             break;
         }
