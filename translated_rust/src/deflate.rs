@@ -1630,8 +1630,10 @@ unsafe extern "C" fn flush_pending(mut strm: crate::zlib_h::z_streamp) {
         state.pending_out as *const ::core::ffi::c_void,
         len as crate::__stddef_size_t_h::size_t,
     );
-    stream.next_out = stream.next_out.offset(len as isize);
-    state.pending_out = state.pending_out.offset(len as isize);
+    // Both ranges were validated by the deflater before this flush. Advance
+    // their addresses without requiring an in-bounds raw-pointer operation.
+    stream.next_out = stream.next_out.wrapping_add(len as usize);
+    state.pending_out = state.pending_out.wrapping_add(len as usize);
     flush_pending_progress(
         &mut stream.avail_out,
         &mut stream.total_out,
