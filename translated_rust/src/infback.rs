@@ -66,6 +66,18 @@ pub use crate::zlib_h::Z_OK;
 pub use crate::zlib_h::Z_STREAM_END;
 pub use crate::zlib_h::Z_STREAM_ERROR;
 pub use crate::zlib_h::Z_VERSION_ERROR;
+
+/// Copy one stored-block chunk after the ABI boundary has validated and lent
+/// the callback input and caller window spans. Keeping the byte movement in
+/// this slice-only core avoids a libc `memcpy` call in the decoder loop.
+fn inflate_back_copy_stored(input: &[u8], output: &mut [u8]) -> bool {
+    if input.len() != output.len() {
+        return false;
+    }
+    output.copy_from_slice(input);
+    true
+}
+
 #[export_name = "inflateBackInit_"]
 pub unsafe extern "C" fn inflateBackInit__ffi(
     mut strm: crate::zlib_h::z_streamp,
@@ -309,11 +321,41 @@ pub unsafe extern "C" fn inflateBack_ffi(
                         if copy > left {
                             copy = left;
                         }
-                        crate::stdlib::memcpy(
-                            put as *mut ::core::ffi::c_void,
-                            next as *const ::core::ffi::c_void,
-                            copy as crate::__stddef_size_t_h::size_t,
-                        );
+                        let Ok(copy_len) = usize::try_from(copy) else {
+                            ret = crate::zlib_h::Z_BUF_ERROR;
+                            break '_inf_leave;
+                        };
+                        let copied = if copy_len == 0 {
+                            true
+                        } else if next.is_null() || put.is_null() {
+                            false
+                        } else {
+                            let input_start = next as usize;
+                            let output_start = put as usize;
+                            let Some(input_end) = input_start.checked_add(copy_len) else {
+                                ret = crate::zlib_h::Z_BUF_ERROR;
+                                break '_inf_leave;
+                            };
+                            let Some(output_end) = output_start.checked_add(copy_len) else {
+                                ret = crate::zlib_h::Z_BUF_ERROR;
+                                break '_inf_leave;
+                            };
+                            // `memcpy` never permitted overlap. Reject it
+                            // before creating the immutable and mutable
+                            // views, which must not alias in Rust.
+                            if input_start < output_end && output_start < input_end {
+                                false
+                            } else {
+                                inflate_back_copy_stored(
+                                    ::core::slice::from_raw_parts(next, copy_len),
+                                    ::core::slice::from_raw_parts_mut(put, copy_len),
+                                )
+                            }
+                        };
+                        if !copied {
+                            ret = crate::zlib_h::Z_BUF_ERROR;
+                            break '_inf_leave;
+                        }
                         have = have.wrapping_sub(copy);
                         next = next.wrapping_add(copy as usize);
                         left = left.wrapping_sub(copy);
