@@ -124,10 +124,10 @@ unsafe fn gz_avail(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int 
     } = plan
     {
         if buffered != 0 {
-            let input = state.strm.next_in as *const ::core::ffi::c_uchar;
+            let input = state.strm.next_in;
             if crate::src::gzlib::gz_avail_needs_compaction(
                 buffered,
-                input == state.in_0 as *const ::core::ffi::c_uchar,
+                input == state.in_0,
             ) {
                 // `next_in` points into the input buffer, so the source and
                 // destination may overlap.  `copy` preserves the translated
@@ -445,8 +445,7 @@ unsafe fn gz_read(
             crate::src::gzlib::GzReadPlan::Decompress(chunk) => {
                 n = chunk;
                 state.strm.avail_out = n as crate::stdlib::uInt;
-                state.strm.next_out =
-                    buf as *mut ::core::ffi::c_uchar as *mut crate::stdlib::Bytef;
+                state.strm.next_out = buf as *mut crate::stdlib::Bytef;
                 err = gz_decomp(state);
                 n = state.x.have;
                 state.x.have = 0 as ::core::ffi::c_uint;
