@@ -46,6 +46,10 @@ pub use crate::zlib_h::Z_OK;
 pub use crate::zlib_h::Z_STREAM_END;
 pub use crate::zlib_h::Z_STREAM_ERROR;
 
+fn compact_buffered_input(buffer: &mut [crate::stdlib::Bytef], source_start: usize, len: usize) {
+    buffer.copy_within(source_start..source_start + len, 0);
+}
+
 unsafe extern "C" fn gz_load(
     mut state: crate::gzguts_h::gz_statep,
     mut buf: *mut ::core::ffi::c_uchar,
@@ -108,20 +112,24 @@ unsafe extern "C" fn gz_avail(mut state: crate::gzguts_h::gz_statep) -> ::core::
     }
     if (*state).eof == 0 as ::core::ffi::c_int {
         if (*strm).avail_in != 0 {
-            let mut p: *mut ::core::ffi::c_uchar = (*state).in_0;
-            let mut q: *const ::core::ffi::c_uchar = (*strm).next_in;
+            let p: *mut ::core::ffi::c_uchar = (*state).in_0;
+            let q: *const ::core::ffi::c_uchar = (*strm).next_in;
             if q != p as *const ::core::ffi::c_uchar {
-                let mut n: ::core::ffi::c_uint = (*strm).avail_in as ::core::ffi::c_uint;
-                loop {
-                    let c2rust_fresh0 = q;
-                    q = q.offset(1);
-                    let c2rust_fresh1 = p;
-                    p = p.offset(1);
-                    *c2rust_fresh1 = *c2rust_fresh0;
-                    n = n.wrapping_sub(1);
-                    if n == 0 {
-                        break;
-                    }
+                let n = (*strm).avail_in as usize;
+                let size = (*state).size as usize;
+                if p.is_null() || q.is_null() || n > size {
+                    return -1 as ::core::ffi::c_int;
+                }
+                let buffer = ::core::slice::from_raw_parts_mut(p, size);
+                // `strm.next_in` is always a cursor in `in_0`: gz_load()
+                // installs the buffer, and inflate only advances that cursor.
+                let Some(source_start) = q.addr().checked_sub(p.addr()) else {
+                    return -1 as ::core::ffi::c_int;
+                };
+                if source_start <= size && n <= size.wrapping_sub(source_start) {
+                    compact_buffered_input(buffer, source_start, n);
+                } else {
+                    return -1 as ::core::ffi::c_int;
                 }
             }
         }
