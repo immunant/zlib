@@ -322,13 +322,18 @@ pub mod stdlib {
 
         pub safe fn close(__fd: ::core::ffi::c_int) -> ::core::ffi::c_int;
 
-        pub fn read(
+        // POSIX validates this transient user buffer in the kernel and
+        // reports an invalid address as `EFAULT`; it neither retains nor
+        // dereferences Rust-managed memory in-process.
+        pub safe fn read(
             __fd: ::core::ffi::c_int,
             __buf: *mut ::core::ffi::c_void,
             __nbytes: crate::__stddef_size_t_h::size_t,
         ) -> crate::stdlib::ssize_t;
 
-        pub fn write(
+        // As with `read`, the kernel reports an invalid transient source as
+        // `EFAULT` and does not retain the pointer after the syscall.
+        pub safe fn write(
             __fd: ::core::ffi::c_int,
             __buf: *const ::core::ffi::c_void,
             __n: crate::__stddef_size_t_h::size_t,

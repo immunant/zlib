@@ -75,6 +75,13 @@ struct GzLoadResult {
     status: ::core::ffi::c_int,
 }
 
+// A POSIX syscall sets the thread-local OS error only on failure. The gzip
+// state machine only consults it for a negative result, so reading it through
+// Rust's OS-error API preserves the C ordering without a raw errno pointer.
+fn gz_last_errno() -> ::core::ffi::c_int {
+    ::std::io::Error::last_os_error().raw_os_error().unwrap_or(0)
+}
+
 // This is the raw descriptor-read boundary. Its private callers either pass a
 // range in gzip's initialized buffers or an FFI caller buffer whose validity
 // was checked by their unsafe entry point. Keep the byte count in a typed
@@ -90,44 +97,34 @@ fn gz_load(
     // Keep the byte count local while crossing the raw read boundary.  The
     // caller only observes it after the descriptor result has been classified.
     let mut loaded: ::core::ffi::c_uint = 0;
-    // SAFETY: the callers maintain the buffer validity described above for
-    // the whole requested range. This is the only place the read boundary
-    // dereferences errno or passes that range to the descriptor API.
-    unsafe {
-        crate::src::gzlib::gz_begin_io(state);
-        *crate::stdlib::__errno_location() = 0;
-        loop {
-            get = crate::src::gzlib::gz_load_request(len, loaded);
-            ret = crate::stdlib::read(
-                state.fd,
-                buf.as_ptr().wrapping_add(loaded as usize) as *mut ::core::ffi::c_void,
-                get as crate::__stddef_size_t_h::size_t,
-            ) as ::core::ffi::c_int;
-            if ret <= 0 {
-                break;
-            }
-            loaded = crate::src::gzlib::gz_add_received(loaded, ret as ::core::ffi::c_uint);
-            if loaded >= len {
-                break;
-            }
+    crate::src::gzlib::gz_begin_io(state);
+    loop {
+        get = crate::src::gzlib::gz_load_request(len, loaded);
+        ret = crate::stdlib::read(
+            state.fd,
+            buf.as_ptr().wrapping_add(loaded as usize) as *mut ::core::ffi::c_void,
+            get as crate::__stddef_size_t_h::size_t,
+        ) as ::core::ffi::c_int;
+        if ret <= 0 {
+            break;
         }
-        if let Err(_) = crate::src::gzlib::gz_load_result(
+        loaded = crate::src::gzlib::gz_add_received(loaded, ret as ::core::ffi::c_uint);
+        if loaded >= len {
+            break;
+        }
+    }
+    let errno = if ret < 0 { gz_last_errno() } else { 0 };
+    if let Err(_) = crate::src::gzlib::gz_load_result(state, ret, loaded, errno) {
+        let message = crate::src::gzlib::gz_errno_message();
+        crate::src::gzlib::gz_error(
             state,
-            ret,
-            loaded,
-            *crate::stdlib::__errno_location(),
-        ) {
-            let message = crate::src::gzlib::gz_errno_message();
-            crate::src::gzlib::gz_error(
-                state,
-                crate::zlib_h::Z_ERRNO,
-                Some(&message),
-            );
-            return GzLoadResult {
-                received: loaded,
-                status: -1,
-            };
-        }
+            crate::zlib_h::Z_ERRNO,
+            Some(&message),
+        );
+        return GzLoadResult {
+            received: loaded,
+            status: -1,
+        };
     }
     GzLoadResult {
         received: loaded,

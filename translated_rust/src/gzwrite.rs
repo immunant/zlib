@@ -44,6 +44,12 @@ pub use crate::zlib_h::Z_OK;
 pub use crate::zlib_h::Z_STREAM_END;
 pub use crate::zlib_h::Z_STREAM_ERROR;
 
+// A failed POSIX syscall sets the thread-local OS error. The gzip write paths
+// inspect it only after a negative result, avoiding a raw errno-pointer read.
+fn gz_last_errno() -> ::core::ffi::c_int {
+    ::std::io::Error::last_os_error().raw_os_error().unwrap_or(0)
+}
+
 // Initial deflater fields are ordinary gzip state.  Keep their setup outside
 // the allocation and deflater-creation boundary in `gz_init()`.
 fn gz_init_prepare_deflater(state: &mut crate::gzguts_h::gz_state) {
@@ -163,12 +169,9 @@ fn gz_comp(
     match crate::src::gzlib::gz_comp_mode(state, flush) {
         crate::src::gzlib::GzCompMode::Direct => {
             while state.strm.avail_in != 0 {
-                // SAFETY: the direct write state exposes `avail_in` bytes at
-                // `next_in`; this request is capped by that count. The errno
-                // slot and descriptor are used only for this POSIX write.
                 let put = crate::src::gzlib::gz_comp_direct_write_request(state);
-                // Snapshot every state-derived argument before entering the
-                // raw descriptor boundary.  `write()` cannot call a zlib
+                // Snapshot every state-derived argument before the descriptor
+                // call. `write()` cannot call a zlib
                 // allocator callback, so the state transition below remains
                 // the only use of this bound gzip state after the syscall.
                 let fd = state.fd;
@@ -178,13 +181,9 @@ fn gz_comp(
                     .cast_const()
                     .cast::<::core::ffi::c_void>();
                 crate::src::gzlib::gz_begin_io(state);
-                let (written, errno) = unsafe {
-                    *crate::stdlib::__errno_location() = 0 as ::core::ffi::c_int;
-                    let written =
-                        crate::stdlib::write(fd, input, put as crate::__stddef_size_t_h::size_t)
-                            as ::core::ffi::c_int;
-                    (written, *crate::stdlib::__errno_location())
-                };
+                let written = crate::stdlib::write(fd, input, put as crate::__stddef_size_t_h::size_t)
+                    as ::core::ffi::c_int;
+                let errno = if written < 0 { gz_last_errno() } else { 0 };
                 if let Err(_) = crate::src::gzlib::gz_io_result(state, written, errno) {
                     let message = crate::src::gzlib::gz_errno_message();
                     crate::src::gzlib::gz_error(state, crate::zlib_h::Z_ERRNO, Some(&message));
@@ -208,24 +207,17 @@ fn gz_comp(
     loop {
         if let Some(plan) = crate::src::gzlib::gz_comp_output_plan(state, flush, ret) {
             while crate::src::gzlib::gz_comp_output_pending(state) != 0 {
-                // SAFETY: the output plan bounds the pending range from
-                // `x.next`, and this scope owns the descriptor/errno bridge
-                // for draining that initialized output buffer.
                 let put = crate::src::gzlib::gz_comp_output_write_request(state);
                 // As on the direct path, snapshot the descriptor and bounded
-                // byte range before the raw call.  This keeps all gzip-state
+                // byte range before the call. This keeps all gzip-state
                 // observation and the subsequent progress update outside the
                 // descriptor boundary.
                 let fd = state.fd;
                 let output = state.x.next.cast_const().cast::<::core::ffi::c_void>();
                 crate::src::gzlib::gz_begin_io(state);
-                let (written, errno) = unsafe {
-                    *crate::stdlib::__errno_location() = 0 as ::core::ffi::c_int;
-                    let written =
-                        crate::stdlib::write(fd, output, put as crate::__stddef_size_t_h::size_t)
-                            as ::core::ffi::c_int;
-                    (written, *crate::stdlib::__errno_location())
-                };
+                let written = crate::stdlib::write(fd, output, put as crate::__stddef_size_t_h::size_t)
+                    as ::core::ffi::c_int;
+                let errno = if written < 0 { gz_last_errno() } else { 0 };
                 if let Err(_) = crate::src::gzlib::gz_io_result(state, written, errno) {
                     let message = crate::src::gzlib::gz_errno_message();
                     crate::src::gzlib::gz_error(state, crate::zlib_h::Z_ERRNO, Some(&message));
