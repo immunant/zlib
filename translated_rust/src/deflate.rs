@@ -4121,14 +4121,16 @@ pub unsafe extern "C" fn deflate_ffi(
     {
         let mut bstate: block_state = need_more;
         bstate = (if (*s).level == 0 as ::core::ffi::c_int {
-            deflate_stored(s, flush) as ::core::ffi::c_uint
+            crate::deflate_stored_at_ffi_boundary!(s, flush) as ::core::ffi::c_uint
         } else if (*s).strategy == crate::zlib_h::Z_HUFFMAN_ONLY {
             crate::deflate_huff_at_ffi_boundary!(s, flush) as ::core::ffi::c_uint
         } else if (*s).strategy == crate::zlib_h::Z_RLE {
             crate::deflate_rle_at_ffi_boundary!(s, flush) as ::core::ffi::c_uint
         } else {
             (match configuration_table[(*s).level as usize].function {
-                DeflateCompressionFunction::Stored => deflate_stored(s, flush),
+                DeflateCompressionFunction::Stored => {
+                    crate::deflate_stored_at_ffi_boundary!(s, flush)
+                }
                 DeflateCompressionFunction::Fast => deflate_fast(s, flush),
                 DeflateCompressionFunction::Slow => deflate_slow(s, flush),
             }) as ::core::ffi::c_uint
@@ -4930,192 +4932,212 @@ pub(crate) fn take_pending_header_len_override(
         .unwrap_or(stored_len)
 }
 
-unsafe extern "C" fn deflate_stored(
-    mut s: *mut crate::src::deflate::deflate_state,
-    mut flush: ::core::ffi::c_int,
-) -> block_state {
-    let (pending_buf_size, w_size, wrap) = {
-        let state = &*s;
-        (state.pending_buf_size, state.w_size, state.wrap)
-    };
-    let mut min_block: ::core::ffi::c_uint = stored_block_min_size(pending_buf_size, w_size);
-    let mut last: ::core::ffi::c_int = 0 as ::core::ffi::c_int;
-    let mut len: ::core::ffi::c_uint = 0;
-    let mut left: ::core::ffi::c_uint = 0;
-    let mut have: ::core::ffi::c_uint = 0;
-    let mut used: ::core::ffi::c_uint = (*(*s).strm).avail_in as ::core::ffi::c_uint;
-    loop {
-        len = MAX_STORED as ::core::ffi::c_uint;
-        let Some(available_output) =
-            stored_block_available_output((*s).bi_valid, (*(*s).strm).avail_out)
-        else {
-            break;
-        };
-        have = available_output;
-        left = stored_block_buffered_len((*s).strstart, (*s).block_start);
-        len = stored_block_payload_len(left, (*(*s).strm).avail_in, have);
-        if stored_block_should_wait(len, min_block, left, (*(*s).strm).avail_in, flush) {
-            break;
-        }
-        last = stored_block_is_last(flush, len, left, (*(*s).strm).avail_in) as ::core::ffi::c_int;
-        // The tree boundary owns the callback-backed pending-storage view.
-        // Tell it to encode this direct-output block's length there, rather
-        // than rewriting four pending bytes through raw interior pointers.
-        (*s).pending_header_len_override = Some(len as crate::zutil_h::ulg);
-        crate::src::trees::_tr_stored_block(
-            s as *mut crate::src::deflate::internal_state,
-            ::core::ptr::null_mut::<crate::stdlib::charf>(),
-            0 as crate::zutil_h::ulg,
-            last,
-        );
-        flush_pending((*s).strm);
-        let (window_len, input_len) = stored_block_copy_lengths(left, len);
-        if window_len != 0 {
-            let window = core::slice::from_raw_parts((*s).window, (*s).window_size as usize);
-            let output =
-                core::slice::from_raw_parts_mut((*(*s).strm).next_out, window_len as usize);
-            if !stored_block_copy_buffered_output(window, output, (*s).block_start, window_len) {
-                return need_more;
+// As with the RLE and Huffman-only strategies, level-zero's remaining raw
+// state, stream, and callback-storage crossings belong to the exported
+// `deflate_ffi` boundary.  Keep this expansion at that boundary until the
+// one-call `DeflateWorkingSet` owns the whole strategy.
+#[macro_export]
+macro_rules! deflate_stored_at_ffi_boundary {
+    ($s:expr, $flush:expr) => {{
+        let mut s = $s;
+        let mut flush = $flush;
+        'stored: {
+            let (pending_buf_size, w_size, wrap) = {
+                let state = &*s;
+                (state.pending_buf_size, state.w_size, state.wrap)
+            };
+            let mut min_block: ::core::ffi::c_uint =
+                stored_block_min_size(pending_buf_size, w_size);
+            let mut last: ::core::ffi::c_int = 0 as ::core::ffi::c_int;
+            let mut len: ::core::ffi::c_uint = 0;
+            let mut left: ::core::ffi::c_uint = 0;
+            let mut have: ::core::ffi::c_uint = 0;
+            let mut used: ::core::ffi::c_uint = (*(*s).strm).avail_in as ::core::ffi::c_uint;
+            loop {
+                len = MAX_STORED as ::core::ffi::c_uint;
+                let Some(available_output) =
+                    stored_block_available_output((*s).bi_valid, (*(*s).strm).avail_out)
+                else {
+                    break;
+                };
+                have = available_output;
+                left = stored_block_buffered_len((*s).strstart, (*s).block_start);
+                len = stored_block_payload_len(left, (*(*s).strm).avail_in, have);
+                if stored_block_should_wait(len, min_block, left, (*(*s).strm).avail_in, flush) {
+                    break;
+                }
+                last = stored_block_is_last(flush, len, left, (*(*s).strm).avail_in)
+                    as ::core::ffi::c_int;
+                // The tree boundary owns the callback-backed pending-storage view.
+                // Tell it to encode this direct-output block's length there, rather
+                // than rewriting four pending bytes through raw interior pointers.
+                (*s).pending_header_len_override = Some(len as crate::zutil_h::ulg);
+                crate::src::trees::_tr_stored_block(
+                    s as *mut crate::src::deflate::internal_state,
+                    ::core::ptr::null_mut::<crate::stdlib::charf>(),
+                    0 as crate::zutil_h::ulg,
+                    last,
+                );
+                flush_pending((*s).strm);
+                let (window_len, input_len) = stored_block_copy_lengths(left, len);
+                if window_len != 0 {
+                    let window =
+                        core::slice::from_raw_parts((*s).window, (*s).window_size as usize);
+                    let output =
+                        core::slice::from_raw_parts_mut((*(*s).strm).next_out, window_len as usize);
+                    if !stored_block_copy_buffered_output(
+                        window,
+                        output,
+                        (*s).block_start,
+                        window_len,
+                    ) {
+                        break 'stored need_more;
+                    }
+                    (*(*s).strm).next_out = (*(*s).strm).next_out.offset(window_len as isize);
+                    (*(*s).strm).avail_out = (*(*s).strm).avail_out.wrapping_sub(window_len);
+                    (*(*s).strm).total_out = (*(*s).strm)
+                        .total_out
+                        .wrapping_add(window_len as crate::stdlib::uLong);
+                    (*s).block_start += window_len as ::core::ffi::c_long;
+                }
+                if input_len != 0 {
+                    read_buf((*s).strm, (*(*s).strm).next_out, input_len, wrap);
+                    (*(*s).strm).next_out = (*(*s).strm).next_out.offset(input_len as isize);
+                    (*(*s).strm).avail_out = (*(*s).strm).avail_out.wrapping_sub(input_len);
+                    (*(*s).strm).total_out = (*(*s).strm)
+                        .total_out
+                        .wrapping_add(input_len as crate::stdlib::uLong);
+                }
+                if !(last == 0 as ::core::ffi::c_int) {
+                    break;
+                }
             }
-            (*(*s).strm).next_out = (*(*s).strm).next_out.offset(window_len as isize);
-            (*(*s).strm).avail_out = (*(*s).strm).avail_out.wrapping_sub(window_len);
-            (*(*s).strm).total_out = (*(*s).strm)
-                .total_out
-                .wrapping_add(window_len as crate::stdlib::uLong);
-            (*s).block_start += window_len as ::core::ffi::c_long;
+            used = used.wrapping_sub((*(*s).strm).avail_in as ::core::ffi::c_uint);
+            if used != 0 {
+                let window =
+                    core::slice::from_raw_parts_mut((*s).window, (*s).window_size as usize);
+                let input = core::slice::from_raw_parts(
+                    (*(*s).strm).next_in.offset(-(used as isize)),
+                    used as usize,
+                );
+                let Some(history) = stored_block_update_history(
+                    window,
+                    input,
+                    used,
+                    (*s).w_size,
+                    (*s).window_size,
+                    StoredHistoryState {
+                        matches: (*s).matches,
+                        strstart: (*s).strstart,
+                        insert: (*s).insert,
+                        block_start: (*s).block_start,
+                    },
+                ) else {
+                    break 'stored need_more;
+                };
+                (*s).matches = history.matches;
+                (*s).strstart = history.strstart;
+                (*s).insert = history.insert;
+                (*s).block_start = history.block_start;
+            }
+            if (*s).high_water < (*s).strstart as crate::zutil_h::ulg {
+                (*s).high_water = (*s).strstart as crate::zutil_h::ulg;
+            }
+            if last != 0 {
+                (*s).bi_used = 8 as ::core::ffi::c_int;
+                break 'stored finish_done;
+            }
+            if flush != crate::zlib_h::Z_NO_FLUSH
+                && flush != crate::zlib_h::Z_FINISH
+                && (*(*s).strm).avail_in == 0 as crate::stdlib::uInt
+                && (*s).strstart as ::core::ffi::c_long == (*s).block_start
+            {
+                break 'stored block_done;
+            }
+            have = (*s)
+                .window_size
+                .wrapping_sub((*s).strstart as crate::zutil_h::ulg)
+                as ::core::ffi::c_uint;
+            if (*(*s).strm).avail_in > have
+                && (*s).block_start >= (*s).w_size as ::core::ffi::c_long
+            {
+                (*s).block_start -= (*s).w_size as ::core::ffi::c_long;
+                (*s).strstart = (*s).strstart.wrapping_sub((*s).w_size);
+                crate::stdlib::memcpy(
+                    (*s).window as *mut ::core::ffi::c_void,
+                    (*s).window.offset((*s).w_size as isize) as *const ::core::ffi::c_void,
+                    (*s).strstart as crate::__stddef_size_t_h::size_t,
+                );
+                if (*s).matches < 2 as crate::stdlib::uInt {
+                    (*s).matches = (*s).matches.wrapping_add(1);
+                }
+                have = have.wrapping_add((*s).w_size as ::core::ffi::c_uint);
+                if (*s).insert > (*s).strstart {
+                    (*s).insert = (*s).strstart;
+                }
+            }
+            if have > (*(*s).strm).avail_in {
+                have = (*(*s).strm).avail_in as ::core::ffi::c_uint;
+            }
+            if have != 0 {
+                read_buf(
+                    (*s).strm,
+                    (*s).window.wrapping_add((*s).strstart as usize),
+                    have,
+                    wrap,
+                );
+                (*s).strstart = (*s).strstart.wrapping_add(have);
+                (*s).insert = stored_insert_after_input((*s).insert, (*s).w_size, have);
+            }
+            if (*s).high_water < (*s).strstart as crate::zutil_h::ulg {
+                (*s).high_water = (*s).strstart as crate::zutil_h::ulg;
+            }
+            have = stored_block_header_bytes((*s).bi_valid);
+            have = (if (*s)
+                .pending_buf_size
+                .wrapping_sub(have as crate::zutil_h::ulg)
+                > 65535 as crate::zutil_h::ulg
+            {
+                65535 as crate::zutil_h::ulg
+            } else {
+                (*s).pending_buf_size
+                    .wrapping_sub(have as crate::zutil_h::ulg)
+            }) as ::core::ffi::c_uint;
+            min_block = if have > (*s).w_size {
+                (*s).w_size as ::core::ffi::c_uint
+            } else {
+                have
+            };
+            left = stored_block_buffered_len((*s).strstart, (*s).block_start);
+            if stored_block_can_emit(left, min_block, flush, (*(*s).strm).avail_in, have) {
+                len = if left > have { have } else { left };
+                last = if flush == crate::zlib_h::Z_FINISH
+                    && (*(*s).strm).avail_in == 0 as crate::stdlib::uInt
+                    && len == left
+                {
+                    1 as ::core::ffi::c_int
+                } else {
+                    0 as ::core::ffi::c_int
+                };
+                crate::src::trees::_tr_stored_block(
+                    s as *mut crate::src::deflate::internal_state,
+                    ((*s).window as *mut crate::stdlib::charf).offset((*s).block_start as isize),
+                    len as crate::zutil_h::ulg,
+                    last,
+                );
+                (*s).block_start += len as ::core::ffi::c_long;
+                flush_pending((*s).strm);
+            }
+            if last != 0 {
+                (*s).bi_used = 8 as ::core::ffi::c_int;
+            }
+            break 'stored (if last != 0 {
+                finish_started as ::core::ffi::c_int
+            } else {
+                need_more as ::core::ffi::c_int
+            }) as block_state;
         }
-        if input_len != 0 {
-            read_buf((*s).strm, (*(*s).strm).next_out, input_len, wrap);
-            (*(*s).strm).next_out = (*(*s).strm).next_out.offset(input_len as isize);
-            (*(*s).strm).avail_out = (*(*s).strm).avail_out.wrapping_sub(input_len);
-            (*(*s).strm).total_out = (*(*s).strm)
-                .total_out
-                .wrapping_add(input_len as crate::stdlib::uLong);
-        }
-        if !(last == 0 as ::core::ffi::c_int) {
-            break;
-        }
-    }
-    used = used.wrapping_sub((*(*s).strm).avail_in as ::core::ffi::c_uint);
-    if used != 0 {
-        let window = core::slice::from_raw_parts_mut((*s).window, (*s).window_size as usize);
-        let input = core::slice::from_raw_parts(
-            (*(*s).strm).next_in.offset(-(used as isize)),
-            used as usize,
-        );
-        let Some(history) = stored_block_update_history(
-            window,
-            input,
-            used,
-            (*s).w_size,
-            (*s).window_size,
-            StoredHistoryState {
-                matches: (*s).matches,
-                strstart: (*s).strstart,
-                insert: (*s).insert,
-                block_start: (*s).block_start,
-            },
-        ) else {
-            return need_more;
-        };
-        (*s).matches = history.matches;
-        (*s).strstart = history.strstart;
-        (*s).insert = history.insert;
-        (*s).block_start = history.block_start;
-    }
-    if (*s).high_water < (*s).strstart as crate::zutil_h::ulg {
-        (*s).high_water = (*s).strstart as crate::zutil_h::ulg;
-    }
-    if last != 0 {
-        (*s).bi_used = 8 as ::core::ffi::c_int;
-        return finish_done;
-    }
-    if flush != crate::zlib_h::Z_NO_FLUSH
-        && flush != crate::zlib_h::Z_FINISH
-        && (*(*s).strm).avail_in == 0 as crate::stdlib::uInt
-        && (*s).strstart as ::core::ffi::c_long == (*s).block_start
-    {
-        return block_done;
-    }
-    have = (*s)
-        .window_size
-        .wrapping_sub((*s).strstart as crate::zutil_h::ulg) as ::core::ffi::c_uint;
-    if (*(*s).strm).avail_in > have && (*s).block_start >= (*s).w_size as ::core::ffi::c_long {
-        (*s).block_start -= (*s).w_size as ::core::ffi::c_long;
-        (*s).strstart = (*s).strstart.wrapping_sub((*s).w_size);
-        crate::stdlib::memcpy(
-            (*s).window as *mut ::core::ffi::c_void,
-            (*s).window.offset((*s).w_size as isize) as *const ::core::ffi::c_void,
-            (*s).strstart as crate::__stddef_size_t_h::size_t,
-        );
-        if (*s).matches < 2 as crate::stdlib::uInt {
-            (*s).matches = (*s).matches.wrapping_add(1);
-        }
-        have = have.wrapping_add((*s).w_size as ::core::ffi::c_uint);
-        if (*s).insert > (*s).strstart {
-            (*s).insert = (*s).strstart;
-        }
-    }
-    if have > (*(*s).strm).avail_in {
-        have = (*(*s).strm).avail_in as ::core::ffi::c_uint;
-    }
-    if have != 0 {
-        read_buf(
-            (*s).strm,
-            (*s).window.wrapping_add((*s).strstart as usize),
-            have,
-            wrap,
-        );
-        (*s).strstart = (*s).strstart.wrapping_add(have);
-        (*s).insert = stored_insert_after_input((*s).insert, (*s).w_size, have);
-    }
-    if (*s).high_water < (*s).strstart as crate::zutil_h::ulg {
-        (*s).high_water = (*s).strstart as crate::zutil_h::ulg;
-    }
-    have = stored_block_header_bytes((*s).bi_valid);
-    have = (if (*s)
-        .pending_buf_size
-        .wrapping_sub(have as crate::zutil_h::ulg)
-        > 65535 as crate::zutil_h::ulg
-    {
-        65535 as crate::zutil_h::ulg
-    } else {
-        (*s).pending_buf_size
-            .wrapping_sub(have as crate::zutil_h::ulg)
-    }) as ::core::ffi::c_uint;
-    min_block = if have > (*s).w_size {
-        (*s).w_size as ::core::ffi::c_uint
-    } else {
-        have
-    };
-    left = stored_block_buffered_len((*s).strstart, (*s).block_start);
-    if stored_block_can_emit(left, min_block, flush, (*(*s).strm).avail_in, have) {
-        len = if left > have { have } else { left };
-        last = if flush == crate::zlib_h::Z_FINISH
-            && (*(*s).strm).avail_in == 0 as crate::stdlib::uInt
-            && len == left
-        {
-            1 as ::core::ffi::c_int
-        } else {
-            0 as ::core::ffi::c_int
-        };
-        crate::src::trees::_tr_stored_block(
-            s as *mut crate::src::deflate::internal_state,
-            ((*s).window as *mut crate::stdlib::charf).offset((*s).block_start as isize),
-            len as crate::zutil_h::ulg,
-            last,
-        );
-        (*s).block_start += len as ::core::ffi::c_long;
-        flush_pending((*s).strm);
-    }
-    if last != 0 {
-        (*s).bi_used = 8 as ::core::ffi::c_int;
-    }
-    return (if last != 0 {
-        finish_started as ::core::ffi::c_int
-    } else {
-        need_more as ::core::ffi::c_int
-    }) as block_state;
+    }};
 }
 
 unsafe extern "C" fn deflate_fast(
