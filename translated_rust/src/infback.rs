@@ -77,8 +77,6 @@ pub unsafe extern "C" fn inflateBackInit__ffi(
     mut version: *const ::core::ffi::c_char,
     mut stream_size: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
-    let mut state: *mut crate::src::inflate::inflate_state =
-        ::core::ptr::null_mut::<crate::src::inflate::inflate_state>();
     if version.is_null()
         || *version as ::core::ffi::c_int
             != crate::zlib_h::ZLIB_VERSION[0 as ::core::ffi::c_int as usize] as ::core::ffi::c_int
@@ -93,34 +91,40 @@ pub unsafe extern "C" fn inflateBackInit__ffi(
     {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    let strm_ref = &mut *strm;
-    strm_ref.msg = ::core::ptr::null_mut::<::core::ffi::c_char>();
-    if strm_ref.zalloc.is_none() {
-        strm_ref.zalloc = Some(
-            crate::src::zutil::zcalloc_ffi
-                as unsafe extern "C" fn(
-                    crate::stdlib::voidpf,
-                    ::core::ffi::c_uint,
-                    ::core::ffi::c_uint,
-                ) -> crate::stdlib::voidpf,
-        ) as crate::zlib_h::alloc_func;
-        strm_ref.opaque = ::core::ptr::null_mut::<::core::ffi::c_void>();
-    }
-    if strm_ref.zfree.is_none() {
-        strm_ref.zfree = Some(
-            crate::src::zutil::zcfree_ffi
-                as unsafe extern "C" fn(crate::stdlib::voidpf, crate::stdlib::voidpf) -> (),
-        ) as crate::zlib_h::free_func;
-    }
-    state = Some(strm_ref.zalloc.expect("non-null function pointer"))
-        .expect("non-null function pointer")(
-        strm_ref.opaque,
+    let (zalloc, opaque) = {
+        let strm_ref = &mut *strm;
+        strm_ref.msg = ::core::ptr::null_mut::<::core::ffi::c_char>();
+        if strm_ref.zalloc.is_none() {
+            strm_ref.zalloc = Some(
+                crate::src::zutil::zcalloc_ffi
+                    as unsafe extern "C" fn(
+                        crate::stdlib::voidpf,
+                        ::core::ffi::c_uint,
+                        ::core::ffi::c_uint,
+                    ) -> crate::stdlib::voidpf,
+            ) as crate::zlib_h::alloc_func;
+            strm_ref.opaque = ::core::ptr::null_mut::<::core::ffi::c_void>();
+        }
+        if strm_ref.zfree.is_none() {
+            strm_ref.zfree = Some(
+                crate::src::zutil::zcfree_ffi
+                    as unsafe extern "C" fn(crate::stdlib::voidpf, crate::stdlib::voidpf) -> (),
+            ) as crate::zlib_h::free_func;
+        }
+        (
+            strm_ref.zalloc.expect("non-null function pointer"),
+            strm_ref.opaque,
+        )
+    };
+    let state = zalloc(
+        opaque,
         1 as crate::stdlib::uInt,
         ::core::mem::size_of::<crate::src::inflate::inflate_state>() as crate::stdlib::uInt,
     ) as *mut crate::src::inflate::inflate_state;
     if state.is_null() {
         return crate::zlib_h::Z_MEM_ERROR;
     }
+    let strm_ref = &mut *strm;
     strm_ref.state = state as *mut crate::src::deflate::internal_state;
     let state_ref = &mut *state;
     state_ref.dmax = 32768 as ::core::ffi::c_uint;
@@ -909,14 +913,19 @@ pub unsafe extern "C" fn inflateBackEnd_ffi(
     if strm.is_null() {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    let strm_ref = &mut *strm;
-    if strm_ref.state.is_null() || strm_ref.zfree.is_none() {
-        return crate::zlib_h::Z_STREAM_ERROR;
-    }
-    let zfree = strm_ref.zfree.expect("non-null function pointer");
-    let opaque = strm_ref.opaque;
-    let state = strm_ref.state;
+    let (zfree, opaque, state) = {
+        let strm_ref = &mut *strm;
+        if strm_ref.state.is_null() || strm_ref.zfree.is_none() {
+            return crate::zlib_h::Z_STREAM_ERROR;
+        }
+        (
+            strm_ref.zfree.expect("non-null function pointer"),
+            strm_ref.opaque,
+            strm_ref.state,
+        )
+    };
     zfree(opaque, state as crate::stdlib::voidpf);
+    let strm_ref = &mut *strm;
     strm_ref.state = ::core::ptr::null_mut::<crate::src::deflate::internal_state>();
     return crate::zlib_h::Z_OK;
 }
