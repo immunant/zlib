@@ -558,8 +558,9 @@ pub(crate) fn gz_comp_needs_write(
 }
 
 // Describe a compression-output drain before the raw write adapter touches
-// the descriptor or advances its buffer pointer.  Address arithmetic avoids
-// making a provenance-dependent pointer subtraction part of that adapter.
+// the descriptor or advances its buffer pointer.  Write-mode gzip does not
+// use `x.have` for read buffering, so it tracks the queued output count and
+// avoids recovering it by subtracting raw buffer addresses.
 pub(crate) struct GzCompOutputPlan {
     pub reset: bool,
 }
@@ -567,11 +568,7 @@ pub(crate) struct GzCompOutputPlan {
 pub(crate) fn gz_comp_output_pending(
     state: &crate::gzguts_h::gz_state,
 ) -> ::core::ffi::c_uint {
-    state
-        .strm
-        .next_out
-        .addr()
-        .wrapping_sub(state.x.next.addr()) as ::core::ffi::c_uint
+    state.x.have
 }
 
 // Keep the request sizing for the two gz_comp write adapters with the
@@ -594,6 +591,17 @@ pub(crate) fn gz_comp_output_write_progress(
     written: ::core::ffi::c_uint,
 ) {
     state.x.next = state.x.next.wrapping_add(written as usize);
+    state.x.have = state.x.have.wrapping_sub(written);
+}
+
+// Record bytes produced by the deflater after the raw call has advanced its
+// output cursor.  The queue count remains the source of truth for later
+// descriptor writes, leaving that adapter free of pointer-difference logic.
+pub(crate) fn gz_comp_output_produced(
+    state: &mut crate::gzguts_h::gz_state,
+    produced: ::core::ffi::c_uint,
+) {
+    state.x.have = state.x.have.wrapping_add(produced);
 }
 
 pub(crate) fn gz_comp_output_plan(
@@ -613,6 +621,7 @@ pub(crate) fn gz_comp_reset_output(state: &mut crate::gzguts_h::gz_state) {
     gz_reset_output_buffer(state);
     state.strm.next_out = state.out;
     state.x.next = state.out;
+    state.x.have = 0;
 }
 
 pub(crate) fn gz_comp_should_reset(flush: ::core::ffi::c_int) -> bool {

@@ -198,7 +198,7 @@ fn gz_comp(
     ret = crate::zlib_h::Z_OK;
     loop {
         if let Some(plan) = crate::src::gzlib::gz_comp_output_plan(state, flush, ret) {
-            while state.strm.next_out > state.x.next {
+            while crate::src::gzlib::gz_comp_output_pending(state) != 0 {
                 // SAFETY: the output plan bounds the pending range from
                 // `x.next`, and this scope owns the descriptor/errno bridge
                 // for draining that initialized output buffer.
@@ -245,6 +245,7 @@ fn gz_comp(
             return -1 as ::core::ffi::c_int;
         }
         have = crate::src::gzlib::gz_produced(have, state.strm.avail_out);
+        crate::src::gzlib::gz_comp_output_produced(state, have);
         if have == 0 {
             break;
         }
