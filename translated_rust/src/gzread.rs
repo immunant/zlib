@@ -142,6 +142,13 @@ fn gz_avail_action(
     }
 }
 
+fn gz_avail_refill_len(
+    size: ::core::ffi::c_uint,
+    avail_in: crate::stdlib::uInt,
+) -> ::core::ffi::c_uint {
+    size.wrapping_sub(avail_in as ::core::ffi::c_uint)
+}
+
 fn gz_fread_request_len(
     size: crate::stdlib::z_size_t,
     nitems: crate::stdlib::z_size_t,
@@ -471,9 +478,7 @@ unsafe extern "C" fn gz_avail(mut state: crate::gzguts_h::gz_statep) -> ::core::
             if gz_load(
                 state,
                 (*state).in_0.wrapping_add((*strm).avail_in as usize),
-                (*state)
-                    .size
-                    .wrapping_sub((*strm).avail_in as ::core::ffi::c_uint),
+                gz_avail_refill_len((*state).size, (*strm).avail_in),
                 &raw mut got,
             ) == -1 as ::core::ffi::c_int
             {
@@ -1054,6 +1059,12 @@ mod tests {
                 compact_input: true
             }
         );
+    }
+
+    #[test]
+    fn gz_avail_refill_len_preserves_remaining_buffer_wrapping() {
+        assert_eq!(gz_avail_refill_len(16, 4), 12);
+        assert_eq!(gz_avail_refill_len(0, 1), ::core::ffi::c_uint::MAX);
     }
 
     #[test]

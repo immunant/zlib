@@ -2403,6 +2403,14 @@ fn syncsearch_safe(have: &mut ::core::ffi::c_uint, buf: &[::core::ffi::c_uchar])
     *have = got;
     next
 }
+
+fn inflate_sync_remaining_input(
+    input: &[::core::ffi::c_uchar],
+    consumed: usize,
+) -> &[::core::ffi::c_uchar] {
+    &input[consumed..]
+}
+
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 enum InflateSyncSearch {
     BufferError,
@@ -2474,7 +2482,10 @@ pub unsafe extern "C" fn inflateSync_ffi(mut strm: crate::zlib_h::z_streamp) -> 
     (*strm).avail_in = (*strm)
         .avail_in
         .wrapping_sub(consumed as crate::stdlib::uInt);
-    (*strm).next_in = (*strm).next_in.offset(consumed as isize);
+    if consumed != 0 {
+        (*strm).next_in =
+            inflate_sync_remaining_input(input, consumed).as_ptr() as *mut ::core::ffi::c_uchar;
+    }
     (*strm).total_in = (*strm)
         .total_in
         .wrapping_add(consumed as crate::stdlib::uLong);
@@ -2703,11 +2714,12 @@ mod tests {
         inflate_mark_value, inflate_mode_data_type_flags, inflate_mode_is_valid,
         inflate_needs_buffer_error, inflate_prime_update, inflate_reset2_params,
         inflate_should_update_window, inflate_state_metadata_is_valid,
-        inflate_stream_has_allocator_callbacks, inflate_sync_point_value, inflate_sync_search_core,
-        inflate_undermine_core, inflate_validate_wrap, initial_window_metadata,
-        stored_block_length, syncsearch_safe, window_needs_allocation, window_update_plan,
-        InflateBlockKind, InflateCopyProgress, InflatePrimeUpdate, InflateSyncSearch, BAD, CHECK,
-        CODE_LENGTH_ORDER, COPY_, COPY_1, HEAD, LEN_, MATCH, STORED, SYNC, TYPE,
+        inflate_stream_has_allocator_callbacks, inflate_sync_point_value,
+        inflate_sync_remaining_input, inflate_sync_search_core, inflate_undermine_core,
+        inflate_validate_wrap, initial_window_metadata, stored_block_length, syncsearch_safe,
+        window_needs_allocation, window_update_plan, InflateBlockKind, InflateCopyProgress,
+        InflatePrimeUpdate, InflateSyncSearch, BAD, CHECK, CODE_LENGTH_ORDER, COPY_, COPY_1, HEAD,
+        LEN_, MATCH, STORED, SYNC, TYPE,
     };
 
     #[test]
@@ -2949,6 +2961,15 @@ mod tests {
             ::core::ffi::c_uint::MAX,
             1,
         ));
+    }
+
+    #[test]
+    fn inflate_sync_remaining_input_uses_consumed_slice_prefix() {
+        let input = *b"marker";
+
+        assert_eq!(inflate_sync_remaining_input(&input, 0), b"marker");
+        assert_eq!(inflate_sync_remaining_input(&input, 2), b"rker");
+        assert_eq!(inflate_sync_remaining_input(&input, input.len()), b"");
     }
 
     #[test]

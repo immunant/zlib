@@ -3649,6 +3649,17 @@ fn pending_cursor_after_bytes(pending: crate::zutil_h::ulg, count: usize) -> cra
     pending.wrapping_add(count as crate::zutil_h::ulg)
 }
 
+fn tally_symbol_bytes(
+    dist: ::core::ffi::c_uint,
+    lc: ::core::ffi::c_uint,
+) -> [crate::zutil_h::uchf; 3] {
+    [
+        dist as crate::zutil_h::uch as crate::zutil_h::uchf,
+        (dist >> 8 as ::core::ffi::c_int) as crate::zutil_h::uch as crate::zutil_h::uchf,
+        lc as crate::zutil_h::uch as crate::zutil_h::uchf,
+    ]
+}
+
 unsafe extern "C" fn bi_flush(mut s: *mut crate::src::deflate::deflate_state) {
     let (count, bytes) = bi_flush_core(&mut (*s).bi_buf, &mut (*s).bi_valid);
     let pending = (*s).pending;
@@ -5060,18 +5071,13 @@ pub unsafe extern "C" fn _tr_tally(
     mut dist: ::core::ffi::c_uint,
     mut lc: ::core::ffi::c_uint,
 ) -> ::core::ffi::c_int {
-    let c2rust_fresh0 = (*s).sym_next;
-    (*s).sym_next = (*s).sym_next.wrapping_add(1);
-    *(*s).sym_buf.offset(c2rust_fresh0 as isize) =
-        dist as crate::zutil_h::uch as crate::zutil_h::uchf;
-    let c2rust_fresh1 = (*s).sym_next;
-    (*s).sym_next = (*s).sym_next.wrapping_add(1);
-    *(*s).sym_buf.offset(c2rust_fresh1 as isize) =
-        (dist >> 8 as ::core::ffi::c_int) as crate::zutil_h::uch as crate::zutil_h::uchf;
-    let c2rust_fresh2 = (*s).sym_next;
-    (*s).sym_next = (*s).sym_next.wrapping_add(1);
-    *(*s).sym_buf.offset(c2rust_fresh2 as isize) =
-        lc as crate::zutil_h::uch as crate::zutil_h::uchf;
+    let symbol_bytes = tally_symbol_bytes(dist, lc);
+    let sym_next = (*s).sym_next;
+    for (index, byte) in symbol_bytes.into_iter().enumerate() {
+        let cursor = sym_next.wrapping_add(index as crate::stdlib::uInt);
+        *(*s).sym_buf.offset(cursor as isize) = byte;
+    }
+    (*s).sym_next = sym_next.wrapping_add(symbol_bytes.len() as crate::stdlib::uInt);
     if dist == 0 as ::core::ffi::c_uint {
         (*s).dyn_ltree[lc as usize].fc.value = (*s).dyn_ltree[lc as usize].fc.value.wrapping_add(1);
     } else {
@@ -5112,7 +5118,7 @@ mod tests {
     use super::{
         bi_flush_core, bi_reverse, bi_windup_core, bl_order, detect_data_type_from_ltree,
         dist_code_index, next_code_for_len, next_codes, pending_cursor_after_bytes,
-        tree_run_limits, MAX_BITS,
+        tally_symbol_bytes, tree_run_limits, MAX_BITS,
     };
 
     fn ltree_with_frequency(
@@ -5240,5 +5246,11 @@ mod tests {
         assert_eq!(pending_cursor_after_bytes(5, 0), 5);
         assert_eq!(pending_cursor_after_bytes(5, 2), 7);
         assert_eq!(pending_cursor_after_bytes(crate::zutil_h::ulg::MAX, 2), 1);
+    }
+
+    #[test]
+    fn tally_symbol_encoding_preserves_little_endian_distance_bytes() {
+        assert_eq!(tally_symbol_bytes(0x1234, 0x56), [0x34, 0x12, 0x56]);
+        assert_eq!(tally_symbol_bytes(0x1_00ff, 0x1_0001), [0xff, 0x00, 0x01]);
     }
 }
