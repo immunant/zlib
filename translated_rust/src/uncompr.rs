@@ -90,6 +90,28 @@ fn has_invalid_uncompress_buffers(
 }
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
+struct UncompressOutcome {
+    status: ::core::ffi::c_int,
+    source_len: crate::stdlib::z_size_t,
+    dest_len: crate::stdlib::z_size_t,
+}
+
+fn uncompress_outcome(
+    err: ::core::ffi::c_int,
+    input_progress: ChunkedProgress,
+    input_available: crate::stdlib::uInt,
+    output_progress: ChunkedProgress,
+    output_available: crate::stdlib::uInt,
+) -> UncompressOutcome {
+    let input_remaining = input_progress.remaining(input_available);
+    UncompressOutcome {
+        status: normalize_uncompress_status(err, input_remaining),
+        source_len: input_progress.consumed(input_available),
+        dest_len: output_progress.consumed(output_available),
+    }
+}
+
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
 struct LegacyUncompressLengths {
     dest: crate::stdlib::z_size_t,
     source: crate::stdlib::z_size_t,
@@ -176,12 +198,17 @@ pub unsafe extern "C" fn uncompress2_z_ffi(
             break err;
         }
     };
-    let input_remaining = input_progress.remaining(stream.avail_in);
-    let status = normalize_uncompress_status(err, input_remaining);
-    *sourceLen = input_progress.consumed(stream.avail_in);
-    *destLen = output_progress.consumed(stream.avail_out);
+    let outcome = uncompress_outcome(
+        err,
+        input_progress,
+        stream.avail_in,
+        output_progress,
+        stream.avail_out,
+    );
+    *sourceLen = outcome.source_len;
+    *destLen = outcome.dest_len;
     crate::src::inflate::inflateEnd(&raw mut stream as *mut crate::zlib_h::z_stream_s);
-    status
+    outcome.status
 }
 
 #[export_name = "uncompress2"]
@@ -228,7 +255,10 @@ pub unsafe extern "C" fn uncompress_ffi(
 
 #[cfg(test)]
 mod tests {
-    use super::{has_invalid_uncompress_buffers, ChunkedProgress, LegacyUncompressLengths};
+    use super::{
+        has_invalid_uncompress_buffers, uncompress_outcome, ChunkedProgress,
+        LegacyUncompressLengths,
+    };
 
     #[test]
     fn buffer_validation_allows_null_pointers_for_empty_buffers() {
@@ -302,5 +332,27 @@ mod tests {
         assert_eq!(available, 0);
         assert_eq!(progress.remaining(available), 0);
         assert_eq!(progress.consumed(available), 0);
+    }
+
+    #[test]
+    fn outcome_reports_normalized_status_and_progress() {
+        let mut input = ChunkedProgress::new(10);
+        let mut output = ChunkedProgress::new(8);
+        let mut input_available = 0;
+        let mut output_available = 0;
+        input.replenish(&mut input_available);
+        output.replenish(&mut output_available);
+
+        let outcome = uncompress_outcome(
+            crate::zlib_h::Z_STREAM_END,
+            input,
+            4,
+            output,
+            3,
+        );
+
+        assert_eq!(outcome.status, crate::zlib_h::Z_OK);
+        assert_eq!(outcome.source_len, 6);
+        assert_eq!(outcome.dest_len, 5);
     }
 }

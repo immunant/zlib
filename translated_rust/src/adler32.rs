@@ -39,6 +39,23 @@ fn reduce(adler: u64, sum2: u64) -> (u64, u64) {
     (adler % BASE_U64, sum2 % BASE_U64)
 }
 
+fn reduce_combine_sums(mut sum1: u64, mut sum2: u64) -> (u64, u64) {
+    if sum1 >= BASE_U64 {
+        sum1 -= BASE_U64;
+    }
+    if sum1 >= BASE_U64 {
+        sum1 -= BASE_U64;
+    }
+    if sum2 >= BASE_U64 << 1 {
+        sum2 -= BASE_U64 << 1;
+    }
+    if sum2 >= BASE_U64 {
+        sum2 -= BASE_U64;
+    }
+
+    (sum1, sum2)
+}
+
 pub fn adler32_z(adler: uLong, buf: &[Bytef]) -> uLong {
     let adler = adler as u64;
     let mut sum2 = (adler >> 16) & 0xffff;
@@ -70,18 +87,7 @@ fn adler32_combine_(adler1: uLong, adler2: uLong, len2: off64_t) -> uLong {
     sum1 += (adler2 as u64 & 0xffff) + BASE_U64 - 1;
     sum2 += ((adler1 as u64 >> 16) & 0xffff) + ((adler2 as u64 >> 16) & 0xffff) + BASE_U64 - rem;
 
-    if sum1 >= BASE_U64 {
-        sum1 -= BASE_U64;
-    }
-    if sum1 >= BASE_U64 {
-        sum1 -= BASE_U64;
-    }
-    if sum2 >= BASE_U64 << 1 {
-        sum2 -= BASE_U64 << 1;
-    }
-    if sum2 >= BASE_U64 {
-        sum2 -= BASE_U64;
-    }
+    (sum1, sum2) = reduce_combine_sums(sum1, sum2);
 
     (sum1 | sum2 << 16) as uLong
 }
@@ -162,6 +168,21 @@ mod tests {
             let buf = &input[..len];
             assert_eq!(adler32_z(seed, buf), reference_adler32(seed, buf));
         }
+    }
+
+    #[test]
+    fn reduces_combine_sums_across_conditional_boundaries() {
+        assert_eq!(
+            reduce_combine_sums(BASE_U64 - 1, BASE_U64 - 1),
+            (BASE_U64 - 1, BASE_U64 - 1)
+        );
+        assert_eq!(reduce_combine_sums(BASE_U64, BASE_U64), (0, 0));
+        assert_eq!(reduce_combine_sums(BASE_U64 << 1, BASE_U64 << 1), (0, 0));
+        assert_eq!(
+            reduce_combine_sums((BASE_U64 << 1) - 1, (BASE_U64 << 1) - 1),
+            (BASE_U64 - 1, BASE_U64 - 1),
+        );
+        assert_eq!(reduce_combine_sums(BASE_U64 << 1, BASE_U64 * 3), (0, 0));
     }
 
     #[test]

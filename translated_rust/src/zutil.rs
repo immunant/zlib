@@ -30,15 +30,17 @@ pub unsafe extern "C" fn zlibVersion_ffi() -> *const ::core::ffi::c_char {
     zlib_version().as_ptr()
 }
 
-fn size_flag<T>(shift: u32) -> crate::stdlib::uLong {
-    let flag = match ::core::mem::size_of::<T>() {
+fn size_class(bytes: usize) -> crate::stdlib::uLong {
+    match bytes {
         2 => 0,
         4 => 1,
         8 => 2,
         _ => 3,
-    };
+    }
+}
 
-    (flag as crate::stdlib::uLong) << shift
+fn size_flag<T>(shift: u32) -> crate::stdlib::uLong {
+    size_class(::core::mem::size_of::<T>()) << shift
 }
 
 fn zlib_compile_flags() -> crate::stdlib::uLong {
@@ -75,9 +77,13 @@ enum AllocationRequest {
     Calloc { items: size_t, size: size_t },
 }
 
+fn allocation_byte_count(items: ::core::ffi::c_uint, size: ::core::ffi::c_uint) -> size_t {
+    items.wrapping_mul(size) as size_t
+}
+
 fn allocation_request(items: ::core::ffi::c_uint, size: ::core::ffi::c_uint) -> AllocationRequest {
     if ::core::mem::size_of::<crate::stdlib::uInt>() > 2 {
-        AllocationRequest::Malloc(items.wrapping_mul(size) as size_t)
+        AllocationRequest::Malloc(allocation_byte_count(items, size))
     } else {
         AllocationRequest::Calloc {
             items: items as size_t,
@@ -108,8 +114,8 @@ pub unsafe extern "C" fn zcfree_ffi(opaque: crate::stdlib::voidpf, ptr: crate::s
 #[cfg(test)]
 mod tests {
     use super::{
-        allocation_request, error_message_index, has_error_message_index, zlib_version,
-        AllocationRequest,
+        allocation_byte_count, allocation_request, error_message_index, has_error_message_index,
+        size_class, size_flag, size_t, zlib_version, AllocationRequest,
     };
 
     #[test]
@@ -132,6 +138,30 @@ mod tests {
     #[test]
     fn version_is_nul_terminated() {
         assert_eq!(zlib_version().last(), Some(&0));
+    }
+
+    #[test]
+    fn size_class_normalizes_supported_and_other_sizes() {
+        assert_eq!(size_class(2), 0);
+        assert_eq!(size_class(4), 1);
+        assert_eq!(size_class(8), 2);
+        assert_eq!(size_class(1), 3);
+        assert_eq!(size_class(16), 3);
+    }
+
+    #[test]
+    fn size_flag_places_the_size_class_at_the_requested_offset() {
+        assert_eq!(size_flag::<u16>(0), 0);
+        assert_eq!(size_flag::<u32>(2), 4);
+        assert_eq!(size_flag::<u64>(4), 32);
+    }
+
+    #[test]
+    fn allocation_byte_count_preserves_c_uint_wrapping() {
+        assert_eq!(
+            allocation_byte_count(::core::ffi::c_uint::MAX, 2),
+            ::core::ffi::c_uint::MAX.wrapping_mul(2) as size_t
+        );
     }
 
     #[test]

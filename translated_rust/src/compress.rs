@@ -40,6 +40,14 @@ fn compress2_buffers_are_valid(
     !(source_len > 0 && source_is_null || dest_capacity > 0 && dest_is_null)
 }
 
+fn normalize_compress_status(status: ::core::ffi::c_int) -> ::core::ffi::c_int {
+    if status == crate::zlib_h::Z_STREAM_END {
+        crate::zlib_h::Z_OK
+    } else {
+        status
+    }
+}
+
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 struct CompressProgress {
     total: usize,
@@ -61,6 +69,14 @@ impl CompressProgress {
 
     fn is_final_chunk(self, scheduled: usize) -> bool {
         scheduled == self.remaining()
+    }
+
+    fn flush_mode(self, scheduled: usize) -> ::core::ffi::c_int {
+        if self.is_final_chunk(scheduled) {
+            crate::zlib_h::Z_FINISH
+        } else {
+            crate::zlib_h::Z_NO_FLUSH
+        }
     }
 
     fn record_available(&mut self, scheduled: usize, available: crate::stdlib::uInt) {
@@ -172,11 +188,7 @@ pub unsafe extern "C" fn compress2_z_ffi(
 
         let status = crate::src::deflate::deflate(
             &mut stream,
-            if source_progress.is_final_chunk(input_len) {
-                crate::zlib_h::Z_FINISH
-            } else {
-                crate::zlib_h::Z_NO_FLUSH
-            },
+            source_progress.flush_mode(input_len),
         );
         source_progress.record_available(input_len, stream.avail_in);
         dest_progress.record_available(output_len, stream.avail_out);
@@ -188,11 +200,7 @@ pub unsafe extern "C" fn compress2_z_ffi(
 
     *destLen = dest_progress.used;
     crate::src::deflate::deflateEnd(&mut stream);
-    if status == crate::zlib_h::Z_STREAM_END {
-        crate::zlib_h::Z_OK
-    } else {
-        status
-    }
+    normalize_compress_status(status)
 }
 
 #[export_name = "compress2"]
@@ -268,8 +276,8 @@ pub unsafe extern "C" fn compressBound_ffi(
 #[cfg(test)]
 mod tests {
     use super::{
-        compress2_buffers_are_valid, compress_bound, compress_bound_z_impl, CompressProgress,
-        MAX_CHUNK,
+        compress2_buffers_are_valid, compress_bound, compress_bound_z_impl,
+        normalize_compress_status, CompressProgress, MAX_CHUNK,
     };
 
     #[test]
@@ -310,6 +318,28 @@ mod tests {
         progress.record_available(5, 0);
         assert_eq!(progress.used, total);
         assert_eq!(progress.remaining(), 0);
+    }
+
+    #[test]
+    fn progress_selects_finish_only_for_the_final_chunk() {
+        let mut progress = CompressProgress::new(4);
+        assert_eq!(progress.flush_mode(3), crate::zlib_h::Z_NO_FLUSH);
+        assert_eq!(progress.flush_mode(4), crate::zlib_h::Z_FINISH);
+
+        progress.record_available(4, 1);
+        assert_eq!(progress.flush_mode(1), crate::zlib_h::Z_FINISH);
+    }
+
+    #[test]
+    fn compress_status_normalization_maps_only_stream_end_to_ok() {
+        assert_eq!(
+            normalize_compress_status(crate::zlib_h::Z_STREAM_END),
+            crate::zlib_h::Z_OK
+        );
+        assert_eq!(
+            normalize_compress_status(crate::zlib_h::Z_STREAM_ERROR),
+            crate::zlib_h::Z_STREAM_ERROR
+        );
     }
 
     #[test]
