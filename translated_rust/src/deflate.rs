@@ -3942,7 +3942,11 @@ unsafe fn deflate_fast(
                     longest_match_state(state, window, prev, hash_head).unwrap_or(0);
             }
         }
-        if (*s).match_length >= crate::zutil_h::MIN_MATCH as crate::stdlib::uInt {
+        let has_match = {
+            let state = &mut *s;
+            state.match_length >= crate::zutil_h::MIN_MATCH as crate::stdlib::uInt
+        };
+        if has_match {
             let state = &mut *s;
             let Ok(symbol_len) = usize::try_from(state.sym_end) else {
                 return need_more;
@@ -4884,7 +4888,11 @@ unsafe fn deflate_rle(
         }
         return finish_done;
     }
-    if (&mut *s).sym_next != 0 {
+    let has_symbols = {
+        let state = &mut *s;
+        state.sym_next != 0
+    };
+    if has_symbols {
         let (block_start, strstart, window) = {
             let state = &mut *s;
             (state.block_start, state.strstart, state.window)
@@ -5041,7 +5049,11 @@ unsafe fn deflate_huff(
         }
         return finish_done;
     }
-    if (&mut *s).sym_next != 0 {
+    let has_symbols = {
+        let state = &mut *s;
+        state.sym_next != 0
+    };
+    if has_symbols {
         let (block_start, strstart, window) = {
             let state = &mut *s;
             (state.block_start, state.strstart, state.window)
