@@ -1031,18 +1031,22 @@ pub unsafe extern "C" fn inflate(
                                                                                                             .wrapping_add(out as ::core::ffi::c_ulong);
                                                                                                         if (*state).wrap & 4 as ::core::ffi::c_int != 0 && out != 0
                                                                                                         {
+                                                                                                            // `output_start` and `out` delimit the same
+                                                                                                            // produced prefix as the translated backwards
+                                                                                                            // cursor, but retain it as one bounded slice.
+                                                                                                            let produced = ::core::slice::from_raw_parts(
+                                                                                                                output_start,
+                                                                                                                out as usize,
+                                                                                                            );
                                                                                                             (*state).check = (if (*state).flags != 0 {
                                                                                                                 crate::src::crc32::crc32_z(
                                                                                                                     (*state).check as crate::stdlib::uLong,
-                                                                                                                    Some(::core::slice::from_raw_parts(
-                                                                                                                        put.offset(-(out as isize)),
-                                                                                                                        out as usize,
-                                                                                                                    )),
+                                                                                                                    Some(produced),
                                                                                                                 )
                                                                                                             } else {
                                                                                                                 crate::src::adler32::adler32(
                                                                                                                     (*state).check as crate::stdlib::uLong,
-                                                                                                                    ::core::slice::from_raw_parts(put.offset(-(out as isize)), out as usize),
+                                                                                                                    produced,
                                                                                                                 )
                                                                                                             }) as ::core::ffi::c_ulong;
                                                                                                             (*strm).adler = (*state).check as crate::stdlib::uLong;
