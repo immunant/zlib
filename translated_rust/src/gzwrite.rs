@@ -606,7 +606,10 @@ fn gz_close_write_prepare(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi:
     ret
 }
 
-pub unsafe extern "C" fn gzclose_w(
+// The close dispatcher has already bound `file` to `state`, so this helper
+// can keep the close ordering and result selection in safe Rust. Allocation
+// release and descriptor closing remain confined to the raw boundary below.
+pub fn gzclose_w(
     state: &mut crate::gzguts_h::gz_state,
     mut file: crate::zlib_h::gzFile,
 ) -> ::core::ffi::c_int {
@@ -615,23 +618,34 @@ pub unsafe extern "C" fn gzclose_w(
         return crate::zlib_h::Z_STREAM_ERROR;
     }
     ret = gz_close_write_prepare(state);
-    if state.size != 0 {
-        if state.direct == 0 {
-            crate::src::deflate::deflateEnd(
-                &mut state.strm as *mut crate::zlib_h::z_stream_s,
-            );
-            crate::stdlib::free(state.out as *mut ::core::ffi::c_void);
+    // SAFETY: this close path owns the initialized gzip allocations and the
+    // descriptor. The dispatcher bound `file` to this state, and no pointer
+    // escapes after it is released.
+    unsafe {
+        if state.size != 0 {
+            if state.direct == 0 {
+                crate::src::deflate::deflateEnd(
+                    &mut state.strm as *mut crate::zlib_h::z_stream_s,
+                );
+                crate::stdlib::free(state.out as *mut ::core::ffi::c_void);
+            }
+            crate::stdlib::free(state.in_0 as *mut ::core::ffi::c_void);
         }
-        crate::stdlib::free(state.in_0 as *mut ::core::ffi::c_void);
     }
     crate::src::gzlib::gzclearerr(state);
     let path = state.path;
     let fd = state.fd;
-    crate::stdlib::free(path as *mut ::core::ffi::c_void);
-    if crate::stdlib::close(fd) == -1 as ::core::ffi::c_int {
-        ret = crate::zlib_h::Z_ERRNO;
+    // SAFETY: `path`, `fd`, and `file` are owned by this closing state. The
+    // order matches zlib: close can override an earlier write result, and
+    // the state allocation is released only after its fields are no longer
+    // needed.
+    unsafe {
+        crate::stdlib::free(path as *mut ::core::ffi::c_void);
+        if crate::stdlib::close(fd) == -1 as ::core::ffi::c_int {
+            ret = crate::zlib_h::Z_ERRNO;
+        }
+        crate::stdlib::free(file as *mut ::core::ffi::c_void);
     }
-    crate::stdlib::free(file as *mut ::core::ffi::c_void);
     return ret;
 }
 #[export_name = "gzclose_w"]
