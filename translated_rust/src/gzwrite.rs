@@ -798,7 +798,7 @@ pub fn gzclose_w(mut allocation: Box<[crate::gzguts_h::gz_state]>) -> ::core::ff
         }
         if state.size != 0 && state.direct == 0 {
             // The initialized gzip state owns this stream until close.
-            unsafe { crate::src::deflate::deflateEnd(&raw mut state.strm) };
+            unsafe { crate::src::deflate::deflateEnd(&mut state.strm) };
         }
         gzclose_w_cleanup(state);
         state.fd.take()

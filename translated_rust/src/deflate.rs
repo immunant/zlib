@@ -823,7 +823,7 @@ pub unsafe extern "C" fn deflateInit2_(
         (*s).status = crate::src::deflate::FINISH_STATE;
         (*strm).msg = crate::src::zutil::zError(-4 as ::core::ffi::c_int)
             .load(::core::sync::atomic::Ordering::Relaxed);
-        deflateEnd(strm);
+        deflateEnd(&mut *strm);
         return crate::zlib_h::Z_MEM_ERROR;
     }
     (*s).sym_buf = (*s).pending_buf.offset((*s).lit_bufsize as isize) as *mut crate::zutil_h::uchf;
@@ -2530,11 +2530,7 @@ pub unsafe extern "C" fn deflate_ffi(
     };
     deflate(strm, flush)
 }
-pub unsafe extern "C" fn deflateEnd(mut strm: crate::zlib_h::z_streamp) -> ::core::ffi::c_int {
-    let mut status: ::core::ffi::c_int = 0;
-    let Some(stream) = strm.as_mut() else {
-        return crate::zlib_h::Z_STREAM_ERROR;
-    };
+pub unsafe fn deflateEnd(stream: &mut crate::zlib_h::z_stream_s) -> ::core::ffi::c_int {
     if stream.zalloc.is_none() || stream.zfree.is_none() {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
@@ -2544,36 +2540,36 @@ pub unsafe extern "C" fn deflateEnd(mut strm: crate::zlib_h::z_streamp) -> ::cor
     if !deflate_stream_state_valid(Some(stream), Some(state)) {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    status = (*(*strm).state).status;
-    if !(*(*strm).state).pending_buf.is_null() {
-        Some((*strm).zfree.expect("non-null function pointer")).expect("non-null function pointer")(
-            (*strm).opaque,
-            (*(*strm).state).pending_buf as crate::stdlib::voidpf,
+    let status = state.status;
+    if !state.pending_buf.is_null() {
+        Some(stream.zfree.expect("non-null function pointer")).expect("non-null function pointer")(
+            stream.opaque,
+            state.pending_buf as crate::stdlib::voidpf,
         );
     }
-    if !(*(*strm).state).head.is_null() {
-        Some((*strm).zfree.expect("non-null function pointer")).expect("non-null function pointer")(
-            (*strm).opaque,
-            (*(*strm).state).head as crate::stdlib::voidpf,
+    if !state.head.is_null() {
+        Some(stream.zfree.expect("non-null function pointer")).expect("non-null function pointer")(
+            stream.opaque,
+            state.head as crate::stdlib::voidpf,
         );
     }
-    if !(*(*strm).state).prev.is_null() {
-        Some((*strm).zfree.expect("non-null function pointer")).expect("non-null function pointer")(
-            (*strm).opaque,
-            (*(*strm).state).prev as crate::stdlib::voidpf,
+    if !state.prev.is_null() {
+        Some(stream.zfree.expect("non-null function pointer")).expect("non-null function pointer")(
+            stream.opaque,
+            state.prev as crate::stdlib::voidpf,
         );
     }
-    if !(*(*strm).state).window.is_null() {
-        Some((*strm).zfree.expect("non-null function pointer")).expect("non-null function pointer")(
-            (*strm).opaque,
-            (*(*strm).state).window as crate::stdlib::voidpf,
+    if !state.window.is_null() {
+        Some(stream.zfree.expect("non-null function pointer")).expect("non-null function pointer")(
+            stream.opaque,
+            state.window as crate::stdlib::voidpf,
         );
     }
-    Some((*strm).zfree.expect("non-null function pointer")).expect("non-null function pointer")(
-        (*strm).opaque,
-        (*strm).state as crate::stdlib::voidpf,
+    Some(stream.zfree.expect("non-null function pointer")).expect("non-null function pointer")(
+        stream.opaque,
+        stream.state as crate::stdlib::voidpf,
     );
-    (*strm).state = ::core::ptr::null_mut::<crate::src::deflate::internal_state>();
+    stream.state = ::core::ptr::null_mut::<crate::src::deflate::internal_state>();
     return if status == crate::src::deflate::BUSY_STATE {
         crate::zlib_h::Z_DATA_ERROR
     } else {
@@ -2583,6 +2579,9 @@ pub unsafe extern "C" fn deflateEnd(mut strm: crate::zlib_h::z_streamp) -> ::cor
 #[export_name = "deflateEnd"]
 
 pub unsafe extern "C" fn deflateEnd_ffi(mut strm: crate::zlib_h::z_streamp) -> ::core::ffi::c_int {
+    let Some(strm) = strm.as_mut() else {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    };
     deflateEnd(strm)
 }
 pub unsafe extern "C" fn deflateCopy(
@@ -2664,7 +2663,7 @@ pub unsafe extern "C" fn deflateCopy(
         || (*ds).head.is_null()
         || (*ds).pending_buf.is_null()
     {
-        deflateEnd(dest);
+        deflateEnd(&mut *dest);
         return crate::zlib_h::Z_MEM_ERROR;
     }
     crate::stdlib::memcpy(

@@ -1035,7 +1035,7 @@ pub fn gzclose_r(mut allocation: Box<[crate::gzguts_h::gz_state]>) -> ::core::ff
         let state = &mut allocation[0];
         if state.size != 0 {
             // The initialized gzip state owns this stream until close.
-            unsafe { crate::src::inflate::inflateEnd(&raw mut state.strm) };
+            unsafe { crate::src::inflate::inflateEnd(&mut state.strm) };
         }
         let err = gzclose_r_cleanup(state);
         (state.fd.take(), err)

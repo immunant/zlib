@@ -108,9 +108,7 @@ pub fn uncompress2_z(
     let used = used.wrapping_sub(len);
     let written = written.wrapping_sub(left);
     unsafe {
-        crate::src::inflate::inflateEnd(
-            &raw mut stream as *mut _ as *mut crate::zlib_h::z_stream_s,
-        );
+        crate::src::inflate::inflateEnd(&mut stream);
     }
     return (
         if err == crate::zlib_h::Z_STREAM_END {
