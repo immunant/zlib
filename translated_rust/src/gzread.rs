@@ -304,7 +304,7 @@ unsafe extern "C" fn gz_decomp(mut state: crate::gzguts_h::gz_statep) -> ::core:
                     );
                     break;
                 }
-            } else if !((*strm).avail_out != 0 && ret != crate::zlib_h::Z_STREAM_END) {
+            } else if !gz_decomp_should_continue((*strm).avail_out, ret) {
                 break;
             }
         }
@@ -362,9 +362,7 @@ unsafe extern "C" fn gz_fetch(mut state: crate::gzguts_h::gz_statep) -> ::core::
                 return -1 as ::core::ffi::c_int;
             }
         }
-        if !((*state).x.have == 0 as ::core::ffi::c_uint
-            && ((*state).eof == 0 || (*strm).avail_in != 0))
-        {
+        if !gz_fetch_needs_more_output((*state).x.have, (*state).eof, (*strm).avail_in) {
             break;
         }
     }
@@ -478,6 +476,18 @@ fn gz_read_state_ready(state: &crate::gzguts_h::gz_state) -> bool {
         && (state.err == crate::zlib_h::Z_OK
             || state.err == crate::zlib_h::Z_BUF_ERROR
             || state.again != 0)
+}
+
+fn gz_decomp_should_continue(avail_out: crate::stdlib::uInt, ret: ::core::ffi::c_int) -> bool {
+    avail_out != 0 && ret != crate::zlib_h::Z_STREAM_END
+}
+
+fn gz_fetch_needs_more_output(
+    have: ::core::ffi::c_uint,
+    eof: ::core::ffi::c_int,
+    avail_in: crate::stdlib::uInt,
+) -> bool {
+    have == 0 as ::core::ffi::c_uint && (eof == 0 || avail_in != 0)
 }
 
 fn gz_record_decompressed_output(state: &mut crate::gzguts_h::gz_state, had: ::core::ffi::c_uint) {

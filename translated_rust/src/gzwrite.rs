@@ -283,11 +283,7 @@ unsafe extern "C" fn gz_write(
                 break;
             }
             if gz_comp(state, crate::zlib_h::Z_NO_FLUSH) == -1 as ::core::ffi::c_int {
-                return if (*state).again != 0 {
-                    put.wrapping_sub(len)
-                } else {
-                    0 as crate::stdlib::z_size_t
-                };
+                return gz_write_error_return((*state).again, put, len);
             }
         }
     } else {
@@ -304,11 +300,7 @@ unsafe extern "C" fn gz_write(
             n = gz_note_input_consumed(&mut *state, n);
             len = len.wrapping_sub(n as crate::stdlib::z_size_t);
             if ret == -1 as ::core::ffi::c_int {
-                return if (*state).again != 0 {
-                    put.wrapping_sub(len)
-                } else {
-                    0 as crate::stdlib::z_size_t
-                };
+                return gz_write_error_return((*state).again, put, len);
             }
             if !(len != 0) {
                 break;
@@ -324,6 +316,18 @@ fn gz_write_state_ready(state: &crate::gzguts_h::gz_state) -> bool {
 
 fn gz_write_params_ready(state: &crate::gzguts_h::gz_state) -> bool {
     gz_write_state_ready(state) && state.direct == 0
+}
+
+fn gz_write_error_return(
+    again: ::core::ffi::c_int,
+    requested: crate::stdlib::z_size_t,
+    remaining: crate::stdlib::z_size_t,
+) -> crate::stdlib::z_size_t {
+    if again != 0 {
+        requested.wrapping_sub(remaining)
+    } else {
+        0 as crate::stdlib::z_size_t
+    }
 }
 
 fn gz_note_buffered_input(state: &mut crate::gzguts_h::gz_state, count: ::core::ffi::c_uint) {

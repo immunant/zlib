@@ -223,16 +223,11 @@ pub unsafe extern "C" fn inflateBack_ffi(
                         hold = hold.wrapping_add((*c2rust_fresh0 as ::core::ffi::c_ulong) << bits);
                         bits = bits.wrapping_add(8 as ::core::ffi::c_uint);
                     }
-                    (*state).last = (hold as ::core::ffi::c_uint
-                        & ((1 as ::core::ffi::c_uint) << 1 as ::core::ffi::c_int)
-                            .wrapping_sub(1 as ::core::ffi::c_uint))
-                        as ::core::ffi::c_int;
-                    hold >>= 1 as ::core::ffi::c_int;
-                    bits = bits.wrapping_sub(1 as ::core::ffi::c_int as ::core::ffi::c_uint);
-                    match hold as ::core::ffi::c_uint
-                        & ((1 as ::core::ffi::c_uint) << 2 as ::core::ffi::c_int)
-                            .wrapping_sub(1 as ::core::ffi::c_uint)
-                    {
+                    let block_header = crate::src::inflate::inflate_block_header(hold, bits);
+                    (*state).last = block_header.last;
+                    hold = block_header.hold;
+                    bits = block_header.bits;
+                    match block_header.block_type {
                         0 => {
                             (*state).mode = crate::src::inflate::STORED;
                         }
@@ -252,8 +247,6 @@ pub unsafe extern "C" fn inflateBack_ffi(
                             (*state).mode = crate::src::inflate::BAD;
                         }
                     }
-                    hold >>= 2 as ::core::ffi::c_int;
-                    bits = bits.wrapping_sub(2 as ::core::ffi::c_int as ::core::ffi::c_uint);
                     continue;
                 }
             }

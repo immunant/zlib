@@ -206,6 +206,65 @@ pub(crate) fn inflate_stored_block_length(
     }
 }
 
+pub(crate) struct InflateBlockHeader {
+    pub(crate) last: ::core::ffi::c_int,
+    pub(crate) block_type: ::core::ffi::c_uint,
+    pub(crate) hold: ::core::ffi::c_ulong,
+    pub(crate) bits: ::core::ffi::c_uint,
+}
+
+pub(crate) fn inflate_block_header(
+    mut hold: ::core::ffi::c_ulong,
+    mut bits: ::core::ffi::c_uint,
+) -> InflateBlockHeader {
+    let last = (hold as ::core::ffi::c_uint
+        & ((1 as ::core::ffi::c_uint) << 1 as ::core::ffi::c_int)
+            .wrapping_sub(1 as ::core::ffi::c_uint)) as ::core::ffi::c_int;
+    hold >>= 1 as ::core::ffi::c_int;
+    bits = bits.wrapping_sub(1 as ::core::ffi::c_int as ::core::ffi::c_uint);
+    let block_type = hold as ::core::ffi::c_uint
+        & ((1 as ::core::ffi::c_uint) << 2 as ::core::ffi::c_int)
+            .wrapping_sub(1 as ::core::ffi::c_uint);
+    hold >>= 2 as ::core::ffi::c_int;
+    bits = bits.wrapping_sub(2 as ::core::ffi::c_int as ::core::ffi::c_uint);
+
+    InflateBlockHeader {
+        last,
+        block_type,
+        hold,
+        bits,
+    }
+}
+
+fn inflate_zlib_check_word(hold: ::core::ffi::c_ulong) -> ::core::ffi::c_ulong {
+    (hold >> 24 as ::core::ffi::c_int & 0xff as ::core::ffi::c_ulong)
+        .wrapping_add(hold >> 8 as ::core::ffi::c_int & 0xff00 as ::core::ffi::c_ulong)
+        .wrapping_add((hold & 0xff00 as ::core::ffi::c_ulong) << 8 as ::core::ffi::c_int)
+        .wrapping_add((hold & 0xff as ::core::ffi::c_ulong) << 24 as ::core::ffi::c_int)
+}
+
+fn inflate_expected_check_word(
+    hold: ::core::ffi::c_ulong,
+    flags: ::core::ffi::c_int,
+) -> ::core::ffi::c_ulong {
+    if flags != 0 {
+        hold
+    } else {
+        inflate_zlib_check_word(hold)
+    }
+}
+
+fn inflate_gzip_length_matches(hold: ::core::ffi::c_ulong, total: ::core::ffi::c_ulong) -> bool {
+    hold == total & 0xffffffff as ::core::ffi::c_ulong
+}
+
+fn inflate_gzip_header_crc_matches(
+    hold: ::core::ffi::c_ulong,
+    check: ::core::ffi::c_ulong,
+) -> bool {
+    hold == check & 0xffff as ::core::ffi::c_ulong
+}
+
 enum InflateZlibHeaderError {
     IncorrectHeaderCheck,
     UnknownCompressionMethod,
@@ -841,14 +900,7 @@ pub unsafe extern "C" fn inflate_ffi(
                     hold = hold.wrapping_add((*c2rust_fresh10 as ::core::ffi::c_ulong) << bits);
                     bits = bits.wrapping_add(8 as ::core::ffi::c_uint);
                 }
-                (*state).check = (hold >> 24 as ::core::ffi::c_int & 0xff as ::core::ffi::c_ulong)
-                    .wrapping_add(hold >> 8 as ::core::ffi::c_int & 0xff00 as ::core::ffi::c_ulong)
-                    .wrapping_add(
-                        (hold & 0xff00 as ::core::ffi::c_ulong) << 8 as ::core::ffi::c_int,
-                    )
-                    .wrapping_add(
-                        (hold & 0xff as ::core::ffi::c_ulong) << 24 as ::core::ffi::c_int,
-                    );
+                (*state).check = inflate_zlib_check_word(hold);
                 (*strm).adler = (*state).check as crate::stdlib::uLong;
                 hold = 0 as ::core::ffi::c_ulong;
                 bits = 0 as ::core::ffi::c_uint;
@@ -999,23 +1051,7 @@ pub unsafe extern "C" fn inflate_ffi(
                     }
                     out = left;
                     if (*state).wrap & 4 as ::core::ffi::c_int != 0
-                        && (if (*state).flags != 0 {
-                            hold
-                        } else {
-                            (hold >> 24 as ::core::ffi::c_int & 0xff as ::core::ffi::c_ulong)
-                                .wrapping_add(
-                                    hold >> 8 as ::core::ffi::c_int
-                                        & 0xff00 as ::core::ffi::c_ulong,
-                                )
-                                .wrapping_add(
-                                    (hold & 0xff00 as ::core::ffi::c_ulong)
-                                        << 8 as ::core::ffi::c_int,
-                                )
-                                .wrapping_add(
-                                    (hold & 0xff as ::core::ffi::c_ulong)
-                                        << 24 as ::core::ffi::c_int,
-                                )
-                        }) != (*state).check
+                        && inflate_expected_check_word(hold, (*state).flags) != (*state).check
                     {
                         (*strm).msg = b"incorrect data check\0".as_ptr()
                             as *const ::core::ffi::c_char
@@ -1057,7 +1093,7 @@ pub unsafe extern "C" fn inflate_ffi(
                         bits = bits.wrapping_add(8 as ::core::ffi::c_uint);
                     }
                     if (*state).wrap & 4 as ::core::ffi::c_int != 0
-                        && hold != (*state).total & 0xffffffff as ::core::ffi::c_ulong
+                        && !inflate_gzip_length_matches(hold, (*state).total)
                     {
                         (*strm).msg = b"incorrect length check\0".as_ptr()
                             as *const ::core::ffi::c_char
@@ -1473,16 +1509,11 @@ pub unsafe extern "C" fn inflate_ffi(
                         hold = hold.wrapping_add((*c2rust_fresh11 as ::core::ffi::c_ulong) << bits);
                         bits = bits.wrapping_add(8 as ::core::ffi::c_uint);
                     }
-                    (*state).last = (hold as ::core::ffi::c_uint
-                        & ((1 as ::core::ffi::c_uint) << 1 as ::core::ffi::c_int)
-                            .wrapping_sub(1 as ::core::ffi::c_uint))
-                        as ::core::ffi::c_int;
-                    hold >>= 1 as ::core::ffi::c_int;
-                    bits = bits.wrapping_sub(1 as ::core::ffi::c_int as ::core::ffi::c_uint);
-                    match hold as ::core::ffi::c_uint
-                        & ((1 as ::core::ffi::c_uint) << 2 as ::core::ffi::c_int)
-                            .wrapping_sub(1 as ::core::ffi::c_uint)
-                    {
+                    let block_header = inflate_block_header(hold, bits);
+                    (*state).last = block_header.last;
+                    hold = block_header.hold;
+                    bits = block_header.bits;
+                    match block_header.block_type {
                         0 => {
                             (*state).mode = crate::src::inflate::STORED;
                         }
@@ -1492,9 +1523,6 @@ pub unsafe extern "C" fn inflate_ffi(
                             );
                             (*state).mode = crate::src::inflate::LEN_;
                             if flush == crate::zlib_h::Z_TREES {
-                                hold >>= 2 as ::core::ffi::c_int;
-                                bits = bits
-                                    .wrapping_sub(2 as ::core::ffi::c_int as ::core::ffi::c_uint);
                                 break;
                             }
                         }
@@ -1508,8 +1536,6 @@ pub unsafe extern "C" fn inflate_ffi(
                             (*state).mode = crate::src::inflate::BAD;
                         }
                     }
-                    hold >>= 2 as ::core::ffi::c_int;
-                    bits = bits.wrapping_sub(2 as ::core::ffi::c_int as ::core::ffi::c_uint);
                     continue;
                 }
             }
@@ -1937,7 +1963,7 @@ pub unsafe extern "C" fn inflate_ffi(
                         bits = bits.wrapping_add(8 as ::core::ffi::c_uint);
                     }
                     if (*state).wrap & 4 as ::core::ffi::c_int != 0
-                        && hold != (*state).check & 0xffff as ::core::ffi::c_ulong
+                        && !inflate_gzip_header_crc_matches(hold, (*state).check)
                     {
                         (*strm).msg = b"header crc mismatch\0".as_ptr()
                             as *const ::core::ffi::c_char
