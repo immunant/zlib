@@ -2781,21 +2781,20 @@ pub fn deflate(
     strm_ref: &mut crate::zlib_h::z_stream,
     mut flush: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
-    // This legacy dispatcher still has to adopt the ABI stream/state records,
+    // This legacy dispatcher still has to adopt the callback-owned state,
     // lend cursor-backed buffers, and inspect the retained gzip header. Keep
     // that work at one explicit transitional codec boundary so Rust callers do
     // not inherit an unsafe-function contract.
     unsafe {
-        let strm = strm_ref as *mut crate::zlib_h::z_stream;
         let mut old_flush: ::core::ffi::c_int = 0;
-        if flush > crate::zlib_h::Z_BLOCK || flush < 0 as ::core::ffi::c_int || strm.is_null() {
+        if flush > crate::zlib_h::Z_BLOCK || flush < 0 as ::core::ffi::c_int {
             return crate::zlib_h::Z_STREAM_ERROR;
         }
         // This transitional dispatcher still uses raw cursors in its legacy
-        // compression loop.  Validate and adopt the stream/state once at entry
-        // rather than routing through the private raw state-check adapter.
+        // compression loop. Validate the safe stream and adopt its raw state
+        // once at entry rather than routing through the private state checker.
         let (s, pending, avail_in) = {
-            let stream = &mut *strm;
+            let stream = &mut *strm_ref;
             let state_ptr = stream.state as *mut crate::src::deflate::deflate_state;
             if state_ptr.is_null() {
                 return crate::zlib_h::Z_STREAM_ERROR;
@@ -2804,7 +2803,7 @@ pub fn deflate(
             if !deflate_state_values_are_valid(
                 stream.zalloc.is_some(),
                 stream.zfree.is_some(),
-                state.strm == strm,
+                state.strm == stream as *mut crate::zlib_h::z_stream,
                 state.status,
             ) {
                 return crate::zlib_h::Z_STREAM_ERROR;
@@ -2842,13 +2841,13 @@ pub fn deflate(
             (state_ptr, state.pending != 0, stream.avail_in)
         };
         if pending {
-            if flush_pending(strm) == 0 as crate::stdlib::uInt {
+            if flush_pending(strm_ref as *mut crate::zlib_h::z_stream) == 0 as crate::stdlib::uInt {
                 let state = &mut *s;
                 state.last_flush = -1 as ::core::ffi::c_int;
                 return crate::zlib_h::Z_OK;
             }
         } else if repeated_flush_is_buffer_error(avail_in, flush, old_flush) {
-            let stream = &mut *strm;
+            let stream = &mut *strm_ref;
             stream.msg = crate::src::zutil::z_errmsg[(if (-5 as ::core::ffi::c_int)
                 < -6 as ::core::ffi::c_int
                 || -5 as ::core::ffi::c_int > 2 as ::core::ffi::c_int
@@ -2861,13 +2860,13 @@ pub fn deflate(
             return -5 as ::core::ffi::c_int;
         }
         let finish_with_input = {
-            let stream = &*strm;
+            let stream = &*strm_ref;
             let state = &*s;
             state.status == crate::src::deflate::FINISH_STATE
                 && stream.avail_in != 0 as crate::stdlib::uInt
         };
         if finish_with_input {
-            let stream = &mut *strm;
+            let stream = &mut *strm_ref;
             stream.msg = crate::src::zutil::z_errmsg[(if (-5 as ::core::ffi::c_int)
                 < -6 as ::core::ffi::c_int
                 || -5 as ::core::ffi::c_int > 2 as ::core::ffi::c_int
@@ -2892,7 +2891,7 @@ pub fn deflate(
             state.status == crate::src::deflate::INIT_STATE
         };
         if initialized_zlib_header {
-            let stream = &mut *strm;
+            let stream = &mut *strm_ref;
             let state = &mut *s;
             let (header, dictionary_adler) = zlib_header_words(
                 state.w_bits,
@@ -2931,7 +2930,7 @@ pub fn deflate(
             state.pending != 0
         };
         if zlib_header_is_pending {
-            flush_pending(strm);
+            flush_pending(strm_ref as *mut crate::zlib_h::z_stream);
             let pending_after_flush = {
                 let state = &mut *s;
                 state.pending
@@ -2952,7 +2951,7 @@ pub fn deflate(
             // borrow ends before `flush_pending()` can revisit compatibility
             // state or callback-owned output.
             let fixed_header_plan = {
-                let stream = &mut *strm;
+                let stream = &mut *strm_ref;
                 let state = &mut *s;
                 stream.adler = crate::src::crc32::crc32_slice(0, &[]);
                 let header = if state.gzhead.is_null() {
@@ -2999,7 +2998,7 @@ pub fn deflate(
                 plan
             };
             if fixed_header_plan.flush_now {
-                flush_pending(strm);
+                flush_pending(strm_ref as *mut crate::zlib_h::z_stream);
                 let state = &mut *s;
                 if state.pending != 0 as crate::zutil_h::ulg {
                     state.last_flush = -1 as ::core::ffi::c_int;
@@ -3027,7 +3026,7 @@ pub fn deflate(
                     let extra = ::core::slice::from_raw_parts(header.extra, extra_len);
                     loop {
                         let state = &mut *s;
-                        let stream = &mut *strm;
+                        let stream = &mut *strm_ref;
                         let Ok(pending_len) = usize::try_from(state.pending_buf_size) else {
                         return crate::zlib_h::Z_STREAM_ERROR;
                     };
@@ -3056,7 +3055,7 @@ pub fn deflate(
                         if state.pending != state.pending_buf_size {
                             return crate::zlib_h::Z_STREAM_ERROR;
                         }
-                        flush_pending(strm);
+                        flush_pending(strm_ref as *mut crate::zlib_h::z_stream);
                         let state = &mut *s;
                         if state.pending != 0 as crate::zutil_h::ulg {
                             state.last_flush = -1 as ::core::ffi::c_int;
@@ -3085,7 +3084,7 @@ pub fn deflate(
                     let name = ::std::ffi::CStr::from_ptr(header.name.cast()).to_bytes_with_nul();
                     loop {
                         let state = &mut *s;
-                        let stream = &mut *strm;
+                        let stream = &mut *strm_ref;
                         let Ok(pending_len) = usize::try_from(state.pending_buf_size) else {
                         return crate::zlib_h::Z_STREAM_ERROR;
                     };
@@ -3114,7 +3113,7 @@ pub fn deflate(
                         if state.pending != state.pending_buf_size {
                             return crate::zlib_h::Z_STREAM_ERROR;
                         }
-                        flush_pending(strm);
+                        flush_pending(strm_ref as *mut crate::zlib_h::z_stream);
                         let state = &mut *s;
                         if state.pending != 0 as crate::zutil_h::ulg {
                             state.last_flush = -1 as ::core::ffi::c_int;
@@ -3141,7 +3140,7 @@ pub fn deflate(
                         ::std::ffi::CStr::from_ptr(header.comment.cast()).to_bytes_with_nul();
                     loop {
                         let state = &mut *s;
-                        let stream = &mut *strm;
+                        let stream = &mut *strm_ref;
                         let Ok(pending_len) = usize::try_from(state.pending_buf_size) else {
                         return crate::zlib_h::Z_STREAM_ERROR;
                     };
@@ -3170,7 +3169,7 @@ pub fn deflate(
                         if state.pending != state.pending_buf_size {
                             return crate::zlib_h::Z_STREAM_ERROR;
                         }
-                        flush_pending(strm);
+                        flush_pending(strm_ref as *mut crate::zlib_h::z_stream);
                         let state = &mut *s;
                         if state.pending != 0 as crate::zutil_h::ulg {
                             state.last_flush = -1 as ::core::ffi::c_int;
@@ -3210,7 +3209,7 @@ pub fn deflate(
             };
             if hcrc_plan.emit {
                 if hcrc_plan.flush_before_emit {
-                    flush_pending(strm);
+                    flush_pending(strm_ref as *mut crate::zlib_h::z_stream);
                     let state = &mut *s;
                     if state.pending != 0 as crate::zutil_h::ulg {
                         state.last_flush = -1 as ::core::ffi::c_int;
@@ -3218,7 +3217,7 @@ pub fn deflate(
                     }
                 }
                 let hcrc = {
-                    let stream = &*strm;
+                    let stream = &*strm_ref;
                     stream.adler
                 };
                 let state = &mut *s;
@@ -3236,12 +3235,12 @@ pub fn deflate(
                 if !append_gzip_hcrc_state(pending_buf, &mut state.pending, hcrc) {
                     return crate::zlib_h::Z_STREAM_ERROR;
                 }
-                let stream = &mut *strm;
+                let stream = &mut *strm_ref;
                 stream.adler = crate::src::crc32::crc32_slice(0, &[]);
             }
             let state = &mut *s;
             state.status = crate::src::deflate::BUSY_STATE;
-            flush_pending(strm);
+            flush_pending(strm_ref as *mut crate::zlib_h::z_stream);
             let state = &mut *s;
             if state.pending != 0 as crate::zutil_h::ulg {
                 state.last_flush = -1 as ::core::ffi::c_int;
@@ -3249,7 +3248,7 @@ pub fn deflate(
             }
         }
         let should_compress = {
-            let stream = &*strm;
+            let stream = &*strm_ref;
             let state = &*s;
             stream.avail_in != 0 as crate::stdlib::uInt
                 || state.lookahead != 0 as crate::stdlib::uInt
@@ -3288,7 +3287,7 @@ pub fn deflate(
                     == finish_started as ::core::ffi::c_int as ::core::ffi::c_uint
             {
                 let output_is_full = {
-                    let stream = &*strm;
+                    let stream = &*strm_ref;
                     stream.avail_out == 0 as crate::stdlib::uInt
                 };
                 if output_is_full {
@@ -3369,9 +3368,9 @@ pub fn deflate(
                         }
                     }
                 }
-                flush_pending(strm);
+                flush_pending(strm_ref as *mut crate::zlib_h::z_stream);
                 let output_is_full = {
-                    let stream = &*strm;
+                    let stream = &*strm_ref;
                     stream.avail_out == 0 as crate::stdlib::uInt
                 };
                 if output_is_full {
@@ -3387,7 +3386,7 @@ pub fn deflate(
         {
             let state = &mut *s;
             let trailer = {
-                let stream = &*strm;
+                let stream = &*strm_ref;
                 deflate_trailer_plan(state.wrap, stream.adler, stream.total_in)
             };
             if matches!(trailer, DeflateTrailerPlan::None) {
@@ -3422,7 +3421,7 @@ pub fn deflate(
                 return crate::zlib_h::Z_STREAM_ERROR;
             }
         };
-        flush_pending(strm);
+        flush_pending(strm_ref as *mut crate::zlib_h::z_stream);
         let pending_after_flush = {
             let state = &mut *s;
             if state.wrap > 0 as ::core::ffi::c_int {
