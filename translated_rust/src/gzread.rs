@@ -126,72 +126,6 @@ impl GzReadRequest {
     }
 }
 
-// A checked view of unread compressed input in gzip's owned input buffer.
-// The ABI stream cursor is projected to an address once at the state boundary;
-// compaction then works only with a mutable slice and checked indices.  Keep
-// this separate from the read state so the eventual gzip owner facade can use
-// the same cursor without retaining `z_stream::next_in`.
-struct GzInputCursor<'a> {
-    buffer: &'a mut [u8],
-    start: usize,
-    have: usize,
-}
-
-impl<'a> GzInputCursor<'a> {
-    // An empty ABI cursor need not point into the buffer (new gzip streams
-    // use null).  Once bytes are loaded, the caller publishes the base
-    // address together with the returned count.
-    fn empty(buffer: &'a mut [u8], capacity: usize) -> Option<Self> {
-        let buffer = buffer.get_mut(..capacity)?;
-        Some(Self {
-            buffer,
-            start: 0,
-            have: 0,
-        })
-    }
-
-    fn from_owned_buffer(
-        buffer: &'a mut [u8],
-        cursor_address: usize,
-        have: crate::stdlib::uInt,
-        capacity: usize,
-    ) -> Option<Self> {
-        let buffer = buffer.get_mut(..capacity)?;
-        let start = cursor_address.checked_sub(buffer.as_ptr().addr())?;
-        let have = have as usize;
-        let end = start.checked_add(have)?;
-        buffer.get(start..end)?;
-        Some(Self {
-            buffer,
-            start,
-            have,
-        })
-    }
-
-    fn compact(&mut self) {
-        if self.start != 0 {
-            self.buffer
-                .copy_within(self.start..self.start + self.have, 0);
-            self.start = 0;
-        }
-    }
-
-    // Keep compaction, bounded suffix selection, and the post-read byte
-    // count together.  The ABI caller still decides when it may publish the
-    // resulting cursor, which preserves the existing error-path cursor
-    // timing while giving a later owner-backed input facade one safe step.
-    fn fill(&mut self, fd: &rustix::fd::OwnedFd) -> Option<(GzLoad, u32)> {
-        self.compact();
-        let result = gz_load(fd, &mut self.buffer[self.have..]);
-        let added = match result {
-            GzLoad::Loaded { have, .. } | GzLoad::Error { have, .. } => have as usize,
-        };
-        let have = self.have.checked_add(added)?;
-        let have = u32::try_from(have).ok()?;
-        Some((result, have))
-    }
-}
-
 enum GzLoad {
     Loaded {
         have: ::core::ffi::c_uint,
@@ -359,13 +293,24 @@ fn gz_avail(state: GzAvailState<'_>) -> Option<()> {
             // `strm.next_in` is a cursor in `in_0` only while input is
             // pending.  A zero count intentionally accepts its null cursor.
             let Some(mut input) = (if pending == 0 {
-                GzInputCursor::empty(buffer.as_mut(), size)
+                crate::src::gzlib::GzBufferedInput::empty(buffer.as_mut(), size)
             } else {
-                GzInputCursor::from_owned_buffer(buffer.as_mut(), cursor_address, pending, size)
+                crate::src::gzlib::GzBufferedInput::from_owned_buffer(
+                    buffer.as_mut(),
+                    cursor_address,
+                    pending,
+                )
             }) else {
                 return None;
             };
-            let Some((load, available)) = input.fill(fd) else {
+            let Some(target) = input.refill_target() else {
+                return None;
+            };
+            let load = gz_load(fd, target);
+            let added = match load {
+                GzLoad::Loaded { have, .. } | GzLoad::Error { have, .. } => have as usize,
+            };
+            let Some(available) = input.extend(added) else {
                 return None;
             };
             match apply_gz_load(

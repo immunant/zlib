@@ -185,6 +185,18 @@ impl<'a> GzBufferedCursor<'a> {
 }
 
 impl<'a> GzBufferedInput<'a> {
+    // An empty cursor is valid even when the ABI cursor is null.  Limit the
+    // visible storage to the caller's initialized capacity before any later
+    // refill or compaction operation uses it.
+    pub(crate) fn empty(buffer: &'a mut [u8], capacity: usize) -> Option<Self> {
+        let buffer = buffer.get_mut(..capacity)?;
+        Some(Self {
+            buffer,
+            start: 0,
+            have: 0,
+        })
+    }
+
     pub(crate) fn from_owned_buffer(
         buffer: &'a mut [u8],
         cursor_address: usize,
@@ -199,6 +211,30 @@ impl<'a> GzBufferedInput<'a> {
             start,
             have,
         })
+    }
+
+    // Compact the checked unread range and expose the remaining initialized
+    // suffix for a refill.  Read-side code can then keep its byte count as an
+    // index instead of retaining an ABI stream cursor between I/O calls.
+    pub(crate) fn refill_target(&mut self) -> Option<&mut [u8]> {
+        if self.start != 0 {
+            let end = self.start.checked_add(self.have)?;
+            self.buffer.copy_within(self.start..end, 0);
+            self.start = 0;
+        }
+        self.buffer.get_mut(self.have..)
+    }
+
+    // Publish bytes added through the refill target only after checking that
+    // they still fit in this owned buffer.  The returned u32 is suitable for
+    // the ABI avail_in field at the boundary.
+    pub(crate) fn extend(&mut self, added: usize) -> Option<u32> {
+        let have = self.have.checked_add(added)?;
+        if have > self.buffer.len() {
+            return None;
+        }
+        self.have = have;
+        u32::try_from(have).ok()
     }
 
     pub(crate) fn append(&mut self, input: &[u8]) -> usize {
