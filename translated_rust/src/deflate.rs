@@ -2001,6 +2001,53 @@ fn write_gzip_trailer(
     true
 }
 
+fn write_zlib_header(
+    state: &mut crate::src::deflate::deflate_state,
+    strm: &mut crate::zlib_h::z_stream,
+    pending_buf: &mut [crate::stdlib::Bytef],
+) -> bool {
+    let mut header: crate::stdlib::uInt =
+        (crate::zlib_h::Z_DEFLATED as crate::stdlib::uInt).wrapping_add(
+            state.w_bits.wrapping_sub(8 as crate::stdlib::uInt) << 4 as ::core::ffi::c_int,
+        ) << 8 as ::core::ffi::c_int;
+    let level_flags = if state.strategy >= crate::zlib_h::Z_HUFFMAN_ONLY || state.level < 2 {
+        0
+    } else if state.level < 6 {
+        1
+    } else if state.level == 6 {
+        2
+    } else {
+        3
+    };
+    header |= level_flags << 6 as ::core::ffi::c_int;
+    let dictionary = state.strstart != 0;
+    if dictionary {
+        header |= crate::zutil_h::PRESET_DICT as crate::stdlib::uInt;
+    }
+    header = header.wrapping_add(
+        (31 as crate::stdlib::uInt).wrapping_sub(header.wrapping_rem(31 as crate::stdlib::uInt)),
+    );
+    if !put_short_msb(state, pending_buf, header) {
+        return false;
+    }
+    if dictionary
+        && (!put_short_msb(
+            state,
+            pending_buf,
+            (strm.adler >> 16 as ::core::ffi::c_int) as crate::stdlib::uInt,
+        ) || !put_short_msb(
+            state,
+            pending_buf,
+            (strm.adler & 0xffff as crate::stdlib::uLong) as crate::stdlib::uInt,
+        ))
+    {
+        return false;
+    }
+    strm.adler = crate::src::adler32::adler32(0 as crate::stdlib::uLong, None);
+    state.status = crate::src::deflate::BUSY_STATE;
+    true
+}
+
 fn flush_pending_impl(
     strm: &mut crate::zlib_h::z_stream,
     state: &mut crate::src::deflate::deflate_state,
@@ -2155,55 +2202,14 @@ pub unsafe fn deflate(
         (*s).status = crate::src::deflate::BUSY_STATE;
     }
     if (*s).status == crate::src::deflate::INIT_STATE {
-        let mut header: crate::stdlib::uInt =
-            (crate::zlib_h::Z_DEFLATED as crate::stdlib::uInt).wrapping_add(
-                (*s).w_bits.wrapping_sub(8 as crate::stdlib::uInt) << 4 as ::core::ffi::c_int,
-            ) << 8 as ::core::ffi::c_int;
-        let mut level_flags: crate::stdlib::uInt = 0;
-        if (*s).strategy >= crate::zlib_h::Z_HUFFMAN_ONLY || (*s).level < 2 as ::core::ffi::c_int {
-            level_flags = 0 as crate::stdlib::uInt;
-        } else if (*s).level < 6 as ::core::ffi::c_int {
-            level_flags = 1 as crate::stdlib::uInt;
-        } else if (*s).level == 6 as ::core::ffi::c_int {
-            level_flags = 2 as crate::stdlib::uInt;
-        } else {
-            level_flags = 3 as crate::stdlib::uInt;
-        }
-        header |= level_flags << 6 as ::core::ffi::c_int;
-        if (*s).strstart != 0 as crate::stdlib::uInt {
-            header |= crate::zutil_h::PRESET_DICT as crate::stdlib::uInt;
-        }
-        header = header.wrapping_add(
-            (31 as crate::stdlib::uInt)
-                .wrapping_sub(header.wrapping_rem(31 as crate::stdlib::uInt)),
-        );
-        let dictionary = (*s).strstart != 0 as crate::stdlib::uInt;
         let state = &mut *s;
         let pending_buf = ::core::slice::from_raw_parts_mut(
             state.pending_buf,
             state.pending_buf_size as usize,
         );
-        if !put_short_msb(state, pending_buf, header) {
+        if !write_zlib_header(state, &mut *strm, pending_buf) {
             return crate::zlib_h::Z_STREAM_ERROR;
         }
-        if dictionary {
-            if !put_short_msb(
-                state,
-                pending_buf,
-                ((*strm).adler >> 16 as ::core::ffi::c_int) as crate::stdlib::uInt,
-            ) {
-                return crate::zlib_h::Z_STREAM_ERROR;
-            }
-            if !put_short_msb(
-                state,
-                pending_buf,
-                ((*strm).adler & 0xffff as crate::stdlib::uLong) as crate::stdlib::uInt,
-            ) {
-                return crate::zlib_h::Z_STREAM_ERROR;
-            }
-        }
-        (*strm).adler = crate::src::adler32::adler32(0 as crate::stdlib::uLong, None);
-        (*s).status = crate::src::deflate::BUSY_STATE;
         flush_pending(strm);
         if (*s).pending != 0 as crate::zutil_h::ulg {
             (*s).last_flush = -1 as ::core::ffi::c_int;
