@@ -345,7 +345,7 @@ unsafe fn gz_write(
     }
     return put;
 }
-unsafe fn gzwrite(
+fn gzwrite(
     state: &mut crate::gzguts_h::gz_state,
     buf: &[u8],
 ) -> ::core::ffi::c_int {
@@ -356,17 +356,16 @@ unsafe fn gzwrite(
     }
     crate::src::gzlib::gz_error_state(state, crate::zlib_h::Z_OK, None, None);
     if buf.len() > crate::limits_h::INT_MAX as usize {
-        crate::src::gzlib::gz_error(
-            state as *mut crate::gzguts_h::gz_state,
-            crate::zlib_h::Z_DATA_ERROR,
-            b"requested length does not fit in int\0".as_ptr() as *const ::core::ffi::c_char,
-        );
+        unsafe {
+            crate::src::gzlib::gz_error(
+                state as *mut crate::gzguts_h::gz_state,
+                crate::zlib_h::Z_DATA_ERROR,
+                b"requested length does not fit in int\0".as_ptr() as *const ::core::ffi::c_char,
+            );
+        }
         return 0 as ::core::ffi::c_int;
     }
-    return gz_write(
-        state,
-        buf,
-    ) as ::core::ffi::c_int;
+    return unsafe { gz_write(state, buf) } as ::core::ffi::c_int;
 }
 #[export_name = "gzwrite"]
 
@@ -388,7 +387,7 @@ pub unsafe extern "C" fn gzwrite_ffi(
     };
     gzwrite(state, buf)
 }
-unsafe fn gzfwrite(
+fn gzfwrite(
     state: &mut crate::gzguts_h::gz_state,
     buf: Result<&[u8], ()>,
     mut size: crate::stdlib::z_size_t,
@@ -400,19 +399,17 @@ unsafe fn gzfwrite(
     }
     crate::src::gzlib::gz_error_state(state, crate::zlib_h::Z_OK, None, None);
     let Ok(buf) = buf else {
-        crate::src::gzlib::gz_error(
-            state as *mut crate::gzguts_h::gz_state,
-            crate::zlib_h::Z_STREAM_ERROR,
-            b"request does not fit in a size_t\0".as_ptr() as *const ::core::ffi::c_char,
-        );
+        unsafe {
+            crate::src::gzlib::gz_error(
+                state as *mut crate::gzguts_h::gz_state,
+                crate::zlib_h::Z_STREAM_ERROR,
+                b"request does not fit in a size_t\0".as_ptr() as *const ::core::ffi::c_char,
+            );
+        }
         return 0 as crate::stdlib::z_size_t;
     };
     return if !buf.is_empty() {
-        gz_write(
-            state,
-            buf,
-        )
-        .wrapping_div(size)
+        unsafe { gz_write(state, buf) }.wrapping_div(size)
     } else {
         0 as crate::stdlib::z_size_t
     };
@@ -443,7 +440,7 @@ fn gzputc(
     let buf = [c as ::core::ffi::c_uchar];
     // `state` is the validated handle supplied by the FFI wrapper, and `buf`
     // lives for the entire synchronous write.
-    if unsafe { gzwrite(state, &buf) } != 1 as ::core::ffi::c_int {
+    if gzwrite(state, &buf) != 1 as ::core::ffi::c_int {
         return -1 as ::core::ffi::c_int;
     }
     return c & 0xff as ::core::ffi::c_int;
@@ -459,7 +456,7 @@ pub unsafe extern "C" fn gzputc_ffi(
     };
     gzputc(state, c)
 }
-unsafe fn gzputs(
+fn gzputs(
     state: &mut crate::gzguts_h::gz_state,
     s: &::std::ffi::CStr,
 ) -> ::core::ffi::c_int {
@@ -475,17 +472,16 @@ unsafe fn gzputs(
     if len > crate::limits_h::INT_MAX as usize
         || len as ::core::ffi::c_uint as crate::stdlib::z_size_t != len
     {
-        crate::src::gzlib::gz_error(
-            state as *mut crate::gzguts_h::gz_state,
-            crate::zlib_h::Z_STREAM_ERROR,
-            b"string length does not fit in int\0".as_ptr() as *const ::core::ffi::c_char,
-        );
+        unsafe {
+            crate::src::gzlib::gz_error(
+                state as *mut crate::gzguts_h::gz_state,
+                crate::zlib_h::Z_STREAM_ERROR,
+                b"string length does not fit in int\0".as_ptr() as *const ::core::ffi::c_char,
+            );
+        }
         return -1 as ::core::ffi::c_int;
     }
-    put = gz_write(
-        state,
-        s.to_bytes(),
-    );
+    put = unsafe { gz_write(state, s.to_bytes()) };
     return if len != 0 && put == 0 as crate::stdlib::z_size_t {
         -1 as ::core::ffi::c_int
     } else {
@@ -506,7 +502,7 @@ pub unsafe extern "C" fn gzputs_ffi(
     }
     gzputs(state, ::std::ffi::CStr::from_ptr(s))
 }
-unsafe fn gzflush(
+fn gzflush(
     state: &mut crate::gzguts_h::gz_state,
     flush: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
@@ -519,12 +515,10 @@ unsafe fn gzflush(
     if flush < 0 as ::core::ffi::c_int || flush > crate::zlib_h::Z_FINISH {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    if state.skip != 0
-        && gz_zero(state) == -1 as ::core::ffi::c_int
-    {
+    if state.skip != 0 && unsafe { gz_zero(state) } == -1 as ::core::ffi::c_int {
         return state.err;
     }
-    gz_comp(state, flush);
+    unsafe { gz_comp(state, flush) };
     return state.err;
 }
 #[export_name = "gzflush"]
