@@ -2979,7 +2979,12 @@ pub unsafe extern "C" fn inflateCopy(
             return crate::zlib_h::Z_MEM_ERROR;
         }
     }
-    let source = &*source;
+    // The allocator callbacks have completed. Reuse the checked stream/state
+    // binding for the final stream copy instead of reopening `source` through
+    // a raw dereference.
+    let Some((source, _source_state)) = inflateStateCheck(source) else {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    };
     let dest = &mut *dest;
     let copy = &mut *copy;
     let window = if window.is_null() {
