@@ -506,6 +506,22 @@ fn gzseek_read_buffer_commit_state(
     true
 }
 
+/// Normalize a negative seek through the read-stream rewind path.  The
+/// descriptor rewind itself remains at the boundary; this only validates the
+/// mode and computes the post-rewind logical offset with zlib's signed
+/// wrapping arithmetic.
+fn gzseek_rewind_offset_state(
+    mode: ::core::ffi::c_int,
+    pos: crate::stdlib::off64_t,
+    offset: crate::stdlib::off64_t,
+) -> Option<crate::stdlib::off64_t> {
+    if mode != crate::gzguts_h::GZ_READ {
+        return None;
+    }
+    let offset = offset.wrapping_add(pos);
+    (offset >= 0).then_some(offset)
+}
+
 pub unsafe extern "C" fn gzseek64(
     mut file: crate::zlib_h::gzFile,
     mut offset: crate::stdlib::off64_t,
@@ -558,13 +574,11 @@ pub unsafe extern "C" fn gzseek64(
         return next_pos;
     }
     if offset < 0 as crate::stdlib::off64_t {
-        if (*state).mode != crate::gzguts_h::GZ_READ {
+        let Some(rewind_offset) = gzseek_rewind_offset_state((*state).mode, (*state).x.pos, offset)
+        else {
             return -1 as crate::stdlib::off64_t;
-        }
-        offset += (*state).x.pos;
-        if offset < 0 as crate::stdlib::off64_t {
-            return -1 as crate::stdlib::off64_t;
-        }
+        };
+        offset = rewind_offset;
         if gzrewind(file) == -1 as ::core::ffi::c_int {
             return -1 as crate::stdlib::off64_t;
         }
