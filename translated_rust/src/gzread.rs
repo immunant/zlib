@@ -93,6 +93,18 @@ struct GzInputCursor<'a> {
 }
 
 impl<'a> GzInputCursor<'a> {
+    // An empty ABI cursor need not point into the buffer (new gzip streams
+    // use null).  Once bytes are loaded, the caller publishes the base
+    // address together with the returned count.
+    fn empty(buffer: &'a mut [u8], capacity: usize) -> Option<Self> {
+        let buffer = buffer.get_mut(..capacity)?;
+        Some(Self {
+            buffer,
+            start: 0,
+            have: 0,
+        })
+    }
+
     fn from_owned_buffer(
         buffer: &'a mut [u8],
         cursor_address: usize,
@@ -117,6 +129,21 @@ impl<'a> GzInputCursor<'a> {
                 .copy_within(self.start..self.start + self.have, 0);
             self.start = 0;
         }
+    }
+
+    // Keep compaction, bounded suffix selection, and the post-read byte
+    // count together.  The ABI caller still decides when it may publish the
+    // resulting cursor, which preserves the existing error-path cursor
+    // timing while giving a later owner-backed input facade one safe step.
+    fn fill(&mut self, fd: &rustix::fd::OwnedFd) -> Option<(GzLoad, u32)> {
+        self.compact();
+        let result = gz_load(fd, &mut self.buffer[self.have..]);
+        let added = match result {
+            GzLoad::Loaded { have, .. } | GzLoad::Error { have, .. } => have as usize,
+        };
+        let have = self.have.checked_add(added)?;
+        let have = u32::try_from(have).ok()?;
+        Some((result, have))
     }
 }
 
@@ -243,35 +270,34 @@ fn apply_gz_load(
 }
 
 unsafe fn gz_avail(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
-    let mut got: ::core::ffi::c_uint = 0;
     if state.err != crate::zlib_h::Z_OK && state.err != crate::zlib_h::Z_BUF_ERROR {
         return -1 as ::core::ffi::c_int;
     }
     if state.eof == 0 as ::core::ffi::c_int {
-        {
-            let strm = &mut state.strm;
-            if strm.avail_in != 0 {
-                let buffer = state.in_0.as_deref_mut().unwrap();
-                // `strm.next_in` is always a cursor in `in_0`: gz_load()
-                // installs the buffer, and inflate only advances that cursor.
-                let Some(mut input) = GzInputCursor::from_owned_buffer(
-                    buffer,
-                    strm.next_in.addr(),
-                    strm.avail_in,
-                    state.size as usize,
-                ) else {
-                    return -1 as ::core::ffi::c_int;
-                };
-                input.compact();
-            }
-        }
         let avail_in = state.strm.avail_in;
         let size = state.size as usize;
         let Some(mut buffer) = state.in_0.take() else {
             return -1 as ::core::ffi::c_int;
         };
         errno::set_errno(errno::Errno(0));
-        let ret = if let Some(output) = buffer.get_mut(avail_in as usize..size) {
+        let ret = (|| {
+            // `strm.next_in` is a cursor in `in_0` only while input is
+            // pending.  A zero count intentionally accepts its null cursor.
+            let Some(mut input) = (if avail_in == 0 {
+                GzInputCursor::empty(buffer.as_mut(), size)
+            } else {
+                GzInputCursor::from_owned_buffer(
+                    buffer.as_mut(),
+                    state.strm.next_in.addr(),
+                    avail_in,
+                    size,
+                )
+            }) else {
+                return -1;
+            };
+            let Some((load, available)) = input.fill(state.fd.as_ref().unwrap()) else {
+                return -1;
+            };
             match apply_gz_load(
                 GzLoadTarget {
                     again: &mut state.again,
@@ -281,22 +307,19 @@ unsafe fn gz_avail(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int 
                     buffered: &mut state.x.have,
                     path: state.path.as_deref(),
                 },
-                gz_load(state.fd.as_ref().unwrap(), output),
+                load,
             ) {
-                Ok(have) => {
-                    got = have;
+                Ok(_) => {
+                    state.strm.avail_in = available;
                     0
                 }
                 Err(_) => -1,
             }
-        } else {
-            -1 as ::core::ffi::c_int
-        };
+        })();
         state.in_0 = Some(buffer);
         if ret == -1 as ::core::ffi::c_int {
             return -1 as ::core::ffi::c_int;
         }
-        state.strm.avail_in = state.strm.avail_in.wrapping_add(got);
         state.strm.next_in = state.in_0.as_deref_mut().unwrap().as_mut_ptr();
     }
     return 0 as ::core::ffi::c_int;
