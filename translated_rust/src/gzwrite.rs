@@ -205,6 +205,13 @@ fn gz_zero_action(ret: ::core::ffi::c_int, has_skip: bool) -> GzZeroAction {
     }
 }
 
+fn gzclose_operation_error(
+    result: ::core::ffi::c_int,
+    err: ::core::ffi::c_int,
+) -> Option<::core::ffi::c_int> {
+    (result == -1 as ::core::ffi::c_int).then_some(err)
+}
+
 fn gzclose_w_result(
     zero_error: Option<::core::ffi::c_int>,
     finish_error: Option<::core::ffi::c_int>,
@@ -1490,17 +1497,14 @@ pub unsafe extern "C" fn gzclose_w(mut file: crate::zlib_h::gzFile) -> ::core::f
     if !gzclose_mode_is_writable(state.mode) {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    let zero_error =
-        if gz_has_pending_skip((*state).skip) && gz_zero(state) == -1 as ::core::ffi::c_int {
-            Some((*state).err)
-        } else {
-            None
-        };
-    let finish_error = if gz_comp(state, crate::zlib_h::Z_FINISH) == -1 as ::core::ffi::c_int {
-        Some((*state).err)
+    let zero_error = if gz_has_pending_skip((*state).skip) {
+        let result = gz_zero(state);
+        gzclose_operation_error(result, (*state).err)
     } else {
         None
     };
+    let result = gz_comp(state, crate::zlib_h::Z_FINISH);
+    let finish_error = gzclose_operation_error(result, (*state).err);
     match gzclose_buffer_action((*state).size, (*state).direct) {
         GzCloseBufferAction::Keep => {}
         GzCloseBufferAction::FreeBuffers { end_deflate } => {
@@ -1551,8 +1555,8 @@ mod tests {
         gz_zero_apply_comp_progress, gz_zero_apply_progress, gz_zero_chunk_len,
         gz_zero_chunk_limits, gz_zero_chunk_step, gz_zero_initial_step,
         gz_zero_needs_initialization, gz_zero_pending_step, gz_zero_progress,
-        gzclose_buffer_action, gzclose_mode_is_writable, gzclose_w_result, gzflush_action,
-        gzflush_mode_is_valid, gzfwrite_result, gzputc_result, gzputc_write_action,
+        gzclose_buffer_action, gzclose_mode_is_writable, gzclose_operation_error, gzclose_w_result,
+        gzflush_action, gzflush_mode_is_valid, gzfwrite_result, gzputc_result, gzputc_write_action,
         gzputs_len_fits_int, gzputs_result, gzsetparams_action, gzsetparams_buffer_action,
         gzsetparams_settings_match, gzsetparams_state_is_usable, gzwrite_request,
         GzCloseBufferAction, GzCompDeflateAction, GzCompOutputBufferAction, GzCompResetAction,
@@ -1593,6 +1597,19 @@ mod tests {
             gzflush_action(Some(::core::ffi::c_int::MIN)),
             GzFlushAction::Compress
         ));
+    }
+
+    #[test]
+    fn gzclose_operation_error_captures_only_failure_sentinel() {
+        assert_eq!(
+            gzclose_operation_error(-1, crate::zlib_h::Z_ERRNO),
+            Some(crate::zlib_h::Z_ERRNO)
+        );
+        assert_eq!(gzclose_operation_error(0, crate::zlib_h::Z_ERRNO), None);
+        assert_eq!(
+            gzclose_operation_error(crate::zlib_h::Z_STREAM_END, crate::zlib_h::Z_ERRNO),
+            None
+        );
     }
 
     #[test]
