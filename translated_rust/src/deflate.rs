@@ -2693,6 +2693,37 @@ struct DeflateCopyPreparation {
     plan: DeflateCopyPlan,
 }
 
+// This is the safe half of the eventual custom-allocation owner.  It has the
+// same four independently sized regions as zlib's callback allocation path,
+// but exposes only owned slices to copy/reset cores.  The ABI adapter cannot
+// use it until callback allocation and release are represented by that owner;
+// keeping the representation here nevertheless lets the deep-copy algorithm
+// be exercised without a state record or an allocator callback.
+struct DeflateOwnedStorage {
+    window: Box<[crate::stdlib::Bytef]>,
+    prev: Box<[crate::src::deflate::Posf]>,
+    head: Box<[crate::src::deflate::Posf]>,
+    pending: Box<[crate::stdlib::Bytef]>,
+}
+
+impl DeflateStorageLayout {
+    fn allocate_owned(&self) -> Option<DeflateOwnedStorage> {
+        fn allocate_zeroed<T: Clone>(len: usize, value: T) -> Option<Box<[T]>> {
+            let mut storage = Vec::new();
+            storage.try_reserve_exact(len).ok()?;
+            storage.resize(len, value);
+            Some(storage.into_boxed_slice())
+        }
+
+        Some(DeflateOwnedStorage {
+            window: allocate_zeroed(self.window.byte_len()?, 0)?,
+            prev: allocate_zeroed(self.prev.element_len::<crate::src::deflate::Posf>()?, 0)?,
+            head: allocate_zeroed(self.head.element_len::<crate::src::deflate::Posf>()?, 0)?,
+            pending: allocate_zeroed(self.pending.byte_len()?, 0)?,
+        })
+    }
+}
+
 // The tree bookkeeping is independent of the callback-owned state and buffer
 // allocations.  Keep its deep-copy operation in a pointer-free value so the
 // copy path can eventually hand only the allocation handles to the boundary
@@ -2924,18 +2955,18 @@ impl PendingRegions {
         })
     }
 
-    fn copy_from(self, source: &[crate::stdlib::Bytef], destination: &mut [crate::stdlib::Bytef]) {
+    fn copy_from(&self, source: &[crate::stdlib::Bytef], destination: &mut [crate::stdlib::Bytef]) {
         let Some(queued) = source.get(self.queued.clone()) else {
             return;
         };
         let Some(symbols) = source.get(self.symbols.clone()) else {
             return;
         };
-        let Some(destination_queued) = destination.get_mut(self.queued) else {
+        let Some(destination_queued) = destination.get_mut(self.queued.clone()) else {
             return;
         };
         destination_queued.copy_from_slice(queued);
-        let Some(destination_symbols) = destination.get_mut(self.symbols) else {
+        let Some(destination_symbols) = destination.get_mut(self.symbols.clone()) else {
             return;
         };
         destination_symbols.copy_from_slice(symbols);
