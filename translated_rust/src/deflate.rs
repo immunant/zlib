@@ -3956,13 +3956,10 @@ pub unsafe extern "C" fn deflateEnd_ffi(mut strm: crate::zlib_h::z_streamp) -> :
 // pointers.  Keep that projection out of `deflateCopy()` itself: its safe
 // typed-slice core is also the path used by the eventual allocation owner.
 unsafe fn deflate_copy_from_abi(
-    mut dest: crate::zlib_h::z_streamp,
-    mut source: crate::zlib_h::z_streamp,
+    mut dest: ::core::ptr::NonNull<crate::zlib_h::z_stream_s>,
+    source: ::core::ptr::NonNull<crate::zlib_h::z_stream_s>,
 ) -> ::core::ffi::c_int {
-    if source.is_null() || dest.is_null() {
-        return crate::zlib_h::Z_STREAM_ERROR;
-    }
-    let source = &*source;
+    let source = source.as_ref();
     if source.zalloc.is_none() || source.zfree.is_none() {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
@@ -3971,7 +3968,7 @@ unsafe fn deflate_copy_from_abi(
         return crate::zlib_h::Z_STREAM_ERROR;
     }
     let ss = &*source_state;
-    let dest = &mut *dest;
+    let dest = dest.as_mut();
     let payload = DeflateCopyPayload {
         data_type: source.data_type,
         status: ss.status,
@@ -4217,6 +4214,12 @@ pub unsafe extern "C" fn deflateCopy_ffi(
     mut dest: crate::zlib_h::z_streamp,
     mut source: crate::zlib_h::z_streamp,
 ) -> ::core::ffi::c_int {
+    let Some(dest) = ::core::ptr::NonNull::new(dest) else {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    };
+    let Some(source) = ::core::ptr::NonNull::new(source) else {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    };
     deflate_copy_from_abi(dest, source)
 }
 struct LongestMatchInput {
