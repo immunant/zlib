@@ -535,13 +535,20 @@ pub unsafe extern "C" fn gzread_ffi(
 ) -> ::core::ffi::c_int {
     gzread(file, buf, len)
 }
-pub unsafe extern "C" fn gzfread(
+fn gzf_len(
+    size: crate::stdlib::z_size_t,
+    nitems: crate::stdlib::z_size_t,
+) -> Option<crate::stdlib::z_size_t> {
+    size.checked_mul(nitems)
+}
+#[export_name = "gzfread"]
+
+pub unsafe extern "C" fn gzfread_ffi(
     mut buf: crate::stdlib::voidp,
     mut size: crate::stdlib::z_size_t,
     mut nitems: crate::stdlib::z_size_t,
     mut file: crate::zlib_h::gzFile,
 ) -> crate::stdlib::z_size_t {
-    let mut len: crate::stdlib::z_size_t = 0;
     let mut state: crate::gzguts_h::gz_statep =
         ::core::ptr::null_mut::<crate::gzguts_h::gz_state>();
     if file.is_null() {
@@ -562,30 +569,19 @@ pub unsafe extern "C" fn gzfread(
         crate::zlib_h::Z_OK,
         ::core::ptr::null::<::core::ffi::c_char>(),
     );
-    len = nitems.wrapping_mul(size);
-    if size != 0 && len.wrapping_div(size) != nitems {
+    let Some(len) = gzf_len(size, nitems) else {
         crate::src::gzlib::gz_error(
             state as *mut crate::gzguts_h::gz_state,
             crate::zlib_h::Z_STREAM_ERROR,
             b"request does not fit in a size_t\0".as_ptr() as *const ::core::ffi::c_char,
         );
         return 0 as crate::stdlib::z_size_t;
-    }
+    };
     return if len != 0 {
         gz_read(state, buf, len).wrapping_div(size)
     } else {
         0 as crate::stdlib::z_size_t
     };
-}
-#[export_name = "gzfread"]
-
-pub unsafe extern "C" fn gzfread_ffi(
-    mut buf: crate::stdlib::voidp,
-    mut size: crate::stdlib::z_size_t,
-    mut nitems: crate::stdlib::z_size_t,
-    mut file: crate::zlib_h::gzFile,
-) -> crate::stdlib::z_size_t {
-    gzfread(buf, size, nitems, file)
 }
 pub unsafe extern "C" fn gzgetc(mut file: crate::zlib_h::gzFile) -> ::core::ffi::c_int {
     let mut buf: [::core::ffi::c_uchar; 1] = [0; 1];
@@ -807,25 +803,23 @@ pub unsafe extern "C" fn gzgets_ffi(
 ) -> *mut ::core::ffi::c_char {
     gzgets(file, buf, len)
 }
-pub unsafe extern "C" fn gzdirect(mut file: crate::zlib_h::gzFile) -> ::core::ffi::c_int {
-    let mut state: crate::gzguts_h::gz_statep =
-        ::core::ptr::null_mut::<crate::gzguts_h::gz_state>();
+pub fn gzdirect(state: &crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
+    return (state.direct == 1 as ::core::ffi::c_int) as ::core::ffi::c_int;
+}
+#[export_name = "gzdirect"]
+
+pub unsafe extern "C" fn gzdirect_ffi(mut file: crate::zlib_h::gzFile) -> ::core::ffi::c_int {
     if file.is_null() {
         return 0 as ::core::ffi::c_int;
     }
-    state = file as crate::gzguts_h::gz_statep;
+    let state = file as crate::gzguts_h::gz_statep;
     if (*state).mode == crate::gzguts_h::GZ_READ
         && (*state).how == crate::gzguts_h::LOOK
         && (*state).x.have == 0 as ::core::ffi::c_uint
     {
         gz_look(state);
     }
-    return ((*state).direct == 1 as ::core::ffi::c_int) as ::core::ffi::c_int;
-}
-#[export_name = "gzdirect"]
-
-pub unsafe extern "C" fn gzdirect_ffi(mut file: crate::zlib_h::gzFile) -> ::core::ffi::c_int {
-    gzdirect(file)
+    gzdirect(&*state)
 }
 pub unsafe extern "C" fn gzclose_r(mut file: crate::zlib_h::gzFile) -> ::core::ffi::c_int {
     let mut ret: ::core::ffi::c_int = 0;
