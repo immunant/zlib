@@ -126,7 +126,7 @@ fn gz_init(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
     return 0 as ::core::ffi::c_int;
 }
 
-unsafe fn gz_comp(
+fn gz_comp(
     state: &mut crate::gzguts_h::gz_state,
     flush: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
@@ -148,7 +148,8 @@ unsafe fn gz_comp(
             gz_set_errno(rustix::io::Errno::BADF);
             return -1 as ::core::ffi::c_int;
         }
-        let fd = BorrowedFd::borrow_raw(state.fd);
+        // `fd` was checked above and remains owned by `state` for this call.
+        let fd = unsafe { BorrowedFd::borrow_raw(state.fd) };
         while strm.avail_in != 0 {
             gz_clear_errno();
             state.again = 0 as ::core::ffi::c_int;
@@ -157,7 +158,9 @@ unsafe fn gz_comp(
             } else {
                 strm.avail_in as ::core::ffi::c_uint
             };
-            let input = ::core::slice::from_raw_parts(strm.next_in, put as usize);
+            // zlib's stream cursor and length describe the still-live input
+            // selected by the caller of this synchronous write operation.
+            let input = unsafe { ::core::slice::from_raw_parts(strm.next_in, put as usize) };
             writ = match rustix::io::write(fd, input) {
                 Ok(written) => written as ::core::ffi::c_int,
                 Err(error) => {
@@ -180,7 +183,8 @@ unsafe fn gz_comp(
         if strm.avail_in == 0 as crate::stdlib::uInt && flush == crate::zlib_h::Z_NO_FLUSH {
             return 0 as ::core::ffi::c_int;
         }
-        crate::src::deflate::deflateReset(strm);
+        // `strm` is the initialized stream held by this gzip state.
+        unsafe { crate::src::deflate::deflateReset(strm) };
         state.reset = 0 as ::core::ffi::c_int;
     }
     ret = crate::zlib_h::Z_OK;
@@ -190,7 +194,8 @@ unsafe fn gz_comp(
         gz_set_errno(rustix::io::Errno::BADF);
         return -1 as ::core::ffi::c_int;
     }
-    let fd = BorrowedFd::borrow_raw(state.fd);
+    // `fd` was checked above and remains owned by `state` for this call.
+    let fd = unsafe { BorrowedFd::borrow_raw(state.fd) };
     loop {
         if strm.avail_out == 0 as crate::stdlib::uInt
             || flush != crate::zlib_h::Z_NO_FLUSH
@@ -199,14 +204,15 @@ unsafe fn gz_comp(
             while strm.next_out > state.x.next {
                 gz_clear_errno();
                 state.again = 0 as ::core::ffi::c_int;
-                put = if strm.next_out.offset_from(state.x.next)
+                put = if unsafe { strm.next_out.offset_from(state.x.next) }
                     > max as ::core::ffi::c_int as isize
                 {
                     max
                 } else {
-                    strm.next_out.offset_from(state.x.next) as ::core::ffi::c_uint
+                    unsafe { strm.next_out.offset_from(state.x.next) as ::core::ffi::c_uint }
                 };
-                let output = ::core::slice::from_raw_parts(state.x.next, put as usize);
+                // The pending range is bounded by the gzip output buffer.
+                let output = unsafe { ::core::slice::from_raw_parts(state.x.next, put as usize) };
                 writ = match rustix::io::write(fd, output) {
                     Ok(written) => written as ::core::ffi::c_int,
                     Err(error) => {
@@ -229,7 +235,8 @@ unsafe fn gz_comp(
             }
         }
         have = strm.avail_out as ::core::ffi::c_uint;
-        ret = crate::src::deflate::deflate(strm, flush);
+        // `strm` is the initialized stream held by this gzip state.
+        ret = unsafe { crate::src::deflate::deflate(strm, flush) };
         if ret == crate::zlib_h::Z_STREAM_ERROR {
             crate::src::gzlib::gz_static_error(
                 state,
@@ -254,7 +261,7 @@ fn gz_zero(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
     let mut ret: ::core::ffi::c_int = 0;
     let mut n: ::core::ffi::c_uint = 0;
     if state.strm.avail_in != 0
-        && unsafe { gz_comp(state, crate::zlib_h::Z_NO_FLUSH) } == -1 as ::core::ffi::c_int
+        && gz_comp(state, crate::zlib_h::Z_NO_FLUSH) == -1 as ::core::ffi::c_int
     {
         return -1 as ::core::ffi::c_int;
     }
@@ -281,7 +288,7 @@ fn gz_zero(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
         }
         state.strm.avail_in = n as crate::stdlib::uInt;
         state.strm.next_in = state.in_0 as *mut crate::stdlib::Bytef;
-        ret = unsafe { gz_comp(state, crate::zlib_h::Z_NO_FLUSH) };
+        ret = gz_comp(state, crate::zlib_h::Z_NO_FLUSH);
         n = n.wrapping_sub(state.strm.avail_in as ::core::ffi::c_uint);
         state.x.pos += n as crate::stdlib::off64_t;
         state.skip -= n as crate::stdlib::off64_t;
@@ -342,7 +349,7 @@ fn gz_write(
             if buf.is_empty() {
                 break;
             }
-            if unsafe { gz_comp(state, crate::zlib_h::Z_NO_FLUSH) } == -1 as ::core::ffi::c_int {
+            if gz_comp(state, crate::zlib_h::Z_NO_FLUSH) == -1 as ::core::ffi::c_int {
                 return if state.again != 0 {
                     put.wrapping_sub(buf.len())
                 } else {
@@ -352,7 +359,7 @@ fn gz_write(
         }
     } else {
         if state.strm.avail_in != 0
-            && unsafe { gz_comp(state, crate::zlib_h::Z_NO_FLUSH) } == -1 as ::core::ffi::c_int
+            && gz_comp(state, crate::zlib_h::Z_NO_FLUSH) == -1 as ::core::ffi::c_int
         {
             return 0 as crate::stdlib::z_size_t;
         }
@@ -363,7 +370,7 @@ fn gz_write(
                 n = buf.len() as ::core::ffi::c_uint;
             }
             state.strm.avail_in = n as crate::stdlib::uInt;
-            ret = unsafe { gz_comp(state, crate::zlib_h::Z_NO_FLUSH) };
+            ret = gz_comp(state, crate::zlib_h::Z_NO_FLUSH);
             n = n.wrapping_sub(state.strm.avail_in as ::core::ffi::c_uint);
             state.x.pos += n as crate::stdlib::off64_t;
             buf = &buf[n as usize..];
@@ -548,7 +555,7 @@ fn gzflush(
     if state.skip != 0 && gz_zero(state) == -1 as ::core::ffi::c_int {
         return state.err;
     }
-    unsafe { gz_comp(state, flush) };
+    gz_comp(state, flush);
     return state.err;
 }
 #[export_name = "gzflush"]
@@ -584,7 +591,7 @@ fn gzsetparams(
     }
     if state.size != 0 {
         if state.strm.avail_in != 0
-            && unsafe { gz_comp(state, crate::zlib_h::Z_BLOCK) } == -1 as ::core::ffi::c_int
+            && gz_comp(state, crate::zlib_h::Z_BLOCK) == -1 as ::core::ffi::c_int
         {
             return state.err;
         }
