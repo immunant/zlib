@@ -1072,9 +1072,10 @@ fn inflate_back_push_repeated_code_length(
 // Default allocator selection and error-message reset are ordinary stream
 // state transitions; keep them reference-based so the allocation boundary in
 // `inflateBackInit_` only handles the still-uninitialized state object.
-fn inflate_back_prepare_stream(strm: &mut crate::zlib_h::z_stream) {
+fn inflate_back_prepare_stream(strm: &mut crate::zlib_h::z_stream) -> bool {
     strm.msg = ::core::ptr::null_mut::<::core::ffi::c_char>();
-    if strm.zalloc.is_none() {
+    let uses_default_allocator = strm.zalloc.is_none();
+    if uses_default_allocator {
         strm.zalloc = Some(
             crate::src::zutil::zcalloc
                 as unsafe extern "C" fn(
@@ -1091,6 +1092,7 @@ fn inflate_back_prepare_stream(strm: &mut crate::zlib_h::z_stream) {
                 as unsafe extern "C" fn(crate::stdlib::voidpf, crate::stdlib::voidpf) -> (),
         ) as crate::zlib_h::free_func;
     }
+    uses_default_allocator
 }
 
 // Once the allocation has been bound, initializing the rest of an
@@ -1142,17 +1144,24 @@ fn inflateBackInit_(
     };
     let strm_ref = strm.expect("configuration preflight requires a stream");
     let window = window.expect("configuration preflight requires a window");
-    inflate_back_prepare_stream(strm_ref);
-    // SAFETY: preflight requires the initialized allocator. This is the
-    // allocation contract paired with `inflateBackEnd()` for the newly
-    // initialized stream state.
-    let state = unsafe {
-        Some(strm_ref.zalloc.expect("non-null function pointer"))
-            .expect("non-null function pointer")(
+    let uses_default_allocator = inflate_back_prepare_stream(strm_ref);
+    let state = if uses_default_allocator {
+        crate::src::zutil::zcalloc(
             strm_ref.opaque,
             1 as crate::stdlib::uInt,
             ::core::mem::size_of::<crate::src::inflate::inflate_state>() as crate::stdlib::uInt,
         ) as *mut crate::src::inflate::inflate_state
+    } else {
+        // SAFETY: this is the caller-provided allocation contract paired
+        // with `inflateBackEnd()` for the newly initialized stream state.
+        unsafe {
+            Some(strm_ref.zalloc.expect("non-null function pointer"))
+                .expect("non-null function pointer")(
+                strm_ref.opaque,
+                1 as crate::stdlib::uInt,
+                ::core::mem::size_of::<crate::src::inflate::inflate_state>() as crate::stdlib::uInt,
+            ) as *mut crate::src::inflate::inflate_state
+        }
     };
     if state.is_null() {
         return crate::zlib_h::Z_MEM_ERROR;

@@ -539,9 +539,10 @@ fn inflate_initialize_state(
 // Default callbacks belong to initialization, after the ABI entry point has
 // bound the stream. This keeps callback selection out of the exported
 // forwarding wrapper and leaves the allocation sequence below unchanged.
-fn inflate_prepare_stream(strm: &mut crate::zlib_h::z_stream) {
+fn inflate_prepare_stream(strm: &mut crate::zlib_h::z_stream) -> bool {
     strm.msg = ::core::ptr::null_mut::<::core::ffi::c_char>();
-    if strm.zalloc.is_none() {
+    let uses_default_allocator = strm.zalloc.is_none();
+    if uses_default_allocator {
         strm.zalloc = Some(
             crate::src::zutil::zcalloc
                 as unsafe extern "C" fn(
@@ -558,6 +559,7 @@ fn inflate_prepare_stream(strm: &mut crate::zlib_h::z_stream) {
                 as unsafe extern "C" fn(crate::stdlib::voidpf, crate::stdlib::voidpf) -> (),
         ) as crate::zlib_h::free_func;
     }
+    uses_default_allocator
 }
 
 #[export_name = "inflateReset2"]
@@ -605,17 +607,24 @@ pub(crate) fn inflateInit2_(
     };
     // The remaining initialization is ordinary stream/state work, including
     // default callback selection.
-    inflate_prepare_stream(strm);
-    // SAFETY: `inflate_prepare_stream()` installed a zlib-compatible
-    // allocator when the caller did not provide one. The callback ABI owns
-    // the allocation contract for this state request.
-    state = unsafe {
-        Some(strm.zalloc.expect("non-null function pointer"))
-            .expect("non-null function pointer")(
+    let uses_default_allocator = inflate_prepare_stream(strm);
+    state = if uses_default_allocator {
+        crate::src::zutil::zcalloc(
             strm.opaque,
             1 as crate::stdlib::uInt,
             ::core::mem::size_of::<crate::src::inflate::inflate_state>() as crate::stdlib::uInt,
         ) as *mut crate::src::inflate::inflate_state
+    } else {
+        // SAFETY: the caller supplied this allocation callback as part of
+        // zlib's stream contract.
+        unsafe {
+            Some(strm.zalloc.expect("non-null function pointer"))
+                .expect("non-null function pointer")(
+                strm.opaque,
+                1 as crate::stdlib::uInt,
+                ::core::mem::size_of::<crate::src::inflate::inflate_state>() as crate::stdlib::uInt,
+            ) as *mut crate::src::inflate::inflate_state
+        }
     };
     if state.is_null() {
         return crate::zlib_h::Z_MEM_ERROR;
