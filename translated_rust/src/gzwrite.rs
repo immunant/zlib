@@ -403,16 +403,9 @@ pub unsafe extern "C" fn gzfwrite(
     mut buf: crate::stdlib::voidpc,
     mut size: crate::stdlib::z_size_t,
     mut nitems: crate::stdlib::z_size_t,
-    mut file: crate::zlib_h::gzFile,
+    state: &mut crate::gzguts_h::gz_state,
 ) -> crate::stdlib::z_size_t {
     let mut len: crate::stdlib::z_size_t = 0;
-    let mut state: crate::gzguts_h::gz_statep =
-        ::core::ptr::null_mut::<crate::gzguts_h::gz_state>();
-    if file.is_null() {
-        return 0 as crate::stdlib::z_size_t;
-    }
-    state = file as crate::gzguts_h::gz_statep;
-    let state = &mut *state;
     if !crate::src::gzlib::gz_write_state_is_usable(state) {
         return 0 as crate::stdlib::z_size_t;
     }
@@ -444,21 +437,17 @@ pub unsafe extern "C" fn gzfwrite_ffi(
     mut nitems: crate::stdlib::z_size_t,
     mut file: crate::zlib_h::gzFile,
 ) -> crate::stdlib::z_size_t {
-    gzfwrite(buf, size, nitems, file)
+    if file.is_null() {
+        return 0 as crate::stdlib::z_size_t;
+    }
+    gzfwrite(buf, size, nitems, &mut *(file as crate::gzguts_h::gz_statep))
 }
 pub unsafe extern "C" fn gzputc(
-    mut file: crate::zlib_h::gzFile,
+    state: &mut crate::gzguts_h::gz_state,
     mut c: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
     let mut have: ::core::ffi::c_uint = 0;
     let mut buf: [::core::ffi::c_uchar; 1] = [0; 1];
-    let mut state: crate::gzguts_h::gz_statep =
-        ::core::ptr::null_mut::<crate::gzguts_h::gz_state>();
-    if file.is_null() {
-        return -1 as ::core::ffi::c_int;
-    }
-    state = file as crate::gzguts_h::gz_statep;
-    let state = &mut *state;
     if !crate::src::gzlib::gz_write_state_is_usable(state) {
         return -1 as ::core::ffi::c_int;
     }
@@ -495,21 +484,17 @@ pub unsafe extern "C" fn gzputc_ffi(
     mut file: crate::zlib_h::gzFile,
     mut c: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
-    gzputc(file, c)
+    if file.is_null() {
+        return -1 as ::core::ffi::c_int;
+    }
+    gzputc(&mut *(file as crate::gzguts_h::gz_statep), c)
 }
 pub unsafe extern "C" fn gzputs(
-    mut file: crate::zlib_h::gzFile,
+    state: &mut crate::gzguts_h::gz_state,
     mut s: *const ::core::ffi::c_char,
 ) -> ::core::ffi::c_int {
     let mut len: crate::stdlib::z_size_t = 0;
     let mut put: crate::stdlib::z_size_t = 0;
-    let mut state: crate::gzguts_h::gz_statep =
-        ::core::ptr::null_mut::<crate::gzguts_h::gz_state>();
-    if file.is_null() {
-        return -1 as ::core::ffi::c_int;
-    }
-    state = file as crate::gzguts_h::gz_statep;
-    let state = &mut *state;
     if !crate::src::gzlib::gz_write_state_is_usable(state) {
         return -1 as ::core::ffi::c_int;
     }
@@ -542,19 +527,15 @@ pub unsafe extern "C" fn gzputs_ffi(
     mut file: crate::zlib_h::gzFile,
     mut s: *const ::core::ffi::c_char,
 ) -> ::core::ffi::c_int {
-    gzputs(file, s)
+    if file.is_null() {
+        return -1 as ::core::ffi::c_int;
+    }
+    gzputs(&mut *(file as crate::gzguts_h::gz_statep), s)
 }
 pub unsafe extern "C" fn gzflush(
-    mut file: crate::zlib_h::gzFile,
+    state: &mut crate::gzguts_h::gz_state,
     mut flush: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
-    let mut state: crate::gzguts_h::gz_statep =
-        ::core::ptr::null_mut::<crate::gzguts_h::gz_state>();
-    if file.is_null() {
-        return crate::zlib_h::Z_STREAM_ERROR;
-    }
-    state = file as crate::gzguts_h::gz_statep;
-    let state = &mut *state;
     if !crate::src::gzlib::gz_write_state_is_usable(state) {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
@@ -578,20 +559,16 @@ pub unsafe extern "C" fn gzflush_ffi(
     mut file: crate::zlib_h::gzFile,
     mut flush: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
-    gzflush(file, flush)
-}
-pub unsafe extern "C" fn gzsetparams(
-    mut file: crate::zlib_h::gzFile,
-    mut level: ::core::ffi::c_int,
-    mut strategy: ::core::ffi::c_int,
-) -> ::core::ffi::c_int {
-    let mut state: crate::gzguts_h::gz_statep =
-        ::core::ptr::null_mut::<crate::gzguts_h::gz_state>();
     if file.is_null() {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    state = file as crate::gzguts_h::gz_statep;
-    let state = &mut *state;
+    gzflush(&mut *(file as crate::gzguts_h::gz_statep), flush)
+}
+pub unsafe extern "C" fn gzsetparams(
+    state: &mut crate::gzguts_h::gz_state,
+    mut level: ::core::ffi::c_int,
+    mut strategy: ::core::ffi::c_int,
+) -> ::core::ffi::c_int {
     if !crate::src::gzlib::gz_write_state_is_usable(state) || state.direct != 0 {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
@@ -625,17 +602,20 @@ pub unsafe extern "C" fn gzsetparams_ffi(
     mut level: ::core::ffi::c_int,
     mut strategy: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
-    gzsetparams(file, level, strategy)
-}
-pub unsafe extern "C" fn gzclose_w(mut file: crate::zlib_h::gzFile) -> ::core::ffi::c_int {
-    let mut ret: ::core::ffi::c_int = crate::zlib_h::Z_OK;
-    let mut state: crate::gzguts_h::gz_statep =
-        ::core::ptr::null_mut::<crate::gzguts_h::gz_state>();
     if file.is_null() {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    state = file as crate::gzguts_h::gz_statep;
-    let state = &mut *state;
+    gzsetparams(
+        &mut *(file as crate::gzguts_h::gz_statep),
+        level,
+        strategy,
+    )
+}
+pub unsafe extern "C" fn gzclose_w(
+    state: &mut crate::gzguts_h::gz_state,
+    mut file: crate::zlib_h::gzFile,
+) -> ::core::ffi::c_int {
+    let mut ret: ::core::ffi::c_int = crate::zlib_h::Z_OK;
     if !crate::src::gzlib::gz_has_mode(state, crate::gzguts_h::GZ_WRITE) {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
@@ -671,5 +651,8 @@ pub unsafe extern "C" fn gzclose_w(mut file: crate::zlib_h::gzFile) -> ::core::f
 #[export_name = "gzclose_w"]
 
 pub unsafe extern "C" fn gzclose_w_ffi(mut file: crate::zlib_h::gzFile) -> ::core::ffi::c_int {
-    gzclose_w(file)
+    if file.is_null() {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    }
+    gzclose_w(&mut *(file as crate::gzguts_h::gz_statep), file)
 }
