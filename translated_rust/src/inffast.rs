@@ -289,18 +289,6 @@ fn inflate_fast_dispatch(
     inflate_fast_impl(&mut fast_state, input, output, output_at)
 }
 
-/// Compatibility façade for internal callers that still carry the complete
-/// ABI state.  It can become safe after the C4 state migration removes the
-/// retained header pointer from `inflate_state`.
-pub(crate) unsafe fn inflate_fast(
-    state: &mut inflate_state,
-    input: &[u8],
-    output: &mut [u8],
-    output_at: usize,
-) -> FastProgress {
-    inflate_fast_dispatch(state, input, output, output_at)
-}
-
 #[export_name = "inflate_fast"]
 pub unsafe extern "C" fn inflate_fast_ffi(
     strm: crate::zlib_h::z_streamp,
