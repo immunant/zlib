@@ -4605,13 +4605,24 @@ pub unsafe extern "C" fn _tr_stored_block_ffi(
 ) {
     _tr_stored_block(s, buf, stored_len, last)
 }
-pub unsafe extern "C" fn _tr_flush_bits(mut s: *mut crate::src::deflate::deflate_state) {
-    bi_flush(s);
+// Bit flushing only updates an already-bound deflater and its pending-output
+// buffer. Keep that work reference-based; the ABI adapter below owns the raw
+// state and allocation-backed buffer binding.
+pub fn tr_flush_bits(
+    state: &mut crate::src::deflate::deflate_state,
+    pending: &mut [crate::zutil_h::uch],
+) {
+    bi_flush_state(state, pending);
 }
 #[export_name = "_tr_flush_bits"]
 
 pub unsafe extern "C" fn _tr_flush_bits_ffi(mut s: *mut crate::src::deflate::deflate_state) {
-    _tr_flush_bits(s)
+    let state = &mut *s;
+    let pending = ::core::slice::from_raw_parts_mut(
+        state.pending_buf,
+        state.pending_buf_size as usize,
+    );
+    tr_flush_bits(state, pending)
 }
 pub unsafe extern "C" fn _tr_align(mut s: *mut crate::src::deflate::deflate_state) {
     let mut len: ::core::ffi::c_int = 3 as ::core::ffi::c_int;

@@ -154,7 +154,6 @@ pub use crate::src::crc32::crc32_z_ffi as crc32_z;
 pub use crate::src::trees::_dist_code;
 pub use crate::src::trees::_length_code;
 pub use crate::src::trees::_tr_align;
-pub use crate::src::trees::_tr_flush_bits;
 pub use crate::src::trees::_tr_flush_block;
 pub use crate::src::trees::_tr_init;
 pub use crate::src::trees::_tr_stored_block;
@@ -1618,9 +1617,13 @@ fn flush_pending_progress(
 unsafe extern "C" fn flush_pending(mut strm: crate::zlib_h::z_streamp) {
     let mut s: *mut crate::src::deflate::deflate_state =
         (*strm).state as *mut crate::src::deflate::deflate_state;
-    crate::src::trees::_tr_flush_bits(s as *mut crate::src::deflate::internal_state);
     let stream = &mut *strm;
     let state = &mut *s;
+    let pending_buf = ::core::slice::from_raw_parts_mut(
+        state.pending_buf,
+        state.pending_buf_size as usize,
+    );
+    crate::src::trees::tr_flush_bits(state, pending_buf);
     let len = pending_copy_len(state.pending, stream.avail_out);
     if len == 0 as ::core::ffi::c_uint {
         return;
