@@ -3896,7 +3896,7 @@ fn gen_bitlen_overflow_reassignment(
     }
 }
 
-fn tally_symbol_bytes(
+pub(crate) fn tally_symbol_bytes(
     dist: ::core::ffi::c_uint,
     lc: ::core::ffi::c_uint,
 ) -> [crate::zutil_h::uchf; 3] {
@@ -3917,7 +3917,10 @@ fn match_tree_codes(
     )
 }
 
-fn tally_match_tree_indices(dist: ::core::ffi::c_uint, lc: ::core::ffi::c_uint) -> (usize, usize) {
+pub(crate) fn tally_match_tree_indices(
+    dist: ::core::ffi::c_uint,
+    lc: ::core::ffi::c_uint,
+) -> (usize, usize) {
     let (length_code, distance_code) = match_tree_codes(lc, dist);
     let length_index =
         length_code as ::core::ffi::c_int + crate::src::deflate::LITERALS + 1 as ::core::ffi::c_int;

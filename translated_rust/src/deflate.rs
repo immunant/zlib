@@ -433,6 +433,34 @@ fn deflate_rle_tally_plan(match_length: crate::stdlib::uInt) -> DeflateRleTallyP
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct DeflateRleMatchTally {
+    cursors: [crate::stdlib::uInt; 3],
+    next_sym: crate::stdlib::uInt,
+    symbol_bytes: [crate::zutil_h::uchf; 3],
+    length_tree_index: usize,
+    distance_tree_index: usize,
+}
+
+fn deflate_rle_match_tally_plan(
+    match_length: crate::stdlib::uInt,
+    sym_next: crate::stdlib::uInt,
+) -> DeflateRleMatchTally {
+    let length = match_length.wrapping_sub(crate::zutil_h::MIN_MATCH as crate::stdlib::uInt);
+    let distance = 1;
+    let (cursors, next_sym) = symbol_triplet_cursors(sym_next);
+    let (length_tree_index, distance_tree_index) =
+        crate::src::trees::tally_match_tree_indices(distance, length);
+
+    DeflateRleMatchTally {
+        cursors,
+        next_sym,
+        symbol_bytes: crate::src::trees::tally_symbol_bytes(distance, length),
+        length_tree_index,
+        distance_tree_index,
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum DeflateRleRefillAction {
     Continue,
     NeedMore,
@@ -3905,61 +3933,21 @@ unsafe fn deflate_rle(
         }
         match deflate_rle_tally_plan((*s).match_length) {
             DeflateRleTallyPlan::MatchWithoutCount => {
-                let mut len: crate::zutil_h::uch =
-                    (*s).match_length.wrapping_sub(3 as crate::stdlib::uInt) as crate::zutil_h::uch;
-                let mut dist: crate::zutil_h::ush = 1 as ::core::ffi::c_int as crate::zutil_h::ush;
-                let (cursors, next) = symbol_triplet_cursors((*s).sym_next);
-                (*s).sym_next = next;
-                *(*s).sym_buf.offset(cursors[0] as isize) =
-                    dist as crate::zutil_h::uch as crate::zutil_h::uchf;
-                *(*s).sym_buf.offset(cursors[1] as isize) =
-                    (dist as ::core::ffi::c_int >> 8 as ::core::ffi::c_int) as crate::zutil_h::uch
-                        as crate::zutil_h::uchf;
-                *(*s).sym_buf.offset(cursors[2] as isize) = len as crate::zutil_h::uchf;
-                dist = dist.wrapping_sub(1);
-                (*s).dyn_ltree[(*(&raw const crate::src::trees::_length_code
-                    as *const crate::zutil_h::uch)
-                    .offset(len as isize) as ::core::ffi::c_int
-                    + crate::src::deflate::LITERALS
-                    + 1 as ::core::ffi::c_int) as usize]
-                    .fc
-                    .value = (*s).dyn_ltree[(*(&raw const crate::src::trees::_length_code
-                    as *const crate::zutil_h::uch)
-                    .offset(len as isize)
-                    as ::core::ffi::c_int
-                    + crate::src::deflate::LITERALS
-                    + 1 as ::core::ffi::c_int)
-                    as usize]
+                let tally = deflate_rle_match_tally_plan((*s).match_length, (*s).sym_next);
+                (*s).sym_next = tally.next_sym;
+                *(*s).sym_buf.offset(tally.cursors[0] as isize) = tally.symbol_bytes[0];
+                *(*s).sym_buf.offset(tally.cursors[1] as isize) = tally.symbol_bytes[1];
+                *(*s).sym_buf.offset(tally.cursors[2] as isize) = tally.symbol_bytes[2];
+                (*s).dyn_ltree[tally.length_tree_index].fc.value = (*s).dyn_ltree
+                    [tally.length_tree_index]
                     .fc
                     .value
                     .wrapping_add(1);
-                (*s).dyn_dtree[(if (dist as ::core::ffi::c_int) < 256 as ::core::ffi::c_int {
-                    *(&raw const crate::src::trees::_dist_code as *const crate::zutil_h::uch)
-                        .offset(dist as isize) as ::core::ffi::c_int
-                } else {
-                    *(&raw const crate::src::trees::_dist_code as *const crate::zutil_h::uch)
-                        .offset(
-                            (256 as ::core::ffi::c_int
-                                + (dist as ::core::ffi::c_int >> 7 as ::core::ffi::c_int))
-                                as isize,
-                        ) as ::core::ffi::c_int
-                }) as usize]
+                (*s).dyn_dtree[tally.distance_tree_index].fc.value = (*s).dyn_dtree
+                    [tally.distance_tree_index]
                     .fc
-                    .value =
-                    (*s).dyn_dtree[(if (dist as ::core::ffi::c_int) < 256 as ::core::ffi::c_int {
-                        *(&raw const crate::src::trees::_dist_code as *const crate::zutil_h::uch)
-                            .offset(dist as isize) as ::core::ffi::c_int
-                    } else {
-                        *(&raw const crate::src::trees::_dist_code as *const crate::zutil_h::uch)
-                            .offset(
-                                (256 as ::core::ffi::c_int
-                                    + (dist as ::core::ffi::c_int >> 7 as ::core::ffi::c_int))
-                                    as isize,
-                            ) as ::core::ffi::c_int
-                    }) as usize]
-                        .fc
-                        .value
-                        .wrapping_add(1);
+                    .value
+                    .wrapping_add(1);
                 bflush = ((*s).sym_next == (*s).sym_end) as ::core::ffi::c_int;
                 ((*s).lookahead, (*s).strstart, (*s).match_length) =
                     deflate_rle_match_state_after_emit(
@@ -4173,18 +4161,18 @@ mod tests {
         deflate_match_refill_action, deflate_pending_value, deflate_preflight,
         deflate_prime_bits_valid, deflate_request_is_invalid, deflate_reset_status_and_adler,
         deflate_rle_can_scan_match, deflate_rle_clamp_match_length, deflate_rle_match_length,
-        deflate_rle_match_state_after_emit, deflate_rle_refill_action, deflate_rle_tally_plan,
-        deflate_set_dictionary_allowed, deflate_should_return_buf_error, deflate_state_check_impl,
-        deflate_state_check_result, deflate_state_is_usable, deflate_state_status_valid,
-        deflate_version_matches, dictionary_tail_offset, fill_window_available_space,
-        fill_window_cursor, fill_window_hash_update, fill_window_insert_after_slide,
-        fill_window_should_refill, fill_window_should_slide, fill_window_state_after_slide,
-        fill_window_zero_range, flush_pending_accounting, gzip_default_xfl, gzip_header_crc,
-        gzip_header_crc_pending, gzip_header_crc_pending_range, lm_head_clear_len,
-        lm_initial_state, lm_match_parameters, longest_match_candidate_update,
-        longest_match_clamp_length, longest_match_limit, longest_match_next_chain_length,
-        longest_match_search_parameters, normalize_deflate_params, pending_buffer_needs_flush,
-        pending_output_len, pending_short_cursors, read_buf_checksum,
+        deflate_rle_match_state_after_emit, deflate_rle_match_tally_plan,
+        deflate_rle_refill_action, deflate_rle_tally_plan, deflate_set_dictionary_allowed,
+        deflate_should_return_buf_error, deflate_state_check_impl, deflate_state_check_result,
+        deflate_state_is_usable, deflate_state_status_valid, deflate_version_matches,
+        dictionary_tail_offset, fill_window_available_space, fill_window_cursor,
+        fill_window_hash_update, fill_window_insert_after_slide, fill_window_should_refill,
+        fill_window_should_slide, fill_window_state_after_slide, fill_window_zero_range,
+        flush_pending_accounting, gzip_default_xfl, gzip_header_crc, gzip_header_crc_pending,
+        gzip_header_crc_pending_range, lm_head_clear_len, lm_initial_state, lm_match_parameters,
+        longest_match_candidate_update, longest_match_clamp_length, longest_match_limit,
+        longest_match_next_chain_length, longest_match_search_parameters, normalize_deflate_params,
+        pending_buffer_needs_flush, pending_output_len, pending_short_cursors, read_buf_checksum,
         read_buf_input_progress_after_copy, read_buf_len, read_buf_total_in_after_copy,
         short_msb_bytes, slide_hash_entry, stored_block_available_output, stored_block_can_emit,
         stored_block_header_bytes, stored_block_is_last, stored_block_min_size,
@@ -4246,6 +4234,32 @@ mod tests {
         assert!(!deflate_rle_can_scan_match(min_match.wrapping_sub(1), 1));
         assert!(!deflate_rle_can_scan_match(min_match, 0));
         assert!(deflate_rle_can_scan_match(min_match, 1));
+    }
+
+    #[test]
+    fn deflate_rle_match_tally_plan_encodes_minimum_match_without_counting_it() {
+        let plan =
+            deflate_rle_match_tally_plan(crate::zutil_h::MIN_MATCH as crate::stdlib::uInt, 7);
+
+        assert_eq!(plan.cursors, [7, 8, 9]);
+        assert_eq!(plan.next_sym, 10);
+        assert_eq!(plan.symbol_bytes, [1, 0, 0]);
+        assert_eq!(plan.length_tree_index, 257);
+        assert_eq!(plan.distance_tree_index, 0);
+    }
+
+    #[test]
+    fn deflate_rle_match_tally_plan_preserves_maximum_length_and_cursor_wrapping() {
+        let plan = deflate_rle_match_tally_plan(
+            crate::zutil_h::MAX_MATCH as crate::stdlib::uInt,
+            crate::stdlib::uInt::MAX,
+        );
+
+        assert_eq!(plan.cursors, [crate::stdlib::uInt::MAX, 0, 1]);
+        assert_eq!(plan.next_sym, 2);
+        assert_eq!(plan.symbol_bytes, [1, 0, 255]);
+        assert_eq!(plan.length_tree_index, 285);
+        assert_eq!(plan.distance_tree_index, 0);
     }
 
     #[test]
