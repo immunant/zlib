@@ -530,24 +530,9 @@ pub fn gzread<'a, F>(
 where
     F: FnOnce(usize) -> Option<&'a mut [::core::ffi::c_uchar]>,
 {
-    if !gz_begin_read_operation(state) {
-        return -1 as ::core::ffi::c_int;
-    }
-    if !crate::src::gzlib::gz_uint_request_fits_int(len) {
-        crate::src::gzlib::gz_error(
-            state,
-            crate::zlib_h::Z_STREAM_ERROR,
-            Some(b"request does not fit in an int\0"),
-        );
-        return -1 as ::core::ffi::c_int;
-    }
-    let Some(slice_len) = crate::src::gzlib::gz_rust_slice_len(len as crate::stdlib::z_size_t) else {
-        crate::src::gzlib::gz_error(
-            state,
-            crate::zlib_h::Z_STREAM_ERROR,
-            Some(b"request does not fit in a Rust slice\0"),
-        );
-        return -1 as ::core::ffi::c_int;
+    let slice_len = match gzread_request_len(state, len) {
+        Ok(slice_len) => slice_len,
+        Err(()) => return -1 as ::core::ffi::c_int,
     };
     let buf = bind(slice_len);
     let Some(buf) = buf else {
@@ -586,15 +571,15 @@ where
     read as ::core::ffi::c_int
 }
 
-// The FFI wrapper asks this safe adapter whether it may bind caller memory.
-// It owns state validation and all rejected-request error recording; the
-// wrapper merely forwards that result before converting a raw range.
-fn gzread_preflight(
+// State validation and request classification must happen before any caller
+// range is bound. Both the Rust-facing operation and FFI preflight use this
+// same safe coordinator, leaving their adapters to handle only the buffer.
+fn gzread_request_len(
     state: &mut crate::gzguts_h::gz_state,
     len: ::core::ffi::c_uint,
-) -> Result<usize, ::core::ffi::c_int> {
+) -> Result<usize, ()> {
     if !gz_begin_read_operation(state) {
-        return Err(-1);
+        return Err(());
     }
     if !crate::src::gzlib::gz_uint_request_fits_int(len) {
         crate::src::gzlib::gz_error(
@@ -602,7 +587,7 @@ fn gzread_preflight(
             crate::zlib_h::Z_STREAM_ERROR,
             Some(b"request does not fit in an int\0"),
         );
-        return Err(-1);
+        return Err(());
     }
     let Some(slice_len) = crate::src::gzlib::gz_rust_slice_len(len as crate::stdlib::z_size_t) else {
         crate::src::gzlib::gz_error(
@@ -610,9 +595,19 @@ fn gzread_preflight(
             crate::zlib_h::Z_STREAM_ERROR,
             Some(b"request does not fit in a Rust slice\0"),
         );
-        return Err(-1);
+        return Err(());
     };
     Ok(slice_len)
+}
+
+// The FFI wrapper asks this safe adapter whether it may bind caller memory.
+// It preserves the public error result while the request coordinator owns all
+// state validation and rejected-request error recording.
+fn gzread_preflight(
+    state: &mut crate::gzguts_h::gz_state,
+    len: ::core::ffi::c_uint,
+) -> Result<usize, ::core::ffi::c_int> {
+    gzread_request_len(state, len).map_err(|()| -1)
 }
 
 // Keep the public result mapping in safe code as well. The FFI entry point
@@ -663,55 +658,36 @@ pub fn gzfread<'a, F>(
 where
     F: FnOnce(usize) -> Option<&'a mut [::core::ffi::c_uchar]>,
 {
-    if !gz_begin_read_operation(state) {
-        return 0 as crate::stdlib::z_size_t;
-    }
-    match crate::src::gzlib::gz_item_request(size, nitems) {
-        crate::src::gzlib::GzItemRequest::Empty => 0 as crate::stdlib::z_size_t,
-        crate::src::gzlib::GzItemRequest::TooLarge => {
+    let slice_len = match gzfread_request_len(state, size, nitems) {
+        Ok(Some(slice_len)) => slice_len,
+        Ok(None) | Err(()) => return 0 as crate::stdlib::z_size_t,
+    };
+    match bind(slice_len) {
+        Some(buf) if buf.len() == slice_len => gz_read(state, buf).wrapping_div(size),
+        _ => {
             crate::src::gzlib::gz_error(
                 state,
                 crate::zlib_h::Z_STREAM_ERROR,
-                Some(b"request does not fit in a size_t\0"),
+                Some(b"request does not fit in a Rust slice\0"),
             );
             0 as crate::stdlib::z_size_t
-        }
-        crate::src::gzlib::GzItemRequest::Bytes(len) => {
-            let Some(slice_len) = crate::src::gzlib::gz_rust_slice_len(len) else {
-                crate::src::gzlib::gz_error(
-                    state,
-                    crate::zlib_h::Z_STREAM_ERROR,
-                    Some(b"request does not fit in a Rust slice\0"),
-                );
-                return 0 as crate::stdlib::z_size_t;
-            };
-            match bind(slice_len) {
-                Some(buf) if buf.len() == slice_len => gz_read(state, buf).wrapping_div(size),
-                _ => {
-                    crate::src::gzlib::gz_error(
-                        state,
-                        crate::zlib_h::Z_STREAM_ERROR,
-                        Some(b"request does not fit in a Rust slice\0"),
-                    );
-                    0 as crate::stdlib::z_size_t
-                }
-            }
         }
     }
 }
 
-// Like `gzread_preflight`, this adapter owns the state and request decision
-// that must happen before an ABI caller range is bound.
-fn gzfread_preflight(
+// Unlike byte reads, item reads can be empty without binding a caller range.
+// Keep that distinction and all rejected-request error recording in this safe
+// coordinator before either adapter considers its buffer.
+fn gzfread_request_len(
     state: &mut crate::gzguts_h::gz_state,
     size: crate::stdlib::z_size_t,
     nitems: crate::stdlib::z_size_t,
-) -> Result<usize, ()> {
+) -> Result<Option<usize>, ()> {
     if !gz_begin_read_operation(state) {
         return Err(());
     }
     match crate::src::gzlib::gz_item_request(size, nitems) {
-        crate::src::gzlib::GzItemRequest::Empty => Ok(0),
+        crate::src::gzlib::GzItemRequest::Empty => Ok(None),
         crate::src::gzlib::GzItemRequest::TooLarge => {
             crate::src::gzlib::gz_error(
                 state,
@@ -721,18 +697,27 @@ fn gzfread_preflight(
             Err(())
         }
         crate::src::gzlib::GzItemRequest::Bytes(len) => {
-            if crate::src::gzlib::gz_rust_slice_len(len).is_none() {
+            let Some(slice_len) = crate::src::gzlib::gz_rust_slice_len(len) else {
                 crate::src::gzlib::gz_error(
                     state,
                     crate::zlib_h::Z_STREAM_ERROR,
                     Some(b"request does not fit in a Rust slice\0"),
                 );
-                Err(())
-            } else {
-                Ok(len as usize)
-            }
+                return Err(());
+            };
+            Ok(Some(slice_len))
         }
     }
+}
+
+// Like `gzread_preflight`, this adapter exposes only a concrete slice length
+// to the FFI wrapper. Empty requests remain zero-length and need no binding.
+fn gzfread_preflight(
+    state: &mut crate::gzguts_h::gz_state,
+    size: crate::stdlib::z_size_t,
+    nitems: crate::stdlib::z_size_t,
+) -> Result<usize, ()> {
+    gzfread_request_len(state, size, nitems).map(|slice_len| slice_len.unwrap_or(0))
 }
 
 fn gzfread_ffi_dispatch(
