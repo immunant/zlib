@@ -555,19 +555,14 @@ fn update_window(
 }
 
 // Updating a bound inflater window is an internal operation, not an ABI
-// entry point. Its pointer binding remains confined to this adapter.
+// entry point. A first call with no output ensures the allocation exists; a
+// second call consumes the produced output after that allocator callback has
+// returned.
 fn updatewindow(
-    strm: crate::zlib_h::z_streamp,
-    end: *const crate::stdlib::Bytef,
-    copy: ::core::ffi::c_uint,
+    stream: &mut crate::zlib_h::z_stream,
+    state: &mut crate::src::inflate::inflate_state,
+    output: Option<&[crate::stdlib::Bytef]>,
 ) -> ::core::ffi::c_int {
-    // SAFETY: `inflate()` has already validated its stream and state before
-    // this internal helper is reached.
-    let stream = unsafe { &mut *strm };
-    // SAFETY: the validated stream owns a live inflater state.
-    let state = unsafe {
-        &mut *(stream.state as *mut crate::src::inflate::inflate_state)
-    };
     if state.window.is_null() {
         // SAFETY: zlib's initialized allocator is invoked with the same
         // window size and element count as the C implementation.
@@ -583,12 +578,8 @@ fn updatewindow(
             return 1;
         }
     }
-    let end = if copy == 0 {
-        &[]
-    } else {
-        // SAFETY: `end` is the post-inflate output cursor, and `copy` is the
-        // bounded number of bytes produced immediately before it.
-        unsafe { ::core::slice::from_raw_parts(end.wrapping_sub(copy as usize), copy as usize) }
+    let Some(output) = output else {
+        return 0;
     };
     // SAFETY: a successful allocation above (or the initialized existing
     // window) has exactly the configured window length.
@@ -598,7 +589,7 @@ fn updatewindow(
             ((1 as ::core::ffi::c_uint) << state.wbits) as usize,
         )
     };
-    update_window(state, window, end);
+    update_window(state, window, output);
     0
 }
 pub unsafe extern "C" fn inflate(
@@ -2270,23 +2261,37 @@ pub unsafe extern "C" fn inflate(
     (*strm).avail_in = have as crate::stdlib::uInt;
     (*state).hold = hold;
     (*state).bits = bits;
-    if (*state).wsize != 0
+    let produced = out.wrapping_sub((*strm).avail_out as ::core::ffi::c_uint);
+    let update_window = (*state).wsize != 0
         || out != (*strm).avail_out
             && ((*state).mode as ::core::ffi::c_uint)
                 < crate::src::inflate::BAD as ::core::ffi::c_int as ::core::ffi::c_uint
             && (((*state).mode as ::core::ffi::c_uint)
                 < crate::src::inflate::CHECK as ::core::ffi::c_int as ::core::ffi::c_uint
-                || flush != crate::zlib_h::Z_FINISH)
-    {
-        if updatewindow(
-            strm,
-            (*strm).next_out,
-            out.wrapping_sub((*strm).avail_out as ::core::ffi::c_uint),
-        ) != 0
-        {
-            (*state).mode = crate::src::inflate::MEM;
+                || flush != crate::zlib_h::Z_FINISH);
+    let window_binding = if update_window {
+        let stream = &mut *strm;
+        let state = &mut *state;
+        if updatewindow(stream, state, None) != 0 {
+            state.mode = crate::src::inflate::MEM;
             return crate::zlib_h::Z_MEM_ERROR;
         }
+        Some((stream, state))
+    } else {
+        None
+    };
+    let output = if produced == 0 {
+        &[]
+    } else {
+        // SAFETY: the validated output cursor advanced by exactly `produced`
+        // bytes during this call, so this is the completed output range.
+        ::core::slice::from_raw_parts(
+            put.wrapping_sub(produced as usize),
+            produced as usize,
+        )
+    };
+    if let Some((stream, state)) = window_binding {
+        updatewindow(stream, state, Some(output));
     }
     in_0 = in_0.wrapping_sub((*strm).avail_in as ::core::ffi::c_uint);
     out = out.wrapping_sub((*strm).avail_out as ::core::ffi::c_uint);
@@ -2294,11 +2299,6 @@ pub unsafe extern "C" fn inflate(
     (*strm).total_out = (*strm).total_out.wrapping_add(out as crate::stdlib::uLong);
     (*state).total = (*state).total.wrapping_add(out as ::core::ffi::c_ulong);
     if (*state).wrap & 4 as ::core::ffi::c_int != 0 && out != 0 {
-        let output = ::core::slice::from_raw_parts(output_start, output_capacity);
-        let output_start = output_capacity
-            .wrapping_sub(left as usize)
-            .wrapping_sub(out as usize);
-        let output = &output[output_start..output_start + out as usize];
         (*state).check = (if (*state).flags != 0 {
             crate::src::crc32::crc32_bytes((*state).check as crate::stdlib::uLong, output)
         } else {
