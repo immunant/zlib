@@ -1853,19 +1853,20 @@ fn flush_pending(
 fn deflate_run_strategy(
     state: &mut crate::src::deflate::deflate_state,
     strm: &mut crate::zlib_h::z_stream_s,
+    pending_buf: &mut [crate::stdlib::Bytef],
     flush: ::core::ffi::c_int,
 ) -> block_state {
     if state.level == 0 as ::core::ffi::c_int {
-        deflate_stored(state, strm, flush)
+        deflate_stored(state, strm, pending_buf, flush)
     } else if state.strategy == crate::zlib_h::Z_HUFFMAN_ONLY {
-        deflate_huff(state, strm, flush)
+        deflate_huff(state, strm, pending_buf, flush)
     } else if state.strategy == crate::zlib_h::Z_RLE {
-        deflate_rle(state, strm, flush)
+        deflate_rle(state, strm, pending_buf, flush)
     } else {
         match configuration_table[state.level as usize].func {
-            DeflateFunc::Stored => deflate_stored(state, strm, flush),
-            DeflateFunc::Fast => deflate_fast(state, strm, flush),
-            DeflateFunc::Slow => deflate_slow(state, strm, flush),
+            DeflateFunc::Stored => deflate_stored(state, strm, pending_buf, flush),
+            DeflateFunc::Fast => deflate_fast(state, strm, pending_buf, flush),
+            DeflateFunc::Slow => deflate_slow(state, strm, pending_buf, flush),
         }
     }
 }
@@ -2225,7 +2226,10 @@ pub unsafe extern "C" fn deflate_ffi(
         || flush != crate::zlib_h::Z_NO_FLUSH && (*s).status != crate::src::deflate::FINISH_STATE
     {
         let mut bstate: block_state = need_more;
-        bstate = deflate_run_strategy(&mut *s, &mut *strm, flush);
+        let state = &mut *s;
+        let pending_buf =
+            ::core::slice::from_raw_parts_mut(state.pending_buf, state.pending_buf_size as usize);
+        bstate = deflate_run_strategy(state, &mut *strm, pending_buf, flush);
         if bstate as ::core::ffi::c_uint
             == finish_started as ::core::ffi::c_int as ::core::ffi::c_uint
             || bstate as ::core::ffi::c_uint
@@ -2735,12 +2739,11 @@ fn deflate_flush_block_impl(
 fn deflate_stored(
     s: &mut crate::src::deflate::deflate_state,
     strm: &mut crate::zlib_h::z_stream_s,
+    pending_buf: &mut [crate::stdlib::Bytef],
     mut flush: ::core::ffi::c_int,
 ) -> block_state {
     unsafe {
         let window = ::core::slice::from_raw_parts_mut(s.window, s.window_size as usize);
-        let pending_buf =
-            ::core::slice::from_raw_parts_mut(s.pending_buf, s.pending_buf_size as usize);
         let min_block = deflate_stored_min_block(s.pending_buf_size, s.w_size);
         let mut last: ::core::ffi::c_int = 0 as ::core::ffi::c_int;
         let mut len: ::core::ffi::c_uint = 0;
@@ -2928,16 +2931,13 @@ fn deflate_stored(
 fn deflate_fast(
     s: &mut crate::src::deflate::deflate_state,
     strm: &mut crate::zlib_h::z_stream_s,
+    pending_buf: &mut [crate::stdlib::Bytef],
     mut flush: ::core::ffi::c_int,
 ) -> block_state {
     let state = s;
     unsafe {
         let mut hash_head: crate::src::deflate::IPos = 0;
         let mut bflush: ::core::ffi::c_int = 0;
-        let pending_buf = &mut *::core::ptr::slice_from_raw_parts_mut(
-            state.pending_buf,
-            state.pending_buf_size as usize,
-        );
         loop {
             if state.lookahead < crate::src::deflate::MIN_LOOKAHEAD as crate::stdlib::uInt {
                 fill_window(state, strm);
@@ -3069,16 +3069,13 @@ fn deflate_fast(
 fn deflate_slow(
     s: &mut crate::src::deflate::deflate_state,
     strm: &mut crate::zlib_h::z_stream_s,
+    pending_buf: &mut [crate::stdlib::Bytef],
     mut flush: ::core::ffi::c_int,
 ) -> block_state {
     let state = s;
     unsafe {
         let mut hash_head: crate::src::deflate::IPos = 0;
         let mut bflush: ::core::ffi::c_int = 0;
-        let pending_buf = &mut *::core::ptr::slice_from_raw_parts_mut(
-            state.pending_buf,
-            state.pending_buf_size as usize,
-        );
         loop {
             if state.lookahead < crate::src::deflate::MIN_LOOKAHEAD as crate::stdlib::uInt {
                 fill_window(state, strm);
@@ -3255,15 +3252,12 @@ fn deflate_slow(
 fn deflate_rle(
     s: &mut crate::src::deflate::deflate_state,
     strm: &mut crate::zlib_h::z_stream_s,
+    pending_buf: &mut [crate::stdlib::Bytef],
     mut flush: ::core::ffi::c_int,
 ) -> block_state {
     let state = s;
     unsafe {
         let mut bflush: ::core::ffi::c_int = 0;
-        let pending_buf = &mut *::core::ptr::slice_from_raw_parts_mut(
-            state.pending_buf,
-            state.pending_buf_size as usize,
-        );
         loop {
             if state.lookahead <= crate::zutil_h::MAX_MATCH as crate::stdlib::uInt {
                 fill_window(state, strm);
@@ -3360,15 +3354,12 @@ fn deflate_rle(
 fn deflate_huff(
     s: &mut crate::src::deflate::deflate_state,
     strm: &mut crate::zlib_h::z_stream_s,
+    pending_buf: &mut [crate::stdlib::Bytef],
     mut flush: ::core::ffi::c_int,
 ) -> block_state {
     let state = s;
     unsafe {
         let mut bflush: ::core::ffi::c_int = 0;
-        let pending_buf = &mut *::core::ptr::slice_from_raw_parts_mut(
-            state.pending_buf,
-            state.pending_buf_size as usize,
-        );
         loop {
             if state.lookahead == 0 as crate::stdlib::uInt {
                 fill_window(state, strm);

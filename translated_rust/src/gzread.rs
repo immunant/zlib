@@ -63,6 +63,13 @@ enum GzLoadReadResult {
     Eof,
 }
 
+fn gz_alloc_byte_vec(len: usize) -> Option<Vec<crate::stdlib::Bytef>> {
+    let mut buf = Vec::new();
+    buf.try_reserve_exact(len).ok()?;
+    buf.resize(len, 0);
+    Some(buf)
+}
+
 fn gz_last_os_errno() -> ::core::ffi::c_int {
     ::std::io::Error::last_os_error()
         .raw_os_error()
@@ -218,28 +225,23 @@ fn gz_look_needs_more_header_input(
 
 fn gz_look(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
     if state.size == 0 as ::core::ffi::c_uint {
-        state.in_0 = unsafe {
-            crate::stdlib::malloc(state.want as crate::__stddef_size_t_h::size_t)
-                as *mut ::core::ffi::c_uchar
-        };
-        state.out = unsafe {
-            crate::stdlib::malloc(
-                (state.want << 1 as ::core::ffi::c_int) as crate::__stddef_size_t_h::size_t,
-            ) as *mut ::core::ffi::c_uchar
-        };
-        if state.in_0.is_null() || state.out.is_null() {
-            unsafe {
-                crate::stdlib::free(state.out as *mut ::core::ffi::c_void);
-                crate::stdlib::free(state.in_0 as *mut ::core::ffi::c_void);
-            }
+        let Some(mut input_buf) = gz_alloc_byte_vec(state.want as usize) else {
             crate::src::gzlib::gz_error_static(
                 state,
                 crate::zlib_h::Z_MEM_ERROR,
                 b"out of memory\0",
             );
             return -1 as ::core::ffi::c_int;
-        }
-        state.size = state.want;
+        };
+        let output_len = (state.want << 1 as ::core::ffi::c_int) as usize;
+        let Some(mut output_buf) = gz_alloc_byte_vec(output_len) else {
+            crate::src::gzlib::gz_error_static(
+                state,
+                crate::zlib_h::Z_MEM_ERROR,
+                b"out of memory\0",
+            );
+            return -1 as ::core::ffi::c_int;
+        };
         state.strm.zalloc = None;
         state.strm.zfree = None;
         state.strm.opaque = ::core::ptr::null_mut::<::core::ffi::c_void>();
@@ -254,10 +256,6 @@ fn gz_look(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
             )
         } != crate::zlib_h::Z_OK
         {
-            unsafe {
-                crate::stdlib::free(state.out as *mut ::core::ffi::c_void);
-                crate::stdlib::free(state.in_0 as *mut ::core::ffi::c_void);
-            }
             state.size = 0 as ::core::ffi::c_uint;
             crate::src::gzlib::gz_error_static(
                 state,
@@ -266,6 +264,11 @@ fn gz_look(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
             );
             return -1 as ::core::ffi::c_int;
         }
+        state.in_0 = input_buf.as_mut_ptr();
+        ::core::mem::forget(input_buf);
+        state.out = output_buf.as_mut_ptr();
+        ::core::mem::forget(output_buf);
+        state.size = state.want;
     }
     if state.direct == -1 as ::core::ffi::c_int || state.junk == 0 as ::core::ffi::c_int {
         unsafe {
@@ -1017,8 +1020,13 @@ pub unsafe extern "C" fn gzclose_r_ffi(mut file: crate::zlib_h::gzFile) -> ::cor
         crate::src::inflate::inflateEnd_ffi(
             &raw mut state.strm as *mut _ as *mut crate::zlib_h::z_stream_s,
         );
-        crate::stdlib::free(state.out as *mut ::core::ffi::c_void);
-        crate::stdlib::free(state.in_0 as *mut ::core::ffi::c_void);
+        let output_len = (state.size << 1 as ::core::ffi::c_int) as usize;
+        drop(Vec::from_raw_parts(state.out, output_len, output_len));
+        drop(Vec::from_raw_parts(
+            state.in_0,
+            state.size as usize,
+            state.size as usize,
+        ));
     }
     err = gzclose_read_status(state.err);
     crate::src::gzlib::gz_error_clear(state, crate::zlib_h::Z_OK);
