@@ -259,9 +259,7 @@ pub unsafe extern "C" fn inflateReset2(
         );
         state.window = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
     }
-    state.wrap = wrap;
-    state.wbits = window_bits as ::core::ffi::c_uint;
-    inflate_reset(strm, state)
+    inflate_reset_with_window_bits(strm, state, wrap, window_bits)
 }
 
 fn inflate_window_bits(
@@ -287,6 +285,31 @@ fn inflate_window_bits(
     }
     Ok((wrap, window_bits))
 }
+
+fn inflate_reset_with_window_bits(
+    strm: &mut crate::zlib_h::z_stream,
+    state: &mut crate::src::inflate::inflate_state,
+    wrap: ::core::ffi::c_int,
+    window_bits: ::core::ffi::c_int,
+) -> ::core::ffi::c_int {
+    state.wrap = wrap;
+    state.wbits = window_bits as ::core::ffi::c_uint;
+    inflate_reset(strm, state)
+}
+
+fn inflate_initialize_state(
+    strm: &mut crate::zlib_h::z_stream,
+    state: &mut crate::src::inflate::inflate_state,
+    window_bits: ::core::ffi::c_int,
+) -> ::core::ffi::c_int {
+    state.window = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
+    state.mode = crate::src::inflate::HEAD;
+    let (wrap, window_bits) = match inflate_window_bits(window_bits) {
+        Ok(window_bits) => window_bits,
+        Err(error) => return error,
+    };
+    inflate_reset_with_window_bits(strm, state, wrap, window_bits)
+}
 #[export_name = "inflateReset2"]
 
 pub unsafe extern "C" fn inflateReset2_ffi(
@@ -301,7 +324,6 @@ pub unsafe extern "C" fn inflateInit2_(
     mut version: *const ::core::ffi::c_char,
     mut stream_size: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
-    let mut ret: ::core::ffi::c_int = 0;
     let mut state: *mut crate::src::inflate::inflate_state =
         ::core::ptr::null_mut::<crate::src::inflate::inflate_state>();
     if version.is_null()
@@ -347,18 +369,18 @@ pub unsafe extern "C" fn inflateInit2_(
         ::core::mem::size_of::<crate::src::inflate::inflate_state>(),
     );
     (*strm).state = state as *mut crate::src::deflate::internal_state;
-    (*state).strm = strm;
-    (*state).window = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
-    (*state).mode = crate::src::inflate::HEAD;
-    ret = inflateReset2(strm, windowBits);
+    let strm = &mut *strm;
+    let state = &mut *state;
+    state.strm = strm;
+    let ret = inflate_initialize_state(strm, state, windowBits);
     if ret != crate::zlib_h::Z_OK {
-        Some((*strm).zfree.expect("non-null function pointer")).expect("non-null function pointer")(
-            (*strm).opaque,
-            state as crate::stdlib::voidpf,
+        Some(strm.zfree.expect("non-null function pointer")).expect("non-null function pointer")(
+            strm.opaque,
+            state as *mut crate::src::inflate::inflate_state as crate::stdlib::voidpf,
         );
-        (*strm).state = ::core::ptr::null_mut::<crate::src::deflate::internal_state>();
+        strm.state = ::core::ptr::null_mut::<crate::src::deflate::internal_state>();
     }
-    return ret;
+    ret
 }
 #[export_name = "inflateInit2_"]
 
@@ -2259,18 +2281,24 @@ pub unsafe extern "C" fn inflateEnd(mut strm: crate::zlib_h::z_streamp) -> ::cor
         return crate::zlib_h::Z_STREAM_ERROR;
     }
     state = (*strm).state as *mut crate::src::inflate::inflate_state;
-    if !(*state).window.is_null() {
-        Some((*strm).zfree.expect("non-null function pointer")).expect("non-null function pointer")(
-            (*strm).opaque,
-            (*state).window as crate::stdlib::voidpf,
+    let strm = &mut *strm;
+    let state = &mut *state;
+    if !state.window.is_null() {
+        Some(strm.zfree.expect("non-null function pointer")).expect("non-null function pointer")(
+            strm.opaque,
+            state.window as crate::stdlib::voidpf,
         );
     }
-    Some((*strm).zfree.expect("non-null function pointer")).expect("non-null function pointer")(
-        (*strm).opaque,
-        (*strm).state as crate::stdlib::voidpf,
+    Some(strm.zfree.expect("non-null function pointer")).expect("non-null function pointer")(
+        strm.opaque,
+        strm.state as crate::stdlib::voidpf,
     );
-    (*strm).state = ::core::ptr::null_mut::<crate::src::deflate::internal_state>();
-    return crate::zlib_h::Z_OK;
+    clear_inflate_state(strm);
+    crate::zlib_h::Z_OK
+}
+
+fn clear_inflate_state(strm: &mut crate::zlib_h::z_stream) {
+    strm.state = ::core::ptr::null_mut::<crate::src::deflate::internal_state>();
 }
 #[export_name = "inflateEnd"]
 
@@ -2288,24 +2316,48 @@ pub unsafe extern "C" fn inflateGetDictionary(
         return crate::zlib_h::Z_STREAM_ERROR;
     }
     state = (*strm).state as *mut crate::src::inflate::inflate_state;
-    if (*state).whave != 0 && !dictionary.is_null() {
-        crate::stdlib::memcpy(
-            dictionary as *mut ::core::ffi::c_void,
-            (*state).window.offset((*state).wnext as isize) as *const ::core::ffi::c_void,
-            (*state).whave.wrapping_sub((*state).wnext) as crate::__stddef_size_t_h::size_t,
-        );
-        crate::stdlib::memcpy(
-            dictionary
-                .offset((*state).whave as isize)
-                .offset(-((*state).wnext as isize)) as *mut ::core::ffi::c_void,
-            (*state).window as *const ::core::ffi::c_void,
-            (*state).wnext as crate::__stddef_size_t_h::size_t,
-        );
+    let state = &*state;
+    let dictionary = if !dictionary.is_null() && state.whave != 0 {
+        Some(::core::slice::from_raw_parts_mut(
+            dictionary,
+            state.whave as usize,
+        ))
+    } else {
+        None
+    };
+    let window = if state.whave != 0 {
+        Some(::core::slice::from_raw_parts(
+            state.window,
+            state.wsize as usize,
+        ))
+    } else {
+        None
+    };
+    let dict_length = if dictLength.is_null() {
+        None
+    } else {
+        Some(&mut *dictLength)
+    };
+    inflate_get_dictionary(state, window, dictionary, dict_length)
+}
+
+fn inflate_get_dictionary(
+    state: &crate::src::inflate::inflate_state,
+    window: Option<&[crate::stdlib::Bytef]>,
+    dictionary: Option<&mut [crate::stdlib::Bytef]>,
+    dict_length: Option<&mut crate::stdlib::uInt>,
+) -> ::core::ffi::c_int {
+    if let (Some(window), Some(dictionary)) = (window, dictionary) {
+        let whave = state.whave as usize;
+        let wnext = state.wnext as usize;
+        let first = whave - wnext;
+        dictionary[..first].copy_from_slice(&window[wnext..whave]);
+        dictionary[first..whave].copy_from_slice(&window[..wnext]);
     }
-    if !dictLength.is_null() {
-        *dictLength = (*state).whave as crate::stdlib::uInt;
+    if let Some(dict_length) = dict_length {
+        *dict_length = state.whave as crate::stdlib::uInt;
     }
-    return crate::zlib_h::Z_OK;
+    crate::zlib_h::Z_OK
 }
 #[export_name = "inflateGetDictionary"]
 
