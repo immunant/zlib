@@ -2648,45 +2648,28 @@ unsafe extern "C" fn deflate_fast(
             (*s).sym_next = (*s).sym_next.wrapping_add(1);
             *(*s).sym_buf.offset(c2rust_fresh46 as isize) = len as crate::zutil_h::uchf;
             dist = dist.wrapping_sub(1);
-            (*s).dyn_ltree[(*(&raw const crate::src::trees::_length_code
-                as *const crate::zutil_h::uch)
-                .offset(len as isize) as ::core::ffi::c_int
-                + crate::src::deflate::LITERALS
-                + 1 as ::core::ffi::c_int) as usize]
-                .fc
-                .freq = (*s).dyn_ltree[(*(&raw const crate::src::trees::_length_code
-                as *const crate::zutil_h::uch)
-                .offset(len as isize) as ::core::ffi::c_int
-                + crate::src::deflate::LITERALS
-                + 1 as ::core::ffi::c_int) as usize]
-                .fc
-                .freq
-                .wrapping_add(1);
-            (*s).dyn_dtree[(if (dist as ::core::ffi::c_int) < 256 as ::core::ffi::c_int {
-                *(&raw const crate::src::trees::_dist_code as *const crate::zutil_h::uch)
-                    .offset(dist as isize) as ::core::ffi::c_int
-            } else {
-                *(&raw const crate::src::trees::_dist_code as *const crate::zutil_h::uch).offset(
-                    (256 as ::core::ffi::c_int
-                        + (dist as ::core::ffi::c_int >> 7 as ::core::ffi::c_int))
-                        as isize,
-                ) as ::core::ffi::c_int
-            }) as usize]
-                .fc
-                .freq = (*s).dyn_dtree[(if (dist as ::core::ffi::c_int) < 256 as ::core::ffi::c_int
+            let length_code = crate::src::trees::_length_code[len as usize] as ::core::ffi::c_int;
+            let dist_code = crate::src::trees::_dist_code[if (dist as ::core::ffi::c_int)
+                < 256 as ::core::ffi::c_int
             {
-                *(&raw const crate::src::trees::_dist_code as *const crate::zutil_h::uch)
-                    .offset(dist as isize) as ::core::ffi::c_int
+                dist as usize
             } else {
-                *(&raw const crate::src::trees::_dist_code as *const crate::zutil_h::uch).offset(
-                    (256 as ::core::ffi::c_int
-                        + (dist as ::core::ffi::c_int >> 7 as ::core::ffi::c_int))
-                        as isize,
-                ) as ::core::ffi::c_int
-            }) as usize]
+                (256 as ::core::ffi::c_int
+                    + (dist as ::core::ffi::c_int >> 7 as ::core::ffi::c_int))
+                    as usize
+            }] as ::core::ffi::c_int;
+            (*s).dyn_ltree[(length_code
+                + crate::src::deflate::LITERALS
+                + 1 as ::core::ffi::c_int) as usize]
+                .fc
+                .freq = (*s).dyn_ltree[(length_code
+                + crate::src::deflate::LITERALS
+                + 1 as ::core::ffi::c_int) as usize]
                 .fc
                 .freq
                 .wrapping_add(1);
+            (*s).dyn_dtree[dist_code as usize].fc.freq =
+                (*s).dyn_dtree[dist_code as usize].fc.freq.wrapping_add(1);
             bflush = ((*s).sym_next == (*s).sym_end) as ::core::ffi::c_int;
             (*s).lookahead = (*s).lookahead.wrapping_sub((*s).match_length);
             if (*s).match_length <= (*s).max_lazy_match
@@ -2903,45 +2886,28 @@ unsafe extern "C" fn deflate_slow(
             (*s).sym_next = (*s).sym_next.wrapping_add(1);
             *(*s).sym_buf.offset(c2rust_fresh37 as isize) = len as crate::zutil_h::uchf;
             dist = dist.wrapping_sub(1);
-            (*s).dyn_ltree[(*(&raw const crate::src::trees::_length_code
-                as *const crate::zutil_h::uch)
-                .offset(len as isize) as ::core::ffi::c_int
-                + crate::src::deflate::LITERALS
-                + 1 as ::core::ffi::c_int) as usize]
-                .fc
-                .freq = (*s).dyn_ltree[(*(&raw const crate::src::trees::_length_code
-                as *const crate::zutil_h::uch)
-                .offset(len as isize) as ::core::ffi::c_int
-                + crate::src::deflate::LITERALS
-                + 1 as ::core::ffi::c_int) as usize]
-                .fc
-                .freq
-                .wrapping_add(1);
-            (*s).dyn_dtree[(if (dist as ::core::ffi::c_int) < 256 as ::core::ffi::c_int {
-                *(&raw const crate::src::trees::_dist_code as *const crate::zutil_h::uch)
-                    .offset(dist as isize) as ::core::ffi::c_int
-            } else {
-                *(&raw const crate::src::trees::_dist_code as *const crate::zutil_h::uch).offset(
-                    (256 as ::core::ffi::c_int
-                        + (dist as ::core::ffi::c_int >> 7 as ::core::ffi::c_int))
-                        as isize,
-                ) as ::core::ffi::c_int
-            }) as usize]
-                .fc
-                .freq = (*s).dyn_dtree[(if (dist as ::core::ffi::c_int) < 256 as ::core::ffi::c_int
+            let length_code = crate::src::trees::_length_code[len as usize] as ::core::ffi::c_int;
+            let dist_code = crate::src::trees::_dist_code[if (dist as ::core::ffi::c_int)
+                < 256 as ::core::ffi::c_int
             {
-                *(&raw const crate::src::trees::_dist_code as *const crate::zutil_h::uch)
-                    .offset(dist as isize) as ::core::ffi::c_int
+                dist as usize
             } else {
-                *(&raw const crate::src::trees::_dist_code as *const crate::zutil_h::uch).offset(
-                    (256 as ::core::ffi::c_int
-                        + (dist as ::core::ffi::c_int >> 7 as ::core::ffi::c_int))
-                        as isize,
-                ) as ::core::ffi::c_int
-            }) as usize]
+                (256 as ::core::ffi::c_int
+                    + (dist as ::core::ffi::c_int >> 7 as ::core::ffi::c_int))
+                    as usize
+            }] as ::core::ffi::c_int;
+            (*s).dyn_ltree[(length_code
+                + crate::src::deflate::LITERALS
+                + 1 as ::core::ffi::c_int) as usize]
+                .fc
+                .freq = (*s).dyn_ltree[(length_code
+                + crate::src::deflate::LITERALS
+                + 1 as ::core::ffi::c_int) as usize]
                 .fc
                 .freq
                 .wrapping_add(1);
+            (*s).dyn_dtree[dist_code as usize].fc.freq =
+                (*s).dyn_dtree[dist_code as usize].fc.freq.wrapping_add(1);
             bflush = ((*s).sym_next == (*s).sym_end) as ::core::ffi::c_int;
             (*s).lookahead = (*s)
                 .lookahead
@@ -3221,45 +3187,28 @@ unsafe extern "C" fn deflate_rle(
             (*s).sym_next = (*s).sym_next.wrapping_add(1);
             *(*s).sym_buf.offset(c2rust_fresh52 as isize) = len as crate::zutil_h::uchf;
             dist = dist.wrapping_sub(1);
-            (*s).dyn_ltree[(*(&raw const crate::src::trees::_length_code
-                as *const crate::zutil_h::uch)
-                .offset(len as isize) as ::core::ffi::c_int
-                + crate::src::deflate::LITERALS
-                + 1 as ::core::ffi::c_int) as usize]
-                .fc
-                .freq = (*s).dyn_ltree[(*(&raw const crate::src::trees::_length_code
-                as *const crate::zutil_h::uch)
-                .offset(len as isize) as ::core::ffi::c_int
-                + crate::src::deflate::LITERALS
-                + 1 as ::core::ffi::c_int) as usize]
-                .fc
-                .freq
-                .wrapping_add(1);
-            (*s).dyn_dtree[(if (dist as ::core::ffi::c_int) < 256 as ::core::ffi::c_int {
-                *(&raw const crate::src::trees::_dist_code as *const crate::zutil_h::uch)
-                    .offset(dist as isize) as ::core::ffi::c_int
-            } else {
-                *(&raw const crate::src::trees::_dist_code as *const crate::zutil_h::uch).offset(
-                    (256 as ::core::ffi::c_int
-                        + (dist as ::core::ffi::c_int >> 7 as ::core::ffi::c_int))
-                        as isize,
-                ) as ::core::ffi::c_int
-            }) as usize]
-                .fc
-                .freq = (*s).dyn_dtree[(if (dist as ::core::ffi::c_int) < 256 as ::core::ffi::c_int
+            let length_code = crate::src::trees::_length_code[len as usize] as ::core::ffi::c_int;
+            let dist_code = crate::src::trees::_dist_code[if (dist as ::core::ffi::c_int)
+                < 256 as ::core::ffi::c_int
             {
-                *(&raw const crate::src::trees::_dist_code as *const crate::zutil_h::uch)
-                    .offset(dist as isize) as ::core::ffi::c_int
+                dist as usize
             } else {
-                *(&raw const crate::src::trees::_dist_code as *const crate::zutil_h::uch).offset(
-                    (256 as ::core::ffi::c_int
-                        + (dist as ::core::ffi::c_int >> 7 as ::core::ffi::c_int))
-                        as isize,
-                ) as ::core::ffi::c_int
-            }) as usize]
+                (256 as ::core::ffi::c_int
+                    + (dist as ::core::ffi::c_int >> 7 as ::core::ffi::c_int))
+                    as usize
+            }] as ::core::ffi::c_int;
+            (*s).dyn_ltree[(length_code
+                + crate::src::deflate::LITERALS
+                + 1 as ::core::ffi::c_int) as usize]
+                .fc
+                .freq = (*s).dyn_ltree[(length_code
+                + crate::src::deflate::LITERALS
+                + 1 as ::core::ffi::c_int) as usize]
                 .fc
                 .freq
                 .wrapping_add(1);
+            (*s).dyn_dtree[dist_code as usize].fc.freq =
+                (*s).dyn_dtree[dist_code as usize].fc.freq.wrapping_add(1);
             bflush = ((*s).sym_next == (*s).sym_end) as ::core::ffi::c_int;
             (*s).lookahead = (*s).lookahead.wrapping_sub((*s).match_length);
             (*s).strstart = (*s).strstart.wrapping_add((*s).match_length);
