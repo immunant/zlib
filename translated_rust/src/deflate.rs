@@ -169,6 +169,17 @@ struct DeflateStorageLayout {
     pending_items: crate::stdlib::uInt,
 }
 
+/// The eventual safe owner for deflate's four work buffers.  The legacy
+/// callback allocator still owns the live buffers today, but keeping their
+/// checked Rust representation here lets the allocator facade switch storage
+/// ownership without changing strategy code or recreating its geometry.
+struct DeflateOwnedStorage {
+    window: Vec<crate::stdlib::Bytef>,
+    prev: Vec<crate::src::deflate::Posf>,
+    head: Vec<crate::src::deflate::Posf>,
+    pending_buf: Vec<crate::stdlib::Bytef>,
+}
+
 /// All of the byte and item spans that `deflateCopy` must duplicate.  This is
 /// deliberately pointer-free: the legacy allocation and copy boundary uses
 /// these validated lengths, while a later owned-storage conversion can use
@@ -269,6 +280,30 @@ impl DeflateStorageLayout {
 
     fn pending_bytes(&self) -> crate::zutil_h::ulg {
         (self.pending_items as crate::zutil_h::ulg).wrapping_mul(4)
+    }
+
+    fn window_bytes(&self) -> Option<usize> {
+        usize::try_from(self.window_items).ok()?.checked_mul(2)
+    }
+
+    fn pending_byte_len(&self) -> Option<usize> {
+        usize::try_from(self.pending_items).ok()?.checked_mul(4)
+    }
+
+    fn try_owned(&self) -> Option<DeflateOwnedStorage> {
+        fn zeroed<T: Clone>(len: usize, value: T) -> Option<Vec<T>> {
+            let mut storage = Vec::new();
+            storage.try_reserve_exact(len).ok()?;
+            storage.resize(len, value);
+            Some(storage)
+        }
+
+        Some(DeflateOwnedStorage {
+            window: zeroed(self.window_bytes()?, 0)?,
+            prev: zeroed(usize::try_from(self.window_items).ok()?, 0)?,
+            head: zeroed(usize::try_from(self.hash_items).ok()?, 0)?,
+            pending_buf: zeroed(self.pending_byte_len()?, 0)?,
+        })
     }
 }
 
@@ -2383,6 +2418,32 @@ struct DeflateWorkspace<'a> {
     input: &'a [crate::stdlib::Bytef],
     pending_buf: &'a mut [crate::stdlib::Bytef],
     output: &'a mut [crate::stdlib::Bytef],
+}
+
+impl<'a> DeflateWorkspace<'a> {
+    /// Build the same strategy view from safe-owned storage.  The legacy
+    /// engine still constructs this view from validated allocator storage;
+    /// the future allocator facade can use this constructor directly.
+    fn from_owned(
+        storage: &'a mut DeflateOwnedStorage,
+        input: &'a [crate::stdlib::Bytef],
+        output: &'a mut [crate::stdlib::Bytef],
+    ) -> Self {
+        let DeflateOwnedStorage {
+            window,
+            prev,
+            head,
+            pending_buf,
+        } = storage;
+        Self {
+            window,
+            head: Some(head),
+            prev: Some(prev),
+            input,
+            pending_buf,
+            output,
+        }
+    }
 }
 
 // The legacy stream engine owns the one raw-to-slice conversion for this
