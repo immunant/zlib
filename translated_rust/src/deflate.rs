@@ -2800,6 +2800,46 @@ fn update_stored_history_state(
     true
 }
 
+/// Make room at the front of the stored-mode history window when the next
+/// caller input will not fit after the current block.  This is the exact
+/// overlap-aware move performed by `deflate_stored`; keeping it here means
+/// the callback-owned window is only lent once at the legacy adapter.
+fn rebalance_stored_window_state(
+    s: &mut crate::src::deflate::deflate_state,
+    window: &mut [crate::stdlib::Byte],
+    avail_in: crate::stdlib::uInt,
+) -> Option<::core::ffi::c_uint> {
+    let mut have = s
+        .window_size
+        .wrapping_sub(s.strstart as crate::zutil_h::ulg) as ::core::ffi::c_uint;
+    if avail_in <= have || s.block_start < s.w_size as ::core::ffi::c_long {
+        return Some(have);
+    }
+
+    let window_size = usize::try_from(s.window_size).ok()?;
+    let wsize = usize::try_from(s.w_size).ok()?;
+    let strstart = usize::try_from(s.strstart).ok()?;
+    if window_size > window.len() || wsize > window_size || strstart < wsize {
+        return None;
+    }
+    let source_end = wsize.checked_add(strstart)?;
+    if source_end > window_size {
+        return None;
+    }
+
+    window.copy_within(wsize..source_end, 0);
+    s.block_start = s.block_start.wrapping_sub(s.w_size as ::core::ffi::c_long);
+    s.strstart = s.strstart.wrapping_sub(s.w_size);
+    if s.matches < 2 as crate::stdlib::uInt {
+        s.matches = s.matches.wrapping_add(1);
+    }
+    have = have.wrapping_add(s.w_size as ::core::ffi::c_uint);
+    if s.insert > s.strstart {
+        s.insert = s.strstart;
+    }
+    Some(have)
+}
+
 struct StoredBlockPlan {
     len: ::core::ffi::c_uint,
     left: ::core::ffi::c_uint,
@@ -2956,25 +2996,22 @@ unsafe extern "C" fn deflate_stored(
     {
         return block_done;
     }
-    have = (*s)
-        .window_size
-        .wrapping_sub((*s).strstart as crate::zutil_h::ulg) as ::core::ffi::c_uint;
-    if (*(*s).strm).avail_in > have && (*s).block_start >= (*s).w_size as ::core::ffi::c_long {
-        (*s).block_start -= (*s).w_size as ::core::ffi::c_long;
-        (*s).strstart = (*s).strstart.wrapping_sub((*s).w_size);
-        crate::stdlib::memcpy(
-            (*s).window as *mut ::core::ffi::c_void,
-            (*s).window.offset((*s).w_size as isize) as *const ::core::ffi::c_void,
-            (*s).strstart as crate::__stddef_size_t_h::size_t,
-        );
-        if (*s).matches < 2 as crate::stdlib::uInt {
-            (*s).matches = (*s).matches.wrapping_add(1);
-        }
-        have = have.wrapping_add((*s).w_size as ::core::ffi::c_uint);
-        if (*s).insert > (*s).strstart {
-            (*s).insert = (*s).strstart;
-        }
+    let Ok(window_len) = usize::try_from((*s).window_size) else {
+        return need_more;
+    };
+    if window_len != 0 && (*s).window.is_null() {
+        return need_more;
     }
+    let window = if window_len == 0 {
+        &mut []
+    } else {
+        ::core::slice::from_raw_parts_mut((*s).window, window_len)
+    };
+    let Some(next_have) = rebalance_stored_window_state(&mut *s, window, (*(*s).strm).avail_in)
+    else {
+        return need_more;
+    };
+    have = next_have;
     if have > (*(*s).strm).avail_in {
         have = (*(*s).strm).avail_in as ::core::ffi::c_uint;
     }
