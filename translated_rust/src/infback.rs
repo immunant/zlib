@@ -308,6 +308,20 @@ fn inflate_back_reopen_output_window(
     state.wsize
 }
 
+// Decide whether the decoder must publish a full output window before more
+// bytes can be written.  The caller keeps the raw window pointer and invokes
+// the callback; this helper performs only state and count bookkeeping.
+fn inflate_back_prepare_output_window(
+    state: &mut crate::src::inflate::inflate_state,
+    left: &mut ::core::ffi::c_uint,
+) -> bool {
+    if *left != 0 {
+        return false;
+    }
+    *left = inflate_back_reopen_output_window(state);
+    true
+}
+
 fn inflate_back_finish_stored_block(state: &mut crate::src::inflate::inflate_state) {
     state.mode = crate::src::inflate::TYPE;
 }
@@ -872,9 +886,8 @@ pub unsafe extern "C" fn inflateBack(
                                 break '_inf_leave;
                             }
                         }
-                        if left == 0 as ::core::ffi::c_uint {
+                        if inflate_back_prepare_output_window(state_ref, &mut left) {
                             put = state_ref.window;
-                            left = inflate_back_reopen_output_window(state_ref);
                             if out.expect("non-null function pointer")(out_desc, put, left) != 0 {
                                 ret = crate::zlib_h::Z_BUF_ERROR;
                                 break '_inf_leave;
@@ -1250,9 +1263,8 @@ pub unsafe extern "C" fn inflateBack(
             );
             match inflate_back_start_length_code(state_ref, here) {
                 InflateBackLengthCode::Literal => {
-                if left == 0 as ::core::ffi::c_uint {
+                if inflate_back_prepare_output_window(state_ref, &mut left) {
                     put = state_ref.window;
-                    left = inflate_back_reopen_output_window(state_ref);
                     if out.expect("non-null function pointer")(out_desc, put, left) != 0 {
                         ret = crate::zlib_h::Z_BUF_ERROR;
                         break;
@@ -1398,9 +1410,8 @@ pub unsafe extern "C" fn inflateBack(
                         inflate_back_enter_bad(state_ref);
                     } else {
                         loop {
-                            if left == 0 as ::core::ffi::c_uint {
+                            if inflate_back_prepare_output_window(state_ref, &mut left) {
                                 put = state_ref.window;
-                                left = inflate_back_reopen_output_window(state_ref);
                                 if out.expect("non-null function pointer")(out_desc, put, left) != 0
                                 {
                                     ret = crate::zlib_h::Z_BUF_ERROR;
