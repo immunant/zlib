@@ -46,7 +46,7 @@ pub use crate::zlib_h::Z_OK;
 pub use crate::zlib_h::Z_STREAM_END;
 pub use crate::zlib_h::Z_STREAM_ERROR;
 
-use crate::src::gzlib::{GzCodecCall, GzCodecInput, GzCodecResult};
+use crate::src::gzlib::{GzCodecInput, GzCodecResult, GzEmbeddedInflateCall};
 
 fn is_gzip_header(input: &[u8]) -> bool {
     input.len() >= 4 && input[0] == 31 && input[1] == 139 && input[2] == 8 && input[3] < 32
@@ -628,7 +628,7 @@ impl GzDecompLoopState<'_> {
 fn gz_decomp_loop(
     mut decomp: crate::src::gzlib::GzDecompState,
     state: &mut GzDecompLoopState<'_>,
-    mut inflate: impl FnMut(GzCodecCall<'_>) -> Option<GzCodecResult>,
+    mut inflate: impl FnMut(GzEmbeddedInflateCall<'_>) -> Option<GzCodecResult>,
 ) -> crate::src::gzlib::GzDecompFinish {
     let mut result = crate::zlib_h::Z_OK;
     loop {
@@ -645,7 +645,7 @@ fn gz_decomp_loop(
         let Some(call) = state
             .input
             .as_deref()
-            .and_then(|input| decomp.codec_call(input).and_then(&mut inflate))
+            .and_then(|input| decomp.embedded_inflate_call(input).and_then(&mut inflate))
         else {
             result = -1;
             break;
@@ -860,10 +860,9 @@ unsafe fn gz_decomp(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int
             // request.  Cursor accounting remains with `call`, so a future
             // owned embedded codec can replace this projection without
             // changing the gzip decompression state machine.
-            let embedded = call.embedded_inflate_call();
-            strm.next_in = embedded.input().as_ptr().cast_mut();
-            strm.avail_in = embedded.input_available();
-            strm.avail_out = embedded.output_available();
+            strm.next_in = call.input().as_ptr().cast_mut();
+            strm.avail_in = call.input_available();
+            strm.avail_out = call.output_available();
             let result = crate::src::inflate::inflate(
                 strm as *mut crate::zlib_h::z_stream_s,
                 crate::zlib_h::Z_NO_FLUSH,
@@ -879,7 +878,7 @@ unsafe fn gz_decomp(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int
                 strm.total_out,
                 (result == crate::zlib_h::Z_DATA_ERROR).then(|| strm.msg.addr()),
             );
-            GzCodecResult::from_embedded_inflate(&call, snapshot)
+            call.into_codec_result(snapshot)
         })
     };
     // The core transition returns the checked start of its owned output span,

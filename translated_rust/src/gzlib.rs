@@ -177,24 +177,14 @@ pub struct GzCodecInput {
     available: crate::stdlib::uInt,
 }
 
-// A single codec dispatch receives a bounded input slice plus the scalar
-// output capacity.  This is deliberately independent of `z_stream`: the ABI
-// projection can borrow these values for one inflate call, while the gzip
-// owner retains the checked cursor that accounts for consumption afterwards.
-pub(crate) struct GzCodecCall<'a> {
-    input: &'a [u8],
-    input_cursor: GzCodecInput,
-    output_available: crate::stdlib::uInt,
-}
-
 // This is the complete pointer-free request made to gzip's embedded inflate
-// codec.  It intentionally does not retain the accounting cursor: the gzip
-// state machine owns that cursor in `GzCodecCall` and uses it to validate the
-// scalar result after dispatch.  A future embedded-codec owner can consume
-// this request directly without borrowing an ABI `z_stream`.
+// codec.  It owns the checked input cursor needed to account for consumption,
+// so a future embedded-codec owner can consume the request and return a
+// `GzCodecResult` without borrowing an ABI `z_stream` or a separate gzip
+// state-machine request object.
 pub(crate) struct GzEmbeddedInflateCall<'a> {
     input: &'a [u8],
-    input_available: crate::stdlib::uInt,
+    input_cursor: GzCodecInput,
     output_available: crate::stdlib::uInt,
 }
 
@@ -457,39 +447,38 @@ impl GzCodecInput {
     }
 }
 
-impl<'a> GzCodecCall<'a> {
-    pub(crate) fn input(&self) -> &'a [u8] {
-        self.input
-    }
-
-    pub(crate) fn input_cursor(&self) -> &GzCodecInput {
-        &self.input_cursor
-    }
-
-    pub(crate) fn output_available(&self) -> crate::stdlib::uInt {
-        self.output_available
-    }
-
-    pub(crate) fn embedded_inflate_call(&self) -> GzEmbeddedInflateCall<'a> {
-        GzEmbeddedInflateCall {
-            input: self.input,
-            input_available: self.input_cursor.available(),
-            output_available: self.output_available,
-        }
-    }
-}
-
 impl<'a> GzEmbeddedInflateCall<'a> {
     pub(crate) fn input(&self) -> &'a [u8] {
         self.input
     }
 
     pub(crate) fn input_available(&self) -> crate::stdlib::uInt {
-        self.input_available
+        self.input_cursor.available()
     }
 
     pub(crate) fn output_available(&self) -> crate::stdlib::uInt {
         self.output_available
+    }
+
+    // Consume the bounded request when publishing the scalar codec result.
+    // This keeps checked input-progress accounting with the request that was
+    // actually dispatched, rather than reconstructing it from an ABI cursor.
+    pub(crate) fn into_codec_result(
+        self,
+        snapshot: GzEmbeddedInflateResult,
+    ) -> Option<GzCodecResult> {
+        Some(GzCodecResult {
+            result: snapshot.result,
+            input: self.input_cursor.after_codec(snapshot.remaining_input)?,
+            output_available: snapshot.output_available,
+            total_in: snapshot.total_in,
+            total_out: snapshot.total_out,
+            data_error_message: if snapshot.result == crate::zlib_h::Z_DATA_ERROR {
+                snapshot.data_error_message()
+            } else {
+                None
+            },
+        })
     }
 }
 
@@ -999,52 +988,6 @@ impl GzEmbeddedInflateResult {
     }
 }
 
-impl GzCodecResult {
-    // A codec owner reports only scalar cursor counters after its ABI call.
-    // Rebuild the checked input cursor from the call that supplied it, so the
-    // gzip state machine never needs to derive progress from `next_in`.
-    pub(crate) fn from_codec_call(
-        call: &GzCodecCall<'_>,
-        result: ::core::ffi::c_int,
-        remaining_input: crate::stdlib::uInt,
-        output_available: crate::stdlib::uInt,
-        total_in: crate::stdlib::uLong,
-        total_out: crate::stdlib::uLong,
-        data_error_message: Option<&'static [u8]>,
-    ) -> Option<Self> {
-        Some(Self {
-            result,
-            input: call.input_cursor().after_codec(remaining_input)?,
-            output_available,
-            total_in,
-            total_out,
-            data_error_message,
-        })
-    }
-
-    // Convert an embedded-codec snapshot into gzip's checked cursor result.
-    // This is the hand-off point that a future owned inflate facade will use;
-    // it deliberately accepts no ABI stream or raw pointer.
-    pub(crate) fn from_embedded_inflate(
-        call: &GzCodecCall<'_>,
-        snapshot: GzEmbeddedInflateResult,
-    ) -> Option<Self> {
-        Self::from_codec_call(
-            call,
-            snapshot.result,
-            snapshot.remaining_input,
-            snapshot.output_available,
-            snapshot.total_in,
-            snapshot.total_out,
-            if snapshot.result == crate::zlib_h::Z_DATA_ERROR {
-                snapshot.data_error_message()
-            } else {
-                None
-            },
-        )
-    }
-}
-
 // The decompression loop mutates only these scalar gzip fields in response to
 // an inflate result.  Keep that transition with the bounded output accounting
 // so an eventual owned gzip codec can run the loop without borrowing the ABI
@@ -1111,8 +1054,11 @@ impl GzDecompState {
     // Build the complete pointer-free input/output view for one codec pass.
     // The slice bounds validate the stored cursor before any ABI stream
     // cursor is published by the caller.
-    pub(crate) fn codec_call<'a>(&self, input: &'a [u8]) -> Option<GzCodecCall<'a>> {
-        Some(GzCodecCall {
+    pub(crate) fn embedded_inflate_call<'a>(
+        &self,
+        input: &'a [u8],
+    ) -> Option<GzEmbeddedInflateCall<'a>> {
+        Some(GzEmbeddedInflateCall {
             input: self.input.bytes(input)?,
             input_cursor: GzCodecInput {
                 cursor: self.input.cursor,
