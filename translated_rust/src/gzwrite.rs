@@ -3,6 +3,7 @@ pub use crate::__stddef_size_t_h::size_t;
 pub use crate::gzguts_h::gz_state;
 pub use crate::gzguts_h::gz_statep;
 pub use crate::gzguts_h::GZ_WRITE;
+pub use crate::src::gzlib::gz_errno_is_retryable;
 pub use crate::src::gzlib::gz_clamped_uint;
 pub use crate::src::gzlib::gz_error;
 pub use crate::src::gzlib::gz_io_chunk_limit;
@@ -137,15 +138,14 @@ unsafe extern "C" fn gz_comp(
                 put as crate::__stddef_size_t_h::size_t,
             ) as ::core::ffi::c_int;
             if writ < 0 as ::core::ffi::c_int {
-                if *crate::stdlib::__errno_location() == crate::stdlib::EAGAIN
-                    || *crate::stdlib::__errno_location() == crate::stdlib::EWOULDBLOCK
-                {
+                let errno = *crate::stdlib::__errno_location();
+                if gz_errno_is_retryable(errno) {
                     (*state).again = 1 as ::core::ffi::c_int;
                 }
                 crate::src::gzlib::gz_error(
                     state as *mut crate::gzguts_h::gz_state,
                     crate::zlib_h::Z_ERRNO,
-                    crate::stdlib::strerror(*crate::stdlib::__errno_location()),
+                    crate::stdlib::strerror(errno),
                 );
                 return -1 as ::core::ffi::c_int;
             }
@@ -176,15 +176,14 @@ unsafe extern "C" fn gz_comp(
                     put as crate::__stddef_size_t_h::size_t,
                 ) as ::core::ffi::c_int;
                 if writ < 0 as ::core::ffi::c_int {
-                    if *crate::stdlib::__errno_location() == crate::stdlib::EAGAIN
-                        || *crate::stdlib::__errno_location() == crate::stdlib::EWOULDBLOCK
-                    {
+                    let errno = *crate::stdlib::__errno_location();
+                    if gz_errno_is_retryable(errno) {
                         (*state).again = 1 as ::core::ffi::c_int;
                     }
                     crate::src::gzlib::gz_error(
                         state as *mut crate::gzguts_h::gz_state,
                         crate::zlib_h::Z_ERRNO,
-                        crate::stdlib::strerror(*crate::stdlib::__errno_location()),
+                        crate::stdlib::strerror(errno),
                     );
                     return -1 as ::core::ffi::c_int;
                 }

@@ -7,6 +7,7 @@ pub use crate::gzguts_h::GZIP;
 pub use crate::gzguts_h::GZ_READ;
 pub use crate::gzguts_h::LOOK;
 pub use crate::src::gzlib::gz_consume_buffered_read;
+pub use crate::src::gzlib::gz_errno_is_retryable;
 pub use crate::src::gzlib::gz_error;
 pub use crate::src::gzlib::gz_io_chunk_limit;
 pub use crate::src::gzlib::gz_z_size_to_uInt_chunk;
@@ -82,9 +83,8 @@ unsafe fn gz_load(
         }
     }
     if ret < 0 as ::core::ffi::c_int {
-        if *crate::stdlib::__errno_location() == crate::stdlib::EAGAIN
-            || *crate::stdlib::__errno_location() == crate::stdlib::EWOULDBLOCK
-        {
+        let errno = *crate::stdlib::__errno_location();
+        if gz_errno_is_retryable(errno) {
             (*state).again = 1 as ::core::ffi::c_int;
             if *have != 0 as ::core::ffi::c_uint {
                 return 0 as ::core::ffi::c_int;
@@ -93,7 +93,7 @@ unsafe fn gz_load(
         crate::src::gzlib::gz_error(
             state as *mut crate::gzguts_h::gz_state,
             crate::zlib_h::Z_ERRNO,
-            crate::stdlib::strerror(*crate::stdlib::__errno_location()),
+            crate::stdlib::strerror(errno),
         );
         return -1 as ::core::ffi::c_int;
     }

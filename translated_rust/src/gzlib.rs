@@ -392,6 +392,11 @@ pub fn gz_z_size_to_uInt_chunk(len: crate::stdlib::z_size_t) -> ::core::ffi::c_u
         max
     }
 }
+
+pub fn gz_errno_is_retryable(errno: ::core::ffi::c_int) -> bool {
+    errno == crate::stdlib::EAGAIN || errno == crate::stdlib::EWOULDBLOCK
+}
+
 #[export_name = "gzrewind"]
 
 pub unsafe extern "C" fn gzrewind_ffi(mut file: crate::zlib_h::gzFile) -> ::core::ffi::c_int {
