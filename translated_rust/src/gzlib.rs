@@ -352,7 +352,9 @@ pub unsafe extern "C" fn gzbuffer_ffi(
     }
     gzbuffer(&mut *(file as crate::gzguts_h::gz_statep), size)
 }
-pub unsafe extern "C" fn gzrewind(mut file: crate::zlib_h::gzFile) -> ::core::ffi::c_int {
+#[export_name = "gzrewind"]
+
+pub unsafe extern "C" fn gzrewind_ffi(mut file: crate::zlib_h::gzFile) -> ::core::ffi::c_int {
     let mut state: crate::gzguts_h::gz_statep =
         ::core::ptr::null_mut::<crate::gzguts_h::gz_state>();
     if file.is_null() {
@@ -375,12 +377,9 @@ pub unsafe extern "C" fn gzrewind(mut file: crate::zlib_h::gzFile) -> ::core::ff
     gz_reset(state);
     return 0 as ::core::ffi::c_int;
 }
-#[export_name = "gzrewind"]
+#[export_name = "gzseek64"]
 
-pub unsafe extern "C" fn gzrewind_ffi(mut file: crate::zlib_h::gzFile) -> ::core::ffi::c_int {
-    gzrewind(file)
-}
-pub unsafe extern "C" fn gzseek64(
+pub unsafe extern "C" fn gzseek64_ffi(
     mut file: crate::zlib_h::gzFile,
     mut offset: crate::stdlib::off64_t,
     mut whence: ::core::ffi::c_int,
@@ -445,7 +444,7 @@ pub unsafe extern "C" fn gzseek64(
         if offset < 0 as crate::stdlib::off64_t {
             return -1 as ::core::ffi::c_int as crate::stdlib::off64_t;
         }
-        if gzrewind(file) == -1 as ::core::ffi::c_int {
+        if gzrewind_ffi(file) == -1 as ::core::ffi::c_int {
             return -1 as ::core::ffi::c_int as crate::stdlib::off64_t;
         }
     }
@@ -467,28 +466,6 @@ pub unsafe extern "C" fn gzseek64(
     (*state).skip = offset;
     return (*state).x.pos + offset;
 }
-#[export_name = "gzseek64"]
-
-pub unsafe extern "C" fn gzseek64_ffi(
-    mut file: crate::zlib_h::gzFile,
-    mut offset: crate::stdlib::off64_t,
-    mut whence: ::core::ffi::c_int,
-) -> crate::stdlib::off64_t {
-    gzseek64(file, offset, whence)
-}
-pub unsafe extern "C" fn gzseek(
-    mut file: crate::zlib_h::gzFile,
-    mut offset: crate::stdlib::off_t,
-    mut whence: ::core::ffi::c_int,
-) -> crate::stdlib::off_t {
-    let mut ret: crate::stdlib::off64_t = 0;
-    ret = gzseek64(file, offset, whence);
-    return if ret == ret {
-        ret
-    } else {
-        -1 as ::core::ffi::c_int as crate::stdlib::off_t
-    };
-}
 #[export_name = "gzseek"]
 
 pub unsafe extern "C" fn gzseek_ffi(
@@ -496,7 +473,13 @@ pub unsafe extern "C" fn gzseek_ffi(
     mut offset: crate::stdlib::off_t,
     mut whence: ::core::ffi::c_int,
 ) -> crate::stdlib::off_t {
-    gzseek(file, offset, whence)
+    let mut ret: crate::stdlib::off64_t = 0;
+    ret = gzseek64_ffi(file, offset, whence);
+    return if ret == ret {
+        ret
+    } else {
+        -1 as ::core::ffi::c_int as crate::stdlib::off_t
+    };
 }
 pub fn gztell64(state: &crate::gzguts_h::gz_state) -> crate::stdlib::off64_t {
     return state.x.pos

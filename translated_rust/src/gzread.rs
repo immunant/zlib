@@ -482,6 +482,13 @@ fn gzread_len_fits_int(len: ::core::ffi::c_uint) -> bool {
     (len as ::core::ffi::c_int) >= 0 as ::core::ffi::c_int
 }
 
+fn gz_read_state_ready(state: &crate::gzguts_h::gz_state) -> bool {
+    state.mode == crate::gzguts_h::GZ_READ
+        && (state.err == crate::zlib_h::Z_OK
+            || state.err == crate::zlib_h::Z_BUF_ERROR
+            || state.again != 0)
+}
+
 #[export_name = "gzread"]
 
 pub unsafe extern "C" fn gzread_ffi(
@@ -495,13 +502,7 @@ pub unsafe extern "C" fn gzread_ffi(
         return -1 as ::core::ffi::c_int;
     }
     state = file as crate::gzguts_h::gz_statep;
-    if (*state).mode != crate::gzguts_h::GZ_READ {
-        return -1 as ::core::ffi::c_int;
-    }
-    if (*state).err != crate::zlib_h::Z_OK
-        && (*state).err != crate::zlib_h::Z_BUF_ERROR
-        && (*state).again == 0
-    {
+    if !gz_read_state_ready(&*state) {
         return -1 as ::core::ffi::c_int;
     }
     crate::src::gzlib::gz_error(
@@ -553,13 +554,7 @@ pub unsafe extern "C" fn gzfread_ffi(
         return 0 as crate::stdlib::z_size_t;
     }
     state = file as crate::gzguts_h::gz_statep;
-    if (*state).mode != crate::gzguts_h::GZ_READ {
-        return 0 as crate::stdlib::z_size_t;
-    }
-    if (*state).err != crate::zlib_h::Z_OK
-        && (*state).err != crate::zlib_h::Z_BUF_ERROR
-        && (*state).again == 0
-    {
+    if !gz_read_state_ready(&*state) {
         return 0 as crate::stdlib::z_size_t;
     }
     crate::src::gzlib::gz_error(
@@ -590,13 +585,7 @@ pub unsafe extern "C" fn gzgetc_ffi(mut file: crate::zlib_h::gzFile) -> ::core::
         return -1 as ::core::ffi::c_int;
     }
     state = file as crate::gzguts_h::gz_statep;
-    if (*state).mode != crate::gzguts_h::GZ_READ {
-        return -1 as ::core::ffi::c_int;
-    }
-    if (*state).err != crate::zlib_h::Z_OK
-        && (*state).err != crate::zlib_h::Z_BUF_ERROR
-        && (*state).again == 0
-    {
+    if !gz_read_state_ready(&*state) {
         return -1 as ::core::ffi::c_int;
     }
     crate::src::gzlib::gz_error(
@@ -644,10 +633,7 @@ pub unsafe extern "C" fn gzungetc_ffi(
     if (*state).how == crate::gzguts_h::LOOK && (*state).x.have == 0 as ::core::ffi::c_uint {
         gz_look(state);
     }
-    if (*state).err != crate::zlib_h::Z_OK
-        && (*state).err != crate::zlib_h::Z_BUF_ERROR
-        && (*state).again == 0
-    {
+    if !gz_read_state_ready(&*state) {
         return -1 as ::core::ffi::c_int;
     }
     crate::src::gzlib::gz_error(
@@ -715,13 +701,7 @@ pub unsafe extern "C" fn gzgets_ffi(
         return ::core::ptr::null_mut::<::core::ffi::c_char>();
     }
     state = file as crate::gzguts_h::gz_statep;
-    if (*state).mode != crate::gzguts_h::GZ_READ {
-        return ::core::ptr::null_mut::<::core::ffi::c_char>();
-    }
-    if (*state).err != crate::zlib_h::Z_OK
-        && (*state).err != crate::zlib_h::Z_BUF_ERROR
-        && (*state).again == 0
-    {
+    if !gz_read_state_ready(&*state) {
         return ::core::ptr::null_mut::<::core::ffi::c_char>();
     }
     crate::src::gzlib::gz_error(

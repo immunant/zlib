@@ -582,6 +582,64 @@ pub unsafe extern "C" fn deflateInit__ffi(
 ) -> ::core::ffi::c_int {
     deflateInit_(strm, level, version, stream_size)
 }
+
+#[derive(Copy, Clone)]
+struct DeflateInit2Config {
+    level: ::core::ffi::c_int,
+    wrap: ::core::ffi::c_int,
+    window_bits: ::core::ffi::c_int,
+    mem_level: ::core::ffi::c_int,
+    strategy: ::core::ffi::c_int,
+    method: ::core::ffi::c_int,
+}
+
+fn deflate_init2_config(
+    mut level: ::core::ffi::c_int,
+    method: ::core::ffi::c_int,
+    mut window_bits: ::core::ffi::c_int,
+    mem_level: ::core::ffi::c_int,
+    strategy: ::core::ffi::c_int,
+) -> Option<DeflateInit2Config> {
+    let mut wrap = 1 as ::core::ffi::c_int;
+    if level == crate::zlib_h::Z_DEFAULT_COMPRESSION {
+        level = 6 as ::core::ffi::c_int;
+    }
+    if window_bits < 0 as ::core::ffi::c_int {
+        wrap = 0 as ::core::ffi::c_int;
+        if window_bits < -15 as ::core::ffi::c_int {
+            return None;
+        }
+        window_bits = -window_bits;
+    } else if window_bits > 15 as ::core::ffi::c_int {
+        wrap = 2 as ::core::ffi::c_int;
+        window_bits -= 16 as ::core::ffi::c_int;
+    }
+    if mem_level < 1 as ::core::ffi::c_int
+        || mem_level > crate::stdlib::MAX_MEM_LEVEL
+        || method != crate::zlib_h::Z_DEFLATED
+        || window_bits < 8 as ::core::ffi::c_int
+        || window_bits > 15 as ::core::ffi::c_int
+        || level < 0 as ::core::ffi::c_int
+        || level > 9 as ::core::ffi::c_int
+        || strategy < 0 as ::core::ffi::c_int
+        || strategy > crate::zlib_h::Z_FIXED
+        || window_bits == 8 as ::core::ffi::c_int && wrap != 1 as ::core::ffi::c_int
+    {
+        return None;
+    }
+    if window_bits == 8 as ::core::ffi::c_int {
+        window_bits = 9 as ::core::ffi::c_int;
+    }
+    Some(DeflateInit2Config {
+        level,
+        wrap,
+        window_bits,
+        mem_level,
+        strategy,
+        method,
+    })
+}
+
 pub unsafe extern "C" fn deflateInit2_(
     mut strm: crate::zlib_h::z_streamp,
     mut level: ::core::ffi::c_int,
@@ -594,7 +652,6 @@ pub unsafe extern "C" fn deflateInit2_(
 ) -> ::core::ffi::c_int {
     let mut s: *mut crate::src::deflate::deflate_state =
         ::core::ptr::null_mut::<crate::src::deflate::deflate_state>();
-    let mut wrap: ::core::ffi::c_int = 1 as ::core::ffi::c_int;
     static my_version: [::core::ffi::c_char; 15] = crate::zlib_h::ZLIB_VERSION;
     if version.is_null()
         || *version.offset(0 as ::core::ffi::c_int as isize) as ::core::ffi::c_int
@@ -624,35 +681,9 @@ pub unsafe extern "C" fn deflateInit2_(
                 as unsafe extern "C" fn(crate::stdlib::voidpf, crate::stdlib::voidpf) -> (),
         ) as crate::zlib_h::free_func;
     }
-    if level == crate::zlib_h::Z_DEFAULT_COMPRESSION {
-        level = 6 as ::core::ffi::c_int;
-    }
-    if windowBits < 0 as ::core::ffi::c_int {
-        wrap = 0 as ::core::ffi::c_int;
-        if windowBits < -15 as ::core::ffi::c_int {
-            return crate::zlib_h::Z_STREAM_ERROR;
-        }
-        windowBits = -windowBits;
-    } else if windowBits > 15 as ::core::ffi::c_int {
-        wrap = 2 as ::core::ffi::c_int;
-        windowBits -= 16 as ::core::ffi::c_int;
-    }
-    if memLevel < 1 as ::core::ffi::c_int
-        || memLevel > crate::stdlib::MAX_MEM_LEVEL
-        || method != crate::zlib_h::Z_DEFLATED
-        || windowBits < 8 as ::core::ffi::c_int
-        || windowBits > 15 as ::core::ffi::c_int
-        || level < 0 as ::core::ffi::c_int
-        || level > 9 as ::core::ffi::c_int
-        || strategy < 0 as ::core::ffi::c_int
-        || strategy > crate::zlib_h::Z_FIXED
-        || windowBits == 8 as ::core::ffi::c_int && wrap != 1 as ::core::ffi::c_int
-    {
+    let Some(config) = deflate_init2_config(level, method, windowBits, memLevel, strategy) else {
         return crate::zlib_h::Z_STREAM_ERROR;
-    }
-    if windowBits == 8 as ::core::ffi::c_int {
-        windowBits = 9 as ::core::ffi::c_int;
-    }
+    };
     s = Some((*strm).zalloc.expect("non-null function pointer")).expect("non-null function pointer")(
         (*strm).opaque,
         1 as crate::stdlib::uInt,
@@ -670,12 +701,13 @@ pub unsafe extern "C" fn deflateInit2_(
     (*strm).state = s as *mut crate::src::deflate::internal_state;
     (*s).strm = strm;
     (*s).status = crate::src::deflate::INIT_STATE;
-    (*s).wrap = wrap;
+    (*s).wrap = config.wrap;
     (*s).gzhead = ::core::ptr::null_mut::<crate::zlib_h::gz_header>();
-    (*s).w_bits = windowBits as crate::stdlib::uInt;
+    (*s).w_bits = config.window_bits as crate::stdlib::uInt;
     (*s).w_size = ((1 as ::core::ffi::c_int) << (*s).w_bits) as crate::stdlib::uInt;
     (*s).w_mask = (*s).w_size.wrapping_sub(1 as crate::stdlib::uInt);
-    (*s).hash_bits = (memLevel as crate::stdlib::uInt).wrapping_add(7 as crate::stdlib::uInt);
+    (*s).hash_bits =
+        (config.mem_level as crate::stdlib::uInt).wrapping_add(7 as crate::stdlib::uInt);
     (*s).hash_size = ((1 as ::core::ffi::c_int) << (*s).hash_bits) as crate::stdlib::uInt;
     (*s).hash_mask = (*s).hash_size.wrapping_sub(1 as crate::stdlib::uInt);
     (*s).hash_shift = (*s)
@@ -704,7 +736,8 @@ pub unsafe extern "C" fn deflateInit2_(
     ) as *mut crate::src::deflate::Posf;
     (*s).high_water = 0 as crate::zutil_h::ulg;
     (*s).lit_bufsize =
-        ((1 as ::core::ffi::c_int) << memLevel + 6 as ::core::ffi::c_int) as crate::stdlib::uInt;
+        ((1 as ::core::ffi::c_int) << config.mem_level + 6 as ::core::ffi::c_int)
+            as crate::stdlib::uInt;
     (*s).pending_buf = Some((*strm).zalloc.expect("non-null function pointer"))
         .expect("non-null function pointer")(
         (*strm).opaque,
@@ -729,9 +762,9 @@ pub unsafe extern "C" fn deflateInit2_(
         .lit_bufsize
         .wrapping_sub(1 as crate::stdlib::uInt)
         .wrapping_mul(3 as crate::stdlib::uInt);
-    (*s).level = level;
-    (*s).strategy = strategy;
-    (*s).method = method as crate::stdlib::Byte;
+    (*s).level = config.level;
+    (*s).strategy = config.strategy;
+    (*s).method = config.method as crate::stdlib::Byte;
     return deflateReset(strm);
 }
 #[export_name = "deflateInit2_"]
