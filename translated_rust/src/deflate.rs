@@ -476,6 +476,25 @@ fn read_buf_progress_state(
     )
 }
 
+/// The checked, pointer-free admission for one `read_buf()` refill.  The
+/// compatibility adapter still has to lend the caller's input cursor, but it
+/// should do so only after the amount to copy has been reconciled with the
+/// destination span it was given by the window code.
+#[derive(Copy, Clone)]
+struct ReadBufPlan {
+    len: usize,
+}
+
+fn read_buf_plan(
+    avail_in: crate::stdlib::uInt,
+    requested: ::core::ffi::c_uint,
+    output_len: usize,
+) -> Option<ReadBufPlan> {
+    let len = avail_in.min(requested);
+    let len = usize::try_from(len).ok()?;
+    (len <= output_len).then_some(ReadBufPlan { len })
+}
+
 /// Scalar progress returned by the raw stream adapter. Keeping the updated
 /// input availability with the copied length lets callers make their next
 /// refill decision without re-dereferencing the compatibility stream.
@@ -733,54 +752,53 @@ fn read_buf(
     // ownership in the type instead of lending the output cursor again here.
     // The ABI input cursor remains the one transitional raw boundary in this
     // adapter; its stream record is already a validated safe borrow.
-        let len = strm.avail_in.min(size);
-        if len == 0 {
-            return ReadBufProgress {
-                copied: 0,
-                avail_in: strm.avail_in,
-            };
-        }
-        let Ok(len_usize) = usize::try_from(len) else {
-            return ReadBufProgress {
-                copied: 0,
-                avail_in: strm.avail_in,
-            };
+    let Some(plan) = read_buf_plan(strm.avail_in, size, buf.len()) else {
+        return ReadBufProgress {
+            copied: 0,
+            avail_in: strm.avail_in,
         };
-        if strm.next_in.is_null() || len_usize > buf.len() {
-            return ReadBufProgress {
-                copied: 0,
-                avail_in: strm.avail_in,
-            };
-        }
-        let input = unsafe { ::core::slice::from_raw_parts(strm.next_in, len_usize) };
-        let Some(output) = buf.get_mut(..len_usize) else {
-            return ReadBufProgress {
-                copied: 0,
-                avail_in: strm.avail_in,
-            };
+    };
+    if plan.len == 0 {
+        return ReadBufProgress {
+            copied: 0,
+            avail_in: strm.avail_in,
         };
-        let (len, adler, avail_in, total_in) = read_buf_progress_state(
-            input,
-            output,
-            wrap,
-            strm.adler,
-            strm.avail_in,
-            strm.total_in,
-        );
-        let Some(input_tail) = input.get(len as usize..) else {
-            return ReadBufProgress {
-                copied: 0,
-                avail_in: strm.avail_in,
-            };
+    }
+    if strm.next_in.is_null() {
+        return ReadBufProgress {
+            copied: 0,
+            avail_in: strm.avail_in,
         };
-        strm.avail_in = avail_in;
-        strm.adler = adler;
-        strm.next_in = input_tail.as_ptr() as *mut crate::stdlib::Bytef;
-        strm.total_in = total_in;
-        ReadBufProgress {
-            copied: len,
-            avail_in,
-        }
+    }
+    let input = unsafe { ::core::slice::from_raw_parts(strm.next_in, plan.len) };
+    let Some(output) = buf.get_mut(..plan.len) else {
+        return ReadBufProgress {
+            copied: 0,
+            avail_in: strm.avail_in,
+        };
+    };
+    let (len, adler, avail_in, total_in) = read_buf_progress_state(
+        input,
+        output,
+        wrap,
+        strm.adler,
+        strm.avail_in,
+        strm.total_in,
+    );
+    let Some(input_tail) = input.get(len as usize..) else {
+        return ReadBufProgress {
+            copied: 0,
+            avail_in: strm.avail_in,
+        };
+    };
+    strm.avail_in = avail_in;
+    strm.adler = adler;
+    strm.next_in = input_tail.as_ptr() as *mut crate::stdlib::Bytef;
+    strm.total_in = total_in;
+    ReadBufProgress {
+        copied: len,
+        avail_in,
+    }
 }
 
 fn fill_window_space_state(
