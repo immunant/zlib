@@ -1,10 +1,17 @@
 // =============== BEGIN inftrees_h ================
-#[derive(Copy, Clone)]
 #[repr(C)]
 pub struct code {
     pub op: ::core::ffi::c_uchar,
     pub bits: ::core::ffi::c_uchar,
     pub val: ::core::ffi::c_ushort,
+}
+
+pub(crate) fn copy_code(value: &code) -> code {
+    code {
+        op: value.op,
+        bits: value.bits,
+        val: value.val,
+    }
 }
 
 pub const ENOUGH_LENS: ::core::ffi::c_int = 852 as ::core::ffi::c_int;
@@ -3023,7 +3030,7 @@ pub fn inflate_table(
         if table.len() < 2 {
             return Err(1);
         }
-        table[0] = here;
+        table[0] = copy_code(&here);
         table[1] = here;
         *bits = 1 as ::core::ffi::c_uint;
         return Ok(2);
@@ -3140,7 +3147,7 @@ pub fn inflate_table(
             let Some(slot) = table.get_mut(index) else {
                 return Err(1);
             };
-            *slot = here;
+            *slot = copy_code(&here);
             if fill == 0 as ::core::ffi::c_uint {
                 break;
             }

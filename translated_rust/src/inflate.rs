@@ -95,7 +95,6 @@ pub fn inflate_error_message(strm: &crate::zlib_h::z_stream) -> Option<&'static 
         .copied()
         .find(|message| strm.msg == message.as_ptr().cast_mut())
 }
-#[derive(Copy, Clone)]
 #[repr(C)]
 
 pub struct inflate_state {
@@ -134,6 +133,48 @@ pub struct inflate_state {
     pub sane: ::core::ffi::c_int,
     pub back: ::core::ffi::c_int,
     pub was: ::core::ffi::c_uint,
+}
+
+fn copy_inflate_state(source: &inflate_state) -> inflate_state {
+    inflate_state {
+        strm: source.strm,
+        mode: source.mode,
+        last: source.last,
+        wrap: source.wrap,
+        havedict: source.havedict,
+        flags: source.flags,
+        dmax: source.dmax,
+        check: source.check,
+        total: source.total,
+        head: source.head,
+        wbits: source.wbits,
+        wsize: source.wsize,
+        whave: source.whave,
+        wnext: source.wnext,
+        window: source.window,
+        hold: source.hold,
+        bits: source.bits,
+        length: source.length,
+        offset: source.offset,
+        extra: source.extra,
+        lencode: source.lencode,
+        distcode: source.distcode,
+        lenbits: source.lenbits,
+        distbits: source.distbits,
+        ncode: source.ncode,
+        nlen: source.nlen,
+        ndist: source.ndist,
+        have: source.have,
+        next: source.next,
+        lens: source.lens,
+        work: source.work,
+        codes: ::core::array::from_fn(|index| {
+            crate::src::inftrees::copy_code(&source.codes[index])
+        }),
+        sane: source.sane,
+        back: source.back,
+        was: source.was,
+    }
 }
 pub use crate::__stddef_size_t_h::size_t;
 
@@ -1329,13 +1370,13 @@ pub fn inflate(
                                                                                     )
                                                                             {
                                                                                 loop {
-                                                                                    here = *(*state)
-                                                                                    .lencode
-                                                                                    .offset(
+                                                                                    here = crate::src::inftrees::copy_code(&*(*state)
+                                                                                        .lencode
+                                                                                        .offset(
                                                                                         (hold as ::core::ffi::c_uint
                                                                                             & ((1 as ::core::ffi::c_uint) << (*state).lenbits)
                                                                                                 .wrapping_sub(1 as ::core::ffi::c_uint)) as isize,
-                                                                                    );
+                                                                                        ));
                                                                                     if here.bits as ::core::ffi::c_uint <= bits {
                                                                                     break;
                                                                                 }
@@ -1855,7 +1896,7 @@ pub fn inflate(
                                             } else {
                                                 (*state).back = 0 as ::core::ffi::c_int;
                                                 loop {
-                                                    here = *(*state).lencode.offset(
+                                                    here = crate::src::inftrees::copy_code(&*(*state).lencode.offset(
                                                         (hold as ::core::ffi::c_uint
                                                             & ((1 as ::core::ffi::c_uint)
                                                                 << (*state).lenbits)
@@ -1863,7 +1904,7 @@ pub fn inflate(
                                                                     1 as ::core::ffi::c_uint,
                                                                 ))
                                                             as isize,
-                                                    );
+                                                    ));
                                                     if here.bits as ::core::ffi::c_uint <= bits {
                                                         break;
                                                     }
@@ -1887,7 +1928,7 @@ pub fn inflate(
                                                 {
                                                     last = here;
                                                     loop {
-                                                        here = *(*state).lencode.offset(
+                                                        here = crate::src::inftrees::copy_code(&*(*state).lencode.offset(
                                                         (last.val as ::core::ffi::c_uint)
                                                             .wrapping_add(
                                                             (hold as ::core::ffi::c_uint
@@ -1902,7 +1943,7 @@ pub fn inflate(
                                                                 >> last.bits as ::core::ffi::c_int,
                                                         )
                                                             as isize,
-                                                    );
+                                                        ));
                                                         if (last.bits as ::core::ffi::c_int
                                                             + here.bits as ::core::ffi::c_int)
                                                             as ::core::ffi::c_uint
@@ -2098,12 +2139,12 @@ pub fn inflate(
                                 break 'c_2325;
                             }
                             loop {
-                                here = *(*state).distcode.offset(
+                                here = crate::src::inftrees::copy_code(&*(*state).distcode.offset(
                                     (hold as ::core::ffi::c_uint
                                         & ((1 as ::core::ffi::c_uint) << (*state).distbits)
                                             .wrapping_sub(1 as ::core::ffi::c_uint))
-                                        as isize,
-                                );
+                                    as isize,
+                                ));
                                 if here.bits as ::core::ffi::c_uint <= bits {
                                     break;
                                 }
@@ -2123,7 +2164,7 @@ pub fn inflate(
                             {
                                 last = here;
                                 loop {
-                                    here = *(*state).distcode.offset(
+                                    here = crate::src::inftrees::copy_code(&*(*state).distcode.offset(
                                         (last.val as ::core::ffi::c_uint).wrapping_add(
                                             (hold as ::core::ffi::c_uint
                                                 & ((1 as ::core::ffi::c_uint)
@@ -2132,7 +2173,7 @@ pub fn inflate(
                                                     .wrapping_sub(1 as ::core::ffi::c_uint))
                                                 >> last.bits as ::core::ffi::c_int,
                                         ) as isize,
-                                    );
+                                    ));
                                     if (last.bits as ::core::ffi::c_int
                                         + here.bits as ::core::ffi::c_int)
                                         as ::core::ffi::c_uint
@@ -2871,7 +2912,7 @@ pub fn inflateCopy(
     }
     *dest_ref = *source_ref;
     let copy_ref = unsafe { &mut *copy };
-    *copy_ref = *state_ref;
+    *copy_ref = copy_inflate_state(state_ref);
     copy_ref.strm = ::core::ptr::from_mut(dest_ref);
     if let Some((lencode_index, distcode_index)) = table_indices {
         let copy_codes = ::core::ptr::from_mut(&mut copy_ref.codes).cast::<crate::src::inftrees::code>();
