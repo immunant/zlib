@@ -200,19 +200,17 @@ pub unsafe extern "C" fn compress_ffi(
 ) -> ::core::ffi::c_int {
     compress(dest, destLen, source, sourceLen)
 }
-pub unsafe extern "C" fn compressBound_z(
-    mut sourceLen: crate::stdlib::z_size_t,
-) -> crate::stdlib::z_size_t {
-    let mut bound: crate::stdlib::z_size_t = sourceLen
-        .wrapping_add(sourceLen >> 12 as ::core::ffi::c_int)
-        .wrapping_add(sourceLen >> 14 as ::core::ffi::c_int)
-        .wrapping_add(sourceLen >> 25 as ::core::ffi::c_int)
+pub fn compressBound_z(source_len: crate::stdlib::z_size_t) -> crate::stdlib::z_size_t {
+    let bound = source_len
+        .wrapping_add(source_len >> 12 as ::core::ffi::c_int)
+        .wrapping_add(source_len >> 14 as ::core::ffi::c_int)
+        .wrapping_add(source_len >> 25 as ::core::ffi::c_int)
         .wrapping_add(13 as crate::stdlib::z_size_t);
-    return if bound < sourceLen {
+    if bound < source_len {
         -1 as ::core::ffi::c_int as crate::stdlib::z_size_t
     } else {
         bound
-    };
+    }
 }
 #[export_name = "compressBound_z"]
 
