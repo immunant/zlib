@@ -720,6 +720,20 @@ enum InflateCopySource {
     Output(usize),
 }
 
+/// Borrowed gzip-header output buffers, validated at the ABI boundary.
+///
+/// zlib retains the header carrier in the inflater state, but each `inflate`
+/// call only needs bounded, caller-owned destinations for the progressive
+/// extra, name, and comment fields.  Keeping those destinations as slices
+/// prevents the decoder from rebuilding interior raw pointers while it
+/// consumes the header.
+pub struct InflateHeader<'a> {
+    header: &'a mut crate::zlib_h::gz_header_s,
+    extra: Option<&'a mut [crate::stdlib::Bytef]>,
+    name: Option<&'a mut [crate::stdlib::Bytef]>,
+    comment: Option<&'a mut [crate::stdlib::Bytef]>,
+}
+
 impl<'a> InflateInput<'a> {
     fn new(bytes: &'a [crate::stdlib::Bytef]) -> Self {
         Self { bytes, index: 0 }
@@ -800,7 +814,7 @@ pub unsafe fn inflate(
     mut flush: ::core::ffi::c_int,
     input: &[crate::stdlib::Bytef],
     output: &mut [crate::stdlib::Bytef],
-    mut header: Option<&mut crate::zlib_h::gz_header_s>,
+    mut header: Option<InflateHeader<'_>>,
     message: &mut Option<&'static ::core::ffi::CStr>,
 ) -> ::core::ffi::c_int {
     let mut strm = InflateStream(strm);
@@ -852,11 +866,11 @@ pub unsafe fn inflate(
     if strm.state.is_null() {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    if input.len() != (*strm).avail_in as usize || output.len() != (*strm).avail_out as usize {
+    if input.len() != strm.avail_in as usize || output.len() != strm.avail_out as usize {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    let state = &mut *((*strm).state as *mut crate::src::inflate::inflate_state);
-    if !inflate_state_valid(&*strm, state) {
+    let state = &mut *(strm.state as *mut crate::src::inflate::inflate_state);
+    if !inflate_state_valid(&strm, state) {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
     let mut state = InflateState(state);
@@ -941,8 +955,8 @@ pub unsafe fn inflate(
                                                                                                             (*state).mode = crate::src::inflate::FLAGS;
                                                                                                             continue '_inf_leave;
                                                                                                         } else {
-                                                                                                            if let Some(header) = header.as_deref_mut() {
-                                                                                                                header.done = -1 as ::core::ffi::c_int;
+                                                                                                            if let Some(header) = header.as_mut() {
+                                                                                                                header.header.done = -1 as ::core::ffi::c_int;
                                                                                                             }
                                                                                                             if (*state).wrap & 1 as ::core::ffi::c_int == 0
                                                                                                                 || (((hold as ::core::ffi::c_uint
@@ -1030,8 +1044,8 @@ pub unsafe fn inflate(
                                                                                                         (*state).mode = crate::src::inflate::BAD;
                                                                                                         continue '_inf_leave;
                                                                                                     } else {
-                                                                                                        if let Some(header) = header.as_deref_mut() {
-                                                                                                            header.text = (hold >> 8 as ::core::ffi::c_int
+                                                                                                        if let Some(header) = header.as_mut() {
+                                                                                                            header.header.text = (hold >> 8 as ::core::ffi::c_int
                                                                                                                 & 1 as ::core::ffi::c_ulong) as ::core::ffi::c_int;
                                                                                                         }
                                                                                                         if (*state).flags & 0x200 as ::core::ffi::c_int != 0
@@ -1453,9 +1467,9 @@ pub unsafe fn inflate(
                                                                                 if let Some(
                                                                                     header,
                                                                                 ) = header
-                                                                                    .as_deref_mut()
+                                                                                    .as_mut()
                                                                                 {
-                                                                                    header.time = hold
+                                                                                    header.header.time = hold
                                                                                         as crate::stdlib::uLong;
                                                                                 }
                                                                                 if (*state).flags & 0x200 as ::core::ffi::c_int != 0
@@ -1766,13 +1780,13 @@ pub unsafe fn inflate(
                                                                     );
                                                                 }
                                                                 if let Some(header) =
-                                                                    header.as_deref_mut()
+                                                                    header.as_mut()
                                                                 {
-                                                                    header.xflags = (hold
+                                                                    header.header.xflags = (hold
                                                                         & 0xff
                                                                             as ::core::ffi::c_ulong)
                                                                         as ::core::ffi::c_int;
-                                                                    header.os = (hold
+                                                                    header.header.os = (hold
                                                                         >> 8 as ::core::ffi::c_int)
                                                                         as ::core::ffi::c_int;
                                                                 }
@@ -1923,8 +1937,8 @@ pub unsafe fn inflate(
                                                             .wrapping_add(8 as ::core::ffi::c_uint);
                                                     }
                                                     (*state).length = hold as ::core::ffi::c_uint;
-                                                    if let Some(header) = header.as_deref_mut() {
-                                                        header.extra_len = hold
+                                                    if let Some(header) = header.as_mut() {
+                                                        header.header.extra_len = hold
                                                             as ::core::ffi::c_uint
                                                             as crate::stdlib::uInt;
                                                     }
@@ -1946,8 +1960,8 @@ pub unsafe fn inflate(
                                                     }
                                                     hold = 0 as ::core::ffi::c_ulong;
                                                     bits = 0 as ::core::ffi::c_uint;
-                                                } else if let Some(header) = header.as_deref_mut() {
-                                                    header.extra = ::core::ptr::null_mut::<
+                                                } else if let Some(header) = header.as_mut() {
+                                                    header.header.extra = ::core::ptr::null_mut::<
                                                         crate::stdlib::Bytef,
                                                     >(
                                                     );
@@ -2071,30 +2085,19 @@ pub unsafe fn inflate(
                                             copy = have;
                                         }
                                         if copy != 0 {
-                                            if let Some(header) = header.as_deref_mut() {
-                                                if !header.extra.is_null() && {
-                                                    len = (header.extra_len as ::core::ffi::c_uint)
+                                            if let Some(header) = header.as_mut() {
+                                                if let Some(extra) = header.extra.as_deref_mut() {
+                                                    len = (header.header.extra_len as ::core::ffi::c_uint)
                                                         .wrapping_sub((*state).length);
-                                                    len < header.extra_max
-                                                } {
-                                                    let extra_copy = if len.wrapping_add(copy)
-                                                        > header.extra_max
-                                                    {
-                                                        (header.extra_max as ::core::ffi::c_uint)
-                                                            .wrapping_sub(len)
-                                                    } else {
-                                                        copy
+                                                    if len < extra.len() as ::core::ffi::c_uint {
+                                                        let extra_copy = (copy as usize)
+                                                            .min(extra.len() - len as usize);
+                                                        let input_start = input.len() - have as usize;
+                                                        extra[len as usize..len as usize + extra_copy]
+                                                            .copy_from_slice(
+                                                                &input[input_start..input_start + extra_copy],
+                                                            );
                                                     }
-                                                        as usize;
-                                                    let input_start = input.len() - have as usize;
-                                                    ::core::slice::from_raw_parts_mut(
-                                                        header.extra.wrapping_add(len as usize),
-                                                        extra_copy,
-                                                    )
-                                                    .copy_from_slice(
-                                                        &input
-                                                            [input_start..input_start + extra_copy],
-                                                    );
                                                 }
                                             }
                                             if (*state).flags & 0x200 as ::core::ffi::c_int != 0
@@ -2158,14 +2161,13 @@ pub unsafe fn inflate(
                                     copy = copy.wrapping_add(1);
                                     len = *next.wrapping_offset(c2rust_fresh5 as isize)
                                         as ::core::ffi::c_uint;
-                                    if let Some(header) = header.as_deref_mut() {
-                                        if !header.name.is_null()
-                                            && (*state).length < header.name_max
-                                        {
-                                            let c2rust_fresh6 = (*state).length;
-                                            (*state).length = (*state).length.wrapping_add(1);
-                                            *header.name.wrapping_offset(c2rust_fresh6 as isize) =
-                                                len as crate::stdlib::Bytef;
+                                    if let Some(header) = header.as_mut() {
+                                        if let Some(name) = header.name.as_deref_mut() {
+                                            if (*state).length < name.len() as ::core::ffi::c_uint {
+                                                let c2rust_fresh6 = (*state).length;
+                                                (*state).length = (*state).length.wrapping_add(1);
+                                                name[c2rust_fresh6 as usize] = len as crate::stdlib::Bytef;
+                                            }
                                         }
                                     }
                                     if !(len != 0 && copy < have) {
@@ -2186,8 +2188,8 @@ pub unsafe fn inflate(
                                 if len != 0 {
                                     break '_inf_leave;
                                 }
-                            } else if let Some(header) = header.as_deref_mut() {
-                                header.name = ::core::ptr::null_mut::<crate::stdlib::Bytef>();
+                            } else if let Some(header) = header.as_mut() {
+                                header.header.name = ::core::ptr::null_mut::<crate::stdlib::Bytef>();
                             }
                             (*state).length = 0 as ::core::ffi::c_uint;
                             (*state).mode = crate::src::inflate::COMMENT;
@@ -2281,12 +2283,13 @@ pub unsafe fn inflate(
                             copy = copy.wrapping_add(1);
                             len = *next.wrapping_offset(c2rust_fresh7 as isize)
                                 as ::core::ffi::c_uint;
-                            if let Some(header) = header.as_deref_mut() {
-                                if !header.comment.is_null() && (*state).length < header.comm_max {
-                                    let c2rust_fresh8 = (*state).length;
-                                    (*state).length = (*state).length.wrapping_add(1);
-                                    *header.comment.wrapping_offset(c2rust_fresh8 as isize) =
-                                        len as crate::stdlib::Bytef;
+                            if let Some(header) = header.as_mut() {
+                                if let Some(comment) = header.comment.as_deref_mut() {
+                                    if (*state).length < comment.len() as ::core::ffi::c_uint {
+                                        let c2rust_fresh8 = (*state).length;
+                                        (*state).length = (*state).length.wrapping_add(1);
+                                        comment[c2rust_fresh8 as usize] = len as crate::stdlib::Bytef;
+                                    }
                                 }
                             }
                             if !(len != 0 && copy < have) {
@@ -2306,8 +2309,8 @@ pub unsafe fn inflate(
                         if len != 0 {
                             break '_inf_leave;
                         }
-                    } else if let Some(header) = header.as_deref_mut() {
-                        header.comment = ::core::ptr::null_mut::<crate::stdlib::Bytef>();
+                    } else if let Some(header) = header.as_mut() {
+                        header.header.comment = ::core::ptr::null_mut::<crate::stdlib::Bytef>();
                     }
                     (*state).mode = crate::src::inflate::HCRC;
                     break 'c_2327;
@@ -2359,9 +2362,9 @@ pub unsafe fn inflate(
                     bits = 0 as ::core::ffi::c_uint;
                 }
             }
-            if let Some(header) = header.as_deref_mut() {
-                header.hcrc = (*state).flags >> 9 as ::core::ffi::c_int & 1 as ::core::ffi::c_int;
-                header.done = 1 as ::core::ffi::c_int;
+            if let Some(header) = header.as_mut() {
+                header.header.hcrc = (*state).flags >> 9 as ::core::ffi::c_int & 1 as ::core::ffi::c_int;
+                header.header.done = 1 as ::core::ffi::c_int;
             }
             (*state).check =
                 crate::src::crc32::crc32(0 as crate::stdlib::uLong, &[]) as ::core::ffi::c_ulong;
@@ -2522,13 +2525,31 @@ pub unsafe extern "C" fn inflate_ffi(
     // zlib requires `next_out` even for a zero-sized output range.
     let output = ::core::slice::from_raw_parts_mut(strm.next_out, strm.avail_out as usize);
     // `inflateGetHeader()` retains this caller-owned pointer in the opaque
-    // stream state.  Resolve it at the ABI boundary so the decoder never
-    // dereferences that raw carrier directly.
+    // stream state.  Resolve its three writable ranges at the ABI boundary so
+    // the decoder only sees bounded slices.
     let header = if strm.state.is_null() {
         None
     } else {
         let state = strm.state.cast::<crate::src::inflate::inflate_state>();
-        unsafe { state.as_mut().and_then(|state| state.head.as_mut()) }
+        unsafe {
+            state.as_mut().and_then(|state| state.head.as_mut()).map(|header| {
+                let extra = (!header.extra.is_null()).then(|| {
+                    ::core::slice::from_raw_parts_mut(header.extra, header.extra_max as usize)
+                });
+                let name = (!header.name.is_null()).then(|| {
+                    ::core::slice::from_raw_parts_mut(header.name, header.name_max as usize)
+                });
+                let comment = (!header.comment.is_null()).then(|| {
+                    ::core::slice::from_raw_parts_mut(header.comment, header.comm_max as usize)
+                });
+                InflateHeader {
+                    header,
+                    extra,
+                    name,
+                    comment,
+                }
+            })
+        }
     };
     let mut message = None;
     inflate(strm, flush, input, output, header, &mut message)
