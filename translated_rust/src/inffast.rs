@@ -16,6 +16,18 @@ pub(crate) struct FastResult {
     pub(crate) exit: FastExit,
 }
 
+// A bounded fast-decoder request must be consumed before an ABI cursor is
+// republished.  Keep every scalar needed for that publication in this
+// pointer-free completion, rather than returning a loose collection of
+// cursor lengths alongside the decoder result.
+pub(crate) struct InflateFastCompletion {
+    pub(crate) result: FastResult,
+    pub(crate) hold: u64,
+    pub(crate) bits: u32,
+    pub(crate) input_len: usize,
+    pub(crate) output_len: usize,
+}
+
 // Normal inflate keeps its history allocation separate from the caller's
 // output.  inflateBack, however, deliberately uses its caller window for
 // both roles.  Represent that relationship explicitly instead of forming
@@ -71,7 +83,7 @@ impl<'input, 'output, 'state> InflateFastRequest<'input, 'output, 'state> {
         })
     }
 
-    pub(crate) fn run(mut self) -> (FastResult, u64, u32, usize, usize) {
+    pub(crate) fn run(mut self) -> InflateFastCompletion {
         let input_len = self.input.len();
         let output_len = self.output.len();
         let result = inflate_fast_core(
@@ -96,13 +108,13 @@ impl<'input, 'output, 'state> InflateFastRequest<'input, 'output, 'state> {
         );
         self.state.hold = result.hold;
         self.state.bits = result.bits;
-        (
+        InflateFastCompletion {
             result,
-            self.state.hold,
-            self.state.bits,
+            hold: self.state.hold,
+            bits: self.state.bits,
             input_len,
             output_len,
-        )
+        }
     }
 }
 
@@ -322,10 +334,10 @@ pub(crate) fn inflate_fast_from_views(
             exit: FastExit::Continue,
         };
     };
-    let (result, hold, bits, _, _) = request.run();
-    state.hold = hold;
-    state.bits = bits;
-    result
+    let completion = request.run();
+    state.hold = completion.hold;
+    state.bits = completion.bits;
+    completion.result
 }
 
 // The ABI projection is deliberately separate from `inflate_fast()`: every
@@ -376,14 +388,18 @@ pub(crate) unsafe fn inflate_fast_from_abi_boundary(
     let Some(request) = request else {
         return;
     };
-    let (result, hold, bits, input_len, output_len) = inflate_fast(request);
-    strm.next_in = strm.next_in.wrapping_add(result.input_used);
-    strm.avail_in = input_len.wrapping_sub(result.input_used) as crate::stdlib::uInt;
-    strm.next_out = output_start.wrapping_add(result.output_used);
-    strm.avail_out = output_len.wrapping_sub(result.output_used) as crate::stdlib::uInt;
-    state.hold = hold;
-    state.bits = bits;
-    match result.exit {
+    let completion = inflate_fast(request);
+    strm.next_in = strm.next_in.wrapping_add(completion.result.input_used);
+    strm.avail_in = completion
+        .input_len
+        .wrapping_sub(completion.result.input_used) as crate::stdlib::uInt;
+    strm.next_out = output_start.wrapping_add(completion.result.output_used);
+    strm.avail_out = completion
+        .output_len
+        .wrapping_sub(completion.result.output_used) as crate::stdlib::uInt;
+    state.hold = completion.hold;
+    state.bits = completion.bits;
+    match completion.result.exit {
         FastExit::Continue => {}
         FastExit::Type => state.mode = TYPE,
         FastExit::InvalidDistance => {
@@ -406,9 +422,7 @@ pub(crate) unsafe fn inflate_fast_from_abi_boundary(
 // This is the pointer-free fast-decoder dispatch used by the ABI adapter and
 // by future owners.  Keeping it separate prevents a raw stream projection
 // from becoming part of the fast path's API.
-pub(crate) fn inflate_fast(
-    request: InflateFastRequest<'_, '_, '_>,
-) -> (FastResult, u64, u32, usize, usize) {
+pub(crate) fn inflate_fast(request: InflateFastRequest<'_, '_, '_>) -> InflateFastCompletion {
     request.run()
 }
 
