@@ -153,6 +153,37 @@ fn copy_aliasing_window_history(
     remaining == 0 || copy_output_match(output, output_index, distance, remaining)
 }
 
+enum DecodeTable {
+    LiteralLength,
+    Distance,
+}
+
+/// Return the active decode table as a bounded view.
+///
+/// Fixed tables have their own immutable storage; dynamic tables always live
+/// in the state's code arena.  Keeping that distinction here avoids raw table
+/// entry dereferences in the fast decoder.
+fn decode_table(
+    state: &crate::src::inflate::inflate_state,
+    kind: DecodeTable,
+) -> Option<&[crate::src::inftrees::code]> {
+    let (pointer, fixed) = match kind {
+        DecodeTable::LiteralLength => (state.lencode, &crate::src::inftrees::lenfix[..]),
+        DecodeTable::Distance => (state.distcode, &crate::src::inftrees::distfix[..]),
+    };
+    if pointer == fixed.as_ptr() {
+        return Some(fixed);
+    }
+
+    let codes = &state.codes;
+    let byte_offset = pointer.addr().checked_sub(codes.as_ptr().addr())?;
+    let code_size = ::core::mem::size_of::<crate::src::inftrees::code>();
+    if byte_offset % code_size != 0 {
+        return None;
+    }
+    codes.get(byte_offset / code_size..)
+}
+
 pub unsafe fn inflate_fast(
     strm: &mut crate::zlib_h::z_stream,
     mut start: ::core::ffi::c_uint,
@@ -169,14 +200,8 @@ pub unsafe fn inflate_fast(
     let mut window: *mut ::core::ffi::c_uchar = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
     let mut hold: ::core::ffi::c_ulong = 0;
     let mut bits: ::core::ffi::c_uint = 0;
-    let mut lcode: *const crate::src::inftrees::code =
-        ::core::ptr::null::<crate::src::inftrees::code>();
-    let mut dcode: *const crate::src::inftrees::code =
-        ::core::ptr::null::<crate::src::inftrees::code>();
     let mut lmask: ::core::ffi::c_uint = 0;
     let mut dmask: ::core::ffi::c_uint = 0;
-    let mut here: *const crate::src::inftrees::code =
-        ::core::ptr::null::<crate::src::inftrees::code>();
     let mut op: ::core::ffi::c_uint = 0;
     let mut len: ::core::ffi::c_uint = 0;
     let mut dist: ::core::ffi::c_uint = 0;
@@ -203,8 +228,14 @@ pub unsafe fn inflate_fast(
     window = state.window;
     hold = state.hold;
     bits = state.bits;
-    lcode = state.lencode;
-    dcode = state.distcode;
+    let Some(lcode) = decode_table(state, DecodeTable::LiteralLength) else {
+        state.mode = crate::src::inflate::BAD;
+        return;
+    };
+    let Some(dcode) = decode_table(state, DecodeTable::Distance) else {
+        state.mode = crate::src::inflate::BAD;
+        return;
+    };
     lmask = ((1 as ::core::ffi::c_uint) << state.lenbits).wrapping_sub(1 as ::core::ffi::c_uint);
     dmask = ((1 as ::core::ffi::c_uint) << state.distbits).wrapping_sub(1 as ::core::ffi::c_uint);
     's_627: loop {
@@ -219,12 +250,16 @@ pub unsafe fn inflate_fast(
             bits = bits.wrapping_add(8 as ::core::ffi::c_uint);
         }
         // The root-table mask bounds this cursor within the validated
-        // literal/length decode table.  Dereferencing the table stays in this
-        // legacy unsafe engine, but forming the cursor itself need not be an
-        // unsafe operation.
-        here = lcode.wrapping_offset((hold & lmask as ::core::ffi::c_ulong) as isize);
+        // literal/length decode table. Read it through the bounded table view
+        // rather than dereferencing the legacy raw table cursor.
+        let Some(mut here_code) = lcode
+            .get((hold & lmask as ::core::ffi::c_ulong) as usize)
+            .map(crate::src::inftrees::copy_code)
+        else {
+            state.mode = crate::src::inflate::BAD;
+            break 's_627;
+        };
         's_92: loop {
-            let here_code = crate::src::inftrees::copy_code(&*here);
             op = here_code.bits as ::core::ffi::c_uint;
             hold >>= op;
             bits = bits.wrapping_sub(op);
@@ -268,9 +303,14 @@ pub unsafe fn inflate_fast(
                     hold = hold.wrapping_add((input_byte as ::core::ffi::c_ulong) << bits);
                     bits = bits.wrapping_add(8 as ::core::ffi::c_uint);
                 }
-                here = dcode.wrapping_offset((hold & dmask as ::core::ffi::c_ulong) as isize);
+                let Some(mut here_code) = dcode
+                    .get((hold & dmask as ::core::ffi::c_ulong) as usize)
+                    .map(crate::src::inftrees::copy_code)
+                else {
+                    state.mode = crate::src::inflate::BAD;
+                    break 's_627;
+                };
                 loop {
-                    let here_code = crate::src::inftrees::copy_code(&*here);
                     op = here_code.bits as ::core::ffi::c_uint;
                     hold >>= op;
                     bits = bits.wrapping_sub(op);
@@ -421,15 +461,18 @@ pub unsafe fn inflate_fast(
                             break 's_92;
                         }
                     } else if op & 64 as ::core::ffi::c_uint == 0 as ::core::ffi::c_uint {
-                        here = dcode
-                            .wrapping_offset(here_code.val as ::core::ffi::c_int as isize)
-                            .wrapping_offset(
-                                (hold
-                                    & ((1 as ::core::ffi::c_uint) << op)
-                                        .wrapping_sub(1 as ::core::ffi::c_uint)
-                                        as ::core::ffi::c_ulong)
-                                    as isize,
-                            );
+                        let index = (here_code.val as usize).wrapping_add(
+                            (hold
+                                & ((1 as ::core::ffi::c_uint) << op)
+                                    .wrapping_sub(1 as ::core::ffi::c_uint)
+                                    as ::core::ffi::c_ulong) as usize,
+                        );
+                        let Some(next_code) = dcode.get(index).map(crate::src::inftrees::copy_code)
+                        else {
+                            state.mode = crate::src::inflate::BAD;
+                            break 's_627;
+                        };
+                        here_code = next_code;
                     } else {
                         strm.msg = b"invalid distance code\0".as_ptr() as *const ::core::ffi::c_char
                             as *mut ::core::ffi::c_char;
@@ -438,14 +481,16 @@ pub unsafe fn inflate_fast(
                     }
                 }
             } else if op & 64 as ::core::ffi::c_uint == 0 as ::core::ffi::c_uint {
-                here = lcode
-                    .wrapping_offset(here_code.val as ::core::ffi::c_int as isize)
-                    .wrapping_offset(
-                        (hold
-                            & ((1 as ::core::ffi::c_uint) << op)
-                                .wrapping_sub(1 as ::core::ffi::c_uint)
-                                as ::core::ffi::c_ulong) as isize,
-                    );
+                let index = (here_code.val as usize).wrapping_add(
+                    (hold
+                        & ((1 as ::core::ffi::c_uint) << op).wrapping_sub(1 as ::core::ffi::c_uint)
+                            as ::core::ffi::c_ulong) as usize,
+                );
+                let Some(next_code) = lcode.get(index).map(crate::src::inftrees::copy_code) else {
+                    state.mode = crate::src::inflate::BAD;
+                    break 's_627;
+                };
+                here_code = next_code;
             } else if op & 32 as ::core::ffi::c_uint != 0 {
                 state.mode = crate::src::inflate::TYPE;
                 break 's_627;
