@@ -2614,22 +2614,17 @@ pub unsafe extern "C" fn inflateSyncPoint_ffi(
 ) -> ::core::ffi::c_int {
     inflateSyncPoint(strm)
 }
-pub unsafe extern "C" fn inflateCopy(
-    mut dest: crate::zlib_h::z_streamp,
-    mut source: crate::zlib_h::z_streamp,
+unsafe fn inflate_copy_impl(
+    dest: &mut crate::zlib_h::z_stream_s,
+    source: &crate::zlib_h::z_stream_s,
+    state: &crate::src::inflate::inflate_state,
 ) -> ::core::ffi::c_int {
-    let mut state: *mut crate::src::inflate::inflate_state =
-        ::core::ptr::null_mut::<crate::src::inflate::inflate_state>();
     let mut copy: *mut crate::src::inflate::inflate_state =
         ::core::ptr::null_mut::<crate::src::inflate::inflate_state>();
     let mut window: *mut ::core::ffi::c_uchar = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
-    if inflateStateCheck(source) != 0 || dest.is_null() {
-        return crate::zlib_h::Z_STREAM_ERROR;
-    }
-    state = (*source).state as *mut crate::src::inflate::inflate_state;
-    copy = Some((*source).zalloc.expect("non-null function pointer"))
+    copy = Some(source.zalloc.expect("non-null function pointer"))
         .expect("non-null function pointer")(
-        (*source).opaque,
+        source.opaque,
         1 as crate::stdlib::uInt,
         ::core::mem::size_of::<crate::src::inflate::inflate_state>() as crate::stdlib::uInt,
     ) as *mut crate::src::inflate::inflate_state;
@@ -2637,42 +2632,30 @@ pub unsafe extern "C" fn inflateCopy(
         return crate::zlib_h::Z_MEM_ERROR;
     }
     window = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
-    if !(*state).window.is_null() {
-        window = Some((*source).zalloc.expect("non-null function pointer"))
+    if !state.window.is_null() {
+        window = Some(source.zalloc.expect("non-null function pointer"))
             .expect("non-null function pointer")(
-            (*source).opaque,
-            (1 as crate::stdlib::uInt) << (*state).wbits,
+            source.opaque,
+            (1 as crate::stdlib::uInt) << state.wbits,
             ::core::mem::size_of::<::core::ffi::c_uchar>() as crate::stdlib::uInt,
         ) as *mut ::core::ffi::c_uchar;
         if window.is_null() {
-            Some((*source).zfree.expect("non-null function pointer"))
+            Some(source.zfree.expect("non-null function pointer"))
                 .expect("non-null function pointer")(
-                (*source).opaque,
+                source.opaque,
                 copy as crate::stdlib::voidpf,
             );
             return crate::zlib_h::Z_MEM_ERROR;
         }
     }
-    crate::stdlib::memcpy(
-        dest as *mut ::core::ffi::c_void,
-        source as *const ::core::ffi::c_void,
-        ::core::mem::size_of::<crate::zlib_h::z_stream>(),
-    );
-    crate::stdlib::memcpy(
-        copy as *mut ::core::ffi::c_void,
-        state as *const ::core::ffi::c_void,
-        ::core::mem::size_of::<crate::src::inflate::inflate_state>(),
-    );
-    (*copy).next = (*state).next;
+    *dest = *source;
+    *copy = *state;
+    (*copy).next = state.next;
     if !window.is_null() {
-        crate::stdlib::memcpy(
-            window as *mut ::core::ffi::c_void,
-            (*state).window as *const ::core::ffi::c_void,
-            (*state).whave as crate::__stddef_size_t_h::size_t,
-        );
+        ::core::ptr::copy_nonoverlapping(state.window, window, state.whave as usize);
     }
     (*copy).window = window;
-    (*dest).state = copy as *mut crate::src::deflate::internal_state;
+    dest.state = copy as *mut crate::src::deflate::internal_state;
     return crate::zlib_h::Z_OK;
 }
 #[export_name = "inflateCopy"]
@@ -2681,7 +2664,19 @@ pub unsafe extern "C" fn inflateCopy_ffi(
     mut dest: crate::zlib_h::z_streamp,
     mut source: crate::zlib_h::z_streamp,
 ) -> ::core::ffi::c_int {
-    inflateCopy(dest, source)
+    if dest.is_null() || source.is_null() {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    }
+    let source = *source;
+    let state = source.state as *const crate::src::inflate::inflate_state;
+    if state.is_null() {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    }
+    let state = &*state;
+    if !inflate_state_valid(&source, state) {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    }
+    inflate_copy_impl(&mut *dest, &source, state)
 }
 pub unsafe extern "C" fn inflateUndermine(
     mut strm: crate::zlib_h::z_streamp,
