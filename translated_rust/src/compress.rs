@@ -71,14 +71,11 @@ fn compress_flush(remaining_source: crate::stdlib::z_size_t) -> ::core::ffi::c_i
     }
 }
 
-pub unsafe extern "C" fn compress2_z(
-    mut dest: *mut crate::stdlib::Bytef,
-    destLen: &mut crate::stdlib::z_size_t,
-    mut source: *const crate::stdlib::Bytef,
-    mut sourceLen: crate::stdlib::z_size_t,
-    mut level: ::core::ffi::c_int,
-) -> ::core::ffi::c_int {
-    let mut stream: crate::zlib_h::z_stream = crate::zlib_h::z_stream {
+// A one-shot compressor starts with no caller buffers or allocator state
+// published.  Keep this value-only construction separate from the driver so
+// every exit path begins from the same inert stream configuration.
+fn compress_stream() -> crate::zlib_h::z_stream {
+    crate::zlib_h::z_stream {
         next_in: ::core::ptr::null_mut::<crate::stdlib::Bytef>(),
         avail_in: 0,
         total_in: 0,
@@ -93,7 +90,17 @@ pub unsafe extern "C" fn compress2_z(
         data_type: 0,
         adler: 0,
         reserved: 0,
-    };
+    }
+}
+
+pub unsafe extern "C" fn compress2_z(
+    mut dest: *mut crate::stdlib::Bytef,
+    destLen: &mut crate::stdlib::z_size_t,
+    mut source: *const crate::stdlib::Bytef,
+    mut sourceLen: crate::stdlib::z_size_t,
+    mut level: ::core::ffi::c_int,
+) -> ::core::ffi::c_int {
+    let mut stream = compress_stream();
     let mut err: ::core::ffi::c_int = 0;
     let max: crate::stdlib::uInt = -1 as ::core::ffi::c_int as crate::stdlib::uInt;
     let mut left: crate::stdlib::z_size_t = 0;

@@ -69,13 +69,11 @@ fn uncompress_result(
     }
 }
 
-pub unsafe extern "C" fn uncompress2_z(
-    mut dest: *mut crate::stdlib::Bytef,
-    destLen: &mut crate::stdlib::z_size_t,
-    mut source: *const crate::stdlib::Bytef,
-    sourceLen: &mut crate::stdlib::z_size_t,
-) -> ::core::ffi::c_int {
-    let mut stream: crate::zlib_h::z_stream = crate::zlib_h::z_stream {
+// A one-shot decompressor likewise begins with no caller buffers or allocator
+// state published.  Keep this value-only setup out of the pointer-bearing
+// driver so its initialization and teardown paths share one inert baseline.
+fn uncompress_stream() -> crate::zlib_h::z_stream {
+    crate::zlib_h::z_stream {
         next_in: ::core::ptr::null_mut::<crate::stdlib::Bytef>(),
         avail_in: 0,
         total_in: 0,
@@ -90,7 +88,16 @@ pub unsafe extern "C" fn uncompress2_z(
         data_type: 0,
         adler: 0,
         reserved: 0,
-    };
+    }
+}
+
+pub unsafe extern "C" fn uncompress2_z(
+    mut dest: *mut crate::stdlib::Bytef,
+    destLen: &mut crate::stdlib::z_size_t,
+    mut source: *const crate::stdlib::Bytef,
+    sourceLen: &mut crate::stdlib::z_size_t,
+) -> ::core::ffi::c_int {
+    let mut stream = uncompress_stream();
     let mut err: ::core::ffi::c_int = 0;
     let max: crate::stdlib::uInt = -1 as ::core::ffi::c_int as crate::stdlib::uInt;
     let mut len: crate::stdlib::z_size_t = 0;
