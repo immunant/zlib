@@ -82,27 +82,28 @@ fn gz_last_errno() -> ::core::ffi::c_int {
     ::std::io::Error::last_os_error().raw_os_error().unwrap_or(0)
 }
 
-// This is the raw descriptor-read boundary. Its private callers either pass a
-// range in gzip's initialized buffers or an FFI caller buffer whose validity
-// was checked by their unsafe entry point. Keep the byte count in a typed
-// result instead of passing a raw out-pointer through each caller, including
-// the partial-read error case that gzip must still account for.
+// This is the descriptor-read boundary. Its private callers retain a bounded
+// Rust buffer through the syscall, so the partial-read cursor can stay a
+// checked slice rather than a raw pointer plus manual address arithmetic.
+// Keep the byte count in a typed result instead of passing a raw out-pointer
+// through each caller, including the partial-read error case that gzip must
+// still account for.
 fn gz_load(
     state: &mut crate::gzguts_h::gz_state,
-    buf: ::core::ptr::NonNull<::core::ffi::c_uchar>,
-    mut len: ::core::ffi::c_uint,
+    buf: &mut [::core::ffi::c_uchar],
 ) -> GzLoadResult {
     let mut ret: ::core::ffi::c_int = 0;
     let mut get: ::core::ffi::c_uint = 0;
     // Keep the byte count local while crossing the raw read boundary.  The
     // caller only observes it after the descriptor result has been classified.
     let mut loaded: ::core::ffi::c_uint = 0;
+    let len = buf.len() as ::core::ffi::c_uint;
     crate::src::gzlib::gz_begin_io(state);
     loop {
         get = crate::src::gzlib::gz_load_request(len, loaded);
         ret = crate::stdlib::read(
             state.fd,
-            buf.as_ptr().wrapping_add(loaded as usize) as *mut ::core::ffi::c_void,
+            buf[loaded as usize..].as_mut_ptr() as *mut ::core::ffi::c_void,
             get as crate::__stddef_size_t_h::size_t,
         ) as ::core::ffi::c_int;
         if ret <= 0 {
@@ -130,22 +131,6 @@ fn gz_load(
         received: loaded,
         status: 0,
     }
-}
-
-// Callers that already have a Rust-facing buffer should retain that bound
-// range until the descriptor boundary. This leaves `gz_load()` as the one
-// adapter for internal raw gzip buffers while avoiding another raw pointer
-// hand-off in the read state machine.
-fn gz_load_slice(
-    state: &mut crate::gzguts_h::gz_state,
-    buf: &mut [::core::ffi::c_uchar],
-) -> GzLoadResult {
-    // Slice pointers, including the dangling pointer for an empty slice, are
-    // non-null. Preserve that invariant at the descriptor boundary instead
-    // of widening this internal helper back to a raw pointer argument.
-    let len = buf.len() as ::core::ffi::c_uint;
-    let buf = ::core::ptr::NonNull::new(buf.as_mut_ptr()).expect("slice pointers are non-null");
-    gz_load(state, buf, len)
 }
 
 // Compute the still-buffered input range without forming a slice from the
@@ -199,7 +184,7 @@ fn gz_avail(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
                     buffer.copy_within(range, 0);
                 }
             }
-            Some(gz_load_slice(state, &mut buffer[buffered as usize..]))
+            Some(gz_load(state, &mut buffer[buffered as usize..]))
         });
         let Some(Some(result)) = refill else {
             return -1;
@@ -410,7 +395,7 @@ fn gz_fetch(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
                     if state.out != output.as_mut_ptr() || requested as usize > output.len() {
                         return None;
                     }
-                    Some(gz_load_slice(state, &mut output[..requested as usize]))
+                    Some(gz_load(state, &mut output[..requested as usize]))
                 });
                 let Some(Some(result)) = result else {
                     crate::src::gzlib::gz_error(
@@ -584,7 +569,7 @@ fn gz_read(
             }
             crate::src::gzlib::GzReadPlan::Copy(chunk) => {
                 n = chunk;
-                let result = gz_load_slice(
+                let result = gz_load(
                     state,
                     &mut buf[got as usize..got.wrapping_add(n as crate::stdlib::z_size_t) as usize],
                 );
