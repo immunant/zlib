@@ -1102,21 +1102,23 @@ fn update_window_buffer_len(wsize: ::core::ffi::c_uint) -> usize {
     wsize as usize
 }
 
-fn update_window_buffer_len_after_metadata(
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+struct UpdateWindowSlicePlan {
+    window_len: usize,
+    produced_len: Option<usize>,
+}
+
+fn update_window_slice_plan(
     wsize: ::core::ffi::c_uint,
     wbits: ::core::ffi::c_uint,
-) -> usize {
+    copy: ::core::ffi::c_uint,
+) -> UpdateWindowSlicePlan {
     let updated_wsize = window_metadata_update_plan(wsize, wbits)
         .map(|metadata| metadata.wsize)
         .unwrap_or(wsize);
-    update_window_buffer_len(updated_wsize)
-}
-
-fn update_window_produced_len(copy: ::core::ffi::c_uint) -> Option<usize> {
-    if copy == 0 {
-        None
-    } else {
-        Some(copy as usize)
+    UpdateWindowSlicePlan {
+        window_len: update_window_buffer_len(updated_wsize),
+        produced_len: (copy != 0).then_some(copy as usize),
     }
 }
 
@@ -1141,14 +1143,14 @@ unsafe fn updatewindow(
     if window_allocation_failed(allocation_plan, !state.window.is_null()) {
         return 1;
     }
-    let window_len = update_window_buffer_len_after_metadata(state.wsize, state.wbits);
+    let slice_plan = update_window_slice_plan(state.wsize, state.wbits, copy);
     update_window_core(
         state.wbits,
         &mut state.wsize,
         &mut state.wnext,
         &mut state.whave,
-        core::slice::from_raw_parts_mut(state.window, window_len),
-        update_window_produced_slice(match update_window_produced_len(copy) {
+        core::slice::from_raw_parts_mut(state.window, slice_plan.window_len),
+        update_window_produced_slice(match slice_plan.produced_len {
             Some(produced_len) => Some(core::slice::from_raw_parts(
                 end.wrapping_sub(produced_len),
                 produced_len,
@@ -3226,8 +3228,8 @@ mod tests {
         inflate_undermine_core, inflate_validate_core, inflate_validate_wrap,
         inflate_zlib_header_error, inflate_zlib_header_transition, inflate_zlib_window_params,
         initial_window_metadata, reset_window_history, stored_block_length, syncsearch_safe,
-        update_window_buffer_len, update_window_buffer_len_after_metadata, update_window_core,
-        update_window_history, update_window_produced_len, window_allocation_failed,
+        update_window_buffer_len, update_window_core, update_window_history,
+        update_window_slice_plan, window_allocation_failed,
         window_allocation_plan, window_allocation_request, window_allocation_request_for_plan,
         window_metadata_update_plan, window_needs_allocation, window_update_plan,
         DynamicCodeLengthRepeat, InflateBlockKind, InflateCallProgress, InflateCopyProgress,
@@ -4647,18 +4649,20 @@ mod tests {
     }
 
     #[test]
-    fn update_window_buffer_len_after_metadata_initializes_only_empty_windows() {
-        assert_eq!(update_window_buffer_len_after_metadata(0, 3), 8);
-        assert_eq!(update_window_buffer_len_after_metadata(8, 15), 8);
-    }
-
-    #[test]
-    fn update_window_produced_len_only_constructs_nonempty_slices() {
-        assert_eq!(update_window_produced_len(0), None);
-        assert_eq!(update_window_produced_len(1), Some(1));
+    fn update_window_slice_plan_preserves_buffer_and_output_lengths() {
         assert_eq!(
-            update_window_produced_len(::core::ffi::c_uint::MAX),
-            Some(::core::ffi::c_uint::MAX as usize)
+            update_window_slice_plan(0, 3, 0),
+            super::UpdateWindowSlicePlan {
+                window_len: 8,
+                produced_len: None,
+            }
+        );
+        assert_eq!(
+            update_window_slice_plan(8, 15, ::core::ffi::c_uint::MAX),
+            super::UpdateWindowSlicePlan {
+                window_len: 8,
+                produced_len: Some(::core::ffi::c_uint::MAX as usize),
+            }
         );
     }
 

@@ -226,6 +226,15 @@ enum FastDecodeError {
     InvalidLiteralLengthCode,
 }
 
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+struct FastDecodeFailure {
+    error: FastDecodeError,
+}
+
+fn fast_decode_failure(error: FastDecodeError) -> FastDecodeFailure {
+    FastDecodeFailure { error }
+}
+
 fn fast_decode_error_message(error: FastDecodeError) -> &'static [u8] {
     match error {
         FastDecodeError::InvalidDistanceCode => b"invalid distance code\0",
@@ -470,6 +479,7 @@ pub unsafe extern "C" fn inflate_fast(
     let mut len: ::core::ffi::c_uint = 0;
     let mut dist: ::core::ffi::c_uint = 0;
     let mut from: *mut ::core::ffi::c_uchar = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
+    let mut pending_failure: Option<FastDecodeFailure> = None;
     let state = &mut *((*strm).state as *mut crate::src::inflate::inflate_state);
     in_0 = (*strm).next_in as *mut ::core::ffi::c_uchar;
     input_remaining = (*strm).avail_in;
@@ -577,12 +587,8 @@ pub unsafe extern "C" fn inflate_fast(
                             here = dcode.wrapping_add(subtable_index(entry, hold));
                         }
                         FastDistAction::Invalid => {
-                            (*strm).msg =
-                                fast_decode_error_message(FastDecodeError::InvalidDistanceCode)
-                                    .as_ptr()
-                                    as *const ::core::ffi::c_char
-                                    as *mut ::core::ffi::c_char;
-                            state.mode = crate::src::inflate::BAD;
+                            pending_failure =
+                                Some(fast_decode_failure(FastDecodeError::InvalidDistanceCode));
                             break 's_94;
                         }
                     }
@@ -644,12 +650,9 @@ pub unsafe extern "C" fn inflate_fast(
                         ) {
                             FastWindowDistance::Valid { distance_back } => distance_back,
                             FastWindowDistance::Invalid => {
-                                (*strm).msg =
-                                    fast_decode_error_message(FastDecodeError::DistanceTooFarBack)
-                                        .as_ptr()
-                                        as *const ::core::ffi::c_char
-                                        as *mut ::core::ffi::c_char;
-                                state.mode = crate::src::inflate::BAD;
+                                pending_failure = Some(fast_decode_failure(
+                                    FastDecodeError::DistanceTooFarBack,
+                                ));
                                 break;
                             }
                         };
@@ -745,10 +748,9 @@ pub unsafe extern "C" fn inflate_fast(
                 }
             }
             9180031981464905198 => {
-                (*strm).msg = fast_decode_error_message(FastDecodeError::InvalidLiteralLengthCode)
-                    .as_ptr() as *const ::core::ffi::c_char
-                    as *mut ::core::ffi::c_char;
-                state.mode = crate::src::inflate::BAD;
+                pending_failure = Some(fast_decode_failure(
+                    FastDecodeError::InvalidLiteralLengthCode,
+                ));
                 break;
             }
             13505557363059842426 => {
@@ -760,6 +762,12 @@ pub unsafe extern "C" fn inflate_fast(
         if !crate::src::inflate::inflate_can_use_fast_path(input_remaining, output_remaining) {
             break;
         }
+    }
+    if let Some(failure) = pending_failure {
+        (*strm).msg = fast_decode_error_message(failure.error).as_ptr()
+            as *const ::core::ffi::c_char
+            as *mut ::core::ffi::c_char;
+        state.mode = crate::src::inflate::BAD;
     }
     (hold, bits, len, input_remaining) = unread_input_state(hold, bits, input_remaining);
     in_0 = in_0.wrapping_sub(len as usize);
@@ -782,12 +790,12 @@ pub unsafe extern "C" fn inflate_fast_ffi(
 mod tests {
     use super::{
         add_and_consume_extra_bits, append_input_byte, bit_mask, code, consume_bits,
-        fast_code_entry, fast_decode_error_message, fast_decode_needs_prefetch,
+        fast_code_entry, fast_decode_error_message, fast_decode_failure, fast_decode_needs_prefetch,
         fast_decode_prefetch_byte_count, fast_dist_action, fast_length_extra_bits_need_input,
         fast_litlen_action, fast_match_copy_layout, fast_match_uses_window, fast_window_copy_plan,
         fast_window_distance_is_invalid, finish_fast_distance, input_bytes_needed,
         input_remaining_after_read, low_bits, output_cursor_after_write, subtable_index,
-        table_index, trailing_match_copy_byte_count, unread_input_state,
+        table_index, trailing_match_copy_byte_count, unread_input_state, FastDecodeFailure,
         validate_fast_window_distance, FastCodeEntry, FastDecodeError, FastDistAction,
         FastDistance, FastDistanceSource, FastLitLenAction, FastMatchCopyLayout,
         FastWindowContinuationSource, FastWindowCopyPlan, FastWindowDistance,
@@ -832,6 +840,16 @@ mod tests {
         assert_eq!(
             fast_decode_error_message(FastDecodeError::InvalidLiteralLengthCode),
             b"invalid literal/length code\0"
+        );
+    }
+
+    #[test]
+    fn fast_decode_failure_preserves_the_selected_error() {
+        assert_eq!(
+            fast_decode_failure(FastDecodeError::DistanceTooFarBack),
+            FastDecodeFailure {
+                error: FastDecodeError::DistanceTooFarBack,
+            }
         );
     }
 
