@@ -399,6 +399,7 @@ pub mod src {
     pub mod inffast;
     pub mod inflate;
     pub mod inftrees;
+    pub(crate) mod safe_types;
     pub mod trees;
     pub mod uncompr;
     pub mod zutil;

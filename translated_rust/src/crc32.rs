@@ -4765,20 +4765,43 @@ pub extern "C" fn get_crc_table_ffi() -> *const crate::stdlib::z_crc_t {
 const CRC32_MASK: crate::stdlib::uLong = 0xffff_ffff;
 pub const CRC32_INITIAL: crate::stdlib::uLong = 0;
 
-fn crc32_initial_state(crc: crate::stdlib::uLong) -> crate::stdlib::uLong {
-    !crc & CRC32_MASK
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct Crc32State(crate::stdlib::uLong);
+
+impl Crc32State {
+    fn from_crc(crc: crate::stdlib::uLong) -> Self {
+        Self(!crc & CRC32_MASK)
+    }
+
+    fn bits(self) -> crate::stdlib::uLong {
+        self.0
+    }
+
+    fn checksum(self) -> crate::stdlib::uLong {
+        (self.bits() ^ CRC32_MASK) & CRC32_MASK
+    }
+
+    fn update_byte(self, byte: u8) -> Self {
+        let table_index = ((self.bits() ^ byte as crate::stdlib::uLong) & 0xff) as usize;
+        let updated = (self.bits() >> 8) ^ crc_table[table_index] as crate::stdlib::uLong;
+
+        Self(updated & CRC32_MASK)
+    }
 }
 
-fn crc32_from_state(state: crate::stdlib::uLong) -> crate::stdlib::uLong {
-    (state ^ CRC32_MASK) & CRC32_MASK
+fn crc32_initial_state(crc: crate::stdlib::uLong) -> Crc32State {
+    Crc32State::from_crc(crc)
 }
 
-fn crc32_update_byte(crc: crate::stdlib::uLong, byte: u8) -> crate::stdlib::uLong {
-    let table_index = ((crc ^ byte as crate::stdlib::uLong) & 0xff) as usize;
-    ((crc >> 8) ^ crc_table[table_index] as crate::stdlib::uLong) & CRC32_MASK
+fn crc32_from_state(state: Crc32State) -> crate::stdlib::uLong {
+    state.checksum()
 }
 
-fn crc32_update_bytes(mut state: crate::stdlib::uLong, bytes: &[u8]) -> crate::stdlib::uLong {
+fn crc32_update_byte(state: Crc32State, byte: u8) -> Crc32State {
+    state.update_byte(byte)
+}
+
+fn crc32_update_bytes(mut state: Crc32State, bytes: &[u8]) -> Crc32State {
     for &byte in bytes {
         state = crc32_update_byte(state, byte);
     }
@@ -4934,7 +4957,7 @@ mod tests {
         classify_ffi_input, crc32, crc32_combine, crc32_combine64, crc32_combine_gen64,
         crc32_combine_op, crc32_combine_operator, crc32_from_state, crc32_initial_state,
         crc32_update_byte, crc32_update_bytes, crc32_z, crc_table_ref, multmodp, next_poly_term,
-        x2n_table, x2nmodp, FfiInputKind, CRC32_INITIAL, CRC32_MASK, POLY,
+        x2n_table, x2nmodp, Crc32State, FfiInputKind, CRC32_INITIAL, CRC32_MASK, POLY,
     };
 
     const HELLO_SPACE_CRC: crate::stdlib::uLong = 0xed81_f9f6;
@@ -5045,13 +5068,13 @@ mod tests {
     #[test]
     fn scalar_crc_update_matches_the_public_checksum() {
         let input = b"123456789";
-        let mut state = CRC32_MASK;
+        let mut state = Crc32State(CRC32_MASK);
 
         for &byte in input {
             state = crc32_update_byte(state, byte);
         }
 
-        assert_eq!((state ^ CRC32_MASK) & CRC32_MASK, crc32_z(0, input));
+        assert_eq!(crc32_from_state(state), crc32_z(0, input));
     }
 
     #[test]
@@ -5059,20 +5082,35 @@ mod tests {
         let crc = crate::stdlib::uLong::MAX;
         let initial = crc32_initial_state(crc);
 
-        assert_eq!(initial, 0);
+        assert_eq!(initial.bits(), 0);
         assert_eq!(crc32_from_state(initial), CRC32_MASK);
-        assert_eq!(crc32_from_state(CRC32_MASK), 0);
+        assert_eq!(crc32_from_state(Crc32State(CRC32_MASK)), 0);
     }
 
     #[test]
     fn byte_updates_preserve_internal_crc_state_boundaries() {
         let input = b"123456789";
-        let whole = crc32_update_bytes(CRC32_MASK, input);
-        let split = crc32_update_bytes(crc32_update_bytes(CRC32_MASK, &input[..4]), &input[4..]);
+        let whole = crc32_update_bytes(Crc32State(CRC32_MASK), input);
+        let split = crc32_update_bytes(
+            crc32_update_bytes(Crc32State(CRC32_MASK), &input[..4]),
+            &input[4..],
+        );
 
-        assert_eq!((whole ^ CRC32_MASK) & CRC32_MASK, 0xcbf4_3926);
+        assert_eq!(crc32_from_state(whole), 0xcbf4_3926);
         assert_eq!(split, whole);
-        assert_eq!(crc32_update_bytes(0x340b_c6d9, b""), 0x340b_c6d9);
+        assert_eq!(
+            crc32_update_bytes(Crc32State(0x340b_c6d9), b"").bits(),
+            0x340b_c6d9
+        );
+    }
+
+    #[test]
+    fn internal_crc_state_masks_host_width_bits_at_its_boundary() {
+        let state = Crc32State::from_crc(crate::stdlib::uLong::MAX);
+
+        assert_eq!(state.bits(), 0);
+        assert_eq!(state.checksum(), CRC32_MASK);
+        assert!(state.update_byte(0).bits() <= CRC32_MASK);
     }
 
     #[test]
