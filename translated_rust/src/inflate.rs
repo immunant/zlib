@@ -1025,6 +1025,72 @@ fn window_allocation_failed(plan: WindowAllocationPlan, ownership: WindowOwnersh
         && ownership.needs_callback_allocation()
 }
 
+/// The callback allocation and initialized prefix needed to clone a history
+/// window for `inflateCopy`.
+///
+/// A copied caller-borrowed `inflateBack` window must become callback-owned,
+/// since the destination stream has its own lifetime.  This plan deliberately
+/// keeps that ownership decision and the initialized-byte bound together, so
+/// the FFI allocation boundary does not have to recreate the window cursor
+/// invariants.
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+enum WindowClonePlan {
+    Missing,
+    Allocate {
+        items: crate::stdlib::uInt,
+        size: crate::stdlib::uInt,
+        initialized_len: usize,
+    },
+}
+
+impl WindowClonePlan {
+    fn initialized_len(self) -> Option<usize> {
+        match self {
+            Self::Missing => None,
+            Self::Allocate {
+                initialized_len, ..
+            } => Some(initialized_len),
+        }
+    }
+
+    fn allocation_request(self) -> Option<(crate::stdlib::uInt, crate::stdlib::uInt)> {
+        match self {
+            Self::Missing => None,
+            Self::Allocate { items, size, .. } => Some((items, size)),
+        }
+    }
+}
+
+fn window_clone_plan(
+    ownership: WindowOwnership,
+    wbits: crate::stdlib::uInt,
+    wsize: crate::stdlib::uInt,
+    wnext: crate::stdlib::uInt,
+    whave: crate::stdlib::uInt,
+) -> Option<WindowClonePlan> {
+    if matches!(ownership, WindowOwnership::Missing) {
+        return (wsize == 0 && wnext == 0 && whave == 0).then_some(WindowClonePlan::Missing);
+    }
+
+    let (items, size) = window_allocation_request(wbits)?;
+    if wsize == 0 {
+        (wnext == 0 && whave == 0).then_some(WindowClonePlan::Allocate {
+            items,
+            size,
+            initialized_len: 0,
+        })
+    } else {
+        (wsize == items)
+            .then(|| WindowHistory::new(wsize, wnext, whave))
+            .flatten()
+            .map(|history| WindowClonePlan::Allocate {
+                items,
+                size,
+                initialized_len: history.have as usize,
+            })
+    }
+}
+
 fn window_update_plan(
     wsize: ::core::ffi::c_uint,
     wnext: ::core::ffi::c_uint,
@@ -3632,15 +3698,25 @@ pub unsafe extern "C" fn inflateCopy(
     mut dest: crate::zlib_h::z_streamp,
     mut source: crate::zlib_h::z_streamp,
 ) -> ::core::ffi::c_int {
-    let mut state: *mut crate::src::inflate::inflate_state =
-        ::core::ptr::null_mut::<crate::src::inflate::inflate_state>();
     let mut copy: *mut crate::src::inflate::inflate_state =
         ::core::ptr::null_mut::<crate::src::inflate::inflate_state>();
     let mut window: *mut ::core::ffi::c_uchar = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
     if dest.is_null() {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    state = (*source).state as *mut crate::src::inflate::inflate_state;
+    let state = &mut *((*source).state as *mut crate::src::inflate::inflate_state);
+    let Some(window_ownership) = state_window_ownership(state) else {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    };
+    let Some(window_plan) = window_clone_plan(
+        window_ownership,
+        state.wbits,
+        state.wsize,
+        state.wnext,
+        state.whave,
+    ) else {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    };
     copy = Some((*source).zalloc.expect("non-null function pointer"))
         .expect("non-null function pointer")(
         (*source).opaque,
@@ -3651,12 +3727,12 @@ pub unsafe extern "C" fn inflateCopy(
         return crate::zlib_h::Z_MEM_ERROR;
     }
     window = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
-    if !(*state).window.is_null() {
+    if let Some((items, size)) = window_plan.allocation_request() {
         window = Some((*source).zalloc.expect("non-null function pointer"))
             .expect("non-null function pointer")(
             (*source).opaque,
-            (1 as crate::stdlib::uInt) << (*state).wbits,
-            ::core::mem::size_of::<::core::ffi::c_uchar>() as crate::stdlib::uInt,
+            items,
+            size,
         ) as *mut ::core::ffi::c_uchar;
         if window.is_null() {
             Some((*source).zfree.expect("non-null function pointer"))
@@ -3674,22 +3750,22 @@ pub unsafe extern "C" fn inflateCopy(
     );
     crate::stdlib::memcpy(
         copy as *mut ::core::ffi::c_void,
-        state as *const ::core::ffi::c_void,
+        state as *mut crate::src::inflate::inflate_state as *const ::core::ffi::c_void,
         ::core::mem::size_of::<crate::src::inflate::inflate_state>()
             as crate::__stddef_size_t_h::size_t,
     );
     let copy = &mut *copy;
     copy.strm = dest;
-    copy.next = (*state).next;
-    if !window.is_null() {
+    copy.next = state.next;
+    if let Some(initialized_len) = window_plan.initialized_len() {
         crate::stdlib::memcpy(
             window as *mut ::core::ffi::c_void,
-            (*state).window as *const ::core::ffi::c_void,
-            (*state).whave as crate::__stddef_size_t_h::size_t,
+            state.window as *const ::core::ffi::c_void,
+            initialized_len as crate::__stddef_size_t_h::size_t,
         );
     }
     copy.window = window;
-    copy.window_ownership = if window.is_null() {
+    copy.window_ownership = if window_plan.initialized_len().is_none() {
         WindowOwnership::Missing.raw()
     } else {
         WindowOwnership::CallbackOwned.raw()
@@ -3824,13 +3900,13 @@ mod tests {
         stored_block_length, syncsearch_safe, update_window_buffer_len, update_window_core,
         update_window_history, update_window_slice_plan, update_window_slices_after_allocation,
         window_allocation_failed, window_allocation_plan, window_allocation_request,
-        window_allocation_request_for_plan, window_metadata_update_plan, window_needs_allocation,
+        window_allocation_request_for_plan, window_clone_plan, window_metadata_update_plan, window_needs_allocation,
         window_ownership_for_state, window_should_release, window_update_plan,
         DynamicCodeLengthRepeat, InflateBlockKind, InflateCallProgress,
         InflateCopyProgress, InflateGzipExtraProgress, InflateGzipFlags, InflateGzipFlagsError,
         InflateGzipHeaderCompletion, InflateMatchPlan, InflateMatchSource, InflateOutputChecksum,
         InflatePrimeUpdate, InflateSyncSearch, InflateZlibHeaderError, InflateZlibHeaderTransition,
-        InflateZlibWindowParams, WindowAllocationPlan, BAD, CHECK, CODE_LENGTH_ORDER, COPY_,
+        InflateZlibWindowParams, WindowAllocationPlan, WindowClonePlan, BAD, CHECK, CODE_LENGTH_ORDER, COPY_,
         COPY_1, DICT, DICTID, HEAD, LEN_, MATCH, STORED, SYNC, TYPE, TYPEDO, WindowOwnership,
     };
 
@@ -5504,6 +5580,68 @@ mod tests {
             ),
             None
         );
+    }
+
+    #[test]
+    fn window_clone_plan_preserves_missing_and_initialized_history_cases() {
+        assert_eq!(
+            window_clone_plan(WindowOwnership::Missing, 15, 0, 0, 0),
+            Some(WindowClonePlan::Missing)
+        );
+        assert_eq!(
+            window_clone_plan(WindowOwnership::CallbackOwned, 3, 8, 3, 3),
+            Some(WindowClonePlan::Allocate {
+                items: 8,
+                size: 1,
+                initialized_len: 3,
+            })
+        );
+        assert_eq!(
+            window_clone_plan(WindowOwnership::CallerBorrowed, 3, 8, 2, 8),
+            Some(WindowClonePlan::Allocate {
+                items: 8,
+                size: 1,
+                initialized_len: 8,
+            })
+        );
+    }
+
+    #[test]
+    fn window_clone_plan_handles_reset_history_but_rejects_inconsistent_metadata() {
+        assert_eq!(
+            window_clone_plan(WindowOwnership::CallbackOwned, 3, 0, 0, 0),
+            Some(WindowClonePlan::Allocate {
+                items: 8,
+                size: 1,
+                initialized_len: 0,
+            })
+        );
+        assert_eq!(
+            window_clone_plan(WindowOwnership::Missing, 3, 0, 1, 0),
+            None
+        );
+        assert_eq!(
+            window_clone_plan(WindowOwnership::CallbackOwned, 3, 7, 0, 0),
+            None
+        );
+        assert_eq!(
+            window_clone_plan(WindowOwnership::CallerBorrowed, 3, 8, 2, 5),
+            None
+        );
+        assert_eq!(
+            window_clone_plan(WindowOwnership::CallbackOwned, 32, 8, 0, 8),
+            None
+        );
+    }
+
+    #[test]
+    fn window_clone_plan_keeps_allocator_request_and_copy_length_coupled() {
+        let plan = window_clone_plan(WindowOwnership::CallerBorrowed, 3, 8, 2, 8).unwrap();
+
+        assert_eq!(plan.allocation_request(), Some((8, 1)));
+        assert_eq!(plan.initialized_len(), Some(8));
+        assert_eq!(WindowClonePlan::Missing.allocation_request(), None);
+        assert_eq!(WindowClonePlan::Missing.initialized_len(), None);
     }
 
     #[test]
