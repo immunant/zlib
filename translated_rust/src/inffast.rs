@@ -49,8 +49,8 @@ pub use crate::zlib_h::z_stream;
 pub use crate::zlib_h::z_stream_s;
 pub use crate::zlib_h::z_streamp;
 pub unsafe fn inflate_fast(strm: &mut crate::zlib_h::z_stream, mut start: ::core::ffi::c_uint) {
-    let mut in_0: *mut ::core::ffi::c_uchar = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
-    let mut last: *mut ::core::ffi::c_uchar = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
+    let mut in_index: usize = 0;
+    let mut last: usize = 0;
     let mut out: *mut ::core::ffi::c_uchar = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
     let mut beg: *mut ::core::ffi::c_uchar = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
     let mut end: *mut ::core::ffi::c_uchar = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
@@ -76,8 +76,11 @@ pub unsafe fn inflate_fast(strm: &mut crate::zlib_h::z_stream, mut start: ::core
     // entering the fast path. Keep the one raw handle conversion here, then
     // use the resulting borrow for all state access below.
     let state = &mut *(strm.state as *mut crate::src::inflate::inflate_state);
-    in_0 = strm.next_in as *mut ::core::ffi::c_uchar;
-    last = in_0.wrapping_offset(strm.avail_in.wrapping_sub(5 as crate::stdlib::uInt) as isize);
+    // The fast-loop entry condition leaves at least five input bytes.  Keep
+    // that existing boundary here and use an indexed view for bit-buffer
+    // reads, rather than repeatedly dereferencing the raw input cursor.
+    let input = ::core::slice::from_raw_parts(strm.next_in, strm.avail_in as usize);
+    last = input.len().wrapping_sub(5);
     out = strm.next_out as *mut ::core::ffi::c_uchar;
     beg = out
         .wrapping_offset(-((start as crate::stdlib::uInt).wrapping_sub(strm.avail_out) as isize));
@@ -94,13 +97,13 @@ pub unsafe fn inflate_fast(strm: &mut crate::zlib_h::z_stream, mut start: ::core
     dmask = ((1 as ::core::ffi::c_uint) << state.distbits).wrapping_sub(1 as ::core::ffi::c_uint);
     's_627: loop {
         if bits < 15 as ::core::ffi::c_uint {
-            let c2rust_fresh0 = in_0;
-            in_0 = in_0.wrapping_add(1);
-            hold = hold.wrapping_add((*c2rust_fresh0 as ::core::ffi::c_ulong) << bits);
+            let input_byte = input[in_index];
+            in_index = in_index.wrapping_add(1);
+            hold = hold.wrapping_add((input_byte as ::core::ffi::c_ulong) << bits);
             bits = bits.wrapping_add(8 as ::core::ffi::c_uint);
-            let c2rust_fresh1 = in_0;
-            in_0 = in_0.wrapping_add(1);
-            hold = hold.wrapping_add((*c2rust_fresh1 as ::core::ffi::c_ulong) << bits);
+            let input_byte = input[in_index];
+            in_index = in_index.wrapping_add(1);
+            hold = hold.wrapping_add((input_byte as ::core::ffi::c_ulong) << bits);
             bits = bits.wrapping_add(8 as ::core::ffi::c_uint);
         }
         // The root-table mask bounds this cursor within the validated
@@ -124,9 +127,9 @@ pub unsafe fn inflate_fast(strm: &mut crate::zlib_h::z_stream, mut start: ::core
                 op &= 15 as ::core::ffi::c_uint;
                 if op != 0 {
                     if bits < op {
-                        let c2rust_fresh3 = in_0;
-                        in_0 = in_0.wrapping_add(1);
-                        hold = hold.wrapping_add((*c2rust_fresh3 as ::core::ffi::c_ulong) << bits);
+                        let input_byte = input[in_index];
+                        in_index = in_index.wrapping_add(1);
+                        hold = hold.wrapping_add((input_byte as ::core::ffi::c_ulong) << bits);
                         bits = bits.wrapping_add(8 as ::core::ffi::c_uint);
                     }
                     len = len.wrapping_add(
@@ -138,13 +141,13 @@ pub unsafe fn inflate_fast(strm: &mut crate::zlib_h::z_stream, mut start: ::core
                     bits = bits.wrapping_sub(op);
                 }
                 if bits < 15 as ::core::ffi::c_uint {
-                    let c2rust_fresh4 = in_0;
-                    in_0 = in_0.wrapping_add(1);
-                    hold = hold.wrapping_add((*c2rust_fresh4 as ::core::ffi::c_ulong) << bits);
+                    let input_byte = input[in_index];
+                    in_index = in_index.wrapping_add(1);
+                    hold = hold.wrapping_add((input_byte as ::core::ffi::c_ulong) << bits);
                     bits = bits.wrapping_add(8 as ::core::ffi::c_uint);
-                    let c2rust_fresh5 = in_0;
-                    in_0 = in_0.wrapping_add(1);
-                    hold = hold.wrapping_add((*c2rust_fresh5 as ::core::ffi::c_ulong) << bits);
+                    let input_byte = input[in_index];
+                    in_index = in_index.wrapping_add(1);
+                    hold = hold.wrapping_add((input_byte as ::core::ffi::c_ulong) << bits);
                     bits = bits.wrapping_add(8 as ::core::ffi::c_uint);
                 }
                 here = dcode.wrapping_offset((hold & dmask as ::core::ffi::c_ulong) as isize);
@@ -158,16 +161,15 @@ pub unsafe fn inflate_fast(strm: &mut crate::zlib_h::z_stream, mut start: ::core
                         dist = here_code.val as ::core::ffi::c_uint;
                         op &= 15 as ::core::ffi::c_uint;
                         if bits < op {
-                            let c2rust_fresh6 = in_0;
-                            in_0 = in_0.wrapping_add(1);
-                            hold =
-                                hold.wrapping_add((*c2rust_fresh6 as ::core::ffi::c_ulong) << bits);
+                            let input_byte = input[in_index];
+                            in_index = in_index.wrapping_add(1);
+                            hold = hold.wrapping_add((input_byte as ::core::ffi::c_ulong) << bits);
                             bits = bits.wrapping_add(8 as ::core::ffi::c_uint);
                             if bits < op {
-                                let c2rust_fresh7 = in_0;
-                                in_0 = in_0.wrapping_add(1);
-                                hold = hold
-                                    .wrapping_add((*c2rust_fresh7 as ::core::ffi::c_ulong) << bits);
+                                let input_byte = input[in_index];
+                                in_index = in_index.wrapping_add(1);
+                                hold =
+                                    hold.wrapping_add((input_byte as ::core::ffi::c_ulong) << bits);
                                 bits = bits.wrapping_add(8 as ::core::ffi::c_uint);
                             }
                         }
@@ -377,24 +379,20 @@ pub unsafe fn inflate_fast(strm: &mut crate::zlib_h::z_stream, mut start: ::core
                 break 's_627;
             }
         }
-        if !(in_0 < last && out < end) {
+        if !(in_index < last && out < end) {
             break;
         }
     }
     len = bits >> 3 as ::core::ffi::c_int;
     // `len` is the whole-byte portion of the bits just read, so this rewind
     // remains within the input cursor range established by the fast loop.
-    in_0 = in_0.wrapping_offset(-(len as isize));
+    in_index = in_index.wrapping_sub(len as usize);
     bits = bits.wrapping_sub(len << 3 as ::core::ffi::c_int);
     hold &= ((1 as ::core::ffi::c_uint) << bits).wrapping_sub(1 as ::core::ffi::c_uint)
         as ::core::ffi::c_ulong;
-    strm.next_in = in_0 as *mut crate::stdlib::Bytef;
+    strm.next_in = input.as_ptr().wrapping_add(in_index) as *mut crate::stdlib::Bytef;
     strm.next_out = out as *mut crate::stdlib::Bytef;
-    strm.avail_in = (if in_0 < last {
-        (5usize).wrapping_add(last.addr().wrapping_sub(in_0.addr()))
-    } else {
-        (5usize).wrapping_sub(in_0.addr().wrapping_sub(last.addr()))
-    }) as ::core::ffi::c_uint as crate::stdlib::uInt;
+    strm.avail_in = input.len().wrapping_sub(in_index) as crate::stdlib::uInt;
     strm.avail_out = (if out < end {
         (257usize).wrapping_add(end.addr().wrapping_sub(out.addr()))
     } else {
