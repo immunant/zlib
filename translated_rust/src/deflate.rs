@@ -1393,7 +1393,7 @@ pub unsafe extern "C" fn deflateParams(
         if err == crate::zlib_h::Z_STREAM_ERROR {
             return err;
         }
-        if (*strm).avail_in != 0
+        if _strm.avail_in != 0
             || state.strstart as ::core::ffi::c_long - state.block_start
                 + state.lookahead as ::core::ffi::c_long
                 != 0
