@@ -96,11 +96,12 @@ fn gz_init(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
         let Some(output) = ::core::ptr::NonNull::new(
             crate::stdlib::malloc(output_len).cast::<::core::ffi::c_uchar>(),
         ) else {
-            // SAFETY: this failure path releases only the input allocation
-            // created above before reporting the initialization error.
-            unsafe {
-                crate::stdlib::free(input.as_ptr() as *mut ::core::ffi::c_void);
-            }
+            // This input allocation uses zlib's default allocator, so its
+            // matching safe default deallocator can release it here.
+            crate::src::zutil::zcfree(
+                ::core::ptr::null_mut(),
+                input.as_ptr() as crate::stdlib::voidpf,
+            );
             crate::src::gzlib::gz_error(
                 state,
                 crate::zlib_h::Z_MEM_ERROR,
@@ -124,12 +125,16 @@ fn gz_init(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
             )
         };
         if ret != crate::zlib_h::Z_OK {
-            // SAFETY: failed initialization has not transferred either
-            // allocation, so this path releases exactly those two buffers.
-            unsafe {
-                crate::stdlib::free(output.as_ptr() as *mut ::core::ffi::c_void);
-                crate::stdlib::free(input.as_ptr() as *mut ::core::ffi::c_void);
-            }
+            // Failed initialization has not transferred either default
+            // allocation, so release exactly those two buffers in C order.
+            crate::src::zutil::zcfree(
+                ::core::ptr::null_mut(),
+                output.as_ptr() as crate::stdlib::voidpf,
+            );
+            crate::src::zutil::zcfree(
+                ::core::ptr::null_mut(),
+                input.as_ptr() as crate::stdlib::voidpf,
+            );
             crate::src::gzlib::gz_error(
                 state,
                 crate::zlib_h::Z_MEM_ERROR,
@@ -844,37 +849,35 @@ pub fn gzclose_w(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
     // teardown boundary. This selection only inspects ordinary state flags;
     // the selected deflater and allocation releases remain below.
     let cleanup = crate::src::gzlib::gz_write_close_cleanup(state);
-    // SAFETY: this close path owns the initialized gzip allocations and the
-    // descriptor. The cleanup plan is derived from that bound state, and no
-    // pointer escapes after its selected allocation is released.
-    unsafe {
-        match cleanup {
-            crate::src::gzlib::GzWriteCloseCleanup::DeflaterAndBuffers => {
+    match cleanup {
+        crate::src::gzlib::GzWriteCloseCleanup::DeflaterAndBuffers => {
+            // SAFETY: `gz_init` initialized this deflater before a write
+            // state with buffers can reach the close path.
+            unsafe {
                 crate::src::deflate::deflateEnd(&mut state.strm as *mut crate::zlib_h::z_stream_s);
-                crate::stdlib::free(state.out as *mut ::core::ffi::c_void);
             }
-            crate::src::gzlib::GzWriteCloseCleanup::None
-            | crate::src::gzlib::GzWriteCloseCleanup::Input => {}
+            crate::src::zutil::zcfree(::core::ptr::null_mut(), state.out as crate::stdlib::voidpf);
         }
-        if !matches!(cleanup, crate::src::gzlib::GzWriteCloseCleanup::None) {
-            crate::stdlib::free(state.in_0 as *mut ::core::ffi::c_void);
-        }
+        crate::src::gzlib::GzWriteCloseCleanup::None
+        | crate::src::gzlib::GzWriteCloseCleanup::Input => {}
+    }
+    if !matches!(cleanup, crate::src::gzlib::GzWriteCloseCleanup::None) {
+        crate::src::zutil::zcfree(::core::ptr::null_mut(), state.in_0 as crate::stdlib::voidpf);
     }
     crate::src::gzlib::gzclearerr(state);
     let path = state.path;
     let fd = state.fd;
-    // SAFETY: `path`, `fd`, and the allocation backing `state` are owned by
-    // this closing state. The
-    // order matches zlib: close can override an earlier write result, and
-    // the state allocation is released only after its fields are no longer
-    // needed.
-    unsafe {
-        crate::stdlib::free(path as *mut ::core::ffi::c_void);
-        if crate::stdlib::close(fd) == -1 as ::core::ffi::c_int {
-            ret = crate::zlib_h::Z_ERRNO;
-        }
-        crate::stdlib::free(state as *mut crate::gzguts_h::gz_state as *mut ::core::ffi::c_void);
+    // The order matches zlib: close can override an earlier write result,
+    // and the state allocation is released only after its fields are no
+    // longer needed.
+    crate::src::zutil::zcfree(::core::ptr::null_mut(), path as crate::stdlib::voidpf);
+    if crate::stdlib::close(fd) == -1 as ::core::ffi::c_int {
+        ret = crate::zlib_h::Z_ERRNO;
     }
+    crate::src::zutil::zcfree(
+        ::core::ptr::null_mut(),
+        state as *mut crate::gzguts_h::gz_state as crate::stdlib::voidpf,
+    );
     return ret;
 }
 #[export_name = "gzclose_w"]
