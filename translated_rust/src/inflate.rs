@@ -750,8 +750,8 @@ fn updatewindow_impl(
     whave: &mut ::core::ffi::c_uint,
     window: &mut [crate::stdlib::Bytef],
     end: &[crate::stdlib::Bytef],
-    copy: ::core::ffi::c_uint,
 ) {
+    let copy = end.len() as ::core::ffi::c_uint;
     if *wsize == 0 as ::core::ffi::c_uint {
         *wsize = (1 as ::core::ffi::c_uint) << wbits;
         *wnext = 0 as ::core::ffi::c_uint;
@@ -2399,7 +2399,6 @@ pub unsafe extern "C" fn inflate_ffi(
             &mut state_ref.whave,
             window,
             output,
-            produced,
         );
     }
     in_0 = in_0.wrapping_sub((*strm).avail_in as ::core::ffi::c_uint);
@@ -2575,7 +2574,6 @@ pub unsafe extern "C" fn inflateSetDictionary_ffi(
         &mut state_ref.whave,
         window,
         dictionary_slice,
-        dictLength as ::core::ffi::c_uint,
     );
     state_ref.havedict = 1 as ::core::ffi::c_int;
     return crate::zlib_h::Z_OK;

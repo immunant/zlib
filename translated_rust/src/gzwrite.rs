@@ -605,30 +605,25 @@ pub unsafe extern "C" fn gzputc_ffi(
     mut c: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
     let mut buf: [::core::ffi::c_uchar; 1] = [0; 1];
-    let mut state: crate::gzguts_h::gz_statep =
-        ::core::ptr::null_mut::<crate::gzguts_h::gz_state>();
     if file.is_null() {
         return -1 as ::core::ffi::c_int;
     }
-    state = file as crate::gzguts_h::gz_statep;
-    if !gz_write_state_ready(&*state) {
+    let state = &mut *(file as crate::gzguts_h::gz_statep);
+    if !gz_write_state_ready(state) {
         return -1 as ::core::ffi::c_int;
     }
-    crate::src::gzlib::gz_error_clear(&mut *state, crate::zlib_h::Z_OK);
-    {
-        let state_ref = &mut *state;
-        if state_ref.skip != 0 && gz_zero(state_ref) == -1 as ::core::ffi::c_int {
-            return -1 as ::core::ffi::c_int;
-        }
+    crate::src::gzlib::gz_error_clear(state, crate::zlib_h::Z_OK);
+    if state.skip != 0 && gz_zero(state) == -1 as ::core::ffi::c_int {
+        return -1 as ::core::ffi::c_int;
     }
-    if (*state).size != 0 {
-        let buffered = ::core::slice::from_raw_parts_mut((*state).in_0, (*state).size as usize);
-        if let Some(ret) = gzputc_buffered(&mut *state, buffered, c) {
+    if state.size != 0 {
+        let buffered = ::core::slice::from_raw_parts_mut(state.in_0, state.size as usize);
+        if let Some(ret) = gzputc_buffered(state, buffered, c) {
             return ret;
         }
     }
     buf[0 as ::core::ffi::c_int as usize] = c as ::core::ffi::c_uchar;
-    if gz_write(&mut *state, &buf) != 1 as crate::stdlib::z_size_t {
+    if gz_write(state, &buf) != 1 as crate::stdlib::z_size_t {
         return -1 as ::core::ffi::c_int;
     }
     return c & 0xff as ::core::ffi::c_int;

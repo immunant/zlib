@@ -965,42 +965,37 @@ pub unsafe extern "C" fn gzgets_ffi(
 ) -> *mut ::core::ffi::c_char {
     let mut left: ::core::ffi::c_uint = 0;
     let mut n: ::core::ffi::c_uint = 0;
-    let mut state: crate::gzguts_h::gz_statep =
-        ::core::ptr::null_mut::<crate::gzguts_h::gz_state>();
     if file.is_null() || buf.is_null() || len < 1 as ::core::ffi::c_int {
         return ::core::ptr::null_mut::<::core::ffi::c_char>();
     }
-    state = file as crate::gzguts_h::gz_statep;
-    if !gz_read_state_ready(&*state) {
+    let state = &mut *(file as crate::gzguts_h::gz_statep);
+    if !gz_read_state_ready(state) {
         return ::core::ptr::null_mut::<::core::ffi::c_char>();
     }
-    crate::src::gzlib::gz_error_clear(&mut *state, crate::zlib_h::Z_OK);
-    {
-        let state_ref = &mut *state;
-        if state_ref.skip != 0 && gz_skip(state_ref) == -1 as ::core::ffi::c_int {
-            return ::core::ptr::null_mut::<::core::ffi::c_char>();
-        }
+    crate::src::gzlib::gz_error_clear(state, crate::zlib_h::Z_OK);
+    if state.skip != 0 && gz_skip(state) == -1 as ::core::ffi::c_int {
+        return ::core::ptr::null_mut::<::core::ffi::c_char>();
     }
     let str = buf;
     let output = ::core::slice::from_raw_parts_mut(buf as *mut crate::stdlib::Bytef, len as usize);
     let mut written = 0usize;
     left = (len as ::core::ffi::c_uint).wrapping_sub(1 as ::core::ffi::c_uint);
     if left != 0 {
-        while !((*state).x.have == 0 as ::core::ffi::c_uint
-            && gz_fetch(&mut *state) == -1 as ::core::ffi::c_int)
+        while !(state.x.have == 0 as ::core::ffi::c_uint
+            && gz_fetch(state) == -1 as ::core::ffi::c_int)
         {
-            if (*state).x.have == 0 as ::core::ffi::c_uint {
-                (*state).past = 1 as ::core::ffi::c_int;
+            if state.x.have == 0 as ::core::ffi::c_uint {
+                state.past = 1 as ::core::ffi::c_int;
                 break;
             } else {
                 let buffered = ::core::slice::from_raw_parts(
-                    (*state).x.next as *const crate::stdlib::Bytef,
-                    (*state).x.have as usize,
+                    state.x.next as *const crate::stdlib::Bytef,
+                    state.x.have as usize,
                 );
                 let output_window = &mut output[written..written + left as usize];
                 let found_eol;
                 (n, found_eol) = gzgets_copy_buffered(output_window, buffered, left);
-                gz_note_buffered_read(&mut *state, n);
+                gz_note_buffered_read(state, n);
                 left = left.wrapping_sub(n);
                 written = written.wrapping_add(n as usize);
                 if !(left != 0 && !found_eol) {
