@@ -202,7 +202,6 @@ unsafe extern "C" fn gz_avail(mut state: crate::gzguts_h::gz_statep) -> ::core::
 
 unsafe extern "C" fn gz_look(mut state: crate::gzguts_h::gz_statep) -> ::core::ffi::c_int {
     let state = &mut *state;
-    let mut strm: crate::zlib_h::z_streamp = &raw mut state.strm;
     if state.size == 0 as ::core::ffi::c_uint {
         state.in_0 = crate::src::gzlib::gz_buffer(state.want);
         state.out = crate::src::gzlib::gz_buffer(state.want << 1);
@@ -241,7 +240,7 @@ unsafe extern "C" fn gz_look(mut state: crate::gzguts_h::gz_statep) -> ::core::f
         }
     }
     if state.direct == -1 as ::core::ffi::c_int || state.junk == 0 as ::core::ffi::c_int {
-        crate::src::inflate::inflateReset(strm as *mut crate::zlib_h::z_stream_s);
+        crate::src::inflate::inflateReset(&raw mut state.strm as *mut crate::zlib_h::z_stream_s);
         state.how = crate::gzguts_h::GZIP;
         state.junk = (state.junk != -1 as ::core::ffi::c_int) as ::core::ffi::c_int;
         state.direct = 0 as ::core::ffi::c_int;
@@ -250,34 +249,40 @@ unsafe extern "C" fn gz_look(mut state: crate::gzguts_h::gz_statep) -> ::core::f
     if gz_avail(state) == -1 as ::core::ffi::c_int {
         return -1 as ::core::ffi::c_int;
     }
-    if (*strm).avail_in == 0 as crate::stdlib::uInt
-        || state.again != 0 && (*strm).avail_in < 4 as crate::stdlib::uInt
+    if state.strm.avail_in == 0 as crate::stdlib::uInt
+        || state.again != 0 && state.strm.avail_in < 4 as crate::stdlib::uInt
     {
         return 0 as ::core::ffi::c_int;
     }
-    let avail_in = (*strm).avail_in as usize;
-    let input = if avail_in > 3 {
-        Some(::core::slice::from_raw_parts((*strm).next_in, avail_in))
-    } else {
-        None
+    let avail_in = state.strm.avail_in as usize;
+    let next_in = state.strm.next_in;
+    // `gz_avail()` installs `next_in` in this owned buffer, and inflate only
+    // advances that cursor. Validate it before deriving the input view.
+    let Some(input) = state.in_0.as_deref().and_then(|buffer| {
+        let start = next_in.addr().checked_sub(buffer.as_ptr().addr())?;
+        let end = start.checked_add(avail_in)?;
+        buffer.get(start..end)
+    }) else {
+        return -1 as ::core::ffi::c_int;
     };
-    if input.is_some_and(is_gzip_header) {
-        crate::src::inflate::inflateReset(strm as *mut crate::zlib_h::z_stream_s);
+    if is_gzip_header(input) {
+        crate::src::inflate::inflateReset(&raw mut state.strm as *mut crate::zlib_h::z_stream_s);
         state.how = crate::gzguts_h::GZIP;
         state.junk = 1 as ::core::ffi::c_int;
         state.direct = 0 as ::core::ffi::c_int;
         return 0 as ::core::ffi::c_int;
     }
-    state.x.next = state.out.as_deref_mut().unwrap().as_mut_ptr();
-    if avail_in != 0 {
-        let input = input.unwrap_or_else(|| {
-            ::core::slice::from_raw_parts((*strm).next_in, avail_in)
-        });
-        let output = ::core::slice::from_raw_parts_mut(state.x.next, input.len());
-        copy_buffered_input(input, output);
-    }
+    let Some(output) = state
+        .out
+        .as_deref_mut()
+        .and_then(|buffer| buffer.get_mut(..avail_in))
+    else {
+        return -1 as ::core::ffi::c_int;
+    };
+    copy_buffered_input(input, output);
+    state.x.next = output.as_mut_ptr();
     state.x.have = avail_in as ::core::ffi::c_uint;
-    (*strm).avail_in = 0 as crate::stdlib::uInt;
+    state.strm.avail_in = 0 as crate::stdlib::uInt;
     state.how = crate::gzguts_h::COPY;
     return 0 as ::core::ffi::c_int;
 }
@@ -725,7 +730,7 @@ pub unsafe extern "C" fn gzungetc(
             return -1 as ::core::ffi::c_int;
         };
         state.x.have = 1 as ::core::ffi::c_uint;
-        state.x.next = state.out.as_deref_mut().unwrap().as_mut_ptr().add(next);
+        state.x.next = buffer.as_mut_ptr().wrapping_add(next);
         state.x.pos -= 1;
         state.past = 0 as ::core::ffi::c_int;
         return c;
@@ -742,7 +747,8 @@ pub unsafe extern "C" fn gzungetc(
     let Some(capacity) = size.checked_mul(2) else {
         return -1 as ::core::ffi::c_int;
     };
-    let out = state.out.as_deref_mut().unwrap().as_mut_ptr();
+    let buffer = &mut state.out.as_deref_mut().unwrap()[..capacity];
+    let out = buffer.as_mut_ptr();
     let cursor = state.x.next;
     if cursor.is_null() {
         return -1 as ::core::ffi::c_int;
@@ -750,12 +756,11 @@ pub unsafe extern "C" fn gzungetc(
     let Some(next) = cursor.addr().checked_sub(out.addr()) else {
         return -1 as ::core::ffi::c_int;
     };
-    let buffer = ::core::slice::from_raw_parts_mut(out, capacity);
     let Some(next) = pushback_buffer(buffer, next, state.x.have as usize, c as ::core::ffi::c_uchar) else {
         return -1 as ::core::ffi::c_int;
     };
     state.x.have = state.x.have.wrapping_add(1);
-    state.x.next = out.add(next);
+    state.x.next = out.wrapping_add(next);
     state.x.pos -= 1;
     state.past = 0 as ::core::ffi::c_int;
     return c;
