@@ -3167,16 +3167,108 @@ pub unsafe extern "C" fn deflateCopy(
         return crate::zlib_h::Z_MEM_ERROR;
     }
     dest.state = ds as *mut crate::src::deflate::internal_state;
-    // The allocation is immediately overwritten with the source state before
-    // any field is observed.  Do not clear it first: that C-style write is
-    // dead and the copied state supplies every byte.
-    ::core::ptr::copy_nonoverlapping(ss, ds, 1);
-    // The bytewise state copy above is needed for the C allocator-backed
-    // storage.  Replace the copied owner before it can be observed or
-    // released, making the header registration an independent deep copy.
+    // Publish an explicit initialized snapshot rather than byte-copying a
+    // Rust value out of callback-owned storage.  The allocation handles are
+    // retained until their replacements are installed below, preserving the
+    // C copy path's callback-visible allocation order.  Header registration
+    // is independently deep-copied before any callback can observe `ds`.
+    ::core::ptr::write(
+        ds,
+        crate::src::deflate::internal_state {
+            strm: ::core::ptr::NonNull::from(&mut *dest),
+            status: ss.status,
+            pending_buf: ss.pending_buf,
+            pending_buf_size: ss.pending_buf_size,
+            pending_out: ss.pending_out,
+            pending: ss.pending,
+            wrap: ss.wrap,
+            gzhead: ss.gzhead.as_ref().map(copy_gzip_header),
+            gzindex: ss.gzindex,
+            method: ss.method,
+            last_flush: ss.last_flush,
+            w_size: ss.w_size,
+            w_bits: ss.w_bits,
+            w_mask: ss.w_mask,
+            window: ss.window,
+            window_size: ss.window_size,
+            prev: ss.prev,
+            head: ss.head,
+            ins_h: ss.ins_h,
+            hash_size: ss.hash_size,
+            hash_bits: ss.hash_bits,
+            hash_mask: ss.hash_mask,
+            hash_shift: ss.hash_shift,
+            block_start: ss.block_start,
+            match_length: ss.match_length,
+            prev_match: ss.prev_match,
+            match_available: ss.match_available,
+            strstart: ss.strstart,
+            match_start: ss.match_start,
+            lookahead: ss.lookahead,
+            prev_length: ss.prev_length,
+            max_chain_length: ss.max_chain_length,
+            max_lazy_match: ss.max_lazy_match,
+            level: ss.level,
+            strategy: ss.strategy,
+            good_match: ss.good_match,
+            nice_match: ss.nice_match,
+            dyn_ltree: ::core::array::from_fn(|index| crate::src::deflate::ct_data_s {
+                fc: ss.dyn_ltree[index].fc,
+                dl: ss.dyn_ltree[index].dl,
+            }),
+            dyn_dtree: ::core::array::from_fn(|index| crate::src::deflate::ct_data_s {
+                fc: ss.dyn_dtree[index].fc,
+                dl: ss.dyn_dtree[index].dl,
+            }),
+            bl_tree: ::core::array::from_fn(|index| crate::src::deflate::ct_data_s {
+                fc: ss.bl_tree[index].fc,
+                dl: ss.bl_tree[index].dl,
+            }),
+            l_desc: crate::src::deflate::tree_desc_s {
+                kind: match &ss.l_desc.kind {
+                    crate::src::deflate::TreeKind::LitLen => crate::src::deflate::TreeKind::LitLen,
+                    crate::src::deflate::TreeKind::Dist => crate::src::deflate::TreeKind::Dist,
+                    crate::src::deflate::TreeKind::BitLen => crate::src::deflate::TreeKind::BitLen,
+                },
+                max_code: ss.l_desc.max_code,
+            },
+            d_desc: crate::src::deflate::tree_desc_s {
+                kind: match &ss.d_desc.kind {
+                    crate::src::deflate::TreeKind::LitLen => crate::src::deflate::TreeKind::LitLen,
+                    crate::src::deflate::TreeKind::Dist => crate::src::deflate::TreeKind::Dist,
+                    crate::src::deflate::TreeKind::BitLen => crate::src::deflate::TreeKind::BitLen,
+                },
+                max_code: ss.d_desc.max_code,
+            },
+            bl_desc: crate::src::deflate::tree_desc_s {
+                kind: match &ss.bl_desc.kind {
+                    crate::src::deflate::TreeKind::LitLen => crate::src::deflate::TreeKind::LitLen,
+                    crate::src::deflate::TreeKind::Dist => crate::src::deflate::TreeKind::Dist,
+                    crate::src::deflate::TreeKind::BitLen => crate::src::deflate::TreeKind::BitLen,
+                },
+                max_code: ss.bl_desc.max_code,
+            },
+            bl_count: ss.bl_count,
+            heap: ss.heap,
+            heap_len: ss.heap_len,
+            heap_max: ss.heap_max,
+            depth: ss.depth,
+            sym_buf_start: ss.sym_buf_start,
+            lit_bufsize: ss.lit_bufsize,
+            sym_next: ss.sym_next,
+            sym_end: ss.sym_end,
+            opt_len: ss.opt_len,
+            static_len: ss.static_len,
+            matches: ss.matches,
+            insert: ss.insert,
+            bi_buf: ss.bi_buf,
+            bi_valid: ss.bi_valid,
+            bi_used: ss.bi_used,
+            high_water: ss.high_water,
+            slid: ss.slid,
+        },
+    );
     let ds = &mut *ds;
-    ::core::ptr::addr_of_mut!(ds.gzhead).write(ss.gzhead.as_ref().map(copy_gzip_header));
-    ds.strm = ::core::ptr::NonNull::from(&mut *dest);
     let storage = DeflateStorageLayout::new(ds.w_size, ds.hash_size, ds.lit_bufsize);
     ds.window = ::core::ptr::NonNull::new(Some(dest.zalloc.expect("non-null function pointer"))
         .expect("non-null function pointer")(
