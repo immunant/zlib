@@ -574,18 +574,14 @@ pub unsafe extern "C" fn inflate(
                         if (*state).wbits == 0 as ::core::ffi::c_uint {
                             (*state).wbits = 15 as ::core::ffi::c_uint;
                         }
-                        (*state).check = crate::src::crc32::crc32(
-                            0 as crate::stdlib::uLong,
-                            ::core::ptr::null::<crate::stdlib::Bytef>(),
-                            0 as crate::stdlib::uInt,
-                        ) as ::core::ffi::c_ulong;
+                        (*state).check =
+                            crate::src::crc32::crc32_initial() as ::core::ffi::c_ulong;
                         hbuf[0 as ::core::ffi::c_int as usize] = hold as ::core::ffi::c_uchar;
                         hbuf[1 as ::core::ffi::c_int as usize] =
                             (hold >> 8 as ::core::ffi::c_int) as ::core::ffi::c_uchar;
-                        (*state).check = crate::src::crc32::crc32(
+                        (*state).check = crate::src::crc32::crc32_update(
                             (*state).check as crate::stdlib::uLong,
-                            &raw mut hbuf as *mut ::core::ffi::c_uchar,
-                            2 as crate::stdlib::uInt,
+                            &hbuf[..2],
                         ) as ::core::ffi::c_ulong;
                         hold = 0 as ::core::ffi::c_ulong;
                         bits = 0 as ::core::ffi::c_uint;
@@ -640,12 +636,8 @@ pub unsafe extern "C" fn inflate(
                             } else {
                                 (*state).dmax = (1 as ::core::ffi::c_uint) << len;
                                 (*state).flags = 0 as ::core::ffi::c_int;
-                                (*state).check = crate::src::adler32::adler32(
-                                    0 as crate::stdlib::uLong,
-                                    ::core::ptr::null::<crate::stdlib::Bytef>(),
-                                    0 as crate::stdlib::uInt,
-                                )
-                                    as ::core::ffi::c_ulong;
+                                (*state).check =
+                                    crate::src::adler32::adler32_initial() as ::core::ffi::c_ulong;
                                 (*strm).adler = (*state).check as crate::stdlib::uLong;
                                 (*state).mode = (if hold & 0x200 as ::core::ffi::c_ulong != 0 {
                                     crate::src::inflate::DICTID as ::core::ffi::c_int
@@ -697,10 +689,9 @@ pub unsafe extern "C" fn inflate(
                         hbuf[0 as ::core::ffi::c_int as usize] = hold as ::core::ffi::c_uchar;
                         hbuf[1 as ::core::ffi::c_int as usize] =
                             (hold >> 8 as ::core::ffi::c_int) as ::core::ffi::c_uchar;
-                        (*state).check = crate::src::crc32::crc32(
+                        (*state).check = crate::src::crc32::crc32_update(
                             (*state).check as crate::stdlib::uLong,
-                            &raw mut hbuf as *mut ::core::ffi::c_uchar,
-                            2 as crate::stdlib::uInt,
+                            &hbuf[..2],
                         ) as ::core::ffi::c_ulong;
                     }
                     hold = 0 as ::core::ffi::c_ulong;
@@ -1048,11 +1039,8 @@ pub unsafe extern "C" fn inflate(
                     (*state).bits = bits;
                     return crate::zlib_h::Z_NEED_DICT;
                 }
-                (*state).check = crate::src::adler32::adler32(
-                    0 as crate::stdlib::uLong,
-                    ::core::ptr::null::<crate::stdlib::Bytef>(),
-                    0 as crate::stdlib::uInt,
-                ) as ::core::ffi::c_ulong;
+                (*state).check =
+                    crate::src::adler32::adler32_initial() as ::core::ffi::c_ulong;
                 (*strm).adler = (*state).check as crate::stdlib::uLong;
                 (*state).mode = crate::src::inflate::TYPE;
                 c2rust_current_block = 11604185039344352166;
@@ -1081,10 +1069,9 @@ pub unsafe extern "C" fn inflate(
                         (hold >> 16 as ::core::ffi::c_int) as ::core::ffi::c_uchar;
                     hbuf[3 as ::core::ffi::c_int as usize] =
                         (hold >> 24 as ::core::ffi::c_int) as ::core::ffi::c_uchar;
-                    (*state).check = crate::src::crc32::crc32(
+                    (*state).check = crate::src::crc32::crc32_update(
                         (*state).check as crate::stdlib::uLong,
-                        &raw mut hbuf as *mut ::core::ffi::c_uchar,
-                        4 as crate::stdlib::uInt,
+                        &hbuf,
                     ) as ::core::ffi::c_ulong;
                 }
                 hold = 0 as ::core::ffi::c_ulong;
@@ -1352,10 +1339,9 @@ pub unsafe extern "C" fn inflate(
                     hbuf[0 as ::core::ffi::c_int as usize] = hold as ::core::ffi::c_uchar;
                     hbuf[1 as ::core::ffi::c_int as usize] =
                         (hold >> 8 as ::core::ffi::c_int) as ::core::ffi::c_uchar;
-                    (*state).check = crate::src::crc32::crc32(
+                    (*state).check = crate::src::crc32::crc32_update(
                         (*state).check as crate::stdlib::uLong,
-                        &raw mut hbuf as *mut ::core::ffi::c_uchar,
-                        2 as crate::stdlib::uInt,
+                        &hbuf[..2],
                     ) as ::core::ffi::c_ulong;
                 }
                 hold = 0 as ::core::ffi::c_ulong;
@@ -1456,10 +1442,9 @@ pub unsafe extern "C" fn inflate(
                         hbuf[0 as ::core::ffi::c_int as usize] = hold as ::core::ffi::c_uchar;
                         hbuf[1 as ::core::ffi::c_int as usize] =
                             (hold >> 8 as ::core::ffi::c_int) as ::core::ffi::c_uchar;
-                        (*state).check = crate::src::crc32::crc32(
+                        (*state).check = crate::src::crc32::crc32_update(
                             (*state).check as crate::stdlib::uLong,
-                            &raw mut hbuf as *mut ::core::ffi::c_uchar,
-                            2 as crate::stdlib::uInt,
+                            &hbuf[..2],
                         ) as ::core::ffi::c_ulong;
                     }
                     hold = 0 as ::core::ffi::c_ulong;
@@ -1872,11 +1857,7 @@ pub unsafe extern "C" fn inflate(
                         (*state).flags >> 9 as ::core::ffi::c_int & 1 as ::core::ffi::c_int;
                     (*(*state).head).done = 1 as ::core::ffi::c_int;
                 }
-                (*state).check = crate::src::crc32::crc32(
-                    0 as crate::stdlib::uLong,
-                    ::core::ptr::null::<crate::stdlib::Bytef>(),
-                    0 as crate::stdlib::uInt,
-                ) as ::core::ffi::c_ulong;
+                (*state).check = crate::src::crc32::crc32_initial() as ::core::ffi::c_ulong;
                 (*strm).adler = (*state).check as crate::stdlib::uLong;
                 (*state).mode = crate::src::inflate::TYPE;
                 continue;
@@ -2099,11 +2080,7 @@ pub unsafe extern "C" fn inflateSetDictionary(
     if (*state).mode as ::core::ffi::c_uint
         == crate::src::inflate::DICT as ::core::ffi::c_int as ::core::ffi::c_uint
     {
-        dictid = crate::src::adler32::adler32(
-            0 as crate::stdlib::uLong,
-            ::core::ptr::null::<crate::stdlib::Bytef>(),
-            0 as crate::stdlib::uInt,
-        ) as ::core::ffi::c_ulong;
+        dictid = crate::src::adler32::adler32_initial() as ::core::ffi::c_ulong;
         dictid =
             crate::src::adler32::adler32(dictid as crate::stdlib::uLong, dictionary, dictLength)
                 as ::core::ffi::c_ulong;

@@ -4785,6 +4785,17 @@ fn crc32_slice(
     return crc ^ 0xffffffff as crate::stdlib::uLong;
 }
 
+pub fn crc32_initial() -> crate::stdlib::uLong {
+    crc32_update(0 as crate::stdlib::uLong, &[])
+}
+
+pub fn crc32_update(
+    crc: crate::stdlib::uLong,
+    buf: &[::core::ffi::c_uchar],
+) -> crate::stdlib::uLong {
+    crc32_slice(crc, buf)
+}
+
 pub unsafe extern "C" fn crc32_z(
     mut crc: crate::stdlib::uLong,
     mut buf: *const ::core::ffi::c_uchar,

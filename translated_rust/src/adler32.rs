@@ -15,6 +15,10 @@ pub const BASE: ::core::ffi::c_uint = 65521 as ::core::ffi::c_uint;
 
 pub const NMAX: ::core::ffi::c_int = 5552 as ::core::ffi::c_int;
 
+pub fn adler32_initial() -> crate::stdlib::uLong {
+    1 as crate::stdlib::uLong
+}
+
 fn adler32_slice(
     mut adler: crate::stdlib::uLong,
     buf: &[crate::stdlib::Bytef],
@@ -81,7 +85,7 @@ pub unsafe extern "C" fn adler32_z(
         return adler32_slice(adler, ::core::slice::from_raw_parts(buf, 1));
     }
     if buf.is_null() {
-        return 1 as crate::stdlib::uLong;
+        return adler32_initial();
     }
     adler32_slice(adler, ::core::slice::from_raw_parts(buf, len as usize))
 }

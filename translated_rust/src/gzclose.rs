@@ -23,13 +23,11 @@ pub use crate::zlib_h::Z_STREAM_ERROR;
 #[export_name = "gzclose"]
 
 pub unsafe extern "C" fn gzclose_ffi(mut file: crate::zlib_h::gzFile) -> ::core::ffi::c_int {
-    let mut state: crate::gzguts_h::gz_statep =
-        ::core::ptr::null_mut::<crate::gzguts_h::gz_state>();
     if file.is_null() {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    state = file as crate::gzguts_h::gz_statep;
-    return if (*state).mode == crate::gzguts_h::GZ_READ {
+    let state = &*(file as crate::gzguts_h::gz_statep);
+    return if state.mode == crate::gzguts_h::GZ_READ {
         crate::src::gzread::gzclose_r_ffi(file as *mut crate::zlib_h::gzFile_s)
     } else {
         crate::src::gzwrite::gzclose_w_ffi(file as *mut crate::zlib_h::gzFile_s)

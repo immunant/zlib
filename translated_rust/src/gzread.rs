@@ -754,6 +754,13 @@ pub unsafe extern "C" fn gzgets_ffi(
 pub fn gzdirect(state: &crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
     return (state.direct == 1 as ::core::ffi::c_int) as ::core::ffi::c_int;
 }
+
+fn gz_direct_needs_look(state: &crate::gzguts_h::gz_state) -> bool {
+    state.mode == crate::gzguts_h::GZ_READ
+        && state.how == crate::gzguts_h::LOOK
+        && state.x.have == 0 as ::core::ffi::c_uint
+}
+
 #[export_name = "gzdirect"]
 
 pub unsafe extern "C" fn gzdirect_ffi(mut file: crate::zlib_h::gzFile) -> ::core::ffi::c_int {
@@ -761,10 +768,7 @@ pub unsafe extern "C" fn gzdirect_ffi(mut file: crate::zlib_h::gzFile) -> ::core
         return 0 as ::core::ffi::c_int;
     }
     let state = file as crate::gzguts_h::gz_statep;
-    if (*state).mode == crate::gzguts_h::GZ_READ
-        && (*state).how == crate::gzguts_h::LOOK
-        && (*state).x.have == 0 as ::core::ffi::c_uint
-    {
+    if gz_direct_needs_look(&*state) {
         gz_look(state);
     }
     gzdirect(&*state)
