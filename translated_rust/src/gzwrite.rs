@@ -237,15 +237,7 @@ unsafe extern "C" fn gz_zero(mut state: crate::gzguts_h::gz_statep) -> ::core::f
     }
     first = 1 as ::core::ffi::c_int;
     loop {
-        n = if ::core::mem::size_of::<::core::ffi::c_int>() as usize
-            == ::core::mem::size_of::<crate::stdlib::off64_t>() as usize
-            && (*state).size > crate::src::gzlib::gz_intmax()
-            || (*state).size as crate::stdlib::off64_t > (*state).skip
-        {
-            (*state).skip as ::core::ffi::c_uint
-        } else {
-            (*state).size
-        };
+        n = gz_zero_chunk_size((*state).size, (*state).skip);
         if first != 0 {
             crate::stdlib::memset(
                 (*state).in_0 as *mut ::core::ffi::c_void,
@@ -268,6 +260,21 @@ unsafe extern "C" fn gz_zero(mut state: crate::gzguts_h::gz_statep) -> ::core::f
         }
     }
     return 0 as ::core::ffi::c_int;
+}
+
+fn gz_zero_chunk_size(
+    size: crate::stdlib::uInt,
+    skip: crate::stdlib::off64_t,
+) -> crate::stdlib::uInt {
+    if ::core::mem::size_of::<::core::ffi::c_int>() as usize
+        == ::core::mem::size_of::<crate::stdlib::off64_t>() as usize
+        && size > crate::src::gzlib::gz_intmax()
+        || size as crate::stdlib::off64_t > skip
+    {
+        skip as crate::stdlib::uInt
+    } else {
+        size
+    }
 }
 
 unsafe extern "C" fn gz_write(
