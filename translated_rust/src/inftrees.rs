@@ -24,7 +24,7 @@ pub const DISTS: crate::src::inftrees::codetype = 2;
 
 pub mod inffixed_h {
 
-    pub static mut lenfix: [crate::src::inftrees::code; 512] = [
+    pub static lenfix: [crate::src::inftrees::code; 512] = [
         crate::src::inftrees::code {
             op: 96 as ::core::ffi::c_uchar,
             bits: 7 as ::core::ffi::c_uchar,
@@ -2587,7 +2587,7 @@ pub mod inffixed_h {
         },
     ];
 
-    pub static mut distfix: [crate::src::inftrees::code; 32] = [
+    pub static distfix: [crate::src::inftrees::code; 32] = [
         crate::src::inftrees::code {
             op: 16 as ::core::ffi::c_uchar,
             bits: 5 as ::core::ffi::c_uchar,
@@ -3192,9 +3192,9 @@ pub unsafe extern "C" fn inflate_table_ffi(
     inflate_table(type_0, lens, codes, table, bits, work)
 }
 pub fn inflate_fixed(state: &mut crate::src::inflate::inflate_state) {
-    state.lencode = &raw const lenfix as *const crate::src::inftrees::code;
+    state.lencode = crate::src::inflate::CodeTable::FixedLens;
     state.lenbits = 9 as ::core::ffi::c_uint;
-    state.distcode = &raw const distfix as *const crate::src::inftrees::code;
+    state.distcode = crate::src::inflate::CodeTable::FixedDists;
     state.distbits = 5 as ::core::ffi::c_uint;
 }
 #[export_name = "inflate_fixed"]

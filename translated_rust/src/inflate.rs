@@ -64,6 +64,15 @@ pub const BAD: crate::src::inflate::inflate_mode = 16209;
 pub const MEM: crate::src::inflate::inflate_mode = 16210;
 
 pub const SYNC: crate::src::inflate::inflate_mode = 16211;
+
+#[derive(Copy, Clone)]
+pub enum CodeTable {
+    Empty,
+    Dynamic(usize),
+    FixedLens,
+    FixedDists,
+}
+
 #[repr(C)]
 
 pub struct inflate_state {
@@ -86,8 +95,8 @@ pub struct inflate_state {
     pub length: ::core::ffi::c_uint,
     pub offset: ::core::ffi::c_uint,
     pub extra: ::core::ffi::c_uint,
-    pub lencode: *const crate::src::inftrees::code,
-    pub distcode: *const crate::src::inftrees::code,
+    pub lencode: CodeTable,
+    pub distcode: CodeTable,
     pub lenbits: ::core::ffi::c_uint,
     pub distbits: ::core::ffi::c_uint,
     pub ncode: ::core::ffi::c_uint,
@@ -130,8 +139,8 @@ impl Default for inflate_state {
             length: 0,
             offset: 0,
             extra: 0,
-            lencode: ::core::ptr::null(),
-            distcode: ::core::ptr::null(),
+            lencode: CodeTable::Empty,
+            distcode: CodeTable::Empty,
             lenbits: 0,
             distbits: 0,
             ncode: 0,
@@ -150,6 +159,26 @@ impl Default for inflate_state {
 }
 
 impl inflate_state {
+    pub fn code_at(&self, table: CodeTable, index: usize) -> crate::src::inftrees::code {
+        let code = match table {
+            CodeTable::Empty => None,
+            CodeTable::Dynamic(start) => start
+                .checked_add(index)
+                .and_then(|index| self.codes.get(index)),
+            CodeTable::FixedLens => crate::src::inftrees::inffixed_h::lenfix.get(index),
+            CodeTable::FixedDists => crate::src::inftrees::inffixed_h::distfix.get(index),
+        };
+        *code.expect("valid inflate code table index")
+    }
+
+    pub fn lencode_at(&self, index: usize) -> crate::src::inftrees::code {
+        self.code_at(self.lencode, index)
+    }
+
+    pub fn distcode_at(&self, index: usize) -> crate::src::inftrees::code {
+        self.code_at(self.distcode, index)
+    }
+
     fn copy_for_inflate_copy(&self) -> Option<Self> {
         let window = if let Some(window) = self.window.as_ref() {
             let mut copied_window = Vec::new();
@@ -304,8 +333,8 @@ pub unsafe extern "C" fn inflateResetKeep(
     (*state).hold = 0 as ::core::ffi::c_ulong;
     (*state).bits = 0 as ::core::ffi::c_uint;
     (*state).next = &raw mut (*state).codes as *mut crate::src::inftrees::code;
-    (*state).distcode = (*state).next;
-    (*state).lencode = (*state).distcode;
+    (*state).distcode = CodeTable::Dynamic(0);
+    (*state).lencode = CodeTable::Dynamic(0);
     (*state).sane = 1 as ::core::ffi::c_int;
     (*state).back = -1 as ::core::ffi::c_int;
     return crate::zlib_h::Z_OK;
@@ -1153,8 +1182,8 @@ pub unsafe extern "C" fn inflate(
                                                                                                 as ::core::ffi::c_ushort;
                                                                                         }
                                                                                         (*state).next = &raw mut (*state).codes as *mut crate::src::inftrees::code;
-                                                                                        (*state).distcode = (*state).next as *const crate::src::inftrees::code;
-                                                                                        (*state).lencode = (*state).distcode;
+                                                                                        (*state).distcode = CodeTable::Dynamic(0);
+                                                                                        (*state).lencode = CodeTable::Dynamic(0);
                                                                                         (*state).lenbits = 7 as ::core::ffi::c_uint;
                                                                                         ret = crate::src::inftrees::inflate_table(
                                                                                             crate::src::inftrees::CODES,
@@ -1209,7 +1238,11 @@ pub unsafe extern "C" fn inflate(
                                                                                         );
                                                                                     bits = bits.wrapping_add(8 as ::core::ffi::c_uint);
                                                                                 }
-                                                                                if let Some(head) = (*state).head.clone() {
+                                                                                if let Some(head) =
+                                                                                    (*state)
+                                                                                        .head
+                                                                                        .clone()
+                                                                                {
                                                                                     head.borrow_mut().time = hold as crate::stdlib::uLong;
                                                                                 }
                                                                                 if (*state).flags & 0x200 as ::core::ffi::c_int != 0
@@ -1243,13 +1276,11 @@ pub unsafe extern "C" fn inflate(
                                                                                 )
                                                                         {
                                                                             loop {
-                                                                                here = *(*state)
-                                                                                    .lencode
-                                                                                    .offset(
-                                                                                        (hold as ::core::ffi::c_uint
-                                                                                            & ((1 as ::core::ffi::c_uint) << (*state).lenbits)
-                                                                                                .wrapping_sub(1 as ::core::ffi::c_uint)) as isize,
-                                                                                    );
+                                                                                here = (*state).lencode_at(
+                                                                                    (hold as ::core::ffi::c_uint
+                                                                                        & ((1 as ::core::ffi::c_uint) << (*state).lenbits)
+                                                                                            .wrapping_sub(1 as ::core::ffi::c_uint)) as usize,
+                                                                                );
                                                                                 if here.bits as ::core::ffi::c_uint <= bits {
                                                                                     break;
                                                                                 }
@@ -1419,7 +1450,7 @@ pub unsafe extern "C" fn inflate(
                                                                             continue '_inf_leave;
                                                                         } else {
                                                                             (*state).next = &raw mut (*state).codes as *mut crate::src::inftrees::code;
-                                                                            (*state).lencode = (*state).next as *const crate::src::inftrees::code;
+                                                                            (*state).lencode = CodeTable::Dynamic(0);
                                                                             (*state).lenbits = 9 as ::core::ffi::c_uint;
                                                                             ret = crate::src::inftrees::inflate_table(
                                                                                 crate::src::inftrees::LENS,
@@ -1435,7 +1466,12 @@ pub unsafe extern "C" fn inflate(
                                                                                 (*state).mode = crate::src::inflate::BAD;
                                                                                 continue '_inf_leave;
                                                                             } else {
-                                                                                (*state).distcode = (*state).next as *const crate::src::inftrees::code;
+                                                                                (*state).distcode = CodeTable::Dynamic(
+                                                                                    (*state)
+                                                                                        .next
+                                                                                        .offset_from(&raw mut (*state).codes as *mut crate::src::inftrees::code)
+                                                                                        as usize,
+                                                                                );
                                                                                 (*state).distbits = 6 as ::core::ffi::c_uint;
                                                                                 ret = crate::src::inftrees::inflate_table(
                                                                                     crate::src::inftrees::DISTS,
@@ -1518,8 +1554,11 @@ pub unsafe extern "C" fn inflate(
                                                                         8 as ::core::ffi::c_uint,
                                                                     );
                                                                 }
-                                                                if let Some(head) = (*state).head.clone() {
-                                                                    let mut head = head.borrow_mut();
+                                                                if let Some(head) =
+                                                                    (*state).head.clone()
+                                                                {
+                                                                    let mut head =
+                                                                        head.borrow_mut();
                                                                     head.xflags = (hold
                                                                         & 0xff
                                                                             as ::core::ffi::c_ulong)
@@ -1715,7 +1754,8 @@ pub unsafe extern "C" fn inflate(
                                                 &mut *state,
                                                 out,
                                             );
-                                            put = crate::output_pointer!((*strm).next_out) as *mut ::core::ffi::c_uchar;
+                                            put = crate::output_pointer!((*strm).next_out)
+                                                as *mut ::core::ffi::c_uchar;
                                             left = (*strm).avail_out as ::core::ffi::c_uint;
                                             let input_cursor = (*strm).next_in;
                                             next = match input_cursor.0 {
@@ -1740,12 +1780,12 @@ pub unsafe extern "C" fn inflate(
                                         } else {
                                             (*state).back = 0 as ::core::ffi::c_int;
                                             loop {
-                                                here = *(*state).lencode.offset(
+                                                here = (*state).lencode_at(
                                                     (hold as ::core::ffi::c_uint
                                                         & ((1 as ::core::ffi::c_uint)
                                                             << (*state).lenbits)
                                                             .wrapping_sub(1 as ::core::ffi::c_uint))
-                                                        as isize,
+                                                        as usize,
                                                 );
                                                 if here.bits as ::core::ffi::c_uint <= bits {
                                                     break;
@@ -1769,7 +1809,7 @@ pub unsafe extern "C" fn inflate(
                                             {
                                                 last = here;
                                                 loop {
-                                                    here = *(*state).lencode.offset(
+                                                    here = (*state).lencode_at(
                                                         (last.val as ::core::ffi::c_uint)
                                                             .wrapping_add(
                                                             (hold as ::core::ffi::c_uint
@@ -1783,7 +1823,7 @@ pub unsafe extern "C" fn inflate(
                                                                     ))
                                                                 >> last.bits as ::core::ffi::c_int,
                                                         )
-                                                            as isize,
+                                                            as usize,
                                                     );
                                                     if (last.bits as ::core::ffi::c_int
                                                         + here.bits as ::core::ffi::c_int)
@@ -1858,8 +1898,7 @@ pub unsafe extern "C" fn inflate(
                                                 if let Some(extra) = head.extra.as_mut() {
                                                     len = (extra_len as ::core::ffi::c_uint)
                                                         .wrapping_sub((*state).length);
-                                                    let max =
-                                                        (extra_max as usize).min(extra.len());
+                                                    let max = (extra_max as usize).min(extra.len());
                                                     if (len as usize) < max {
                                                         let copied =
                                                             (copy as usize).min(max - len as usize);
@@ -1972,11 +2011,11 @@ pub unsafe extern "C" fn inflate(
                             break 'c_2325;
                         }
                         loop {
-                            here = *(*state).distcode.offset(
+                            here = (*state).distcode_at(
                                 (hold as ::core::ffi::c_uint
                                     & ((1 as ::core::ffi::c_uint) << (*state).distbits)
                                         .wrapping_sub(1 as ::core::ffi::c_uint))
-                                    as isize,
+                                    as usize,
                             );
                             if here.bits as ::core::ffi::c_uint <= bits {
                                 break;
@@ -1996,7 +2035,7 @@ pub unsafe extern "C" fn inflate(
                         {
                             last = here;
                             loop {
-                                here = *(*state).distcode.offset(
+                                here = (*state).distcode_at(
                                     (last.val as ::core::ffi::c_uint).wrapping_add(
                                         (hold as ::core::ffi::c_uint
                                             & ((1 as ::core::ffi::c_uint)
@@ -2004,7 +2043,7 @@ pub unsafe extern "C" fn inflate(
                                                     + last.op as ::core::ffi::c_int)
                                                 .wrapping_sub(1 as ::core::ffi::c_uint))
                                             >> last.bits as ::core::ffi::c_int,
-                                    ) as isize,
+                                    ) as usize,
                                 );
                                 if (last.bits as ::core::ffi::c_int
                                     + here.bits as ::core::ffi::c_int)
@@ -2136,8 +2175,7 @@ pub unsafe extern "C" fn inflate(
             }
             if let Some(head) = (*state).head.clone() {
                 let mut head = head.borrow_mut();
-                head.hcrc =
-                    (*state).flags >> 9 as ::core::ffi::c_int & 1 as ::core::ffi::c_int;
+                head.hcrc = (*state).flags >> 9 as ::core::ffi::c_int & 1 as ::core::ffi::c_int;
                 head.done = 1 as ::core::ffi::c_int;
             }
             (*state).check =
@@ -2331,7 +2369,8 @@ pub unsafe extern "C" fn inflateGetDictionary(
             .expect("a non-empty history has a window");
         let tail = (*state).whave.wrapping_sub((*state).wnext) as usize;
         let dictionary = ::core::slice::from_raw_parts_mut(dictionary, (*state).whave as usize);
-        dictionary[..tail].copy_from_slice(&window[(*state).wnext as usize..(*state).whave as usize]);
+        dictionary[..tail]
+            .copy_from_slice(&window[(*state).wnext as usize..(*state).whave as usize]);
         dictionary[tail..].copy_from_slice(&window[..(*state).wnext as usize]);
     }
     if !dictLength.is_null() {
@@ -2585,28 +2624,6 @@ pub unsafe extern "C" fn inflateCopy(
     };
     let mut copy = Box::new(copy_state);
     *dest = (*source).clone();
-    if (*state).lencode
-        >= &raw mut (*state).codes as *mut crate::src::inftrees::code
-            as *const crate::src::inftrees::code
-        && (*state).lencode
-            <= (&raw mut (*state).codes as *mut crate::src::inftrees::code)
-                .offset(crate::src::inftrees::ENOUGH as isize)
-                .offset(-(1 as ::core::ffi::c_int as isize))
-                as *const crate::src::inftrees::code
-    {
-        (*copy).lencode = (&raw mut (*copy).codes as *mut crate::src::inftrees::code).offset(
-            (*state)
-                .lencode
-                .offset_from(&raw mut (*state).codes as *mut crate::src::inftrees::code)
-                as isize,
-        );
-        (*copy).distcode = (&raw mut (*copy).codes as *mut crate::src::inftrees::code).offset(
-            (*state)
-                .distcode
-                .offset_from(&raw mut (*state).codes as *mut crate::src::inftrees::code)
-                as isize,
-        );
-    }
     (*copy).next = (&raw mut (*copy).codes as *mut crate::src::inftrees::code).offset(
         (*state)
             .next
