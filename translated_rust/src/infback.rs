@@ -214,32 +214,54 @@ pub unsafe extern "C" fn inflateBackInit__ffi(
     inflateBackInit_(strm, windowBits, window, version, stream_size)
 }
 
-// Callback-back input is valid only for the byte count returned by `in`.
-// Keep that one raw callback/cursor transition in a named helper so the
-// decoder below can consume bytes without repeating unchecked pointer work at
-// every bit-reader site.  The returned byte is copied before the cursor
-// advances, and a zero-length callback result keeps zlib's null-cursor
-// convention for the final stream publication.
-unsafe fn inflate_back_pull_byte(
-    input: crate::zlib_h::in_func,
-    input_desc: *mut ::core::ffi::c_void,
-    next: &mut *mut ::core::ffi::c_uchar,
-    have: &mut ::core::ffi::c_uint,
-) -> Option<::core::ffi::c_uchar> {
-    if *have == 0 {
-        *have = input.expect("non-null function pointer")(input_desc, &raw mut *next);
-        if *have == 0 {
-            *next = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
-            return None;
-        }
+// The callback owns the raw cursor transition, but the decoder only needs a
+// bounded current chunk.  This call-scoped facade keeps its public operations
+// pointer-free: the boundary closure below refills and republishes the raw
+// cursor, while all bit-reader sites ask only for bytes or bounded slices.
+struct InflateBackInput<F> {
+    visit: F,
+}
+
+impl<F> InflateBackInput<F>
+where
+    F: FnMut(&mut dyn FnMut(&[::core::ffi::c_uchar]) -> usize),
+{
+    fn new(visit: F) -> Self {
+        Self { visit }
     }
-    *have = have.wrapping_sub(1);
-    let byte = **next;
-    // The byte above was read only after `have` proved this cursor valid.
-    // Retain zlib's one-past-end cursor publication without making the
-    // arithmetic itself an additional unsafe operation.
-    *next = next.wrapping_add(1);
-    Some(byte)
+
+    fn available(&mut self) -> usize {
+        let mut available = 0;
+        (self.visit)(&mut |input| {
+            available = input.len();
+            0
+        });
+        available
+    }
+
+    fn pull_byte(&mut self) -> Option<::core::ffi::c_uchar> {
+        let mut byte = None;
+        (self.visit)(&mut |input| {
+            byte = input.first().copied();
+            usize::from(byte.is_some())
+        });
+        byte
+    }
+
+    fn copy_to(&mut self, output: &mut [::core::ffi::c_uchar]) -> usize {
+        let mut copied = 0;
+        (self.visit)(&mut |input| {
+            copied = input.len().min(output.len());
+            output[..copied].copy_from_slice(&input[..copied]);
+            copied
+        });
+        copied
+    }
+
+    fn with_remaining(&mut self, operation: impl FnOnce(&[::core::ffi::c_uchar]) -> usize) {
+        let mut operation = Some(operation);
+        (self.visit)(&mut |input| operation.take().expect("single input visit")(input));
+    }
 }
 
 pub unsafe extern "C" fn inflateBack(
@@ -316,6 +338,22 @@ pub unsafe extern "C" fn inflateBack(
     bits = 0 as ::core::ffi::c_uint;
     put = (*state).window.expect("inflateBack window").as_ptr();
     left = (*state).wsize;
+    let mut input = InflateBackInput::new(|consume| {
+        if have == 0 {
+            have = in_0.expect("non-null function pointer")(in_desc, &raw mut next);
+            if have == 0 {
+                next = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
+                return;
+            }
+        }
+        // `have` is the callback's promised bound for this cursor.  The
+        // visitor returns exactly the consumed prefix, which is then the only
+        // portion reflected in the raw cursor published on return.
+        let bytes = ::core::slice::from_raw_parts(next, have as usize);
+        let used = consume(bytes).min(bytes.len());
+        next = next.wrapping_add(used);
+        have = have.wrapping_sub(used as ::core::ffi::c_uint);
+    });
     '_inf_leave: loop {
         match (*state).mode as ::core::ffi::c_uint {
             16191 => {
@@ -326,9 +364,7 @@ pub unsafe extern "C" fn inflateBack(
                     continue;
                 } else {
                     while bits < 3 as ::core::ffi::c_int as ::core::ffi::c_uint {
-                        let Some(byte) =
-                            inflate_back_pull_byte(in_0, in_desc, &mut next, &mut have)
-                        else {
+                        let Some(byte) = input.pull_byte() else {
                             ret = crate::zlib_h::Z_BUF_ERROR;
                             break '_inf_leave;
                         };
@@ -376,8 +412,7 @@ pub unsafe extern "C" fn inflateBack(
                 hold >>= bits & 7 as ::core::ffi::c_uint;
                 bits = bits.wrapping_sub(bits & 7 as ::core::ffi::c_uint);
                 while bits < 32 as ::core::ffi::c_int as ::core::ffi::c_uint {
-                    let Some(byte) = inflate_back_pull_byte(in_0, in_desc, &mut next, &mut have)
-                    else {
+                    let Some(byte) = input.pull_byte() else {
                         ret = crate::zlib_h::Z_BUF_ERROR;
                         break '_inf_leave;
                     };
@@ -398,13 +433,9 @@ pub unsafe extern "C" fn inflateBack(
                     bits = 0 as ::core::ffi::c_uint;
                     while (*state).length != 0 as ::core::ffi::c_uint {
                         copy = (*state).length;
-                        if have == 0 as ::core::ffi::c_uint {
-                            have = in_0.expect("non-null function pointer")(in_desc, &raw mut next);
-                            if have == 0 as ::core::ffi::c_uint {
-                                next = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
-                                ret = crate::zlib_h::Z_BUF_ERROR;
-                                break '_inf_leave;
-                            }
+                        if input.available() == 0 {
+                            ret = crate::zlib_h::Z_BUF_ERROR;
+                            break '_inf_leave;
                         }
                         if left == 0 as ::core::ffi::c_uint {
                             put = (*state).window.expect("inflateBack window").as_ptr();
@@ -415,25 +446,17 @@ pub unsafe extern "C" fn inflateBack(
                                 break '_inf_leave;
                             }
                         }
-                        if copy > have {
-                            copy = have;
+                        if copy > input.available() as ::core::ffi::c_uint {
+                            copy = input.available() as ::core::ffi::c_uint;
                         }
                         if copy > left {
                             copy = left;
                         }
-                        // The callback contract provides `have` input bytes,
-                        // and `left` bounds the caller window.  The original
-                        // memcpy path requires these buffers not to overlap,
-                        // so form only the transfer-sized views and let the
-                        // slice copy own the byte movement.
-                        let input = ::core::slice::from_raw_parts(next, copy as usize);
                         let output = ::core::slice::from_raw_parts_mut(put, copy as usize);
-                        output.copy_from_slice(input);
-                        have = have.wrapping_sub(copy);
-                        next = next.wrapping_add(copy as usize);
+                        let copied = input.copy_to(output) as ::core::ffi::c_uint;
                         left = left.wrapping_sub(copy);
                         put = put.wrapping_add(copy as usize);
-                        (*state).length = (*state).length.wrapping_sub(copy);
+                        (*state).length = (*state).length.wrapping_sub(copied);
                     }
                     (*state).mode = crate::src::inflate::TYPE;
                     continue;
@@ -441,8 +464,7 @@ pub unsafe extern "C" fn inflateBack(
             }
             16196 => {
                 while bits < 14 as ::core::ffi::c_int as ::core::ffi::c_uint {
-                    let Some(byte) = inflate_back_pull_byte(in_0, in_desc, &mut next, &mut have)
-                    else {
+                    let Some(byte) = input.pull_byte() else {
                         ret = crate::zlib_h::Z_BUF_ERROR;
                         break '_inf_leave;
                     };
@@ -479,9 +501,7 @@ pub unsafe extern "C" fn inflateBack(
                     (*state).have = 0 as ::core::ffi::c_uint;
                     while (*state).have < (*state).ncode {
                         while bits < 3 as ::core::ffi::c_int as ::core::ffi::c_uint {
-                            let Some(byte) =
-                                inflate_back_pull_byte(in_0, in_desc, &mut next, &mut have)
-                            else {
+                            let Some(byte) = input.pull_byte() else {
                                 ret = crate::zlib_h::Z_BUF_ERROR;
                                 break '_inf_leave;
                             };
@@ -552,9 +572,7 @@ pub unsafe extern "C" fn inflateBack(
                                 if here.bits as ::core::ffi::c_uint <= bits {
                                     break;
                                 }
-                                let Some(byte) =
-                                    inflate_back_pull_byte(in_0, in_desc, &mut next, &mut have)
-                                else {
+                                let Some(byte) = input.pull_byte() else {
                                     ret = crate::zlib_h::Z_BUF_ERROR;
                                     break '_inf_leave;
                                 };
@@ -574,9 +592,7 @@ pub unsafe extern "C" fn inflateBack(
                                             + 2 as ::core::ffi::c_int)
                                             as ::core::ffi::c_uint
                                     {
-                                        let Some(byte) = inflate_back_pull_byte(
-                                            in_0, in_desc, &mut next, &mut have,
-                                        ) else {
+                                        let Some(byte) = input.pull_byte() else {
                                             ret = crate::zlib_h::Z_BUF_ERROR;
                                             break '_inf_leave;
                                         };
@@ -616,9 +632,7 @@ pub unsafe extern "C" fn inflateBack(
                                             + 3 as ::core::ffi::c_int)
                                             as ::core::ffi::c_uint
                                     {
-                                        let Some(byte) = inflate_back_pull_byte(
-                                            in_0, in_desc, &mut next, &mut have,
-                                        ) else {
+                                        let Some(byte) = input.pull_byte() else {
                                             ret = crate::zlib_h::Z_BUF_ERROR;
                                             break '_inf_leave;
                                         };
@@ -645,9 +659,7 @@ pub unsafe extern "C" fn inflateBack(
                                             + 7 as ::core::ffi::c_int)
                                             as ::core::ffi::c_uint
                                     {
-                                        let Some(byte) = inflate_back_pull_byte(
-                                            in_0, in_desc, &mut next, &mut have,
-                                        ) else {
+                                        let Some(byte) = input.pull_byte() else {
                                             ret = crate::zlib_h::Z_BUF_ERROR;
                                             break '_inf_leave;
                                         };
@@ -799,13 +811,12 @@ pub unsafe extern "C" fn inflateBack(
                 break;
             }
         }
-        if have >= 6 as ::core::ffi::c_uint && left >= 258 as ::core::ffi::c_uint {
+        if input.available() >= 6 && left >= 258 as ::core::ffi::c_uint {
             // Both callback cursors are bounded for this dispatch: `have`
             // describes the input callback's current chunk, and `put` lies
             // in the caller window with `left` bytes remaining.  Decode
             // directly through those views instead of republishing them via
             // the legacy raw-stream fast adapter.
-            let input = ::core::slice::from_raw_parts(next, have as usize);
             let window = state.window.expect("inflateBack window");
             let window_size = state.wsize as usize;
             let output = ::core::slice::from_raw_parts_mut(window.as_ptr(), window_size);
@@ -824,14 +835,19 @@ pub unsafe extern "C" fn inflateBack(
                 codes: &state.codes,
                 sane: state.sane != 0,
             };
-            let result = crate::src::inffast::inflate_fast_from_views(
-                input,
-                output,
-                written,
-                &mut fast_state,
-            );
-            next = input.as_ptr().wrapping_add(result.input_used) as *mut ::core::ffi::c_uchar;
-            have = input.len().wrapping_sub(result.input_used) as ::core::ffi::c_uint;
+            let mut fast_result = None;
+            input.with_remaining(|input| {
+                let result = crate::src::inffast::inflate_fast_from_views(
+                    input,
+                    output,
+                    written,
+                    &mut fast_state,
+                );
+                let used = result.input_used;
+                fast_result = Some(result);
+                used
+            });
+            let result = fast_result.expect("fast input visit");
             put = output.as_mut_ptr().wrapping_add(result.output_used);
             left = output.len().wrapping_sub(result.output_used) as ::core::ffi::c_uint;
             hold = fast_state.hold;
@@ -866,7 +882,7 @@ pub unsafe extern "C" fn inflateBack(
                 if here.bits as ::core::ffi::c_uint <= bits {
                     break;
                 }
-                let Some(byte) = inflate_back_pull_byte(in_0, in_desc, &mut next, &mut have) else {
+                let Some(byte) = input.pull_byte() else {
                     ret = crate::zlib_h::Z_BUF_ERROR;
                     break '_inf_leave;
                 };
@@ -898,8 +914,7 @@ pub unsafe extern "C" fn inflateBack(
                     {
                         break;
                     }
-                    let Some(byte) = inflate_back_pull_byte(in_0, in_desc, &mut next, &mut have)
-                    else {
+                    let Some(byte) = input.pull_byte() else {
                         ret = crate::zlib_h::Z_BUF_ERROR;
                         break '_inf_leave;
                     };
@@ -938,9 +953,7 @@ pub unsafe extern "C" fn inflateBack(
                 (*state).extra = here.op as ::core::ffi::c_uint & 15 as ::core::ffi::c_uint;
                 if (*state).extra != 0 as ::core::ffi::c_uint {
                     while bits < (*state).extra {
-                        let Some(byte) =
-                            inflate_back_pull_byte(in_0, in_desc, &mut next, &mut have)
-                        else {
+                        let Some(byte) = input.pull_byte() else {
                             ret = crate::zlib_h::Z_BUF_ERROR;
                             break '_inf_leave;
                         };
@@ -968,8 +981,7 @@ pub unsafe extern "C" fn inflateBack(
                     if here.bits as ::core::ffi::c_uint <= bits {
                         break;
                     }
-                    let Some(byte) = inflate_back_pull_byte(in_0, in_desc, &mut next, &mut have)
-                    else {
+                    let Some(byte) = input.pull_byte() else {
                         ret = crate::zlib_h::Z_BUF_ERROR;
                         break '_inf_leave;
                     };
@@ -1000,9 +1012,7 @@ pub unsafe extern "C" fn inflateBack(
                         {
                             break;
                         }
-                        let Some(byte) =
-                            inflate_back_pull_byte(in_0, in_desc, &mut next, &mut have)
-                        else {
+                        let Some(byte) = input.pull_byte() else {
                             ret = crate::zlib_h::Z_BUF_ERROR;
                             break '_inf_leave;
                         };
@@ -1023,9 +1033,7 @@ pub unsafe extern "C" fn inflateBack(
                     (*state).extra = here.op as ::core::ffi::c_uint & 15 as ::core::ffi::c_uint;
                     if (*state).extra != 0 as ::core::ffi::c_uint {
                         while bits < (*state).extra {
-                            let Some(byte) =
-                                inflate_back_pull_byte(in_0, in_desc, &mut next, &mut have)
-                            else {
+                            let Some(byte) = input.pull_byte() else {
                                 ret = crate::zlib_h::Z_BUF_ERROR;
                                 break '_inf_leave;
                             };
@@ -1124,6 +1132,9 @@ pub unsafe extern "C" fn inflateBack(
             ret = crate::zlib_h::Z_BUF_ERROR;
         }
     }
+    // End the call-scoped input facade before publishing its raw cursor back
+    // to the ABI stream.
+    drop(input);
     (*strm).next_in = next as *mut crate::stdlib::Bytef;
     (*strm).avail_in = have as crate::stdlib::uInt;
     return ret;
