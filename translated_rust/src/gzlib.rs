@@ -1986,14 +1986,10 @@ pub fn gz_error(
     // gzip state. Bind it once so both allocation and formatting use the same
     // length without a second raw C-string traversal.
     let path_len = unsafe { ::core::ffi::CStr::from_ptr(state.path).to_bytes().len() };
-    // SAFETY: `path` is owned by this initialized gzip state and `msg` is a
-    // nul-terminated slice supplied by either a fixed zlib message or a
-    // checked C string at an FFI boundary. This is the sole allocation and
-    // formatting boundary for the owned error record.
-    unsafe {
-        state.msg = crate::stdlib::malloc(path_len.wrapping_add(msg.len().wrapping_add(2)))
-            as *mut ::core::ffi::c_char;
-    }
+    // `malloc` accepts every `size_t` value. `path` and `msg` are only used
+    // below after allocation succeeds, at the C formatting boundary.
+    state.msg = crate::stdlib::malloc(path_len.wrapping_add(msg.len().wrapping_add(2)))
+        as *mut ::core::ffi::c_char;
     if state.msg.is_null() {
         gz_error_allocation_failed(state);
         return;
