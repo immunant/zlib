@@ -3447,22 +3447,32 @@ fn pending_buffer_range(
     start.checked_add(len).filter(|&end| end <= pending_buf_len)
 }
 
+/// Check the source stream fields that must be valid before the FFI boundary
+/// may borrow its opaque state handle.
+///
+/// Keeping this as a named implementation helper leaves `deflateCopy_ffi`
+/// responsible only for ABI conversion.  In particular, a malformed source
+/// with no allocator callbacks must be rejected before its `state` handle is
+/// converted to a Rust reference.
+fn deflate_copy_source_stream(
+    source: Option<&crate::zlib_h::z_stream>,
+) -> Option<&crate::zlib_h::z_stream> {
+    let source = source?;
+    (source.zalloc.is_some() && source.zfree.is_some()).then_some(source)
+}
+
 pub fn deflateCopy(
     dest: Option<&mut crate::zlib_h::z_stream>,
     source: Option<&crate::zlib_h::z_stream>,
+    source_state: Option<&crate::src::deflate::deflate_state>,
 ) -> ::core::ffi::c_int {
-    let Some(source_stream) = source else {
+    let Some(source_stream) = deflate_copy_source_stream(source) else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
-    if source_stream.zalloc.is_none() || source_stream.zfree.is_none() {
-        return crate::zlib_h::Z_STREAM_ERROR;
-    }
     let Some(dest_stream) = dest else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
-    let Some(source_state) =
-        (unsafe { (source_stream.state as *const crate::src::deflate::deflate_state).as_ref() })
-    else {
+    let Some(source_state) = source_state else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
     if !deflate_stream_state_valid(Some(source_stream), Some(source_state)) {
@@ -3604,9 +3614,15 @@ pub unsafe extern "C" fn deflateCopy_ffi(
     mut dest: crate::zlib_h::z_streamp,
     mut source: crate::zlib_h::z_streamp,
 ) -> ::core::ffi::c_int {
-    let source = source.as_ref();
+    let Some(source) = deflate_copy_source_stream(source.as_ref()) else {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    };
+    // The named validator above checks callback availability before this ABI
+    // handle conversion. Keep source validation ahead of destination access,
+    // matching the C copy contract for malformed streams.
+    let source_state = (source.state as *const crate::src::deflate::deflate_state).as_ref();
     let dest = dest.as_mut();
-    deflateCopy(dest, source)
+    deflateCopy(dest, Some(source), source_state)
 }
 fn longest_match(
     state: &mut crate::src::deflate::deflate_state,
