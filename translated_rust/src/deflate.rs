@@ -758,7 +758,9 @@ fn clear_owned_full_flush_hash(state: &mut crate::src::deflate::deflate_state) -
 /// unrelated callback allocations.
 enum CallbackDeflateStorageNeed {
     HeadOnly,
+    PendingOnly,
     Workspace,
+    WorkspaceAndPending,
 }
 
 /// Borrow callback-owned deflate storage for exactly one typed operation.
@@ -774,19 +776,30 @@ fn with_callback_deflate_storage<R>(
         Option<&mut [crate::stdlib::Bytef]>,
         Option<&mut [crate::src::deflate::Posf]>,
         Option<&mut [crate::src::deflate::Posf]>,
+        Option<&mut [crate::stdlib::Bytef]>,
     ) -> R,
 ) -> Option<R> {
     // Preserve the legacy workspace boundary's validation order: an update
     // with no window must fail before it tries to view either hash table.
-    if matches!(need, CallbackDeflateStorageNeed::Workspace) && state.window.is_null() {
+    if matches!(
+        need,
+        CallbackDeflateStorageNeed::Workspace | CallbackDeflateStorageNeed::WorkspaceAndPending
+    ) && state.window.is_null()
+    {
         return None;
     }
-    let head = (!state.head.is_null()).then(|| unsafe {
-        ::core::slice::from_raw_parts_mut(state.head, state.hash_size as usize)
-    });
+    let head = if matches!(need, CallbackDeflateStorageNeed::PendingOnly) {
+        None
+    } else {
+        (!state.head.is_null()).then(|| unsafe {
+            ::core::slice::from_raw_parts_mut(state.head, state.hash_size as usize)
+        })
+    };
     let (window, prev) = match need {
-        CallbackDeflateStorageNeed::HeadOnly => (None, None),
-        CallbackDeflateStorageNeed::Workspace => {
+        CallbackDeflateStorageNeed::HeadOnly | CallbackDeflateStorageNeed::PendingOnly => {
+            (None, None)
+        }
+        CallbackDeflateStorageNeed::Workspace | CallbackDeflateStorageNeed::WorkspaceAndPending => {
             let window = unsafe {
                 ::core::slice::from_raw_parts_mut(state.window, state.window_size as usize)
             };
@@ -796,7 +809,17 @@ fn with_callback_deflate_storage<R>(
             (Some(window), prev)
         }
     };
-    Some(action(state, window, head, prev))
+    let pending = if matches!(
+        need,
+        CallbackDeflateStorageNeed::PendingOnly | CallbackDeflateStorageNeed::WorkspaceAndPending
+    ) {
+        (!state.pending_buf.is_null()).then(|| unsafe {
+            ::core::slice::from_raw_parts_mut(state.pending_buf, state.pending_buf_size as usize)
+        })
+    } else {
+        None
+    };
+    Some(action(state, window, head, prev, pending))
 }
 
 fn read_buf(
@@ -1864,7 +1887,7 @@ pub(crate) fn deflate_reset_state(
     with_callback_deflate_storage(
         state,
         CallbackDeflateStorageNeed::HeadOnly,
-        |state, _, head, _| head.map(|head| deflate_reset(stream, state, head)),
+        |state, _, head, _, _| head.map(|head| deflate_reset(stream, state, head)),
     )
     .flatten()
     .unwrap_or(crate::zlib_h::Z_STREAM_ERROR)
@@ -3150,7 +3173,7 @@ fn with_callback_deflate_workspace<R>(
     with_callback_deflate_storage(
         state,
         CallbackDeflateStorageNeed::Workspace,
-        |state, window, head, prev| {
+        |state, window, head, prev, _| {
             let window = window?;
             let mut workspace =
                 callback_deflate_workspace(window, head, prev, input, output, pending_buf);
@@ -3242,31 +3265,17 @@ fn deflate_validated(
             .load(::core::sync::atomic::Ordering::Relaxed);
         return -5 as ::core::ffi::c_int;
     }
-    with_callback_deflate_pending_buffer(state, |state, pending_buffer| {
-        deflate_with_pending_buffer(strm, state, flush, input, output, pending_buffer)
-    })
+    with_callback_deflate_storage(
+        state,
+        CallbackDeflateStorageNeed::PendingOnly,
+        |state, _, _, _, pending_buffer| {
+            pending_buffer.map(|pending_buffer| {
+                deflate_with_pending_buffer(strm, state, flush, input, output, pending_buffer)
+            })
+        },
+    )
+    .flatten()
     .unwrap_or(crate::zlib_h::Z_STREAM_ERROR)
-}
-
-/// Borrow the one legacy pending allocation for one synchronous deflate
-/// operation.
-///
-/// The pending buffer is still an ABI callback allocation for custom and
-/// mixed allocator streams. Keep its raw conversion at this type-specific
-/// storage boundary so the stream state machine only receives a checked
-/// slice. A future owned pending-buffer path can replace this boundary
-/// without moving header, flush, or strategy logic into an FFI wrapper.
-fn with_callback_deflate_pending_buffer<R>(
-    state: &mut crate::src::deflate::deflate_state,
-    action: impl FnOnce(&mut crate::src::deflate::deflate_state, &mut [crate::stdlib::Bytef]) -> R,
-) -> Option<R> {
-    if state.pending_buf.is_null() {
-        return None;
-    }
-    let pending_buffer = unsafe {
-        ::core::slice::from_raw_parts_mut(state.pending_buf, state.pending_buf_size as usize)
-    };
-    Some(action(state, pending_buffer))
 }
 
 /// Run the deflate state machine after the legacy pending allocation has been
@@ -3655,7 +3664,9 @@ fn deflate_with_pending_buffer(
                         with_callback_deflate_storage(
                             state,
                             CallbackDeflateStorageNeed::HeadOnly,
-                            |state, _, head, _| head.map(|head| clear_full_flush_hash(state, head)),
+                            |state, _, head, _, _| {
+                                head.map(|head| clear_full_flush_hash(state, head))
+                            },
                         )
                         .flatten()
                         .unwrap_or(false)
@@ -3827,10 +3838,120 @@ fn deflate_copy_source_stream(
     (source.zalloc.is_some() && source.zfree.is_some()).then_some(source)
 }
 
+/// Copy the callback-owned work areas through already-validated typed views.
+///
+/// `deflateCopy` has to preserve custom allocator allocation and free calls,
+/// but the source and destination allocations are distinct.  The existing
+/// callback-storage boundaries establish that distinction as slices, letting
+/// this core retain the C copy spans without another raw conversion.
+fn copy_callback_deflate_storage(
+    destination_window: &mut [crate::stdlib::Bytef],
+    destination_prev: &mut [crate::src::deflate::Posf],
+    destination_head: &mut [crate::src::deflate::Posf],
+    destination_pending: &mut [crate::stdlib::Bytef],
+    source_window: &[crate::stdlib::Bytef],
+    source_prev: &[crate::src::deflate::Posf],
+    source_head: &[crate::src::deflate::Posf],
+    source_pending: &[crate::stdlib::Bytef],
+    layout: &DeflateCopyLayout,
+    pending_copy_span: &::core::ops::Range<usize>,
+) -> bool {
+    let Some(destination_window) = destination_window.get_mut(..layout.window_bytes) else {
+        return false;
+    };
+    let Some(source_window) = source_window.get(..layout.window_bytes) else {
+        return false;
+    };
+    let Some(destination_prev) = destination_prev.get_mut(..layout.prev_items) else {
+        return false;
+    };
+    let Some(source_prev) = source_prev.get(..layout.prev_items) else {
+        return false;
+    };
+    let Some(destination_head) = destination_head.get_mut(..layout.head_items) else {
+        return false;
+    };
+    let Some(source_head) = source_head.get(..layout.head_items) else {
+        return false;
+    };
+    let Some(destination_pending) = destination_pending.get_mut(pending_copy_span.clone()) else {
+        return false;
+    };
+    let Some(source_pending) = source_pending.get(pending_copy_span.clone()) else {
+        return false;
+    };
+    destination_window.copy_from_slice(source_window);
+    destination_prev.copy_from_slice(source_prev);
+    destination_head.copy_from_slice(source_head);
+    destination_pending.copy_from_slice(source_pending);
+    true
+}
+
+/// Copy callback-owned storage after allocation without widening its unsafe
+/// boundary.  Both states retain ABI callback allocations here, so the
+/// established workspace and pending-buffer adapters supply all views.
+fn copy_callback_deflate_storage_from_states(
+    destination_state: &mut crate::src::deflate::deflate_state,
+    source_state: &mut crate::src::deflate::deflate_state,
+    layout: &DeflateCopyLayout,
+    pending_copy_span: &::core::ops::Range<usize>,
+) -> bool {
+    with_callback_deflate_storage(
+        destination_state,
+        CallbackDeflateStorageNeed::WorkspaceAndPending,
+        |_, destination_window, destination_head, destination_prev, destination_pending| {
+            let Some(destination_window) = destination_window else {
+                return false;
+            };
+            let Some(destination_head) = destination_head else {
+                return false;
+            };
+            let Some(destination_prev) = destination_prev else {
+                return false;
+            };
+            let Some(destination_pending) = destination_pending else {
+                return false;
+            };
+            with_callback_deflate_storage(
+                source_state,
+                CallbackDeflateStorageNeed::WorkspaceAndPending,
+                |_, source_window, source_head, source_prev, source_pending| {
+                    let Some(source_window) = source_window else {
+                        return false;
+                    };
+                    let Some(source_head) = source_head else {
+                        return false;
+                    };
+                    let Some(source_prev) = source_prev else {
+                        return false;
+                    };
+                    let Some(source_pending) = source_pending else {
+                        return false;
+                    };
+                    copy_callback_deflate_storage(
+                        destination_window,
+                        destination_prev,
+                        destination_head,
+                        destination_pending,
+                        source_window,
+                        source_prev,
+                        source_head,
+                        source_pending,
+                        layout,
+                        pending_copy_span,
+                    )
+                },
+            )
+            .unwrap_or(false)
+        },
+    )
+    .unwrap_or(false)
+}
+
 pub fn deflateCopy(
     dest: Option<&mut crate::zlib_h::z_stream>,
     source: Option<&crate::zlib_h::z_stream>,
-    source_state: Option<&crate::src::deflate::deflate_state>,
+    source_state: Option<&mut crate::src::deflate::deflate_state>,
 ) -> ::core::ffi::c_int {
     let Some(source_stream) = deflate_copy_source_stream(source) else {
         return crate::zlib_h::Z_STREAM_ERROR;
@@ -3924,42 +4045,17 @@ pub fn deflateCopy(
                 deflateEnd(dest_stream);
                 return crate::zlib_h::Z_MEM_ERROR;
             }
-            unsafe {
-                crate::stdlib::memcpy(
-                    dest_state.window as *mut ::core::ffi::c_void,
-                    source_state.window as *const ::core::ffi::c_void,
-                    copy_layout.window_bytes as crate::__stddef_size_t_h::size_t,
-                )
-            };
-            unsafe {
-                crate::stdlib::memcpy(
-                    dest_state.prev as *mut ::core::ffi::c_void,
-                    source_state.prev as *const ::core::ffi::c_void,
-                    (copy_layout.prev_items as crate::__stddef_size_t_h::size_t)
-                        .wrapping_mul(::core::mem::size_of::<crate::src::deflate::Pos>()),
-                )
-            };
-            unsafe {
-                crate::stdlib::memcpy(
-                    dest_state.head as *mut ::core::ffi::c_void,
-                    source_state.head as *const ::core::ffi::c_void,
-                    (copy_layout.head_items as crate::__stddef_size_t_h::size_t)
-                        .wrapping_mul(::core::mem::size_of::<crate::src::deflate::Pos>()),
-                )
-            };
+            if !copy_callback_deflate_storage_from_states(
+                dest_state,
+                source_state,
+                copy_layout,
+                &pending_copy_span,
+            ) {
+                deflateEnd(dest_stream);
+                return crate::zlib_h::Z_MEM_ERROR;
+            }
             dest_state.pending_out = copy_layout.pending_offset;
             dest_state.sym_buf = dest_state.lit_bufsize as usize;
-            unsafe {
-                crate::stdlib::memcpy(
-                    dest_state.pending_buf.wrapping_add(pending_copy_span.start)
-                        as *mut ::core::ffi::c_void,
-                    source_state
-                        .pending_buf
-                        .wrapping_add(pending_copy_span.start)
-                        as *const ::core::ffi::c_void,
-                    pending_copy_span.len() as crate::__stddef_size_t_h::size_t,
-                )
-            };
             crate::zlib_h::Z_OK
         },
     )
@@ -3977,7 +4073,7 @@ pub unsafe extern "C" fn deflateCopy_ffi(
     // The named validator above checks callback availability before this ABI
     // handle conversion. Keep source validation ahead of destination access,
     // matching the C copy contract for malformed streams.
-    let source_state = (source.state as *const crate::src::deflate::deflate_state).as_ref();
+    let source_state = (source.state as *mut crate::src::deflate::deflate_state).as_mut();
     let dest = dest.as_mut();
     deflateCopy(dest, Some(source), source_state)
 }
