@@ -49,7 +49,7 @@ pub use crate::zlib_h::Z_STREAM_ERROR;
 
 /// Allocate the writer's owned input and optional output storage.  This
 /// decision is independent of stream cursors and the deflate state.
-fn gz_init_buffers(
+pub(crate) fn gz_init_buffers(
     want: ::core::ffi::c_uint,
     direct: ::core::ffi::c_int,
 ) -> Option<crate::gzguts_h::gz_buffers> {
@@ -58,187 +58,200 @@ fn gz_init_buffers(
     crate::gzguts_h::gz_buffers::new(input_len, output_len)
 }
 
-unsafe fn gz_init(state_ref: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
-    let mut ret: ::core::ffi::c_int = 0;
-    let mut strm: crate::zlib_h::z_streamp = &raw mut state_ref.strm;
-    let Some(buffers) = gz_init_buffers(state_ref.want, state_ref.direct) else {
-        crate::src::gzlib::gz_error_static(
-            state_ref,
-            crate::zlib_h::Z_MEM_ERROR,
-            b"out of memory\0",
-        );
-        return -1;
-    };
-    state_ref.buffers = Some(buffers);
-    if state_ref.direct == 0 {
-        state_ref.strm.zalloc = None;
-        state_ref.strm.zfree = None;
-        state_ref.strm.opaque = ::core::ptr::null_mut::<::core::ffi::c_void>();
-        ret = crate::src::deflate::deflateInit2_(
-            strm as *mut crate::zlib_h::z_stream_s,
-            state_ref.level,
-            8 as ::core::ffi::c_int,
-            15 as ::core::ffi::c_int + 16 as ::core::ffi::c_int,
-            8 as ::core::ffi::c_int,
-            state_ref.strategy,
-            crate::zlib_h::ZLIB_VERSION.as_ptr(),
-            ::core::mem::size_of::<crate::zlib_h::z_stream>() as ::core::ffi::c_int,
-        );
-        if ret != crate::zlib_h::Z_OK {
-            state_ref.buffers = None;
-            crate::src::gzlib::gz_error_static(
-                state_ref,
-                crate::zlib_h::Z_MEM_ERROR,
-                b"out of memory\0",
-            );
-            return -1 as ::core::ffi::c_int;
-        }
-        state_ref.strm.next_in = ::core::ptr::null_mut::<crate::stdlib::Bytef>();
-    }
-    state_ref.size = state_ref.want;
-    if state_ref.direct == 0 {
-        let Some(output) = state_ref
-            .buffers
-            .as_mut()
-            .and_then(|buffers| buffers.output.as_mut())
-        else {
-            return -1;
-        };
-        state_ref.strm.avail_out = state_ref.size as crate::stdlib::uInt;
-        state_ref.strm.next_out = output.as_mut_ptr() as *mut crate::stdlib::Bytef;
-        state_ref.x.next = state_ref.strm.next_out as *mut ::core::ffi::c_uchar;
-    }
-    return 0 as ::core::ffi::c_int;
-}
-
-pub(crate) unsafe fn gz_comp(
-    state_ref: &mut crate::gzguts_h::gz_state,
-    mut flush: ::core::ffi::c_int,
-) -> ::core::ffi::c_int {
-    let mut ret: ::core::ffi::c_int = 0;
-    let mut have: ::core::ffi::c_uint = 0;
-    if state_ref.size == 0 as ::core::ffi::c_uint && gz_init(state_ref) == -1 as ::core::ffi::c_int
-    {
-        return -1 as ::core::ffi::c_int;
-    }
-    if state_ref.direct != 0 {
-        return 0 as ::core::ffi::c_int;
-    }
-    if state_ref.reset != 0 {
-        if state_ref.strm.avail_in == 0 as crate::stdlib::uInt && flush == crate::zlib_h::Z_NO_FLUSH
-        {
-            return 0 as ::core::ffi::c_int;
-        }
-        crate::src::deflate::deflateReset(&raw mut state_ref.strm);
-        state_ref.reset = 0 as ::core::ffi::c_int;
-    }
-    ret = crate::zlib_h::Z_OK;
-    loop {
-        if state_ref.strm.avail_out == 0 as crate::stdlib::uInt
-            || flush != crate::zlib_h::Z_NO_FLUSH
-                && (flush != crate::zlib_h::Z_FINISH || ret == crate::zlib_h::Z_STREAM_END)
-        {
-            while state_ref.strm.next_out > state_ref.x.next {
-                let (start_index, end_index, result) = {
-                    let (Some(file), Some(output)) = (
-                        state_ref.file.as_mut(),
-                        state_ref
-                            .buffers
-                            .as_ref()
-                            .and_then(|buffers| buffers.output.as_ref()),
-                    ) else {
-                        return -1;
-                    };
-                    let output_start = output.as_ptr() as usize;
-                    let Some(start_index) = (state_ref.x.next as usize)
-                        .checked_sub(output_start)
-                        .filter(|index| *index <= output.len())
-                    else {
-                        return -1;
-                    };
-                    let Some(end_index) = (state_ref.strm.next_out as usize)
-                        .checked_sub(output_start)
-                        .filter(|index| *index <= output.len())
-                    else {
-                        return -1;
-                    };
-                    let Some(pending) = gz_comp_pending_output(output, start_index, end_index)
-                    else {
-                        return -1;
-                    };
-                    (start_index, end_index, gz_direct_write_file(file, pending))
-                };
-                match result {
-                    Ok(written) => {
-                        if written != end_index.wrapping_sub(start_index) {
-                            return -1;
-                        }
-                        let Some(output) = state_ref
-                            .buffers
-                            .as_mut()
-                            .and_then(|buffers| buffers.output.as_mut())
-                        else {
-                            return -1;
-                        };
-                        state_ref.again = 0;
-                        state_ref.x.next = output.as_mut_ptr().wrapping_add(end_index);
-                    }
-                    Err((written, code)) => {
-                        let Some(next_index) = start_index.checked_add(written) else {
-                            return -1;
-                        };
-                        let Some(output) = state_ref
-                            .buffers
-                            .as_mut()
-                            .and_then(|buffers| buffers.output.as_mut())
-                        else {
-                            return -1;
-                        };
-                        if next_index > output.len() {
-                            return -1;
-                        }
-                        state_ref.x.next = output.as_mut_ptr().wrapping_add(next_index);
-                        state_ref.again = (code == crate::stdlib::EAGAIN
-                            || code == crate::stdlib::EWOULDBLOCK)
-                            as ::core::ffi::c_int;
-                        crate::src::gzlib::gz_error_io(state_ref, code);
-                        return -1;
-                    }
+// These macros expand only in exported writer/close boundaries.  They retain
+// the legacy deflate calls and ABI cursor updates at those boundaries until
+// deflate has a safe stream-call adapter.
+macro_rules! gz_init_at_boundary {
+    ($state:expr) => {{
+        let state_ref = &mut *$state;
+        'gz_init_result: {
+            let Some(buffers) =
+                crate::src::gzwrite::gz_init_buffers(state_ref.want, state_ref.direct)
+            else {
+                crate::src::gzlib::gz_error_static(
+                    state_ref,
+                    crate::zlib_h::Z_MEM_ERROR,
+                    b"out of memory\0",
+                );
+                break 'gz_init_result -1;
+            };
+            state_ref.buffers = Some(buffers);
+            if state_ref.direct == 0 {
+                state_ref.strm.zalloc = None;
+                state_ref.strm.zfree = None;
+                state_ref.strm.opaque = ::core::ptr::null_mut::<::core::ffi::c_void>();
+                if crate::src::deflate::deflateInit2_(
+                    &raw mut state_ref.strm as *mut crate::zlib_h::z_stream_s,
+                    state_ref.level,
+                    8 as ::core::ffi::c_int,
+                    15 as ::core::ffi::c_int + 16 as ::core::ffi::c_int,
+                    8 as ::core::ffi::c_int,
+                    state_ref.strategy,
+                    crate::zlib_h::ZLIB_VERSION.as_ptr(),
+                    ::core::mem::size_of::<crate::zlib_h::z_stream>() as ::core::ffi::c_int,
+                ) != crate::zlib_h::Z_OK
+                {
+                    state_ref.buffers = None;
+                    crate::src::gzlib::gz_error_static(
+                        state_ref,
+                        crate::zlib_h::Z_MEM_ERROR,
+                        b"out of memory\0",
+                    );
+                    break 'gz_init_result -1;
                 }
-            }
-            if state_ref.strm.avail_out == 0 as crate::stdlib::uInt {
+                state_ref.strm.next_in = ::core::ptr::null_mut::<crate::stdlib::Bytef>();
                 let Some(output) = state_ref
                     .buffers
                     .as_mut()
                     .and_then(|buffers| buffers.output.as_mut())
                 else {
-                    return -1;
+                    break 'gz_init_result -1;
                 };
-                state_ref.strm.avail_out = state_ref.size as crate::stdlib::uInt;
+                state_ref.strm.avail_out = state_ref.want as crate::stdlib::uInt;
                 state_ref.strm.next_out = output.as_mut_ptr() as *mut crate::stdlib::Bytef;
-                state_ref.x.next = output.as_mut_ptr();
+                state_ref.x.next = state_ref.strm.next_out as *mut ::core::ffi::c_uchar;
             }
+            state_ref.size = state_ref.want;
+            0
         }
-        have = state_ref.strm.avail_out as ::core::ffi::c_uint;
-        ret = crate::src::deflate::deflate(&raw mut state_ref.strm, flush);
-        if ret == crate::zlib_h::Z_STREAM_ERROR {
-            crate::src::gzlib::gz_error_static(
-                state_ref,
-                crate::zlib_h::Z_STREAM_ERROR,
-                b"internal error: deflate stream corrupt\0",
-            );
-            return -1 as ::core::ffi::c_int;
-        }
-        have = have.wrapping_sub(state_ref.strm.avail_out as ::core::ffi::c_uint);
-        if have == 0 {
-            break;
-        }
-    }
-    if flush == crate::zlib_h::Z_FINISH {
-        state_ref.reset = 1 as ::core::ffi::c_int;
-    }
-    return 0 as ::core::ffi::c_int;
+    }};
 }
+pub(crate) use gz_init_at_boundary;
+
+macro_rules! gz_comp_at_boundary {
+    ($state:expr, $flush:expr) => {{
+        let state_ref = &mut *$state;
+        let flush = $flush;
+        'gz_comp_result: {
+            if state_ref.size == 0 && crate::src::gzwrite::gz_init_at_boundary!(state_ref) == -1 {
+                break 'gz_comp_result -1;
+            }
+            if state_ref.direct != 0 {
+                break 'gz_comp_result 0;
+            }
+            if state_ref.reset != 0 {
+                if state_ref.strm.avail_in == 0 && flush == crate::zlib_h::Z_NO_FLUSH {
+                    break 'gz_comp_result 0;
+                }
+                crate::src::deflate::deflateReset(&raw mut state_ref.strm);
+                state_ref.reset = 0;
+            }
+            let mut ret = crate::zlib_h::Z_OK;
+            loop {
+                if state_ref.strm.avail_out == 0
+                    || flush != crate::zlib_h::Z_NO_FLUSH
+                        && (flush != crate::zlib_h::Z_FINISH || ret == crate::zlib_h::Z_STREAM_END)
+                {
+                    while state_ref.strm.next_out > state_ref.x.next {
+                        let (start_index, end_index, result) = {
+                            let (Some(file), Some(output)) = (
+                                state_ref.file.as_mut(),
+                                state_ref
+                                    .buffers
+                                    .as_ref()
+                                    .and_then(|buffers| buffers.output.as_ref()),
+                            ) else {
+                                break 'gz_comp_result -1;
+                            };
+                            let output_start = output.as_ptr() as usize;
+                            let Some(start_index) = (state_ref.x.next as usize)
+                                .checked_sub(output_start)
+                                .filter(|index| *index <= output.len())
+                            else {
+                                break 'gz_comp_result -1;
+                            };
+                            let Some(end_index) = (state_ref.strm.next_out as usize)
+                                .checked_sub(output_start)
+                                .filter(|index| *index <= output.len())
+                            else {
+                                break 'gz_comp_result -1;
+                            };
+                            let Some(pending) = crate::src::gzwrite::gz_comp_pending_output(
+                                output,
+                                start_index,
+                                end_index,
+                            ) else {
+                                break 'gz_comp_result -1;
+                            };
+                            (
+                                start_index,
+                                end_index,
+                                crate::src::gzwrite::gz_direct_write_file(file, pending),
+                            )
+                        };
+                        match result {
+                            Ok(written) => {
+                                if written != end_index.wrapping_sub(start_index) {
+                                    break 'gz_comp_result -1;
+                                }
+                                let Some(output) = state_ref
+                                    .buffers
+                                    .as_mut()
+                                    .and_then(|buffers| buffers.output.as_mut())
+                                else {
+                                    break 'gz_comp_result -1;
+                                };
+                                state_ref.again = 0;
+                                state_ref.x.next = output.as_mut_ptr().wrapping_add(end_index);
+                            }
+                            Err((written, code)) => {
+                                let Some(next_index) = start_index.checked_add(written) else {
+                                    break 'gz_comp_result -1;
+                                };
+                                let Some(output) = state_ref
+                                    .buffers
+                                    .as_mut()
+                                    .and_then(|buffers| buffers.output.as_mut())
+                                else {
+                                    break 'gz_comp_result -1;
+                                };
+                                if next_index > output.len() {
+                                    break 'gz_comp_result -1;
+                                }
+                                state_ref.x.next = output.as_mut_ptr().wrapping_add(next_index);
+                                state_ref.again = (code == crate::stdlib::EAGAIN
+                                    || code == crate::stdlib::EWOULDBLOCK)
+                                    as ::core::ffi::c_int;
+                                crate::src::gzlib::gz_error_io(state_ref, code);
+                                break 'gz_comp_result -1;
+                            }
+                        }
+                    }
+                    if state_ref.strm.avail_out == 0 {
+                        let Some(output) = state_ref
+                            .buffers
+                            .as_mut()
+                            .and_then(|buffers| buffers.output.as_mut())
+                        else {
+                            break 'gz_comp_result -1;
+                        };
+                        state_ref.strm.avail_out = state_ref.size as crate::stdlib::uInt;
+                        state_ref.strm.next_out = output.as_mut_ptr() as *mut crate::stdlib::Bytef;
+                        state_ref.x.next = output.as_mut_ptr();
+                    }
+                }
+                let have = state_ref.strm.avail_out;
+                ret = crate::src::deflate::deflate(&raw mut state_ref.strm, flush);
+                if ret == crate::zlib_h::Z_STREAM_ERROR {
+                    crate::src::gzlib::gz_error_static(
+                        state_ref,
+                        crate::zlib_h::Z_STREAM_ERROR,
+                        b"internal error: deflate stream corrupt\0",
+                    );
+                    break 'gz_comp_result -1;
+                }
+                if have.wrapping_sub(state_ref.strm.avail_out) == 0 {
+                    break;
+                }
+            }
+            if flush == crate::zlib_h::Z_FINISH {
+                state_ref.reset = 1;
+            }
+            0
+        }
+    }};
+}
+pub(crate) use gz_comp_at_boundary;
 
 /// Choose one zero-fill chunk without converting the gzip handle or its
 /// buffers.  The narrowing cast deliberately matches zlib's `unsigned`
@@ -455,7 +468,7 @@ fn gz_write_direct_commit_state(
 /// The result includes the completed prefix on failure, matching the old
 /// `write()` loop's partial-progress behavior without exposing a raw buffer
 /// or descriptor to the gzip implementation.
-fn gz_direct_write_file(
+pub(crate) fn gz_direct_write_file(
     file: &mut ::std::fs::File,
     source: &[u8],
 ) -> Result<usize, (usize, ::core::ffi::c_int)> {
@@ -479,7 +492,11 @@ fn gz_direct_write_file(
 
 /// Borrow the pending compressor output after ABI cursors have been
 /// reconciled to owned-buffer indices.
-fn gz_comp_pending_output(output: &[u8], start_index: usize, end_index: usize) -> Option<&[u8]> {
+pub(crate) fn gz_comp_pending_output(
+    output: &[u8],
+    start_index: usize,
+    end_index: usize,
+) -> Option<&[u8]> {
     output.get(start_index..end_index)
 }
 
@@ -642,7 +659,7 @@ macro_rules! gz_zero_at_boundary {
             let mut ret: ::core::ffi::c_int = 0;
             let mut n: ::core::ffi::c_uint = 0;
             if state.strm.avail_in != 0
-                && crate::src::gzwrite::gz_comp(state, crate::zlib_h::Z_NO_FLUSH)
+                && crate::src::gzwrite::gz_comp_at_boundary!(state, crate::zlib_h::Z_NO_FLUSH)
                     == -1 as ::core::ffi::c_int
             {
                 break 'gz_zero_result -1 as ::core::ffi::c_int;
@@ -701,7 +718,7 @@ macro_rules! gz_zero_at_boundary {
                     break 'gz_zero_result -1;
                 };
                 state.strm.next_in = input.as_mut_ptr() as *mut crate::stdlib::Bytef;
-                ret = crate::src::gzwrite::gz_comp(state, crate::zlib_h::Z_NO_FLUSH);
+                ret = crate::src::gzwrite::gz_comp_at_boundary!(state, crate::zlib_h::Z_NO_FLUSH);
                 n = n.wrapping_sub(state.strm.avail_in as ::core::ffi::c_uint);
                 crate::src::gzwrite::gz_zero_commit_state(state, n);
                 if ret == -1 as ::core::ffi::c_int {
@@ -732,7 +749,8 @@ macro_rules! gz_write_at_boundary {
             if len == 0 as crate::stdlib::z_size_t {
                 break 'gz_write_result 0 as crate::stdlib::z_size_t;
             }
-            if state.size == 0 as ::core::ffi::c_uint && gz_init(state) == -1 as ::core::ffi::c_int
+            if state.size == 0 as ::core::ffi::c_uint
+                && gz_init_at_boundary!(state) == -1 as ::core::ffi::c_int
             {
                 break 'gz_write_result 0 as crate::stdlib::z_size_t;
             }
@@ -783,13 +801,16 @@ macro_rules! gz_write_at_boundary {
                     if len == 0 as crate::stdlib::z_size_t {
                         break;
                     }
-                    if gz_comp(state, crate::zlib_h::Z_NO_FLUSH) == -1 as ::core::ffi::c_int {
+                    if gz_comp_at_boundary!(state, crate::zlib_h::Z_NO_FLUSH)
+                        == -1 as ::core::ffi::c_int
+                    {
                         break 'gz_write_result gz_write_failure_result(state.again, put, len);
                     }
                 }
             } else {
                 if state.strm.avail_in != 0
-                    && gz_comp(state, crate::zlib_h::Z_NO_FLUSH) == -1 as ::core::ffi::c_int
+                    && gz_comp_at_boundary!(state, crate::zlib_h::Z_NO_FLUSH)
+                        == -1 as ::core::ffi::c_int
                 {
                     break 'gz_write_result 0 as crate::stdlib::z_size_t;
                 }
@@ -797,7 +818,7 @@ macro_rules! gz_write_at_boundary {
                 loop {
                     let n = gz_write_direct_chunk_plan(len);
                     state.strm.avail_in = n as crate::stdlib::uInt;
-                    ret = gz_comp(state, crate::zlib_h::Z_NO_FLUSH);
+                    ret = gz_comp_at_boundary!(state, crate::zlib_h::Z_NO_FLUSH);
                     let Some((next_source, next_len, consumed)) = gz_write_direct_progress(
                         source,
                         len,
@@ -1008,7 +1029,7 @@ pub unsafe extern "C" fn gzflush_ffi(
     if state.skip != 0 && gz_zero_at_boundary!(state) == -1 as ::core::ffi::c_int {
         return state.err;
     }
-    gz_comp(state, flush);
+    gz_comp_at_boundary!(state, flush);
     state.err
 }
 #[export_name = "gzsetparams"]
@@ -1033,7 +1054,7 @@ pub unsafe extern "C" fn gzsetparams_ffi(
     }
     if state.size != 0 {
         if state.strm.avail_in != 0
-            && gz_comp(state, crate::zlib_h::Z_BLOCK) == -1 as ::core::ffi::c_int
+            && gz_comp_at_boundary!(state, crate::zlib_h::Z_BLOCK) == -1 as ::core::ffi::c_int
         {
             return state.err;
         }

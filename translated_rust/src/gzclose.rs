@@ -104,7 +104,7 @@ macro_rules! gzclose_write_at_boundary {
                 {
                     ret = state_ref.err;
                 }
-                if crate::src::gzwrite::gz_comp(state_ref, crate::zlib_h::Z_FINISH)
+                if crate::src::gzwrite::gz_comp_at_boundary!(state_ref, crate::zlib_h::Z_FINISH)
                     == -1 as ::core::ffi::c_int
                 {
                     ret = state_ref.err;
