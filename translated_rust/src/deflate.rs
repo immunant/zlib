@@ -2800,40 +2800,25 @@ pub unsafe extern "C" fn deflateEnd_ffi(mut strm: crate::zlib_h::z_streamp) -> :
     };
     deflateEnd(strm)
 }
-// The exported adapter below owns the foreign-call boundary. Keep this
-// implementation callable through that dispatcher without exposing its raw
-// stream and allocation work as an unsafe-function contract to Rust callers.
-pub fn deflateCopy(
-    mut dest: crate::zlib_h::z_streamp,
-    mut source: crate::zlib_h::z_streamp,
+// The exported adapter below owns foreign stream binding. Once it has
+// established distinct stream references, the copy engine keeps that
+// relationship reference-based across its allocation sequence.
+fn deflateCopy(
+    dest: &mut crate::zlib_h::z_stream,
+    source: &mut crate::zlib_h::z_stream,
 ) -> ::core::ffi::c_int {
-    // A copy onto the same initialized stream is a no-op. Keep this zlib
-    // behavior in the named implementation so the ABI adapter below remains
-    // only a dispatcher.
-    if !dest.is_null() && dest == source {
-        return crate::zlib_h::Z_OK;
-    }
-    // SAFETY: this implementation preserves zlib's raw stream and allocator
-    // protocol. Each raw allocation or stream binding is validated before it
-    // is turned into a reference, and no such reference spans an allocator
-    // callback that may inspect either stream.
-    unsafe {
     // Do all source inspection before the first allocator callback.  Apart
     // from preserving zlib's observable publication order, this keeps the
     // copy plan reference-bound instead of repeatedly dereferencing the
     // source state through the allocation sequence below.
     let (pending_offset, plan, zalloc, opaque) = {
-        let Some((source_stream, source_state)) = deflateStateCheck(source) else {
+        let Some((source_stream, source_state)) = deflateStateCheckBound(source) else {
             return crate::zlib_h::Z_STREAM_ERROR;
         };
-        if dest.is_null() {
-            return crate::zlib_h::Z_STREAM_ERROR;
-        }
         // Publish the source stream fields before the allocator callbacks, as
         // zlib's original whole-struct copy does. A typed copy preserves every
         // observable stream field without an untyped foreign-memory operation.
-        let dest_stream = &mut *dest;
-        *dest_stream = *source_stream;
+        *dest = *source_stream;
         let pending_offset = source_state
             .pending_out
             .addr()
@@ -2846,8 +2831,8 @@ pub fn deflateCopy(
         // both complete before a re-entrant allocator can inspect either
         // stream.
         (pending_offset, plan,
-            dest_stream.zalloc.expect("non-null function pointer"),
-            dest_stream.opaque,
+            dest.zalloc.expect("non-null function pointer"),
+            dest.opaque,
         )
     };
     let destination_state_ptr = Some(zalloc).expect("non-null function pointer")(
@@ -2858,25 +2843,28 @@ pub fn deflateCopy(
     if destination_state_ptr.is_null() {
         return crate::zlib_h::Z_MEM_ERROR;
     }
-    (&mut *dest).state = destination_state_ptr as *mut crate::src::deflate::internal_state;
+    dest.state = destination_state_ptr as *mut crate::src::deflate::internal_state;
     // Copy the state before invoking the allocator again: custom allocation
     // callbacks can inspect `dest->state`, just as they can in zlib's C
     // implementation.  The assignment avoids an untyped whole-struct copy.
     {
         // The allocation callback above may inspect either stream. Rebind the
         // source after it returns before publishing the copied state.
-        let Some((_source_stream, source_state)) = deflateStateCheck(source) else {
+        let Some((_source_stream, source_state)) = deflateStateCheckBound(source) else {
             return crate::zlib_h::Z_STREAM_ERROR;
         };
-        let destination_state = &mut *destination_state_ptr;
+        // SAFETY: the allocator returned a non-null allocation large enough
+        // for one deflate state. This is the sole raw state binding in the
+        // reference-based copy engine; no callback runs while it is used.
+        let destination_state = unsafe { &mut *destination_state_ptr };
         deflate_copy_state(destination_state, source_state);
-        destination_state.strm = dest;
+        destination_state.strm = ::core::ptr::from_mut(dest);
     }
     // Re-read the destination callback and opaque argument before every
     // allocation. A user allocator can modify the published destination
     // stream, and zlib observes those changes on each subsequent request.
     let window = {
-        let Some((dest_stream, _destination_state)) = deflateStateCheck(dest) else {
+        let Some((dest_stream, _destination_state)) = deflateStateCheckBound(dest) else {
             return crate::zlib_h::Z_STREAM_ERROR;
         };
         Some(dest_stream.zalloc.expect("non-null function pointer"))
@@ -2888,7 +2876,7 @@ pub fn deflateCopy(
         ) as *mut crate::stdlib::Bytef
     };
     let prev = {
-        let Some((dest_stream, _destination_state)) = deflateStateCheck(dest) else {
+        let Some((dest_stream, _destination_state)) = deflateStateCheckBound(dest) else {
             return crate::zlib_h::Z_STREAM_ERROR;
         };
         Some(dest_stream.zalloc.expect("non-null function pointer"))
@@ -2899,7 +2887,7 @@ pub fn deflateCopy(
         ) as *mut crate::src::deflate::Posf
     };
     let head = {
-        let Some((dest_stream, _destination_state)) = deflateStateCheck(dest) else {
+        let Some((dest_stream, _destination_state)) = deflateStateCheckBound(dest) else {
             return crate::zlib_h::Z_STREAM_ERROR;
         };
         Some(dest_stream.zalloc.expect("non-null function pointer"))
@@ -2910,7 +2898,7 @@ pub fn deflateCopy(
         ) as *mut crate::src::deflate::Posf
     };
     let pending_buf = {
-        let Some((dest_stream, _destination_state)) = deflateStateCheck(dest) else {
+        let Some((dest_stream, _destination_state)) = deflateStateCheckBound(dest) else {
             return crate::zlib_h::Z_STREAM_ERROR;
         };
         Some(dest_stream.zalloc.expect("non-null function pointer"))
@@ -2921,7 +2909,7 @@ pub fn deflateCopy(
         ) as *mut crate::zutil_h::uchf as *mut crate::stdlib::Bytef
     };
     if window.is_null() || prev.is_null() || head.is_null() || pending_buf.is_null() {
-        if let Some((destination_stream, _destination_state)) = deflateStateCheck(dest) {
+        if let Some((destination_stream, _destination_state)) = deflateStateCheckBound(dest) {
             deflateEnd(destination_stream);
         }
         return crate::zlib_h::Z_MEM_ERROR;
@@ -2931,10 +2919,10 @@ pub fn deflateCopy(
     // ordinary reference and slice operations instead of repeated raw-state
     // dereferences. The initial state copy intentionally remains before the
     // callbacks above, where zlib makes it observable through `dest->state`.
-    let Some((source_stream, source_state)) = deflateStateCheck(source) else {
+    let Some((source_stream, source_state)) = deflateStateCheckBound(source) else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
-    let Some((destination_stream, destination_state)) = deflateStateCheck(dest) else {
+    let Some((destination_stream, destination_state)) = deflateStateCheckBound(dest) else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
     // `pending_out` is an offset into the source pending allocation. Retain
@@ -2996,7 +2984,6 @@ pub fn deflateCopy(
     destination_state.bl_desc.dyn_tree = &raw mut destination_state.bl_tree as *mut crate::src::deflate::ct_data_s
         as *mut crate::src::deflate::ct_data;
     return crate::zlib_h::Z_OK;
-    }
 }
 
 fn deflate_copy_state(
@@ -3006,9 +2993,10 @@ fn deflate_copy_state(
     *destination_state = *source_state;
 }
 
-// The source state has passed `deflateStateCheck()` before this is called.
+// The source state has passed `deflateStateCheckBound()` before this is called.
 // Keep all byte-count and range policy here, separate from the raw binding in
-// `deflateCopy()`, so the actual copies below are checked slice operations.
+// `deflateCopy()`, so the actual copies below are checked slice
+// operations.
 struct DeflateCopyPlan {
     window_items: crate::stdlib::uInt,
     prev_items: crate::stdlib::uInt,
@@ -3087,13 +3075,48 @@ fn deflate_copy_buffers(
     destination_pending[plan.symbols.clone()]
         .copy_from_slice(&source_pending[plan.symbols.clone()]);
 }
+
+// Preserve the self-copy result in the named implementation, while leaving
+// raw foreign-pointer binding in the exported adapter. The distinct variant
+// guarantees the copy engine can hold two independent mutable streams.
+enum DeflateCopyInput<'a> {
+    Same(&'a mut crate::zlib_h::z_stream),
+    Distinct(
+        &'a mut crate::zlib_h::z_stream,
+        &'a mut crate::zlib_h::z_stream,
+    ),
+}
+
+fn deflate_copy_from_input(input: DeflateCopyInput<'_>) -> ::core::ffi::c_int {
+    match input {
+        DeflateCopyInput::Same(_stream) => crate::zlib_h::Z_OK,
+        DeflateCopyInput::Distinct(dest, source) => deflateCopy(dest, source),
+    }
+}
 #[export_name = "deflateCopy"]
 
 pub unsafe extern "C" fn deflateCopy_ffi(
     mut dest: crate::zlib_h::z_streamp,
     mut source: crate::zlib_h::z_streamp,
 ) -> ::core::ffi::c_int {
-    deflateCopy(dest, source)
+    if dest.is_null() || source.is_null() {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    }
+    // Capture aliasing before binding either pointer: forming two mutable
+    // references to the same foreign stream would be invalid even though
+    // zlib defines self-copy as a successful no-op.
+    let same_stream = dest == source;
+    // SAFETY: the non-null destination pointer is bound once at this ABI
+    // boundary. The distinct case below binds a separately proven source.
+    let dest = unsafe { &mut *dest };
+    if same_stream {
+        deflate_copy_from_input(DeflateCopyInput::Same(dest))
+    } else {
+        // SAFETY: pointer inequality above permits an independent source
+        // reference for the implementation's distinct-stream operation.
+        let source = unsafe { &mut *source };
+        deflate_copy_from_input(DeflateCopyInput::Distinct(dest, source))
+    }
 }
 fn longest_match_bytes(
     state: &mut crate::src::deflate::deflate_state,
