@@ -1267,11 +1267,27 @@ where
     owner.commit(completion)
 }
 
+// Run a complete callback-back request after its ABI stream/state association
+// has been projected into the pointer-free owner.  Keeping this separately
+// named lets later owner work remove that association without moving callback
+// or diagnostic policy into the export wrapper.
+fn inflate_back_from_stream<InputVisitor, OutputVisitor>(
+    owner: &mut InflateBackStateOwner<'_>,
+    input_visit: InputVisitor,
+    output_visit: OutputVisitor,
+) -> InflateBackDecodeResult
+where
+    InputVisitor: FnMut(&mut dyn FnMut(&[::core::ffi::c_uchar]) -> usize),
+    OutputVisitor: FnMut(&[::core::ffi::c_uchar]) -> ::core::ffi::c_int,
+{
+    inflateBack(owner, input_visit, output_visit)
+}
+
 // This is the complete ABI projection boundary.  It only associates the
 // validated stream with its callback-backed state, builds the pointer-free
 // owner, and publishes the completed diagnostic.  Decoder work remains in
-// `inflateBack()` above.
-unsafe fn inflate_back_from_stream<InputVisitor, OutputVisitor>(
+// `inflate_back_from_stream()` above.
+unsafe fn inflate_back_from_abi_stream<InputVisitor, OutputVisitor>(
     strm: &mut crate::zlib_h::z_stream_s,
     input_visit: InputVisitor,
     output_visit: OutputVisitor,
@@ -1292,7 +1308,7 @@ where
         raw_state.back_window.as_mut().expect("inflateBack window"),
     );
     let mut owner = InflateBackStateOwner::new(normal, back_window);
-    let result = inflateBack(&mut owner, input_visit, output_visit);
+    let result = inflate_back_from_stream(&mut owner, input_visit, output_visit);
     if let Some(message) = result.message {
         strm.msg = message.as_ptr().cast_mut().cast();
     }
@@ -1320,7 +1336,7 @@ pub unsafe extern "C" fn inflateBack_ffi(
     } else {
         strm.avail_in as ::core::ffi::c_uint
     };
-    let status = inflate_back_from_stream(
+    let status = inflate_back_from_abi_stream(
         strm,
         |consume| {
             if have == 0 {
