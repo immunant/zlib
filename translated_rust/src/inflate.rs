@@ -572,19 +572,29 @@ fn update_window(
 
 // Updating a bound inflater window is an internal operation, not an ABI
 // entry point. Its pointer binding remains confined to this adapter.
-unsafe fn updatewindow(
+fn updatewindow(
     strm: crate::zlib_h::z_streamp,
     end: *const crate::stdlib::Bytef,
     copy: ::core::ffi::c_uint,
 ) -> ::core::ffi::c_int {
-    let state = &mut *((*strm).state as *mut crate::src::inflate::inflate_state);
+    // SAFETY: `inflate()` has already validated its stream and state before
+    // this internal helper is reached.
+    let stream = unsafe { &mut *strm };
+    // SAFETY: the validated stream owns a live inflater state.
+    let state = unsafe {
+        &mut *(stream.state as *mut crate::src::inflate::inflate_state)
+    };
     if state.window.is_null() {
-        state.window = Some((*strm).zalloc.expect("non-null function pointer"))
-            .expect("non-null function pointer")(
-            (*strm).opaque,
-            (1 as crate::stdlib::uInt) << state.wbits,
-            ::core::mem::size_of::<::core::ffi::c_uchar>() as crate::stdlib::uInt,
-        ) as *mut ::core::ffi::c_uchar;
+        // SAFETY: zlib's initialized allocator is invoked with the same
+        // window size and element count as the C implementation.
+        state.window = unsafe {
+            Some(stream.zalloc.expect("non-null function pointer"))
+                .expect("non-null function pointer")(
+                stream.opaque,
+                (1 as crate::stdlib::uInt) << state.wbits,
+                ::core::mem::size_of::<::core::ffi::c_uchar>() as crate::stdlib::uInt,
+            ) as *mut ::core::ffi::c_uchar
+        };
         if state.window.is_null() {
             return 1;
         }
@@ -592,12 +602,18 @@ unsafe fn updatewindow(
     let end = if copy == 0 {
         &[]
     } else {
-        ::core::slice::from_raw_parts(end.wrapping_sub(copy as usize), copy as usize)
+        // SAFETY: `end` is the post-inflate output cursor, and `copy` is the
+        // bounded number of bytes produced immediately before it.
+        unsafe { ::core::slice::from_raw_parts(end.wrapping_sub(copy as usize), copy as usize) }
     };
-    let window = ::core::slice::from_raw_parts_mut(
-        state.window,
-        ((1 as ::core::ffi::c_uint) << state.wbits) as usize,
-    );
+    // SAFETY: a successful allocation above (or the initialized existing
+    // window) has exactly the configured window length.
+    let window = unsafe {
+        ::core::slice::from_raw_parts_mut(
+            state.window,
+            ((1 as ::core::ffi::c_uint) << state.wbits) as usize,
+        )
+    };
     update_window(state, window, end);
     0
 }
