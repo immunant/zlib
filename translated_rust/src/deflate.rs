@@ -1,5 +1,4 @@
 // =============== BEGIN deflate_h ================
-pub use crate::src::trees::static_tree_desc_s;
 
 pub const LENGTH_CODES: ::core::ffi::c_int = 29 as ::core::ffi::c_int;
 
@@ -58,7 +57,10 @@ pub union C2Rust_Unnamed_0 {
     pub len: crate::zutil_h::ush,
 }
 
-pub type static_tree_desc = crate::src::deflate::static_tree_desc_s;
+pub type StaticTreeKind = ::core::ffi::c_int;
+pub const STATIC_LITERAL_LENGTH: StaticTreeKind = 1;
+pub const STATIC_DISTANCE: StaticTreeKind = 2;
+pub const STATIC_BIT_LENGTH: StaticTreeKind = 3;
 
 pub type tree_desc = crate::src::deflate::tree_desc_s;
 #[derive(Copy, Clone)]
@@ -67,7 +69,7 @@ pub type tree_desc = crate::src::deflate::tree_desc_s;
 pub struct tree_desc_s {
     pub dyn_tree: *mut crate::src::deflate::ct_data,
     pub max_code: ::core::ffi::c_int,
-    pub stat_desc: *const crate::src::deflate::static_tree_desc,
+    pub stat_desc: StaticTreeKind,
 }
 
 pub type Pos = crate::zutil_h::ush;
