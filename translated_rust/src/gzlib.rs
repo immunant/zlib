@@ -567,6 +567,73 @@ struct GzOpenMode {
     exclusive: ::core::ffi::c_int,
 }
 
+// This is the pointer-free input for constructing an opaque gzip owner.  The
+// ABI handle is still assembled at the boundary, but parsing, mode
+// normalization, path ownership, and open-flag selection no longer need to
+// borrow its embedded ABI stream.  A later C0 owner split can construct its
+// safe state directly from this value.
+struct GzOpenConfig {
+    mode: GzOpenMode,
+    path: Box<[u8]>,
+}
+
+impl GzOpenConfig {
+    // Callers normalize the parsed mode before path allocation, matching
+    // gz_open's existing failure ordering for invalid mode combinations.
+    fn new(path: &[u8], mode: GzOpenMode) -> Option<Self> {
+        let mut path_bytes = Vec::new();
+        path_bytes.try_reserve_exact(path.len()).ok()?;
+        path_bytes.extend_from_slice(path);
+        Some(Self {
+            mode,
+            path: path_bytes.into_boxed_slice(),
+        })
+    }
+
+    fn open_flags(&self) -> ::core::ffi::c_int {
+        self.mode.oflag
+            | crate::stdlib::O_LARGEFILE
+            | if self.mode.mode == crate::gzguts_h::GZ_READ {
+                crate::stdlib::O_RDONLY
+            } else {
+                crate::stdlib::O_WRONLY
+                    | crate::stdlib::O_CREAT
+                    | if self.mode.exclusive != 0 {
+                        crate::stdlib::O_EXCL
+                    } else {
+                        0
+                    }
+                    | if self.mode.mode == crate::gzguts_h::GZ_WRITE {
+                        crate::stdlib::O_TRUNC
+                    } else {
+                        crate::stdlib::O_APPEND
+                    }
+            }
+    }
+}
+
+impl GzOpenMode {
+    // Normalize the state selected by the mode string before allocating a
+    // path or adopting a descriptor.  The result contains no ABI cursor or
+    // raw stream state.
+    fn normalize(mut self) -> Option<Self> {
+        if self.mode == crate::gzguts_h::GZ_NONE {
+            return None;
+        }
+        if self.mode == crate::gzguts_h::GZ_READ {
+            if self.direct == 1 {
+                return None;
+            }
+            if self.direct == 0 {
+                self.direct = 1;
+            }
+        } else if self.direct == -1 {
+            return None;
+        }
+        Some(self)
+    }
+}
+
 fn parse_gz_open_mode(mode: &[u8]) -> Option<GzOpenMode> {
     let mut parsed = GzOpenMode {
         mode: crate::gzguts_h::GZ_NONE,
@@ -657,58 +724,24 @@ unsafe fn gz_open(path: &[u8], fd: ::core::ffi::c_int, mode: &[u8]) -> crate::zl
             reserved: 0,
         },
     });
-    let Some(parsed_mode) = parse_gz_open_mode(mode) else {
+    let Some(mode) = parse_gz_open_mode(mode).and_then(GzOpenMode::normalize) else {
         return ::core::ptr::null_mut::<crate::zlib_h::gzFile_s>();
     };
-    let mut oflag = parsed_mode.oflag;
-    let exclusive = parsed_mode.exclusive;
+    let Some(config) = GzOpenConfig::new(path, mode) else {
+        return ::core::ptr::null_mut::<crate::zlib_h::gzFile_s>();
+    };
+    let oflag = config.open_flags();
     let state_ref = state_owner
         .first_mut()
         .expect("gzip state owner contains its reserved state");
     state_ref.size = 0 as ::core::ffi::c_uint;
     state_ref.want = crate::gzguts_h::GZBUFSIZE as ::core::ffi::c_uint;
     state_ref.err = crate::zlib_h::Z_OK;
-    state_ref.mode = parsed_mode.mode;
-    state_ref.level = parsed_mode.level;
-    state_ref.strategy = parsed_mode.strategy;
-    state_ref.direct = parsed_mode.direct;
-    if state_ref.mode == crate::gzguts_h::GZ_NONE {
-        return ::core::ptr::null_mut::<crate::zlib_h::gzFile_s>();
-    }
-    if state_ref.mode == crate::gzguts_h::GZ_READ {
-        if state_ref.direct == 1 as ::core::ffi::c_int {
-            return ::core::ptr::null_mut::<crate::zlib_h::gzFile_s>();
-        }
-        if state_ref.direct == 0 as ::core::ffi::c_int {
-            state_ref.direct = 1 as ::core::ffi::c_int;
-        }
-    } else if state_ref.direct == -1 as ::core::ffi::c_int {
-        return ::core::ptr::null_mut::<crate::zlib_h::gzFile_s>();
-    }
-    let path_input = path;
-    let mut path_bytes = Vec::new();
-    if path_bytes.try_reserve_exact(path_input.len()).is_err() {
-        return ::core::ptr::null_mut::<crate::zlib_h::gzFile_s>();
-    }
-    path_bytes.extend_from_slice(path_input);
-    state_ref.path = Some(path_bytes.into_boxed_slice());
-    oflag |= crate::stdlib::O_LARGEFILE
-        | (if state_ref.mode == crate::gzguts_h::GZ_READ {
-            crate::stdlib::O_RDONLY
-        } else {
-            crate::stdlib::O_WRONLY
-                | crate::stdlib::O_CREAT
-                | (if exclusive != 0 {
-                    crate::stdlib::O_EXCL
-                } else {
-                    0 as ::core::ffi::c_int
-                })
-                | (if state_ref.mode == crate::gzguts_h::GZ_WRITE {
-                    crate::stdlib::O_TRUNC
-                } else {
-                    crate::stdlib::O_APPEND
-                })
-        });
+    state_ref.mode = config.mode.mode;
+    state_ref.level = config.mode.level;
+    state_ref.strategy = config.mode.strategy;
+    state_ref.direct = config.mode.direct;
+    state_ref.path = Some(config.path);
     if fd == -1 as ::core::ffi::c_int {
         match rustix::fs::open(
             path,
