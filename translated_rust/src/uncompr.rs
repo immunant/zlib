@@ -163,10 +163,17 @@ macro_rules! uncompress2_z_at_boundary {
                 } else {
                     Some(&mut *(*state).head)
                 };
+                let Some(buffers) =
+                    crate::src::inflate::inflate_buffers_at_boundary!(&mut stream, &mut *state,)
+                else {
+                    err = crate::zlib_h::Z_STREAM_ERROR;
+                    break;
+                };
                 err = crate::src::inflate::inflate(
                     &mut stream,
                     &mut *state,
                     gzip_header,
+                    buffers,
                     crate::zlib_h::Z_NO_FLUSH,
                 );
                 if err != crate::zlib_h::Z_OK {

@@ -524,12 +524,19 @@ macro_rules! gz_decomp_at_boundary {
                     } else {
                         Some(&mut *(*inflate_state).head)
                     };
-                    crate::src::inflate::inflate(
+                    match crate::src::inflate::inflate_buffers_at_boundary!(
                         &mut state.strm,
                         &mut *inflate_state,
-                        gzip_header,
-                        crate::zlib_h::Z_NO_FLUSH,
-                    )
+                    ) {
+                        Some(buffers) => crate::src::inflate::inflate(
+                            &mut state.strm,
+                            &mut *inflate_state,
+                            gzip_header,
+                            buffers,
+                            crate::zlib_h::Z_NO_FLUSH,
+                        ),
+                        None => crate::zlib_h::Z_STREAM_ERROR,
+                    }
                 };
                 let Some(next_input_index) = gz_input_advance(
                     state.input_index,

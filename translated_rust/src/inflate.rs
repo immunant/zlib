@@ -1873,10 +1873,60 @@ fn inflate_publish_cursors(
     Some(())
 }
 
+/// The bounded cursor and history views for one ordinary inflate invocation.
+/// These are created only by existing ABI/caller boundaries after they have
+/// adopted the C-compatible stream and state records.  The dispatcher keeps
+/// the views for its no-callback decode loop, so it never has to lend the
+/// entry cursors from raw pointers itself.
+pub struct InflateBuffers<'a> {
+    pub(crate) input: &'a [crate::stdlib::Bytef],
+    pub(crate) output: &'a mut [crate::stdlib::Bytef],
+    pub(crate) window: Option<&'a [crate::stdlib::Bytef]>,
+}
+
+// This expands only at an existing ABI/caller boundary.  The ordinary
+// dispatcher receives the already-bounded views and performs no entry cursor
+// raw lending itself.  In particular, retain zlib's valid null input cursor
+// when `avail_in` is zero, while preserving its required non-null output
+// cursor even for an empty output span.
+macro_rules! inflate_buffers_at_boundary {
+    ($strm:expr, $state:expr $(,)?) => {{
+        let strm = &mut *$strm;
+        let state = &mut *$state;
+        let input_len = strm.avail_in as usize;
+        let output_len = strm.avail_out as usize;
+        if strm.next_out.is_null() || (input_len != 0 && strm.next_in.is_null()) {
+            None
+        } else {
+            let input = if input_len == 0 {
+                &[]
+            } else {
+                ::core::slice::from_raw_parts(strm.next_in, input_len)
+            };
+            let output = ::core::slice::from_raw_parts_mut(strm.next_out, output_len);
+            let window = if state.window.is_null() {
+                None
+            } else {
+                Some(::core::slice::from_raw_parts(
+                    state.window,
+                    state.wsize as usize,
+                ))
+            };
+            Some(crate::src::inflate::InflateBuffers {
+                input,
+                output,
+                window,
+            })
+        }
+    }};
+}
+pub(crate) use inflate_buffers_at_boundary;
+
 pub fn inflate(
     strm_ref: &mut crate::zlib_h::z_stream,
     state_ref: &mut crate::src::inflate::inflate_state,
     mut gzip_header: Option<&mut crate::zlib_h::gz_header>,
+    buffers: InflateBuffers<'_>,
     mut flush: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
     // Rust callers pass both already-adopted compatibility records directly.
@@ -1972,20 +2022,14 @@ pub fn inflate(
             // Keep that one invocation-local borrow for every header field
             // update, then end it with the other cursor views before the exit
             // path can invoke an allocation callback.
-            let input = if have == 0 {
-                &[]
-            } else {
-                ::core::slice::from_raw_parts(strm_ref.next_in, have as usize)
-            };
-            let output = ::core::slice::from_raw_parts_mut(strm_ref.next_out, left as usize);
-            let window = if state_ref.window.is_null() {
-                None
-            } else {
-                Some(::core::slice::from_raw_parts(
-                    state_ref.window,
-                    state_ref.wsize as usize,
-                ))
-            };
+            let InflateBuffers {
+                input,
+                output,
+                window,
+            } = buffers;
+            if input.len() != have as usize || output.len() != left as usize {
+                return crate::zlib_h::Z_STREAM_ERROR;
+            }
             '_inf_leave: loop {
                 'c_2425: {
                     'c_2327: {
@@ -3991,7 +4035,10 @@ pub unsafe extern "C" fn inflate_ffi(
     } else {
         Some(&mut *state_ref.head)
     };
-    inflate(strm_ref, state_ref, gzip_header, flush)
+    let Some(buffers) = inflate_buffers_at_boundary!(strm_ref, state_ref) else {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    };
+    inflate(strm_ref, state_ref, gzip_header, buffers, flush)
 }
 // This expands only in export-attributed ABI functions (including the
 // boundary macros used by gzip and one-shot decompression).  Destruction
