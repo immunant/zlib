@@ -481,11 +481,21 @@ fn gz_comp_output_produced(
     avail_out_before.wrapping_sub(avail_out_after)
 }
 
-fn gz_comp_pending_after_output(
-    pending: crate::stdlib::uInt,
+struct GzCompDeflateProgress {
     produced: ::core::ffi::c_uint,
-) -> crate::stdlib::uInt {
-    pending.wrapping_add(produced as crate::stdlib::uInt)
+    pending: crate::stdlib::uInt,
+}
+
+fn gz_comp_deflate_progress(
+    avail_out_before: ::core::ffi::c_uint,
+    avail_out_after: ::core::ffi::c_uint,
+    pending: crate::stdlib::uInt,
+) -> GzCompDeflateProgress {
+    let produced = gz_comp_output_produced(avail_out_before, avail_out_after);
+    GzCompDeflateProgress {
+        produced,
+        pending: pending.wrapping_add(produced as crate::stdlib::uInt),
+    }
 }
 
 fn gz_comp_pending_after_write(
@@ -685,8 +695,10 @@ unsafe fn gz_comp(
             );
             return -1 as ::core::ffi::c_int;
         }
-        have = gz_comp_output_produced(have, (*strm).avail_out as ::core::ffi::c_uint);
-        *out_pending = gz_comp_pending_after_output(*out_pending, have);
+        let progress =
+            gz_comp_deflate_progress(have, (*strm).avail_out as ::core::ffi::c_uint, *out_pending);
+        have = progress.produced;
+        *out_pending = progress.pending;
         if !gz_comp_has_output(have) {
             break;
         }
@@ -1136,14 +1148,14 @@ pub unsafe extern "C" fn gzclose_w_ffi(mut file: crate::zlib_h::gzFile) -> ::cor
 #[cfg(test)]
 mod tests {
     use super::{
-        gz_buffer_is_initialized, gz_comp_deflate_stream_is_corrupt, gz_comp_direct_write_progress,
-        gz_comp_has_output, gz_comp_max_write_chunk, gz_comp_needs_output_buffer_reset,
-        gz_comp_needs_output_write, gz_comp_needs_reset, gz_comp_output_produced,
-        gz_comp_output_write_chunk_len, gz_comp_output_write_progress,
-        gz_comp_pending_after_output, gz_comp_pending_after_write, gz_comp_reset_action,
-        gz_comp_reset_after_flush, gz_comp_skips_empty_flush, gz_comp_write_again,
-        gz_comp_write_chunk_len, gz_comp_write_failed, gz_comp_write_failure, gz_comp_write_result,
-        gz_has_pending_input, gz_has_pending_skip, gz_init_stream_defaults, gz_write_advanced_pos,
+        gz_buffer_is_initialized, gz_comp_deflate_progress, gz_comp_deflate_stream_is_corrupt,
+        gz_comp_direct_write_progress, gz_comp_has_output, gz_comp_max_write_chunk,
+        gz_comp_needs_output_buffer_reset, gz_comp_needs_output_write, gz_comp_needs_reset,
+        gz_comp_output_produced, gz_comp_output_write_chunk_len, gz_comp_output_write_progress,
+        gz_comp_pending_after_write, gz_comp_reset_action, gz_comp_reset_after_flush,
+        gz_comp_skips_empty_flush, gz_comp_write_again, gz_comp_write_chunk_len,
+        gz_comp_write_failed, gz_comp_write_failure, gz_comp_write_result, gz_has_pending_input,
+        gz_has_pending_skip, gz_init_stream_defaults, gz_write_advanced_pos,
         gz_write_apply_chunk_progress, gz_write_buffered_copy_len, gz_write_buffered_progress,
         gz_write_chunk_len, gz_write_consumed, gz_write_direct_action, gz_write_errno_is_retryable,
         gz_write_error_result, gz_write_is_empty, gz_write_progress,
@@ -1601,15 +1613,31 @@ mod tests {
     }
 
     #[test]
-    fn gz_comp_pending_output_tracks_produced_and_written_bytes() {
-        let pending = gz_comp_pending_after_output(0, 100);
-        assert_eq!(pending, 100);
-        assert_eq!(gz_comp_pending_after_write(pending, 20), 80);
+    fn gz_comp_deflate_progress_tracks_produced_and_pending_bytes() {
+        let progress = gz_comp_deflate_progress(1024, 24, 100);
+
+        assert_eq!(progress.produced, 1000);
+        assert_eq!(progress.pending, 1100);
+        assert_eq!(gz_comp_pending_after_write(progress.pending, 20), 1080);
     }
 
     #[test]
-    fn gz_comp_pending_output_preserves_wrapping_accounting() {
-        assert_eq!(gz_comp_pending_after_output(crate::stdlib::uInt::MAX, 1), 0);
+    fn gz_comp_deflate_progress_handles_zero_and_wrapping_output() {
+        let empty = gz_comp_deflate_progress(1024, 1024, 9);
+        assert_eq!(empty.produced, 0);
+        assert_eq!(empty.pending, 9);
+
+        let wrapping = gz_comp_deflate_progress(0, 1, crate::stdlib::uInt::MAX);
+        assert_eq!(wrapping.produced, ::core::ffi::c_uint::MAX);
+        assert_eq!(wrapping.pending, crate::stdlib::uInt::MAX.wrapping_sub(1));
+    }
+
+    #[test]
+    fn gz_comp_deflate_progress_preserves_pending_wrapping_accounting() {
+        assert_eq!(
+            gz_comp_deflate_progress(1, 0, crate::stdlib::uInt::MAX).pending,
+            0
+        );
         assert_eq!(gz_comp_pending_after_write(0, 1), crate::stdlib::uInt::MAX);
     }
 

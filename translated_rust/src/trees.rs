@@ -3897,7 +3897,7 @@ unsafe fn pqdownheap(
             let right = (*s).heap[(j + 1 as ::core::ffi::c_int) as usize];
             let left = (*s).heap[j as usize];
             if heap_node_precedes(
-                (*tree.offset(right as isize)).fc.value,
+                (*tree.wrapping_add(right as usize)).fc.value,
                 (*s).depth[right as usize],
                 (*tree.offset(left as isize)).fc.value,
                 (*s).depth[left as usize],
