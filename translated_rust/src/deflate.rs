@@ -2555,6 +2555,98 @@ unsafe extern "C" fn longest_match(
 
 pub const MAX_STORED: ::core::ffi::c_int = 65535 as ::core::ffi::c_int;
 
+fn update_stored_history_state(
+    s: &mut crate::src::deflate::deflate_state,
+    window: &mut [crate::stdlib::Byte],
+    consumed: &[crate::stdlib::Byte],
+) -> bool {
+    let Ok(used) = crate::stdlib::uInt::try_from(consumed.len()) else {
+        return false;
+    };
+    if used == 0 {
+        return true;
+    }
+    let Ok(wsize) = usize::try_from(s.w_size) else {
+        return false;
+    };
+    let Ok(window_size) = usize::try_from(s.window_size) else {
+        return false;
+    };
+    let Ok(strstart) = usize::try_from(s.strstart) else {
+        return false;
+    };
+    let Ok(insert) = usize::try_from(s.insert) else {
+        return false;
+    };
+    if wsize == 0
+        || window_size > window.len()
+        || wsize > window_size
+        || strstart > window_size
+        || insert > wsize
+    {
+        return false;
+    }
+
+    if used >= s.w_size {
+        if wsize > consumed.len() || wsize > window_size {
+            return false;
+        }
+        let tail_start = consumed.len() - wsize;
+        window[..wsize].copy_from_slice(&consumed[tail_start..]);
+        s.matches = 2;
+        s.strstart = s.w_size;
+        s.insert = s.strstart;
+    } else {
+        let used = used as usize;
+        let slide = s
+            .window_size
+            .wrapping_sub(s.strstart as crate::zutil_h::ulg)
+            <= used as crate::zutil_h::ulg;
+        let new_strstart = if slide {
+            let Some(new_strstart) = strstart.checked_sub(wsize) else {
+                return false;
+            };
+            let Some(source_end) = wsize.checked_add(new_strstart) else {
+                return false;
+            };
+            if source_end > window_size {
+                return false;
+            }
+            new_strstart
+        } else {
+            strstart
+        };
+        let Some(destination_end) = new_strstart.checked_add(used) else {
+            return false;
+        };
+        if destination_end > window_size {
+            return false;
+        }
+        let new_insert = if slide {
+            insert.min(new_strstart)
+        } else {
+            insert
+        };
+        let insert_add = used.min(wsize - new_insert);
+
+        if slide {
+            let source_end = wsize + new_strstart;
+            window.copy_within(wsize..source_end, 0);
+            if s.matches < 2 {
+                s.matches = s.matches.wrapping_add(1);
+            }
+        }
+        window[new_strstart..destination_end].copy_from_slice(consumed);
+        s.strstart = (new_strstart + used) as crate::stdlib::uInt;
+        s.insert = (new_insert + insert_add) as crate::stdlib::uInt;
+    }
+    s.block_start = s.strstart as ::core::ffi::c_long;
+    if s.high_water < s.strstart as crate::zutil_h::ulg {
+        s.high_water = s.strstart as crate::zutil_h::ulg;
+    }
+    true
+}
+
 unsafe extern "C" fn deflate_stored(
     mut s: *mut crate::src::deflate::deflate_state,
     mut flush: ::core::ffi::c_int,
@@ -2657,53 +2749,21 @@ unsafe extern "C" fn deflate_stored(
     }
     used = used.wrapping_sub((*(*s).strm).avail_in as ::core::ffi::c_uint);
     if used != 0 {
-        if used >= (*s).w_size {
-            (*s).matches = 2 as crate::stdlib::uInt;
-            crate::stdlib::memcpy(
-                (*s).window as *mut ::core::ffi::c_void,
-                (*(*s).strm).next_in.offset(-((*s).w_size as isize)) as *const ::core::ffi::c_void,
-                (*s).w_size as crate::__stddef_size_t_h::size_t,
-            );
-            (*s).strstart = (*s).w_size;
-            (*s).insert = (*s).strstart;
-        } else {
-            if (*s)
-                .window_size
-                .wrapping_sub((*s).strstart as crate::zutil_h::ulg)
-                <= used as crate::zutil_h::ulg
-            {
-                (*s).strstart = (*s).strstart.wrapping_sub((*s).w_size);
-                crate::stdlib::memcpy(
-                    (*s).window as *mut ::core::ffi::c_void,
-                    (*s).window.offset((*s).w_size as isize) as *const ::core::ffi::c_void,
-                    (*s).strstart as crate::__stddef_size_t_h::size_t,
-                );
-                if (*s).matches < 2 as crate::stdlib::uInt {
-                    (*s).matches = (*s).matches.wrapping_add(1);
-                }
-                if (*s).insert > (*s).strstart {
-                    (*s).insert = (*s).strstart;
-                }
-            }
-            crate::stdlib::memcpy(
-                (*s).window.offset((*s).strstart as isize) as *mut ::core::ffi::c_void,
-                (*(*s).strm).next_in.offset(-(used as isize)) as *const ::core::ffi::c_void,
-                used as crate::__stddef_size_t_h::size_t,
-            );
-            (*s).strstart = (*s).strstart.wrapping_add(used);
-            (*s).insert =
-                (*s).insert
-                    .wrapping_add(if used > (*s).w_size.wrapping_sub((*s).insert) {
-                        ((*s).w_size as ::core::ffi::c_uint)
-                            .wrapping_sub((*s).insert as ::core::ffi::c_uint)
-                    } else {
-                        used
-                    });
+        let Ok(window_len) = usize::try_from((*s).window_size) else {
+            return need_more;
+        };
+        let Ok(used_len) = usize::try_from(used) else {
+            return need_more;
+        };
+        if (*s).window.is_null() || (*(*s).strm).next_in.is_null() {
+            return need_more;
         }
-        (*s).block_start = (*s).strstart as ::core::ffi::c_long;
-    }
-    if (*s).high_water < (*s).strstart as crate::zutil_h::ulg {
-        (*s).high_water = (*s).strstart as crate::zutil_h::ulg;
+        let window = ::core::slice::from_raw_parts_mut((*s).window, window_len);
+        let consumed =
+            ::core::slice::from_raw_parts((*(*s).strm).next_in.offset(-(used as isize)), used_len);
+        if !update_stored_history_state(&mut *s, window, consumed) {
+            return need_more;
+        }
     }
     if last != 0 {
         (*s).bi_used = 8 as ::core::ffi::c_int;
