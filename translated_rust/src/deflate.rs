@@ -714,7 +714,7 @@ fn slide_window_state(
 }
 
 fn read_buf(
-    mut strm: crate::zlib_h::z_streamp,
+    strm: &mut crate::zlib_h::z_stream,
     buf: &mut [crate::stdlib::Bytef],
     mut size: ::core::ffi::c_uint,
     wrap: ::core::ffi::c_int,
@@ -722,12 +722,7 @@ fn read_buf(
     // The caller already owns the exact writable destination span. Keep that
     // ownership in the type instead of lending the output cursor again here.
     // The ABI input cursor remains the one transitional raw boundary in this
-    // adapter.
-    unsafe {
-        if strm.is_null() {
-            return ReadBufProgress::default();
-        }
-        let strm = &mut *strm;
+    // adapter; its stream record is already a validated safe borrow.
         let len = strm.avail_in.min(size);
         if len == 0 {
             return ReadBufProgress {
@@ -747,7 +742,7 @@ fn read_buf(
                 avail_in: strm.avail_in,
             };
         }
-        let input = ::core::slice::from_raw_parts(strm.next_in, len_usize);
+        let input = unsafe { ::core::slice::from_raw_parts(strm.next_in, len_usize) };
         let Some(output) = buf.get_mut(..len_usize) else {
             return ReadBufProgress {
                 copied: 0,
@@ -776,7 +771,6 @@ fn read_buf(
             copied: len,
             avail_in,
         }
-    }
 }
 
 fn fill_window_space_state(
@@ -818,7 +812,10 @@ fn fill_window_write_span(
     (end <= window_len).then_some(start..end)
 }
 
-fn fill_window(s: &mut crate::src::deflate::deflate_state) {
+fn fill_window(
+    s: &mut crate::src::deflate::deflate_state,
+    strm: &mut crate::zlib_h::z_stream,
+) {
     unsafe {
         let mut n: ::core::ffi::c_uint = 0;
         let mut more: ::core::ffi::c_uint = 0;
@@ -886,7 +883,7 @@ fn fill_window(s: &mut crate::src::deflate::deflate_state) {
             let Some(output) = window.get_mut(write_span) else {
                 return;
             };
-            let progress = read_buf(state.strm, output, more, state.wrap);
+            let progress = read_buf(strm, output, more, state.wrap);
             n = progress.copied;
             state.lookahead = state.lookahead.wrapping_add(n);
             let insert_pending = state.lookahead.wrapping_add(state.insert)
@@ -1392,7 +1389,7 @@ pub unsafe extern "C" fn deflateSetDictionary_ffi(
         strm_ref.avail_in = dictLength;
         strm_ref.next_in = dictionary as *mut crate::stdlib::Bytef;
     }
-    fill_window(&mut *s);
+    fill_window(&mut *s, &mut *strm);
     while {
         let state_ref = &mut *s;
         state_ref.lookahead >= crate::zutil_h::MIN_MATCH as crate::stdlib::uInt
@@ -1433,7 +1430,7 @@ pub unsafe extern "C" fn deflateSetDictionary_ffi(
                 return crate::zlib_h::Z_STREAM_ERROR;
             }
         }
-        fill_window(&mut *s);
+        fill_window(&mut *s, &mut *strm);
     }
     {
         let strm_ref = &mut *strm;
@@ -3268,11 +3265,11 @@ pub fn deflate(
                     return crate::zlib_h::Z_STREAM_ERROR;
                 };
                 match compressor {
-                    DeflateCompressor::Stored => deflate_stored(state, flush),
-                    DeflateCompressor::Huffman => deflate_huff(state, flush),
-                    DeflateCompressor::Rle => deflate_rle(state, flush),
-                    DeflateCompressor::Fast => deflate_fast(state, flush),
-                    DeflateCompressor::Slow => deflate_slow(state, flush),
+                    DeflateCompressor::Stored => deflate_stored(state, strm_ref, flush),
+                    DeflateCompressor::Huffman => deflate_huff(state, strm_ref, flush),
+                    DeflateCompressor::Rle => deflate_rle(state, strm_ref, flush),
+                    DeflateCompressor::Fast => deflate_fast(state, strm_ref, flush),
+                    DeflateCompressor::Slow => deflate_slow(state, strm_ref, flush),
                 }
             };
             if bstate as ::core::ffi::c_uint
@@ -4206,6 +4203,7 @@ fn stored_block_window_slice(
 
 fn deflate_stored(
     s: &mut crate::src::deflate::deflate_state,
+    strm: &mut crate::zlib_h::z_stream,
     mut flush: ::core::ffi::c_int,
 ) -> block_state {
     // This transitional codec boundary still owns the compatibility-state
@@ -4226,8 +4224,6 @@ fn deflate_stored(
         loop {
             let (initial_avail_in, initial_input, plan) = {
                 let state = &mut *s;
-                let stream = state.strm;
-                let strm = &mut *stream;
                 (
                     strm.avail_in,
                     strm.next_in,
@@ -4333,7 +4329,7 @@ fn deflate_stored(
                     let Some(destination) = output.get_mut(output_used..) else {
                         return need_more;
                     };
-                    let progress = read_buf(stream, destination, len, state.wrap);
+                    let progress = read_buf(strm, destination, len, state.wrap);
                     remaining_avail_in = progress.avail_in;
                     // Advance by the bytes actually copied. On valid zlib state
                     // this equals `len`; retaining the returned value keeps a
@@ -4376,8 +4372,6 @@ fn deflate_stored(
         }
         {
             let state = &mut *s;
-            let stream = state.strm;
-            let strm = &mut *stream;
             if flush != crate::zlib_h::Z_NO_FLUSH
                 && flush != crate::zlib_h::Z_FINISH
                 && strm.avail_in == 0 as crate::stdlib::uInt
@@ -4423,7 +4417,7 @@ fn deflate_stored(
                 let Some(output) = window.get_mut(write_span) else {
                     return need_more;
                 };
-                let progress = read_buf(stream, output, have, state.wrap);
+                let progress = read_buf(strm, output, have, state.wrap);
                 if progress.copied > have || !record_stored_input_state(state, progress.copied) {
                     return need_more;
                 }
@@ -4476,6 +4470,7 @@ fn deflate_stored(
 
 fn deflate_fast(
     s: &mut crate::src::deflate::deflate_state,
+    strm: &mut crate::zlib_h::z_stream,
     mut flush: ::core::ffi::c_int,
 ) -> block_state {
     // The fast loop still needs the legacy state, window, hash, symbol, and
@@ -4485,19 +4480,16 @@ fn deflate_fast(
         let mut hash_head: crate::src::deflate::IPos = 0;
         let mut bflush: ::core::ffi::c_int = 0;
         loop {
-            let needs_input = {
-                let state = &mut *s;
-                state.lookahead < crate::src::deflate::MIN_LOOKAHEAD as crate::stdlib::uInt
-            };
+            let needs_input =
+                s.lookahead < crate::src::deflate::MIN_LOOKAHEAD as crate::stdlib::uInt;
             if needs_input {
-                fill_window(s);
-                let state = &mut *s;
-                if state.lookahead < crate::src::deflate::MIN_LOOKAHEAD as crate::stdlib::uInt
+                fill_window(s, strm);
+                if s.lookahead < crate::src::deflate::MIN_LOOKAHEAD as crate::stdlib::uInt
                     && flush == crate::zlib_h::Z_NO_FLUSH
                 {
                     return need_more;
                 }
-                if state.lookahead == 0 as crate::stdlib::uInt {
+                if s.lookahead == 0 as crate::stdlib::uInt {
                     break;
                 }
             }
@@ -4763,6 +4755,7 @@ fn deflate_fast(
 
 fn deflate_slow(
     s: &mut crate::src::deflate::deflate_state,
+    strm: &mut crate::zlib_h::z_stream,
     mut flush: ::core::ffi::c_int,
 ) -> block_state {
     // Slow parsing still needs the legacy state, hash-table, symbol-buffer,
@@ -4777,7 +4770,7 @@ fn deflate_slow(
                 state.lookahead < crate::src::deflate::MIN_LOOKAHEAD as crate::stdlib::uInt
             };
             if needs_input {
-                fill_window(s);
+                fill_window(s, strm);
                 let state = &mut *s;
                 if state.lookahead < crate::src::deflate::MIN_LOOKAHEAD as crate::stdlib::uInt
                     && flush == crate::zlib_h::Z_NO_FLUSH
@@ -5418,6 +5411,7 @@ fn filtered_match_length(
 
 fn deflate_rle(
     s: &mut crate::src::deflate::deflate_state,
+    strm: &mut crate::zlib_h::z_stream,
     mut flush: ::core::ffi::c_int,
 ) -> block_state {
     // RLE parsing retains the same transitional callback-owned lends as the
@@ -5430,7 +5424,7 @@ fn deflate_rle(
                 state.lookahead <= crate::zutil_h::MAX_MATCH as crate::stdlib::uInt
             };
             if needs_input {
-                fill_window(s);
+                fill_window(s, strm);
                 let state = &mut *s;
                 if state.lookahead <= crate::zutil_h::MAX_MATCH as crate::stdlib::uInt
                     && flush == crate::zlib_h::Z_NO_FLUSH
@@ -5535,6 +5529,7 @@ fn deflate_rle(
 
 fn deflate_huff(
     s: &mut crate::src::deflate::deflate_state,
+    strm: &mut crate::zlib_h::z_stream,
     mut flush: ::core::ffi::c_int,
 ) -> block_state {
     // The Huffman-only loop still owns transitional raw state, window, and
@@ -5548,7 +5543,7 @@ fn deflate_huff(
                 state.lookahead == 0 as crate::stdlib::uInt
             };
             if needs_input {
-                fill_window(s);
+                fill_window(s, strm);
                 let state = &mut *s;
                 if state.lookahead == 0 as crate::stdlib::uInt
                     && flush == crate::zlib_h::Z_NO_FLUSH
