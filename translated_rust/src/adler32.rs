@@ -17,23 +17,22 @@ pub const NMAX: ::core::ffi::c_int = 5_552;
 const BASE_U64: u64 = BASE as u64;
 const NMAX_USIZE: usize = NMAX as usize;
 
-fn update_byte(adler: &mut u64, sum2: &mut u64, byte: Bytef) {
-    *adler = adler.wrapping_add(byte as u64);
-    *sum2 = sum2.wrapping_add(*adler);
-}
-
-fn update_bounded_block(adler: &mut u64, sum2: &mut u64, block: &[Bytef]) {
+fn update_bounded_block(mut adler: u64, mut sum2: u64, block: &[Bytef]) -> (u64, u64) {
     debug_assert!(block.len() <= NMAX_USIZE);
 
     let mut groups = block.chunks_exact(16);
     for group in &mut groups {
         for &byte in group {
-            update_byte(adler, sum2, byte);
+            adler = adler.wrapping_add(byte as u64);
+            sum2 = sum2.wrapping_add(adler);
         }
     }
     for &byte in groups.remainder() {
-        update_byte(adler, sum2, byte);
+        adler = adler.wrapping_add(byte as u64);
+        sum2 = sum2.wrapping_add(adler);
     }
+
+    (adler, sum2)
 }
 
 fn reduce(adler: &mut u64, sum2: &mut u64) {
@@ -47,7 +46,7 @@ pub fn adler32_z(adler: uLong, buf: &[Bytef]) -> uLong {
     let mut adler = adler & 0xffff;
 
     for block in buf.chunks(NMAX_USIZE) {
-        update_bounded_block(&mut adler, &mut sum2, block);
+        (adler, sum2) = update_bounded_block(adler, sum2, block);
         reduce(&mut adler, &mut sum2);
     }
 

@@ -3572,7 +3572,7 @@ static bl_order: [crate::zutil_h::uch; 19] = [
     15 as ::core::ffi::c_int as crate::zutil_h::uch,
 ];
 
-static mut static_l_desc: crate::src::deflate::static_tree_desc = unsafe {
+static mut static_l_desc: crate::src::deflate::static_tree_desc = {
     static_tree_desc_s {
         static_tree: &raw const static_ltree as *const crate::src::deflate::ct_data,
         extra_bits: &raw const extra_lbits as *const crate::stdlib::intf,
@@ -3582,7 +3582,7 @@ static mut static_l_desc: crate::src::deflate::static_tree_desc = unsafe {
     }
 };
 
-static mut static_d_desc: crate::src::deflate::static_tree_desc = unsafe {
+static mut static_d_desc: crate::src::deflate::static_tree_desc = {
     static_tree_desc_s {
         static_tree: &raw const static_dtree as *const crate::src::deflate::ct_data,
         extra_bits: &raw const extra_dbits as *const crate::stdlib::intf,
@@ -3592,7 +3592,7 @@ static mut static_d_desc: crate::src::deflate::static_tree_desc = unsafe {
     }
 };
 
-static mut static_bl_desc: crate::src::deflate::static_tree_desc = unsafe {
+static mut static_bl_desc: crate::src::deflate::static_tree_desc = {
     static_tree_desc_s {
         static_tree: ::core::ptr::null::<crate::src::deflate::ct_data>(),
         extra_bits: &raw const extra_blbits as *const crate::stdlib::intf,
