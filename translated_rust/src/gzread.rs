@@ -498,8 +498,29 @@ unsafe fn gz_read_impl(
                     n = state.x.have;
                 }
                 let count = n as usize;
-                let source = ::core::slice::from_raw_parts(state.x.next, count);
-                buf[out..out + count].copy_from_slice(source);
+                let Some(start) = state.x.next.addr().checked_sub(state.out.as_ptr().addr())
+                else {
+                    crate::src::gzlib::gz_error_state(
+                        state,
+                        crate::zlib_h::Z_STREAM_ERROR,
+                        Some(c"internal error: output buffer corrupt"),
+                    );
+                    n = 0;
+                    err = -1;
+                    break 's_28;
+                };
+                let Some(end) = start.checked_add(count).filter(|end| *end <= state.out.len())
+                else {
+                    crate::src::gzlib::gz_error_state(
+                        state,
+                        crate::zlib_h::Z_STREAM_ERROR,
+                        Some(c"internal error: output buffer corrupt"),
+                    );
+                    n = 0;
+                    err = -1;
+                    break 's_28;
+                };
+                buf[out..out + count].copy_from_slice(&state.out[start..end]);
                 state.x.next = state.x.next.wrapping_add(count);
                 state.x.have = state.x.have.wrapping_sub(n);
                 if state.err != crate::zlib_h::Z_OK {
