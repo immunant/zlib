@@ -509,6 +509,10 @@ unsafe fn gz_decomp(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int
     // pointer projection at its call boundary.
     let strm = &mut state.strm;
     had = strm.avail_out as ::core::ffi::c_uint;
+    // `inflate()` advances `next_out`, but gzip's buffered cursor must point
+    // at the beginning of this output span. Retain that boundary value rather
+    // than recovering it later with raw-pointer arithmetic.
+    let output_start = strm.next_out;
     loop {
         if strm.avail_in == 0 as crate::stdlib::uInt {
             let cursor_address = strm.next_in.addr();
@@ -583,15 +587,16 @@ unsafe fn gz_decomp(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int
                     ret = crate::zlib_h::Z_OK;
                     break;
                 } else {
-                    let message = if strm.msg.is_null() {
-                        b"compressed data error".as_slice()
-                    } else {
-                        // `inflate()` supplies this diagnostic as a
-                        // NUL-terminated C string. Copy it while the stream
-                        // is borrowed instead of forwarding the ABI state to
-                        // the raw error entry point.
-                        unsafe { ::core::ffi::CStr::from_ptr(strm.msg).to_bytes() }
-                    };
+                    // `inflate()` owns every diagnostic it publishes through
+                    // `strm.msg`. Match that known static storage by address,
+                    // rather than dereferencing the ABI pointer just to copy
+                    // a NUL-terminated string. The fallback preserves the
+                    // established gzip message if no codec diagnostic exists.
+                    let message = crate::src::inflate::INFLATE_ERROR_MESSAGES
+                        .iter()
+                        .find(|known| known.as_ptr().cast::<::core::ffi::c_char>() == strm.msg)
+                        .map(|known| &known[..known.len() - 1])
+                        .unwrap_or(b"compressed data error");
                     crate::src::gzlib::GzErrorState {
                         message: &mut state.msg,
                         error: &mut state.err,
@@ -608,7 +613,7 @@ unsafe fn gz_decomp(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int
         }
     }
     state.x.have = (had as crate::stdlib::uInt).wrapping_sub(strm.avail_out) as ::core::ffi::c_uint;
-    state.x.next = strm.next_out.wrapping_sub(state.x.have as usize) as *mut ::core::ffi::c_uchar;
+    state.x.next = output_start;
     if ret == crate::zlib_h::Z_STREAM_END {
         state.junk = 0 as ::core::ffi::c_int;
         state.how = crate::gzguts_h::LOOK;
