@@ -724,120 +724,125 @@ fn fill_window_space_state(
 unsafe extern "C" fn fill_window(mut s: *mut crate::src::deflate::deflate_state) {
     let mut n: ::core::ffi::c_uint = 0;
     let mut more: ::core::ffi::c_uint = 0;
-    let wsize: crate::stdlib::uInt = (*s).w_size;
+    // This remains the transitional state/allocator boundary, but adopt the
+    // validated state record once.  The bounded slice helpers below continue
+    // to own all ordinary buffer manipulation.
+    let state = &mut *s;
+    let wsize: crate::stdlib::uInt = state.w_size;
     loop {
         let (space, should_slide) =
-            fill_window_space_state((*s).window_size, (*s).lookahead, (*s).strstart, wsize);
+            fill_window_space_state(state.window_size, state.lookahead, state.strstart, wsize);
         more = space;
         if should_slide {
-            let Ok(window_len) = usize::try_from((*s).window_size) else {
+            let Ok(window_len) = usize::try_from(state.window_size) else {
                 return;
             };
-            if window_len != 0 && (*s).window.is_null() {
+            if window_len != 0 && state.window.is_null() {
                 return;
             }
             let window = if window_len == 0 {
                 &mut []
             } else {
-                ::core::slice::from_raw_parts_mut((*s).window, window_len)
+                ::core::slice::from_raw_parts_mut(state.window, window_len)
             };
             let Some(next_more) = slide_window_state(
                 window,
                 wsize,
                 more,
-                &mut (*s).match_start,
-                &mut (*s).strstart,
-                &mut (*s).block_start,
-                &mut (*s).insert,
+                &mut state.match_start,
+                &mut state.strstart,
+                &mut state.block_start,
+                &mut state.insert,
             ) else {
                 return;
             };
             slide_hash(s);
             more = next_more;
         }
-        if (*(*s).strm).avail_in == 0 as crate::stdlib::uInt {
+        if (*state.strm).avail_in == 0 as crate::stdlib::uInt {
             break;
         }
         n = read_buf(
-            (*s).strm,
-            (*s).window
-                .wrapping_add((*s).strstart as usize)
-                .wrapping_add((*s).lookahead as usize),
+            state.strm,
+            state
+                .window
+                .wrapping_add(state.strstart as usize)
+                .wrapping_add(state.lookahead as usize),
             more,
         );
-        (*s).lookahead = (*s).lookahead.wrapping_add(n);
-        if (*s).lookahead.wrapping_add((*s).insert)
+        state.lookahead = state.lookahead.wrapping_add(n);
+        if state.lookahead.wrapping_add(state.insert)
             >= crate::zutil_h::MIN_MATCH as crate::stdlib::uInt
         {
-            let Ok(window_len) = usize::try_from((*s).window_size) else {
+            let Ok(window_len) = usize::try_from(state.window_size) else {
                 return;
             };
-            let Ok(head_len) = usize::try_from((*s).hash_size) else {
+            let Ok(head_len) = usize::try_from(state.hash_size) else {
                 return;
             };
-            let Ok(prev_len) = usize::try_from((*s).w_size) else {
+            let Ok(prev_len) = usize::try_from(state.w_size) else {
                 return;
             };
-            if (window_len != 0 && (*s).window.is_null())
-                || (head_len != 0 && (*s).head.is_null())
-                || (prev_len != 0 && (*s).prev.is_null())
+            if (window_len != 0 && state.window.is_null())
+                || (head_len != 0 && state.head.is_null())
+                || (prev_len != 0 && state.prev.is_null())
             {
                 return;
             }
             let window = if window_len == 0 {
                 &[]
             } else {
-                ::core::slice::from_raw_parts((*s).window, window_len)
+                ::core::slice::from_raw_parts(state.window, window_len)
             };
             let head = if head_len == 0 {
                 &mut []
             } else {
-                ::core::slice::from_raw_parts_mut((*s).head, head_len)
+                ::core::slice::from_raw_parts_mut(state.head, head_len)
             };
             let prev = if prev_len == 0 {
                 &mut []
             } else {
-                ::core::slice::from_raw_parts_mut((*s).prev, prev_len)
+                ::core::slice::from_raw_parts_mut(state.prev, prev_len)
             };
             if !insert_pending_strings_state(
                 window,
                 head,
                 prev,
-                (*s).strstart,
-                (*s).lookahead,
-                &mut (*s).insert,
-                &mut (*s).ins_h,
-                (*s).hash_shift,
-                (*s).hash_mask,
-                (*s).w_mask,
+                state.strstart,
+                state.lookahead,
+                &mut state.insert,
+                &mut state.ins_h,
+                state.hash_shift,
+                state.hash_mask,
+                state.w_mask,
             ) {
                 return;
             }
         }
-        if !((*s).lookahead < crate::src::deflate::MIN_LOOKAHEAD as crate::stdlib::uInt
-            && (*(*s).strm).avail_in != 0 as crate::stdlib::uInt)
+        if !(state.lookahead < crate::src::deflate::MIN_LOOKAHEAD as crate::stdlib::uInt
+            && (*state.strm).avail_in != 0 as crate::stdlib::uInt)
         {
             break;
         }
     }
-    if (*s).high_water < (*s).window_size {
-        let Ok(window_len) = usize::try_from((*s).window_size) else {
+    if state.high_water < state.window_size {
+        let Ok(window_len) = usize::try_from(state.window_size) else {
             return;
         };
-        if window_len != 0 && (*s).window.is_null() {
+        if window_len != 0 && state.window.is_null() {
             return;
         }
         let window = if window_len == 0 {
             &mut []
         } else {
-            ::core::slice::from_raw_parts_mut((*s).window, window_len)
+            ::core::slice::from_raw_parts_mut(state.window, window_len)
         };
         if !clear_window_tail_state(
             window,
-            (*s).window_size,
-            (*s).strstart,
-            (*s).lookahead,
-            &mut (*s).high_water,
+            state.window_size,
+            state.strstart,
+            state.lookahead,
+            &mut state.high_water,
         ) {
             return;
         }
