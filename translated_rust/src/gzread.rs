@@ -104,9 +104,10 @@ unsafe fn gz_load(
     }
 }
 
-unsafe extern "C" fn gz_avail(mut state: crate::gzguts_h::gz_statep) -> ::core::ffi::c_int {
+// This helper is internal and all of its callers have already bound the
+// validated gzip state.  Keep only its I/O and input-buffer operations raw.
+unsafe fn gz_avail(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
     let mut got: ::core::ffi::c_uint = 0;
-    let state = &mut *state;
     let plan = match crate::src::gzlib::gz_avail_plan(state) {
         Ok(plan) => plan,
         Err(()) => return -1,
