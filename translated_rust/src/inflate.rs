@@ -1791,8 +1791,10 @@ pub unsafe fn inflate(
                                                                                     // already-established cursors and scalar state.
                                                                                     // Adopt both compatibility records once rather
                                                                                     // than repeatedly traversing their raw pointers.
-                                                                                    let strm_ref = &mut *strm;
-                                                                                    let state_ref = &mut *state;
+                                                                                    let strm_ref =
+                                                                                        &mut *strm;
+                                                                                    let state_ref =
+                                                                                        &mut *state;
                                                                                     if state_ref.havedict == 0 as ::core::ffi::c_int {
                                                                                         strm_ref.next_out = put as *mut crate::stdlib::Bytef;
                                                                                         strm_ref.avail_out = left as crate::stdlib::uInt;
@@ -1826,8 +1828,11 @@ pub unsafe fn inflate(
                                                                                 // TIME has no cursor lend or callback. Keep the
                                                                                 // retained header update and checksum commit on
                                                                                 // one short-lived state borrow.
-                                                                                let state_ref = &mut *state;
-                                                                                if !state_ref.head.is_null()
+                                                                                let state_ref =
+                                                                                    &mut *state;
+                                                                                if !state_ref
+                                                                                    .head
+                                                                                    .is_null()
                                                                                 {
                                                                                     (*state_ref
                                                                                         .head)
@@ -2757,31 +2762,30 @@ pub unsafe fn inflate(
                             // destination.  Keep its scalar state updates on one adopted
                             // decoder-state borrow.
                             let state_ref = &mut *state;
-                                if state_ref.flags & 0x800 as ::core::ffi::c_int != 0 {
-                                    if have == 0 as ::core::ffi::c_uint {
-                                        break '_inf_leave;
+                            if state_ref.flags & 0x800 as ::core::ffi::c_int != 0 {
+                                if have == 0 as ::core::ffi::c_uint {
+                                    break '_inf_leave;
+                                }
+                                let header_crc = state_ref.flags & 0x200 as ::core::ffi::c_int != 0
+                                    && state_ref.wrap & 4 as ::core::ffi::c_int != 0;
+                                copy = 0 as ::core::ffi::c_uint;
+                                loop {
+                                    let c2rust_fresh5 = copy;
+                                    copy = copy.wrapping_add(1);
+                                    len = *next.wrapping_add(c2rust_fresh5 as usize)
+                                        as ::core::ffi::c_uint;
+                                    if header_crc {
+                                        // Feed the byte while it is already available as a
+                                        // scalar, avoiding a second raw input lend solely for
+                                        // the header checksum after the name scan.
+                                        state_ref.check = inflate_header_crc_update(
+                                            state_ref.check,
+                                            &[len as crate::stdlib::Bytef],
+                                        );
                                     }
-                                    let header_crc = state_ref.flags & 0x200 as ::core::ffi::c_int
-                                        != 0
-                                        && state_ref.wrap & 4 as ::core::ffi::c_int != 0;
-                                    copy = 0 as ::core::ffi::c_uint;
-                                    loop {
-                                        let c2rust_fresh5 = copy;
-                                        copy = copy.wrapping_add(1);
-                                        len = *next.wrapping_add(c2rust_fresh5 as usize)
-                                            as ::core::ffi::c_uint;
-                                        if header_crc {
-                                            // Feed the byte while it is already available as a
-                                            // scalar, avoiding a second raw input lend solely for
-                                            // the header checksum after the name scan.
-                                            state_ref.check = inflate_header_crc_update(
-                                                state_ref.check,
-                                                &[len as crate::stdlib::Bytef],
-                                            );
-                                        }
-                                        if !state_ref.head.is_null()
-                                            && !(*state_ref.head).name.is_null()
-                                            && state_ref.length < (*state_ref.head).name_max
+                                    if !state_ref.head.is_null()
+                                        && !(*state_ref.head).name.is_null()
+                                        && state_ref.length < (*state_ref.head).name_max
                                     {
                                         let c2rust_fresh6 = state_ref.length;
                                         state_ref.length = state_ref.length.wrapping_add(1);
@@ -2794,7 +2798,7 @@ pub unsafe fn inflate(
                                         break;
                                     }
                                 }
-                                    have = have.wrapping_sub(copy);
+                                have = have.wrapping_sub(copy);
                                 next = next.wrapping_add(copy as usize);
                                 if len != 0 {
                                     break '_inf_leave;
@@ -2827,8 +2831,8 @@ pub unsafe fn inflate(
                         };
                         loop {
                             let index = (hold as ::core::ffi::c_uint
-                                    & ((1 as ::core::ffi::c_uint) << state_ref.distbits)
-                                        .wrapping_sub(1 as ::core::ffi::c_uint))
+                                & ((1 as ::core::ffi::c_uint) << state_ref.distbits)
+                                    .wrapping_sub(1 as ::core::ffi::c_uint))
                                 as usize;
                             let Some(code) = dcode.get(index).copied() else {
                                 strm_ref.msg = INFLATE_ERROR_MESSAGES[15].as_ptr()
@@ -2857,13 +2861,13 @@ pub unsafe fn inflate(
                             last = here;
                             loop {
                                 let index = (last.val as ::core::ffi::c_uint).wrapping_add(
-                                        (hold as ::core::ffi::c_uint
-                                            & ((1 as ::core::ffi::c_uint)
-                                                << last.bits as ::core::ffi::c_int
-                                                    + last.op as ::core::ffi::c_int)
-                                                .wrapping_sub(1 as ::core::ffi::c_uint))
-                                            >> last.bits as ::core::ffi::c_int,
-                                    ) as usize;
+                                    (hold as ::core::ffi::c_uint
+                                        & ((1 as ::core::ffi::c_uint)
+                                            << last.bits as ::core::ffi::c_int
+                                                + last.op as ::core::ffi::c_int)
+                                            .wrapping_sub(1 as ::core::ffi::c_uint))
+                                        >> last.bits as ::core::ffi::c_int,
+                                ) as usize;
                                 let Some(code) = dcode.get(index).copied() else {
                                     strm_ref.msg = INFLATE_ERROR_MESSAGES[15].as_ptr()
                                         as *const ::core::ffi::c_char
@@ -2919,11 +2923,22 @@ pub unsafe fn inflate(
                         if have == 0 as ::core::ffi::c_uint {
                             break '_inf_leave;
                         }
+                        let header_crc = state_ref.flags & 0x200 as ::core::ffi::c_int != 0
+                            && state_ref.wrap & 4 as ::core::ffi::c_int != 0;
                         copy = 0 as ::core::ffi::c_uint;
                         loop {
                             let c2rust_fresh7 = copy;
                             copy = copy.wrapping_add(1);
                             len = *next.wrapping_add(c2rust_fresh7 as usize) as ::core::ffi::c_uint;
+                            if header_crc {
+                                // The byte is already available as a scalar while scanning the
+                                // NUL-terminated comment.  Feed it directly instead of forming
+                                // a second raw input view after the scan.
+                                state_ref.check = inflate_header_crc_update(
+                                    state_ref.check,
+                                    &[len as crate::stdlib::Bytef],
+                                );
+                            }
                             if !state_ref.head.is_null()
                                 && !(*state_ref.head).comment.is_null()
                                 && state_ref.length < (*state_ref.head).comm_max
@@ -2938,14 +2953,6 @@ pub unsafe fn inflate(
                             if !(len != 0 && copy < have) {
                                 break;
                             }
-                        }
-                        if state_ref.flags & 0x200 as ::core::ffi::c_int != 0
-                            && state_ref.wrap & 4 as ::core::ffi::c_int != 0
-                        {
-                            state_ref.check = inflate_header_crc_update(
-                                state_ref.check,
-                                core::slice::from_raw_parts(next, copy as usize),
-                            );
                         }
                         have = have.wrapping_sub(copy);
                         next = next.wrapping_add(copy as usize);
@@ -3137,8 +3144,7 @@ pub unsafe fn inflate(
                     break 'window (true, &[]);
                 };
                 if plan.allocate {
-                    let Ok(requested_wsize) = ::core::ffi::c_uint::try_from(plan.window_len)
-                    else {
+                    let Ok(requested_wsize) = ::core::ffi::c_uint::try_from(plan.window_len) else {
                         break 'window (true, &[]);
                     };
                     // `inflate()` normally reaches this boundary only after
@@ -3150,8 +3156,7 @@ pub unsafe fn inflate(
                     state_ref.window = zalloc(
                         strm_ref.opaque,
                         requested_wsize,
-                        ::core::mem::size_of::<::core::ffi::c_uchar>()
-                            as crate::stdlib::uInt,
+                        ::core::mem::size_of::<::core::ffi::c_uchar>() as crate::stdlib::uInt,
                     ) as *mut ::core::ffi::c_uchar;
                     if state_ref.window.is_null() {
                         break 'window (true, &[]);
@@ -3167,8 +3172,8 @@ pub unsafe fn inflate(
             if exit.update_window && window.is_none() {
                 break 'window (true, &[]);
             }
-            let needs_output_view = exit.update_window
-                || inflate_exit_needs_checksum(wrap, exit.output_used as usize);
+            let needs_output_view =
+                exit.update_window || inflate_exit_needs_checksum(wrap, exit.output_used as usize);
             let produced = if needs_output_view && exit.output_used != 0 {
                 ::core::slice::from_raw_parts(
                     strm_ref.next_out.wrapping_sub(exit.output_used as usize),
