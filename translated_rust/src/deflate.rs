@@ -3492,6 +3492,33 @@ fn rle_match_length_state(
     }
 }
 
+fn tally_literal_state(
+    s: &mut crate::src::deflate::deflate_state,
+    symbols: &mut [crate::zutil_h::uch],
+    literal: crate::zutil_h::uch,
+) -> Option<bool> {
+    let start = usize::try_from(s.sym_next).ok()?;
+    let end = start.checked_add(3)?;
+    if end > symbols.len() || end > usize::try_from(s.sym_end).ok()? {
+        return None;
+    }
+    if usize::from(literal) >= s.dyn_ltree.len() {
+        return None;
+    }
+
+    let _ = crate::src::trees::_tr_tally(
+        symbols,
+        &mut s.sym_next,
+        s.sym_end,
+        &mut s.matches,
+        &mut s.dyn_ltree,
+        &mut s.dyn_dtree,
+        0,
+        literal as ::core::ffi::c_uint,
+    );
+    Some(s.sym_next == s.sym_end)
+}
+
 unsafe extern "C" fn deflate_rle(
     mut s: *mut crate::src::deflate::deflate_state,
     mut flush: ::core::ffi::c_int,
@@ -3694,22 +3721,40 @@ unsafe extern "C" fn deflate_huff(
                 break;
             }
         }
-        (*s).match_length = 0 as crate::stdlib::uInt;
-        let mut cc: crate::zutil_h::uch =
-            *(*s).window.offset((*s).strstart as isize) as crate::zutil_h::uch;
-        let c2rust_fresh56 = (*s).sym_next;
-        (*s).sym_next = (*s).sym_next.wrapping_add(1);
-        *(*s).sym_buf.offset(c2rust_fresh56 as isize) = 0 as crate::zutil_h::uchf;
-        let c2rust_fresh57 = (*s).sym_next;
-        (*s).sym_next = (*s).sym_next.wrapping_add(1);
-        *(*s).sym_buf.offset(c2rust_fresh57 as isize) = 0 as crate::zutil_h::uchf;
-        let c2rust_fresh58 = (*s).sym_next;
-        (*s).sym_next = (*s).sym_next.wrapping_add(1);
-        *(*s).sym_buf.offset(c2rust_fresh58 as isize) = cc as crate::zutil_h::uchf;
-        (*s).dyn_ltree[cc as usize].fc.freq = (*s).dyn_ltree[cc as usize].fc.freq.wrapping_add(1);
-        bflush = ((*s).sym_next == (*s).sym_end) as ::core::ffi::c_int;
-        (*s).lookahead = (*s).lookahead.wrapping_sub(1);
-        (*s).strstart = (*s).strstart.wrapping_add(1);
+        {
+            let state = &mut *s;
+            let Ok(window_len) = usize::try_from(state.window_size) else {
+                return need_more;
+            };
+            let Ok(symbol_len) = usize::try_from(state.sym_end) else {
+                return need_more;
+            };
+            if (window_len != 0 && state.window.is_null())
+                || (symbol_len != 0 && state.sym_buf.is_null())
+            {
+                return need_more;
+            }
+            let window = if window_len == 0 {
+                &[]
+            } else {
+                ::core::slice::from_raw_parts(state.window, window_len)
+            };
+            let Some(&literal) = window.get(state.strstart as usize) else {
+                return need_more;
+            };
+            let symbols = if symbol_len == 0 {
+                &mut []
+            } else {
+                ::core::slice::from_raw_parts_mut(state.sym_buf, symbol_len)
+            };
+            let Some(flush_now) = tally_literal_state(state, symbols, literal) else {
+                return need_more;
+            };
+            bflush = flush_now as ::core::ffi::c_int;
+            state.match_length = 0;
+            state.lookahead = state.lookahead.wrapping_sub(1);
+            state.strstart = state.strstart.wrapping_add(1);
+        }
         if bflush != 0 {
             crate::src::trees::_tr_flush_block(
                 s as *mut crate::src::deflate::internal_state,
