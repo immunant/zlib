@@ -3267,23 +3267,20 @@ pub(crate) fn tr_tally_update_match_counts(
     let dist_index = dist_code as usize;
     dyn_dtree[dist_index].freq = dyn_dtree[dist_index].freq.wrapping_add(1);
 }
-#[export_name = "_tr_stored_block"]
 
-pub unsafe extern "C" fn _tr_stored_block_ffi(
-    mut s: *mut crate::src::deflate::deflate_state,
-    mut buf: *mut crate::stdlib::charf,
-    mut stored_len: crate::zutil_h::ulg,
-    mut last: ::core::ffi::c_int,
+fn tr_stored_block_impl(
+    state: &mut crate::src::deflate::deflate_state,
+    pending_buf: &mut [crate::stdlib::Bytef],
+    stored: &[crate::stdlib::Byte],
+    stored_len: crate::zutil_h::ulg,
+    last: ::core::ffi::c_int,
 ) {
-    let state = &mut *s;
     let bits = send_bits_state(
         state.bi_buf,
         state.bi_valid,
         ((0 as ::core::ffi::c_int) << 1 as ::core::ffi::c_int) + last,
         3 as ::core::ffi::c_int,
     );
-    let pending_buf =
-        ::core::slice::from_raw_parts_mut(state.pending_buf, state.pending_buf_size as usize);
     append_pending_bytes(pending_buf, &mut state.pending, &bits.bytes[..bits.len]);
     state.bi_buf = bits.bi_buf;
     state.bi_valid = bits.bi_valid;
@@ -3294,11 +3291,25 @@ pub unsafe extern "C" fn _tr_stored_block_ffi(
     state.bi_valid = 0 as ::core::ffi::c_int;
     let len_bytes = stored_block_len_bytes(stored_len);
     append_pending_bytes(pending_buf, &mut state.pending, &len_bytes);
-    if stored_len != 0 {
-        let stored =
-            ::core::slice::from_raw_parts(buf as *const crate::stdlib::Byte, stored_len as usize);
-        append_pending_bytes(pending_buf, &mut state.pending, stored);
-    }
+    append_pending_bytes(pending_buf, &mut state.pending, stored);
+}
+#[export_name = "_tr_stored_block"]
+
+pub unsafe extern "C" fn _tr_stored_block_ffi(
+    mut s: *mut crate::src::deflate::deflate_state,
+    mut buf: *mut crate::stdlib::charf,
+    mut stored_len: crate::zutil_h::ulg,
+    mut last: ::core::ffi::c_int,
+) {
+    let state = &mut *s;
+    let pending_buf =
+        ::core::slice::from_raw_parts_mut(state.pending_buf, state.pending_buf_size as usize);
+    let stored = if stored_len == 0 as crate::zutil_h::ulg {
+        &[]
+    } else {
+        ::core::slice::from_raw_parts(buf as *const crate::stdlib::Byte, stored_len as usize)
+    };
+    tr_stored_block_impl(state, pending_buf, stored, stored_len, last);
 }
 #[export_name = "_tr_flush_bits"]
 
@@ -3495,7 +3506,20 @@ pub unsafe extern "C" fn _tr_flush_block_ffi(
     };
     match decision {
         FlushBlockChoice::Stored => {
-            _tr_stored_block_ffi(s, buf, stored_len, last);
+            let state = &mut *s;
+            let pending_buf = ::core::slice::from_raw_parts_mut(
+                state.pending_buf,
+                state.pending_buf_size as usize,
+            );
+            let stored = if stored_len == 0 as crate::zutil_h::ulg {
+                &[]
+            } else {
+                ::core::slice::from_raw_parts(
+                    buf as *const crate::stdlib::Byte,
+                    stored_len as usize,
+                )
+            };
+            tr_stored_block_impl(state, pending_buf, stored, stored_len, last);
         }
         FlushBlockChoice::Static => {
             {
