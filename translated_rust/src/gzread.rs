@@ -240,10 +240,16 @@ fn gz_look(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
             crate::src::inflate::InflateInitMode::Gzip,
         ) != crate::zlib_h::Z_OK
         {
-            unsafe {
-                ::core::mem::ManuallyDrop::drop(&mut state.out);
-                ::core::mem::ManuallyDrop::drop(&mut state.in_0);
-            }
+            let output = ::core::mem::replace(
+                &mut state.out,
+                ::core::mem::ManuallyDrop::new(Vec::new()),
+            );
+            drop(::core::mem::ManuallyDrop::into_inner(output));
+            let input = ::core::mem::replace(
+                &mut state.in_0,
+                ::core::mem::ManuallyDrop::new(Vec::new()),
+            );
+            drop(::core::mem::ManuallyDrop::into_inner(input));
             state.size = 0 as ::core::ffi::c_uint;
             crate::src::gzlib::gz_static_error(
                 state,
