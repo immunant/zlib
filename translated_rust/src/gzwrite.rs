@@ -178,6 +178,10 @@ fn gzputs_result(
     }
 }
 
+fn gzputc_result(c: ::core::ffi::c_int) -> ::core::ffi::c_int {
+    c & 0xff as ::core::ffi::c_int
+}
+
 fn gz_comp_needs_output_write(
     avail_out: crate::stdlib::uInt,
     flush: ::core::ffi::c_int,
@@ -637,7 +641,7 @@ pub unsafe extern "C" fn gzputc(
             *(*state).in_0.offset(have as isize) = c as ::core::ffi::c_uchar;
             (*strm).avail_in = (*strm).avail_in.wrapping_add(1);
             (*state).x.pos += 1;
-            return c & 0xff as ::core::ffi::c_int;
+            return gzputc_result(c);
         }
     }
     buf[0 as ::core::ffi::c_int as usize] = c as ::core::ffi::c_uchar;
@@ -649,7 +653,7 @@ pub unsafe extern "C" fn gzputc(
     {
         return -1 as ::core::ffi::c_int;
     }
-    return c & 0xff as ::core::ffi::c_int;
+    return gzputc_result(c);
 }
 #[export_name = "gzputc"]
 
@@ -841,7 +845,7 @@ mod tests {
         gz_write_buffered_copy_len, gz_write_buffered_progress, gz_write_chunk_consumed_len,
         gz_write_chunk_len, gz_write_errno_is_retryable, gz_write_error_result,
         gz_write_uses_buffered_path, gz_zero_apply_progress, gz_zero_chunk_len,
-        gzflush_mode_is_valid, gzfwrite_len, gzputs_len_fits_int, gzputs_result,
+        gzflush_mode_is_valid, gzfwrite_len, gzputc_result, gzputs_len_fits_int, gzputs_result,
         gzwrite_len_fits_int,
     };
 
@@ -896,6 +900,14 @@ mod tests {
     fn gzputs_result_returns_written_count() {
         assert_eq!(gzputs_result(5, 5), 5);
         assert_eq!(gzputs_result(5, 3), 3);
+    }
+
+    #[test]
+    fn gzputc_result_returns_the_low_byte() {
+        assert_eq!(gzputc_result(0), 0);
+        assert_eq!(gzputc_result(0x7f), 0x7f);
+        assert_eq!(gzputc_result(0x123), 0x23);
+        assert_eq!(gzputc_result(-1), 0xff);
     }
 
     #[test]

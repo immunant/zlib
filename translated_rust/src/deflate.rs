@@ -381,6 +381,14 @@ static configuration_table: [config; 10] = [
     },
 ];
 
+fn slide_hash_entry(position: ::core::ffi::c_uint, window_size: crate::stdlib::uInt) -> Posf {
+    (if position >= window_size {
+        position.wrapping_sub(window_size)
+    } else {
+        NIL as ::core::ffi::c_uint
+    }) as crate::src::deflate::Pos as Posf
+}
+
 unsafe extern "C" fn slide_hash(mut s: *mut crate::src::deflate::deflate_state) {
     let mut n: ::core::ffi::c_uint = 0;
     let mut m: ::core::ffi::c_uint = 0;
@@ -392,11 +400,7 @@ unsafe extern "C" fn slide_hash(mut s: *mut crate::src::deflate::deflate_state) 
     loop {
         p = p.offset(-1);
         m = *p as ::core::ffi::c_uint;
-        *p = (if m >= wsize {
-            m.wrapping_sub(wsize as ::core::ffi::c_uint)
-        } else {
-            NIL as ::core::ffi::c_uint
-        }) as crate::src::deflate::Pos as crate::src::deflate::Posf;
+        *p = slide_hash_entry(m, wsize);
         n = n.wrapping_sub(1);
         if !(n != 0) {
             break;
@@ -407,11 +411,7 @@ unsafe extern "C" fn slide_hash(mut s: *mut crate::src::deflate::deflate_state) 
     loop {
         p = p.offset(-1);
         m = *p as ::core::ffi::c_uint;
-        *p = (if m >= wsize {
-            m.wrapping_sub(wsize as ::core::ffi::c_uint)
-        } else {
-            NIL as ::core::ffi::c_uint
-        }) as crate::src::deflate::Pos as crate::src::deflate::Posf;
+        *p = slide_hash_entry(m, wsize);
         n = n.wrapping_sub(1);
         if !(n != 0) {
             break;
@@ -3564,7 +3564,7 @@ unsafe extern "C" fn deflate_huff(
 mod tests {
     use super::{
         deflate_bound_lengths, deflate_copyright, deflate_version_matches, gzip_header_crc,
-        gzip_header_crc_pending, pending_output_len,
+        gzip_header_crc_pending, pending_output_len, slide_hash_entry,
     };
 
     #[test]
@@ -3609,6 +3609,16 @@ mod tests {
         assert_eq!(pending_output_len(3, 5), 3);
         assert_eq!(pending_output_len(5, 5), 5);
         assert_eq!(pending_output_len(8, 5), 5);
+    }
+
+    #[test]
+    fn slide_hash_entry_rebases_or_clears_positions() {
+        let window_size = 32 as crate::stdlib::uInt;
+
+        assert_eq!(slide_hash_entry(0, window_size), 0);
+        assert_eq!(slide_hash_entry(31, window_size), 0);
+        assert_eq!(slide_hash_entry(32, window_size), 0);
+        assert_eq!(slide_hash_entry(47, window_size), 15);
     }
 
     #[test]

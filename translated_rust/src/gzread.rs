@@ -737,6 +737,23 @@ fn gzgets_copy_len(
     }
 }
 
+fn gzgets_progress(
+    have: ::core::ffi::c_uint,
+    left: ::core::ffi::c_uint,
+    pos: crate::stdlib::off64_t,
+    copied: ::core::ffi::c_uint,
+) -> (
+    ::core::ffi::c_uint,
+    ::core::ffi::c_uint,
+    crate::stdlib::off64_t,
+) {
+    (
+        have.wrapping_sub(copied),
+        left.wrapping_sub(copied),
+        pos + copied as crate::stdlib::off64_t,
+    )
+}
+
 fn gzclose_r_result(
     stream_err: ::core::ffi::c_int,
     close_ret: ::core::ffi::c_int,
@@ -1260,6 +1277,19 @@ mod tests {
     }
 
     #[test]
+    fn gzgets_progress_updates_buffer_request_and_position() {
+        assert_eq!(gzgets_progress(10, 8, 42, 3), (7, 5, 45));
+    }
+
+    #[test]
+    fn gzgets_progress_preserves_wrapping_byte_counts() {
+        assert_eq!(
+            gzgets_progress(0, 0, 42, 1),
+            (::core::ffi::c_uint::MAX, ::core::ffi::c_uint::MAX, 43)
+        );
+    }
+
+    #[test]
     fn gz_direct_needs_look_only_for_empty_read_look_state() {
         assert!(gz_direct_needs_look(
             crate::gzguts_h::GZ_READ,
@@ -1674,10 +1704,9 @@ pub unsafe extern "C" fn gzgets(
                     (*state).x.next as *const ::core::ffi::c_void,
                     n as crate::__stddef_size_t_h::size_t,
                 );
-                (*state).x.have = (*state).x.have.wrapping_sub(n);
+                ((*state).x.have, left, (*state).x.pos) =
+                    gzgets_progress((*state).x.have, left, (*state).x.pos, n);
                 (*state).x.next = (*state).x.next.offset(n as isize);
-                (*state).x.pos += n as crate::stdlib::off64_t;
-                left = left.wrapping_sub(n);
                 buf = buf.offset(n as isize);
                 if !(left != 0 && eol.is_null()) {
                     break;
