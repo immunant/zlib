@@ -2807,9 +2807,8 @@ pub use crate::zlib_h::z_streamp;
 pub const MAXBITS: ::core::ffi::c_int = 15 as ::core::ffi::c_int;
 #[no_mangle]
 
-pub static inflate_copyright: [::core::ffi::c_char; 49] = crate::internal::c_char_array(
-    b" inflate 1.3.2.1 Copyright 1995-2026 Mark Adler \0",
-);
+pub static inflate_copyright: [::core::ffi::c_char; 49] =
+    crate::internal::c_char_array(b" inflate 1.3.2.1 Copyright 1995-2026 Mark Adler \0");
 pub unsafe extern "C" fn inflate_table(
     mut type_0: crate::src::inftrees::codetype,
     mut lens: *mut ::core::ffi::c_ushort,
