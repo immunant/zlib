@@ -4302,9 +4302,8 @@ fn gen_next_codes(
     let mut code: ::core::ffi::c_uint = 0 as ::core::ffi::c_uint;
     let mut bits = 1usize;
     while bits <= crate::src::deflate::MAX_BITS as usize {
-        code = code.wrapping_add(
-            bl_count[bits - 1] as ::core::ffi::c_uint
-        ) << 1 as ::core::ffi::c_int;
+        code =
+            code.wrapping_add(bl_count[bits - 1] as ::core::ffi::c_uint) << 1 as ::core::ffi::c_int;
         next_code[bits] = code as crate::zutil_h::ush;
         bits += 1;
     }
@@ -4338,28 +4337,32 @@ unsafe extern "C" fn gen_codes(
 
 fn tr_static_init() {}
 
-unsafe extern "C" fn init_block(mut s: *mut crate::src::deflate::deflate_state) {
+fn reset_block(s: &mut crate::src::deflate::deflate_state) {
     let mut n: ::core::ffi::c_int = 0;
     n = 0 as ::core::ffi::c_int;
     while n < crate::src::deflate::L_CODES {
-        (*s).dyn_ltree[n as usize].fc.freq = 0 as crate::zutil_h::ush;
+        s.dyn_ltree[n as usize].fc.freq = 0 as crate::zutil_h::ush;
         n += 1;
     }
     n = 0 as ::core::ffi::c_int;
     while n < crate::src::deflate::D_CODES {
-        (*s).dyn_dtree[n as usize].fc.freq = 0 as crate::zutil_h::ush;
+        s.dyn_dtree[n as usize].fc.freq = 0 as crate::zutil_h::ush;
         n += 1;
     }
     n = 0 as ::core::ffi::c_int;
     while n < crate::src::deflate::BL_CODES {
-        (*s).bl_tree[n as usize].fc.freq = 0 as crate::zutil_h::ush;
+        s.bl_tree[n as usize].fc.freq = 0 as crate::zutil_h::ush;
         n += 1;
     }
-    (*s).dyn_ltree[END_BLOCK as usize].fc.freq = 1 as crate::zutil_h::ush;
-    (*s).static_len = 0 as crate::zutil_h::ulg;
-    (*s).opt_len = (*s).static_len;
-    (*s).matches = 0 as crate::stdlib::uInt;
-    (*s).sym_next = (*s).matches;
+    s.dyn_ltree[END_BLOCK as usize].fc.freq = 1 as crate::zutil_h::ush;
+    s.static_len = 0 as crate::zutil_h::ulg;
+    s.opt_len = s.static_len;
+    s.matches = 0 as crate::stdlib::uInt;
+    s.sym_next = s.matches;
+}
+
+unsafe extern "C" fn init_block(s: *mut crate::src::deflate::deflate_state) {
+    reset_block(&mut *s);
 }
 pub unsafe extern "C" fn _tr_init(mut s: *mut crate::src::deflate::deflate_state) {
     tr_static_init();
