@@ -488,9 +488,7 @@ pub unsafe extern "C" fn gzputs(
     }
     crate::src::gzlib::gzclearerr(state);
     len = crate::stdlib::strlen(s) as crate::stdlib::z_size_t;
-    if (len as ::core::ffi::c_int) < 0 as ::core::ffi::c_int
-        || len as ::core::ffi::c_uint as crate::stdlib::z_size_t != len
-    {
+    if !crate::src::gzlib::gz_string_len_fits_int(len) {
         crate::src::gzlib::gz_error(
             state,
             crate::zlib_h::Z_STREAM_ERROR,
@@ -499,11 +497,7 @@ pub unsafe extern "C" fn gzputs(
         return -1 as ::core::ffi::c_int;
     }
     put = gz_write(state, s as crate::stdlib::voidpc, len);
-    return if len != 0 && put == 0 as crate::stdlib::z_size_t {
-        -1 as ::core::ffi::c_int
-    } else {
-        put as ::core::ffi::c_int
-    };
+    crate::src::gzlib::gz_puts_result(len, put)
 }
 #[export_name = "gzputs"]
 
@@ -527,11 +521,16 @@ fn gzflush(
     // effect as `gz_error(..., Z_OK, null)` without widening this
     // reference-bound coordinator's unsafe surface.
     crate::src::gzlib::gzclearerr(state);
-    if flush < 0 as ::core::ffi::c_int || flush > crate::zlib_h::Z_FINISH {
-        return crate::zlib_h::Z_STREAM_ERROR;
-    }
-    if state.skip != 0 && gz_zero(state) == -1 as ::core::ffi::c_int {
-        return state.err;
+    match crate::src::gzlib::gz_flush_plan(state, flush) {
+        crate::src::gzlib::GzFlushPlan::Invalid => {
+            return crate::zlib_h::Z_STREAM_ERROR;
+        }
+        crate::src::gzlib::GzFlushPlan::Zero => {
+            if gz_zero(state) == -1 as ::core::ffi::c_int {
+                return state.err;
+            }
+        }
+        crate::src::gzlib::GzFlushPlan::Compress => {}
     }
     gz_comp(state, flush);
     return state.err;

@@ -682,6 +682,47 @@ pub(crate) fn gz_putc_plan(state: &mut crate::gzguts_h::gz_state) -> GzPutcPlan 
     GzPutcPlan::Write
 }
 
+// `gzputs()` obtains the string length at its caller-pointer boundary.  Keep
+// C's representability check and its return-value convention scalar so that
+// boundary only needs to measure and pass the string through to `gz_write()`.
+pub(crate) fn gz_string_len_fits_int(len: crate::stdlib::z_size_t) -> bool {
+    (len as ::core::ffi::c_int) >= 0
+        && len as ::core::ffi::c_uint as crate::stdlib::z_size_t == len
+}
+
+pub(crate) fn gz_puts_result(
+    len: crate::stdlib::z_size_t,
+    written: crate::stdlib::z_size_t,
+) -> ::core::ffi::c_int {
+    if len != 0 && written == 0 {
+        -1
+    } else {
+        written as ::core::ffi::c_int
+    }
+}
+
+// `gzflush()` clears a usable state's error before validating the requested
+// flush.  Keep the remaining state-only branch selection separate from its
+// compression boundary so that ordering remains visible and testable.
+pub(crate) enum GzFlushPlan {
+    Invalid,
+    Zero,
+    Compress,
+}
+
+pub(crate) fn gz_flush_plan(
+    state: &crate::gzguts_h::gz_state,
+    flush: ::core::ffi::c_int,
+) -> GzFlushPlan {
+    if flush < 0 || flush > crate::zlib_h::Z_FINISH {
+        GzFlushPlan::Invalid
+    } else if state.skip != 0 {
+        GzFlushPlan::Zero
+    } else {
+        GzFlushPlan::Compress
+    }
+}
+
 pub(crate) fn gz_stream_write_progress(
     state: &mut crate::gzguts_h::gz_state,
     remaining: &mut crate::stdlib::z_size_t,
