@@ -659,10 +659,15 @@ unsafe fn gzread(
         }
         if state.again != 0 {
             let errno_value = errno::errno().0;
-            crate::src::gzlib::gz_error(
-                state,
+            let message = errno::Errno(errno_value).to_string();
+            crate::src::gzlib::gz_set_error(
+                &mut state.msg,
+                &mut state.err,
+                &mut state.x.have,
+                state.again,
+                state.path.as_deref(),
                 crate::zlib_h::Z_ERRNO,
-                crate::stdlib::strerror(errno_value),
+                Some(message.as_bytes()),
             );
             return -1 as ::core::ffi::c_int;
         }
