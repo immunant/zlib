@@ -4811,7 +4811,7 @@ fn load_word(bytes: &[u8], word: usize) -> z_word_t {
     z_word_t::from_ne_bytes(bytes[start..start + W as usize].try_into().unwrap())
 }
 
-fn crc32_bytes(mut crc: crate::stdlib::uLong, mut bytes: &[u8]) -> crate::stdlib::uLong {
+pub(crate) fn crc32_bytes(mut crc: crate::stdlib::uLong, mut bytes: &[u8]) -> crate::stdlib::uLong {
     crc = !crc & 0xffffffff as crate::stdlib::uLong;
     if bytes.len() >= (N * W + W - 1) as usize {
         let prefix = bytes.as_ptr().align_offset(W as usize).min(bytes.len());
