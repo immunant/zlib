@@ -369,12 +369,9 @@ pub fn gzwrite(
     mut buf: crate::stdlib::voidpc,
     mut len: ::core::ffi::c_uint,
 ) -> ::core::ffi::c_int {
-    if !crate::src::gzlib::gz_write_state_is_usable(state) {
+    if !crate::src::gzlib::gz_begin_write_operation(state) {
         return 0 as ::core::ffi::c_int;
     }
-    // This is a validated write state, so clearing the shared error record
-    // cannot affect read-side EOF bookkeeping.
-    crate::src::gzlib::gzclearerr(state);
     if !crate::src::gzlib::gz_uint_request_fits_int(len) {
         // SAFETY: this only updates the bound gzip state's owned error
         // record with a static message.
@@ -408,10 +405,9 @@ pub fn gzfwrite(
     mut nitems: crate::stdlib::z_size_t,
     state: &mut crate::gzguts_h::gz_state,
 ) -> crate::stdlib::z_size_t {
-    if !crate::src::gzlib::gz_write_state_is_usable(state) {
+    if !crate::src::gzlib::gz_begin_write_operation(state) {
         return 0 as crate::stdlib::z_size_t;
     }
-    crate::src::gzlib::gzclearerr(state);
     match crate::src::gzlib::gz_item_request(size, nitems) {
         crate::src::gzlib::GzItemRequest::Empty => 0 as crate::stdlib::z_size_t,
         crate::src::gzlib::GzItemRequest::TooLarge => {
@@ -453,10 +449,9 @@ pub fn gzputc(
     mut c: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
     let buf: [::core::ffi::c_uchar; 1] = [c as ::core::ffi::c_uchar];
-    if !crate::src::gzlib::gz_write_state_is_usable(state) {
+    if !crate::src::gzlib::gz_begin_write_operation(state) {
         return -1 as ::core::ffi::c_int;
     }
-    crate::src::gzlib::gzclearerr(state);
     if state.skip != 0 && gz_zero(state) == -1 as ::core::ffi::c_int {
         return -1 as ::core::ffi::c_int;
     }
@@ -487,10 +482,9 @@ pub unsafe extern "C" fn gzputs(
 ) -> ::core::ffi::c_int {
     let mut len: crate::stdlib::z_size_t = 0;
     let mut put: crate::stdlib::z_size_t = 0;
-    if !crate::src::gzlib::gz_write_state_is_usable(state) {
+    if !crate::src::gzlib::gz_begin_write_operation(state) {
         return -1 as ::core::ffi::c_int;
     }
-    crate::src::gzlib::gzclearerr(state);
     len = crate::stdlib::strlen(s) as crate::stdlib::z_size_t;
     if !crate::src::gzlib::gz_string_len_fits_int(len) {
         crate::src::gzlib::gz_error(
@@ -518,13 +512,9 @@ fn gzflush(
     state: &mut crate::gzguts_h::gz_state,
     mut flush: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
-    if !crate::src::gzlib::gz_write_state_is_usable(state) {
+    if !crate::src::gzlib::gz_begin_write_operation(state) {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    // For a validated write state, `gzclearerr` has the same error-reset
-    // effect as `gz_error(..., Z_OK, null)` without widening this
-    // reference-bound coordinator's unsafe surface.
-    crate::src::gzlib::gzclearerr(state);
     match crate::src::gzlib::gz_flush_plan(state, flush) {
         crate::src::gzlib::GzFlushPlan::Invalid => {
             return crate::zlib_h::Z_STREAM_ERROR;

@@ -83,6 +83,17 @@ pub(crate) fn gz_write_state_is_usable(state: &crate::gzguts_h::gz_state) -> boo
         && (state.err == crate::zlib_h::Z_OK || state.again != 0)
 }
 
+// The ordinary write APIs all begin by rejecting an unusable state and then
+// clearing its previous error record. Keep that state-only transition shared
+// so their caller-buffer and string boundaries do not each reproduce it.
+pub(crate) fn gz_begin_write_operation(state: &mut crate::gzguts_h::gz_state) -> bool {
+    if !gz_write_state_is_usable(state) {
+        return false;
+    }
+    gzclearerr(state);
+    true
+}
+
 // Buffer configuration is valid only before either side of a gzip stream has
 // allocated its working buffers. Keep the mode, allocation, overflow, and
 // minimum-size decisions separate from the public handle adapter.
