@@ -3702,6 +3702,13 @@ fn combined_tree_frequency(
     left_frequency.wrapping_add(right_frequency)
 }
 
+fn tree_parent_depth(
+    left_depth: crate::zutil_h::uch,
+    right_depth: crate::zutil_h::uch,
+) -> crate::zutil_h::uch {
+    left_depth.max(right_depth).wrapping_add(1)
+}
+
 fn supplemental_tree_node(max_code: &mut ::core::ffi::c_int) -> ::core::ffi::c_int {
     if *max_code < 2 {
         *max_code += 1;
@@ -4181,13 +4188,8 @@ unsafe fn build_tree(
             (*tree.wrapping_add(n as usize)).fc.value,
             (*tree.wrapping_add(m as usize)).fc.value,
         );
-        (*s).depth[node as usize] = ((if (*s).depth[n as usize] as ::core::ffi::c_int
-            >= (*s).depth[m as usize] as ::core::ffi::c_int
-        {
-            (*s).depth[n as usize] as ::core::ffi::c_int
-        } else {
-            (*s).depth[m as usize] as ::core::ffi::c_int
-        }) + 1 as ::core::ffi::c_int) as crate::zutil_h::uch;
+        (*s).depth[node as usize] =
+            tree_parent_depth((*s).depth[n as usize], (*s).depth[m as usize]);
         let ref mut c2rust_fresh56 = (*tree.wrapping_add(m as usize)).dl.dad;
         *c2rust_fresh56 = node as crate::zutil_h::ush;
         (*tree.wrapping_add(n as usize)).dl.dad = *c2rust_fresh56;
@@ -5353,8 +5355,8 @@ mod tests {
         reset_block_trees, select_block_encoding, static_bl_desc, static_d_desc, static_l_desc,
         supplemental_tree_node, symbol_buffer_is_full, symbol_triplet_cursors,
         tally_match_tree_indices, tally_symbol_bytes, tally_tree_update, tree_next_cursor,
-        tree_run_continues, tree_run_limits, BlockEncoding, HeapChild, ScanTreeAction,
-        TallyTreeUpdate, BL_CODE_ORDER_LEN, END_BLOCK, MAX_BITS,
+        tree_parent_depth, tree_run_continues, tree_run_limits, BlockEncoding, HeapChild,
+        ScanTreeAction, TallyTreeUpdate, BL_CODE_ORDER_LEN, END_BLOCK, MAX_BITS,
     };
 
     fn ltree_with_frequency(
@@ -5683,6 +5685,13 @@ mod tests {
     fn combined_tree_frequency_preserves_unsigned_wrapping() {
         assert_eq!(combined_tree_frequency(4, 9), 13);
         assert_eq!(combined_tree_frequency(crate::zutil_h::ush::MAX, 1), 0);
+    }
+
+    #[test]
+    fn tree_parent_depth_uses_deeper_child_and_wraps() {
+        assert_eq!(tree_parent_depth(3, 7), 8);
+        assert_eq!(tree_parent_depth(7, 3), 8);
+        assert_eq!(tree_parent_depth(crate::zutil_h::uch::MAX, 4), 0);
     }
 
     #[test]

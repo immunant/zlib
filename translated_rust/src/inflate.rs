@@ -986,6 +986,10 @@ fn update_window_core(
     *whave = plan.whave;
 }
 
+fn update_window_has_produced_bytes(copy: ::core::ffi::c_uint) -> bool {
+    copy != 0
+}
+
 unsafe fn updatewindow(
     mut strm: crate::zlib_h::z_streamp,
     mut produced_start: *const crate::stdlib::Bytef,
@@ -1011,10 +1015,10 @@ unsafe fn updatewindow(
         &mut state.whave,
     );
     let window = core::slice::from_raw_parts_mut(state.window, state.wsize as usize);
-    let produced = if copy == 0 {
-        &[]
-    } else {
+    let produced = if update_window_has_produced_bytes(copy) {
         core::slice::from_raw_parts(produced_start, copy as usize)
+    } else {
+        &[]
     };
     update_window_core(
         state.wbits,
@@ -3072,13 +3076,13 @@ mod tests {
         inflate_validate_core, inflate_validate_wrap, inflate_zlib_header_error,
         inflate_zlib_header_transition, inflate_zlib_window_params, initial_window_metadata,
         reset_window_history, stored_block_length, syncsearch_safe, update_window_core,
-        window_allocation_failed, window_allocation_request, window_needs_allocation,
-        window_update_plan, DynamicCodeLengthRepeat, InflateBlockKind, InflateCopyProgress,
-        InflateGzipExtraProgress, InflateGzipFlags, InflateGzipFlagsError, InflateMatchPlan,
-        InflateMatchSource, InflateOutputChecksum, InflatePrimeUpdate, InflateSyncSearch,
-        InflateZlibHeaderError, InflateZlibHeaderTransition, InflateZlibWindowParams, BAD, CHECK,
-        CODE_LENGTH_ORDER, COPY_, COPY_1, DICT, DICTID, HEAD, LEN_, MATCH, STORED, SYNC, TYPE,
-        TYPEDO,
+        update_window_has_produced_bytes, window_allocation_failed, window_allocation_request,
+        window_needs_allocation, window_update_plan, DynamicCodeLengthRepeat, InflateBlockKind,
+        InflateCopyProgress, InflateGzipExtraProgress, InflateGzipFlags, InflateGzipFlagsError,
+        InflateMatchPlan, InflateMatchSource, InflateOutputChecksum, InflatePrimeUpdate,
+        InflateSyncSearch, InflateZlibHeaderError, InflateZlibHeaderTransition,
+        InflateZlibWindowParams, BAD, CHECK, CODE_LENGTH_ORDER, COPY_, COPY_1, DICT, DICTID, HEAD,
+        LEN_, MATCH, STORED, SYNC, TYPE, TYPEDO,
     };
 
     #[test]
@@ -4203,6 +4207,13 @@ mod tests {
 
         assert_eq!((wsize, wnext, whave), (8, 3, 5));
         assert_eq!(window, *b"abcdefgh");
+    }
+
+    #[test]
+    fn update_window_only_constructs_produced_slice_for_nonzero_copy() {
+        assert!(!update_window_has_produced_bytes(0));
+        assert!(update_window_has_produced_bytes(1));
+        assert!(update_window_has_produced_bytes(::core::ffi::c_uint::MAX));
     }
 
     #[test]
