@@ -1817,6 +1817,19 @@ fn deflate_no_progress(
         && flush != crate::zlib_h::Z_FINISH
 }
 
+// A full flush discards every hash-chain entry while retaining the final
+// sentinel slot. Operate on the already-bound table so this reset does not
+// need a raw store or a C memory call at the dispatch site.
+fn deflate_clear_hash_table(
+    state: &mut crate::src::deflate::deflate_state,
+    head: &mut [crate::src::deflate::Posf],
+) {
+    let (entries, sentinel) = head.split_at_mut(head.len() - 1);
+    entries.fill(0);
+    sentinel[0] = NIL as crate::src::deflate::Posf;
+    state.slid = 0;
+}
+
 fn deflate_zlib_level_flags(
     level: ::core::ffi::c_int,
     strategy: ::core::ffi::c_int,
@@ -2286,21 +2299,16 @@ pub unsafe extern "C" fn deflate(
                 );
                 crate::src::trees::tr_stored_block(state, pending, &[], 0);
                 if flush == crate::zlib_h::Z_FULL_FLUSH {
-                    // The initialized head table has `hash_size` entries, so
-                    // this is its final entry.  Keep cursor formation safe;
-                    // the existing allocation invariant still justifies the
-                    // final raw store.
-                    *state.head.wrapping_add(
-                        state.hash_size.wrapping_sub(1 as crate::stdlib::uInt) as usize,
-                    ) = NIL as crate::src::deflate::Posf;
-                    crate::stdlib::memset(
-                        state.head as *mut ::core::ffi::c_void,
-                        0 as ::core::ffi::c_int,
-                        (state.hash_size.wrapping_sub(1 as crate::stdlib::uInt)
-                            as crate::__stddef_size_t_h::size_t)
-                            .wrapping_mul(::core::mem::size_of::<crate::src::deflate::Posf>()),
+                    // `fill_window()` binds the initialized table once, then
+                    // the reset itself is ordinary bounded slice work.
+                    fill_window(
+                        state,
+                        &mut *strm,
+                        false,
+                        |state, _stream, _window, head, _prev, _input| {
+                            deflate_clear_hash_table(state, head);
+                        },
                     );
-                    state.slid = 0 as ::core::ffi::c_int;
                     if state.lookahead == 0 as crate::stdlib::uInt {
                         state.strstart = 0 as crate::stdlib::uInt;
                         state.block_start = 0 as ::core::ffi::c_long;
