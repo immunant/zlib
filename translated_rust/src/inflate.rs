@@ -2827,8 +2827,11 @@ fn inflate_sync_point_impl(state: &crate::src::inflate::inflate_state) -> ::core
         && state.bits == 0 as ::core::ffi::c_uint) as ::core::ffi::c_int
 }
 
-fn inflate_sync_point_from_stream(strm: &crate::zlib_h::z_stream_s) -> ::core::ffi::c_int {
-    let Some(state) = inflate_mark_state(strm) else {
+fn inflate_sync_point_from_stream(
+    strm: &crate::zlib_h::z_stream_s,
+    state: &crate::src::inflate::inflate_state,
+) -> ::core::ffi::c_int {
+    let Some(state) = inflate_mark_state(strm, state) else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
     inflate_sync_point_impl(state)
@@ -2841,7 +2844,10 @@ pub unsafe extern "C" fn inflateSyncPoint_ffi(
     let Some(strm) = (unsafe { strm.as_ref() }) else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
-    inflate_sync_point_from_stream(strm)
+    let Some(state) = (unsafe { strm.state.cast::<crate::src::inflate::inflate_state>().as_ref() }) else {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    };
+    inflate_sync_point_from_stream(strm, state)
 }
 unsafe fn inflate_copy_impl(
     dest: &mut crate::zlib_h::z_stream_s,
@@ -2958,14 +2964,13 @@ fn inflate_mark_impl(state: &crate::src::inflate::inflate_state) -> ::core::ffi:
 /// and borrowed the stream itself.  State validation remains an
 /// implementation concern, keeping the exported mark accessor to one input
 /// conversion and one safe dispatch.
-fn inflate_mark_state(
+fn inflate_mark_state<'a>(
     strm: &crate::zlib_h::z_stream_s,
-) -> Option<&crate::src::inflate::inflate_state> {
+    state: &'a crate::src::inflate::inflate_state,
+) -> Option<&'a crate::src::inflate::inflate_state> {
     if strm.zalloc.is_none() || strm.zfree.is_none() {
         return None;
     }
-    let state = strm.state.cast::<crate::src::inflate::inflate_state>();
-    let state = unsafe { state.as_ref() }?;
     inflate_state_mode_valid(state).then_some(state)
 }
 
@@ -2978,7 +2983,10 @@ pub unsafe extern "C" fn inflateMark_ffi(
     let Some(strm) = (unsafe { strm.as_ref() }) else {
         return invalid_mark;
     };
-    let Some(state) = inflate_mark_state(strm) else {
+    let Some(state) = (unsafe { strm.state.cast::<crate::src::inflate::inflate_state>().as_ref() }) else {
+        return invalid_mark;
+    };
+    let Some(state) = inflate_mark_state(strm, state) else {
         return invalid_mark;
     };
     inflate_mark_impl(state)
@@ -2987,8 +2995,11 @@ fn inflate_codes_used_impl(state: &crate::src::inflate::inflate_state) -> ::core
     state.next as ::core::ffi::c_ulong
 }
 
-fn inflate_codes_used_from_stream(strm: &crate::zlib_h::z_stream_s) -> ::core::ffi::c_ulong {
-    let Some(state) = inflate_mark_state(strm) else {
+fn inflate_codes_used_from_stream(
+    strm: &crate::zlib_h::z_stream_s,
+    state: &crate::src::inflate::inflate_state,
+) -> ::core::ffi::c_ulong {
+    let Some(state) = inflate_mark_state(strm, state) else {
         return -1 as ::core::ffi::c_int as ::core::ffi::c_ulong;
     };
     inflate_codes_used_impl(state)
@@ -3001,5 +3012,8 @@ pub unsafe extern "C" fn inflateCodesUsed_ffi(
     let Some(strm) = (unsafe { strm.as_ref() }) else {
         return -1 as ::core::ffi::c_int as ::core::ffi::c_ulong;
     };
-    inflate_codes_used_from_stream(strm)
+    let Some(state) = (unsafe { strm.state.cast::<crate::src::inflate::inflate_state>().as_ref() }) else {
+        return -1 as ::core::ffi::c_int as ::core::ffi::c_ulong;
+    };
+    inflate_codes_used_from_stream(strm, state)
 }
