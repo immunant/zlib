@@ -68,6 +68,67 @@ enum GzUngetcError {
     OutOfRoom,
 }
 
+/// The subset of a gzip reader needed to report pushback errors.
+///
+/// This deliberately keeps the public `gzFile_s` cursor out of the pushback
+/// implementation.  The state adapter performs the ABI cursor conversion
+/// before and after calling it.
+struct GzUngetcErrorState<'a> {
+    have: &'a mut crate::stdlib::uInt,
+    again: ::core::ffi::c_int,
+    err: &'a mut ::core::ffi::c_int,
+    path: &'a ::core::ffi::CStr,
+    msg: &'a mut Option<std::ffi::CString>,
+}
+
+impl GzUngetcErrorState<'_> {
+    fn set(&mut self, err: ::core::ffi::c_int, msg: Option<&::core::ffi::CStr>) {
+        *self.msg = None;
+        if err != crate::zlib_h::Z_OK && err != crate::zlib_h::Z_BUF_ERROR && self.again == 0 {
+            *self.have = 0;
+        }
+        *self.err = err;
+        let Some(msg) = msg else {
+            return;
+        };
+        if err == crate::zlib_h::Z_MEM_ERROR {
+            return;
+        }
+        let path = self.path.to_bytes();
+        let message = msg.to_bytes();
+        let Some(size) = path
+            .len()
+            .checked_add(2)
+            .and_then(|size| size.checked_add(message.len()))
+            .and_then(|size| size.checked_add(1))
+        else {
+            *self.err = crate::zlib_h::Z_MEM_ERROR;
+            return;
+        };
+        let mut text = Vec::new();
+        if text.try_reserve_exact(size).is_err() {
+            *self.err = crate::zlib_h::Z_MEM_ERROR;
+            return;
+        }
+        text.extend_from_slice(path);
+        text.extend_from_slice(b": ");
+        text.extend_from_slice(message);
+        text.push(0);
+        *self.msg = Some(
+            std::ffi::CString::from_vec_with_nul(text)
+                .expect("a concatenation of C strings contains only its final NUL"),
+        );
+    }
+}
+
+/// Pointer-free state for the byte insertion half of `gzungetc`.
+struct GzUngetcState<'a> {
+    cursor: GzReadCursor,
+    output: &'a mut [u8],
+    past: &'a mut ::core::ffi::c_int,
+    error: GzUngetcErrorState<'a>,
+}
+
 /// Insert one byte before the unread portion of an owned gzip output buffer.
 ///
 /// The caller converts the ABI cursor to and from `GzReadCursor`; this helper
@@ -825,7 +886,33 @@ pub unsafe extern "C" fn gzgetc__ffi(mut file: crate::zlib_h::gzFile) -> ::core:
     }
     gzgetc_impl(&mut *(file as crate::gzguts_h::gz_statep))
 }
-unsafe fn gzungetc(
+/// Insert a byte using only the checked cursor view of the gzip output.
+fn gzungetc(c: ::core::ffi::c_int, state: &mut GzUngetcState<'_>) -> ::core::ffi::c_int {
+    match gzungetc_cursor(c, &mut state.cursor, state.output) {
+        Ok(()) => {
+            *state.past = 0;
+            c
+        }
+        Err(GzUngetcError::InvalidCharacter) => -1,
+        Err(GzUngetcError::OutOfRoom) => {
+            state.error.set(
+                crate::zlib_h::Z_DATA_ERROR,
+                Some(c"out of room to push characters"),
+            );
+            -1
+        }
+        Err(GzUngetcError::StateCorrupt) => {
+            state
+                .error
+                .set(crate::zlib_h::Z_STREAM_ERROR, Some(c"state corrupt"));
+            -1
+        }
+    }
+}
+
+/// Prepare the ABI-backed gzip reader, then dispatch pushback through the
+/// pointer-free cursor facade above.
+fn gzungetc_state(
     c: ::core::ffi::c_int,
     state: &mut crate::gzguts_h::gz_state,
 ) -> ::core::ffi::c_int {
@@ -833,7 +920,7 @@ unsafe fn gzungetc(
         return -1 as ::core::ffi::c_int;
     }
     if state.how == crate::gzguts_h::LOOK && state.x.have == 0 as ::core::ffi::c_uint {
-        gz_look(state);
+        unsafe { gz_look(state) };
     }
     if state.err != crate::zlib_h::Z_OK
         && state.err != crate::zlib_h::Z_BUF_ERROR
@@ -842,7 +929,7 @@ unsafe fn gzungetc(
         return -1 as ::core::ffi::c_int;
     }
     crate::src::gzlib::gz_error_state(state, crate::zlib_h::Z_OK, None);
-    if state.skip != 0 && gz_skip(state) == -1 as ::core::ffi::c_int {
+    if state.skip != 0 && unsafe { gz_skip(state) } == -1 as ::core::ffi::c_int {
         return -1 as ::core::ffi::c_int;
     }
     if c < 0 as ::core::ffi::c_int {
@@ -878,37 +965,33 @@ unsafe fn gzungetc(
         };
         next
     };
-    let mut cursor = GzReadCursor {
+    let cursor = GzReadCursor {
         have,
         next,
         pos: state.x.pos,
     };
-    match gzungetc_cursor(c, &mut cursor, &mut state.out) {
-        Ok(()) => {
-            state.x.have = cursor.have as ::core::ffi::c_uint;
-            state.x.next = state.out.as_mut_ptr().wrapping_add(cursor.next);
-            state.x.pos = cursor.pos;
-            state.past = 0 as ::core::ffi::c_int;
-            c
-        }
-        Err(GzUngetcError::InvalidCharacter) => -1 as ::core::ffi::c_int,
-        Err(GzUngetcError::OutOfRoom) => {
-            crate::src::gzlib::gz_error_state(
-                state,
-                crate::zlib_h::Z_DATA_ERROR,
-                Some(c"out of room to push characters"),
-            );
-            -1 as ::core::ffi::c_int
-        }
-        Err(GzUngetcError::StateCorrupt) => {
-            crate::src::gzlib::gz_error_state(
-                state,
-                crate::zlib_h::Z_STREAM_ERROR,
-                Some(c"state corrupt"),
-            );
-            -1 as ::core::ffi::c_int
-        }
+    let (result, cursor) = {
+        let mut ungetc = GzUngetcState {
+            cursor,
+            output: &mut state.out,
+            past: &mut state.past,
+            error: GzUngetcErrorState {
+                have: &mut state.x.have,
+                again: state.again,
+                err: &mut state.err,
+                path: state.path.as_c_str(),
+                msg: &mut state.msg,
+            },
+        };
+        let result = gzungetc(c, &mut ungetc);
+        (result, ungetc.cursor)
+    };
+    if result >= 0 {
+        state.x.have = cursor.have as ::core::ffi::c_uint;
+        state.x.next = state.out.as_mut_ptr().wrapping_add(cursor.next);
+        state.x.pos = cursor.pos;
     }
+    result
 }
 #[export_name = "gzungetc"]
 
@@ -919,7 +1002,7 @@ pub unsafe extern "C" fn gzungetc_ffi(
     let Some(state) = (file as crate::gzguts_h::gz_statep).as_mut() else {
         return -1 as ::core::ffi::c_int;
     };
-    gzungetc(c, state)
+    gzungetc_state(c, state)
 }
 /// Read a line into `buf`, which includes room for the terminating NUL.
 ///
