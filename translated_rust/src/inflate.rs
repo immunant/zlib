@@ -1061,11 +1061,23 @@ pub unsafe extern "C" fn inflateReset2_ffi(
     )
     .status()
 }
-pub unsafe extern "C" fn inflateInit2_(
+// The normal initializer's requested payload is entirely pointer-free.  Keep
+// it separate from the ABI observation adapter so every normal initialization
+// enters the callback seam with the same request, without making the request
+// builder carry a stream or foreign version pointer.
+pub(crate) fn inflateInit2_(window_bits: ::core::ffi::c_int) -> InflateCallbackInitRequest {
+    InflateCallbackInitRequest::Normal { window_bits }
+}
+
+// This non-exported adapter observes the one ABI version byte and retains the
+// stream association through callback allocation/publication.  In particular,
+// it deliberately keeps validation out of the export wrapper and still passes
+// a copied scalar—not a borrowed foreign byte—through the callback seam.
+unsafe fn inflate_init2_from_abi(
     strm: Option<&mut crate::zlib_h::z_stream_s>,
-    mut windowBits: ::core::ffi::c_int,
-    mut version: *const ::core::ffi::c_char,
-    mut stream_size: ::core::ffi::c_int,
+    window_bits: ::core::ffi::c_int,
+    version: *const ::core::ffi::c_char,
+    stream_size: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
     let mut copied_state = None;
     // Observe only the leading ABI version byte before the allocation seam;
@@ -1073,9 +1085,7 @@ pub unsafe extern "C" fn inflateInit2_(
     let version = InflateAbiVersion::Observed(version.as_ref().copied());
     inflate_publish_callback_owner(
         strm.map(::core::ptr::NonNull::from),
-        Some(InflateCallbackInitRequest::Normal {
-            window_bits: windowBits,
-        }),
+        Some(inflateInit2_(window_bits)),
         version,
         stream_size,
         None,
@@ -1091,7 +1101,7 @@ pub unsafe extern "C" fn inflateInit2__ffi(
     mut version: *const ::core::ffi::c_char,
     mut stream_size: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
-    inflateInit2_(strm.as_mut(), windowBits, version, stream_size)
+    inflate_init2_from_abi(strm.as_mut(), windowBits, version, stream_size)
 }
 #[export_name = "inflateInit_"]
 
@@ -1100,7 +1110,7 @@ pub unsafe extern "C" fn inflateInit__ffi(
     mut version: *const ::core::ffi::c_char,
     mut stream_size: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
-    inflateInit2_(
+    inflate_init2_from_abi(
         strm.as_mut(),
         crate::zutil_h::DEF_WBITS,
         version,
