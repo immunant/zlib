@@ -344,104 +344,20 @@ fn gzopen_impl(
     Some(gzdopen_impl(GzDopenPreparation { state, oflag }, fd))
 }
 
-unsafe extern "C" fn gz_open(
-    path: *const ::core::ffi::c_void,
-    fd: ::core::ffi::c_int,
-    mode: *const ::core::ffi::c_char,
-) -> crate::zlib_h::gzFile {
-    if path.is_null() || mode.is_null() {
-        return ::core::ptr::null_mut();
-    }
-    let path = ::core::ffi::CStr::from_ptr(path.cast());
-    let mode = ::core::ffi::CStr::from_ptr(mode);
-    let (mut state, mut oflag, exclusive) = match gz_open_state(mode) {
-        Some(open) => open,
-        None => return ::core::ptr::null_mut(),
-    };
-    let path_bytes = path.to_bytes_with_nul();
-    let mut owned_path = Vec::new();
-    if owned_path.try_reserve_exact(path_bytes.len()).is_err() {
-        return ::core::ptr::null_mut();
-    }
-    owned_path.extend_from_slice(path_bytes);
-    state.path = std::ffi::CString::from_vec_with_nul(owned_path)
-        .expect("a C string is always a valid C string");
-    oflag |= crate::stdlib::O_LARGEFILE
-        | (if state.mode == crate::gzguts_h::GZ_READ {
-            crate::stdlib::O_RDONLY
-        } else {
-            crate::stdlib::O_WRONLY
-                | crate::stdlib::O_CREAT
-                | (if exclusive != 0 {
-                    crate::stdlib::O_EXCL
-                } else {
-                    0 as ::core::ffi::c_int
-                })
-                | (if state.mode == crate::gzguts_h::GZ_WRITE {
-                    crate::stdlib::O_TRUNC
-                } else {
-                    crate::stdlib::O_APPEND
-                })
-        });
-    if fd == -1 as ::core::ffi::c_int {
-        state.fd = gz_open_file(path, state.mode, exclusive, oflag);
-    } else {
-        if oflag & crate::stdlib::O_NONBLOCK != 0 {
-            crate::stdlib::fcntl(
-                fd,
-                crate::stdlib::F_SETFL,
-                crate::stdlib::fcntl(fd, crate::stdlib::F_GETFL) | crate::stdlib::O_NONBLOCK,
-            );
-        }
-        if oflag & crate::stdlib::O_CLOEXEC != 0 {
-            crate::stdlib::fcntl(
-                fd,
-                crate::stdlib::F_SETFD,
-                crate::stdlib::fcntl(fd, crate::stdlib::F_GETFD) | crate::stdlib::O_CLOEXEC,
-            );
-        }
-        state.fd = Some(std::os::fd::OwnedFd::from_raw_fd(fd));
-    }
-    let Some(fd) = state.fd.as_ref() else {
-        return ::core::ptr::null_mut::<crate::zlib_h::gzFile_s>();
-    };
-    let fd = std::os::fd::AsRawFd::as_raw_fd(fd);
-    if state.mode == crate::gzguts_h::GZ_APPEND {
-        crate::stdlib::lseek64(fd, 0 as crate::stdlib::__off64_t, crate::stdlib::SEEK_END);
-        state.mode = crate::gzguts_h::GZ_WRITE;
-    }
-    if state.mode == crate::gzguts_h::GZ_READ {
-        state.start =
-            crate::stdlib::lseek64(fd, 0 as crate::stdlib::__off64_t, crate::stdlib::SEEK_CUR)
-                as crate::stdlib::off64_t;
-        if state.start == -1 as crate::stdlib::off64_t {
-            state.start = 0 as crate::stdlib::off64_t;
-        }
-    }
-    gz_reset(
-        &mut state.x.have,
-        state.mode,
-        &mut state.eof,
-        &mut state.past,
-        &mut state.how,
-        &mut state.junk,
-        &mut state.reset,
-        &mut state.again,
-        &mut state.skip,
-        &mut state.err,
-        &mut state.msg,
-        &mut state.x.pos,
-        &mut state.strm.avail_in,
-    );
-    Box::into_raw(Box::new(state)) as crate::zlib_h::gzFile
-}
 #[export_name = "gzopen"]
 
 pub unsafe extern "C" fn gzopen_ffi(
     mut path: *const ::core::ffi::c_char,
     mut mode: *const ::core::ffi::c_char,
 ) -> crate::zlib_h::gzFile {
-    gz_open(path.cast(), -1 as ::core::ffi::c_int, mode)
+    if path.is_null() || mode.is_null() {
+        return ::core::ptr::null_mut();
+    }
+    let path = ::core::ffi::CStr::from_ptr(path);
+    let mode = ::core::ffi::CStr::from_ptr(mode);
+    gzopen_impl(path, mode)
+        .map(Box::into_raw)
+        .unwrap_or(::core::ptr::null_mut()) as crate::zlib_h::gzFile
 }
 #[export_name = "gzopen64"]
 
