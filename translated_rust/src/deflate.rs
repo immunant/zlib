@@ -1343,6 +1343,33 @@ pub(crate) fn deflate_reset(
     }
     ret
 }
+
+/// Reset a legacy ABI-backed deflate stream.
+///
+/// This is the one storage boundary for callers that own a stream but not its
+/// opaque state allocation.  Keep the raw state and hash-table conversions
+/// here until `deflate_state` owns those buffers; the reset logic itself stays
+/// in the slice-based `deflate_reset` core above.
+pub(crate) fn deflate_reset_legacy_stream(
+    stream: &mut crate::zlib_h::z_stream,
+) -> ::core::ffi::c_int {
+    // Check callbacks before following the opaque state handle.  In
+    // particular, a stale non-null state with missing allocators must remain
+    // a stream error without a raw dereference.
+    if !deflate_reset_keep_stream_valid(Some(stream)) {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    }
+    let Some(state) =
+        (unsafe { (stream.state as *mut crate::src::deflate::deflate_state).as_mut() })
+    else {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    };
+    if !deflate_stream_state_valid(Some(stream), Some(state)) || state.head.is_null() {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    }
+    let head = unsafe { ::core::slice::from_raw_parts_mut(state.head, state.hash_size as usize) };
+    deflate_reset(stream, state, head)
+}
 #[export_name = "deflateReset"]
 
 pub unsafe extern "C" fn deflateReset_ffi(
@@ -1354,20 +1381,7 @@ pub unsafe extern "C" fn deflateReset_ffi(
     let Some(stream) = strm.as_mut() else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
-    if stream.zalloc.is_none() || stream.zfree.is_none() {
-        return crate::zlib_h::Z_STREAM_ERROR;
-    }
-    let Some(state) = (stream.state as *mut crate::src::deflate::deflate_state).as_mut() else {
-        return crate::zlib_h::Z_STREAM_ERROR;
-    };
-    if !deflate_stream_state_valid(Some(stream), Some(state)) {
-        return crate::zlib_h::Z_STREAM_ERROR;
-    }
-    if state.head.is_null() {
-        return crate::zlib_h::Z_STREAM_ERROR;
-    }
-    let head = ::core::slice::from_raw_parts_mut(state.head, state.hash_size as usize);
-    deflate_reset(stream, state, head)
+    deflate_reset_legacy_stream(stream)
 }
 fn deflate_set_header(
     state: &mut crate::src::deflate::deflate_state,

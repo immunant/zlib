@@ -248,20 +248,7 @@ fn gz_comp(state: &mut crate::gzguts_h::gz_state, flush: ::core::ffi::c_int) -> 
         if strm.avail_in == 0 as crate::stdlib::uInt && flush == crate::zlib_h::Z_NO_FLUSH {
             return 0 as ::core::ffi::c_int;
         }
-        // `strm` is the initialized stream held by this gzip state.
-        let reset_state = unsafe { &mut *(strm.state as *mut crate::src::deflate::deflate_state) };
-        if reset_state.head.is_null() {
-            crate::src::gzlib::gz_static_error(
-                state,
-                crate::zlib_h::Z_STREAM_ERROR,
-                b"internal error: deflate stream corrupt\0",
-            );
-            return -1 as ::core::ffi::c_int;
-        }
-        let head = unsafe {
-            ::core::slice::from_raw_parts_mut(reset_state.head, reset_state.hash_size as usize)
-        };
-        if crate::src::deflate::deflate_reset(strm, reset_state, head) != crate::zlib_h::Z_OK {
+        if crate::src::deflate::deflate_reset_legacy_stream(strm) != crate::zlib_h::Z_OK {
             crate::src::gzlib::gz_static_error(
                 state,
                 crate::zlib_h::Z_STREAM_ERROR,
