@@ -121,9 +121,9 @@ pub unsafe extern "C" fn inflateBackInit_(
         return crate::zlib_h::Z_STREAM_ERROR;
     }
     // Keep the ABI stream projection at the shared callback allocation
-    // boundary. The back-mode payload is pointer-free until that boundary
-    // publishes it into the callback-owned opaque record.
-    let strm = &mut *strm;
+    // boundary. The back-mode payload and its validated stream handle remain
+    // pointer-free until that boundary publishes the callback-owned record.
+    let strm = ::core::ptr::NonNull::new(strm).expect("non-null stream checked above");
     let mut copied_state = None;
     crate::src::inflate::inflate_publish_callback_owner(
         Some(strm),

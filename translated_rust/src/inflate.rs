@@ -749,7 +749,7 @@ impl InflateCallbackInitRequest {
 // state publication or matching zfree.  The owner it receives contains no
 // callback handle, stream pointer, or foreign registration.
 pub(crate) unsafe fn inflate_publish_callback_owner(
-    strm: Option<&mut crate::zlib_h::z_stream_s>,
+    strm: Option<::core::ptr::NonNull<crate::zlib_h::z_stream_s>>,
     request: Option<InflateCallbackInitRequest>,
     version: InflateAbiVersion,
     stream_size: ::core::ffi::c_int,
@@ -769,9 +769,14 @@ pub(crate) unsafe fn inflate_publish_callback_owner(
             return crate::zlib_h::Z_VERSION_ERROR;
         }
     }
-    let Some(strm) = strm else {
+    let Some(mut strm) = strm else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
+    // Callback allocation and state publication are the one transaction that
+    // needs a mutable ABI stream.  Keep the raw-handle projection here with
+    // that transaction, so callers can carry the validated handle through
+    // their pointer-free admission work without rebuilding a stream borrow.
+    let strm = strm.as_mut();
     // Keep the caller's stream projection at the allocator boundary. The
     // callback-owned state is published only after it has been fully
     // initialized below, since zalloc() need not return initialized bytes.
@@ -1067,7 +1072,7 @@ pub unsafe extern "C" fn inflateInit2_(
     // that seam retains the comparison and its version/size precedence.
     let version = InflateAbiVersion::Observed(version.as_ref().copied());
     inflate_publish_callback_owner(
-        strm,
+        strm.map(::core::ptr::NonNull::from),
         Some(InflateCallbackInitRequest::Normal {
             window_bits: windowBits,
         }),
@@ -3449,7 +3454,7 @@ pub(crate) unsafe fn inflate_from_stream(
             return InflateStreamResult::Status(crate::zlib_h::Z_STREAM_ERROR);
         };
         return InflateStreamResult::Status(inflate_publish_callback_owner(
-            Some(strm),
+            Some(::core::ptr::NonNull::from(strm)),
             None,
             InflateAbiVersion::Unchecked,
             0,
