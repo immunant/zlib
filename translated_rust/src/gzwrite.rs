@@ -148,6 +148,56 @@ impl GzWriteCloseResult {
     }
 }
 
+// Once the final embedded-deflater request has ended, the remaining writer
+// resources have no ABI cursors or callback-backed state.  Move them as one
+// owner so close ordering and descriptor-error precedence can eventually be
+// shared with a pointer-free gzip resource facade.
+struct GzWriteCloseResources {
+    buffers: crate::gzguts_h::GzBuffers,
+    fd: Option<rustix::fd::OwnedFd>,
+    path: Option<Box<[u8]>>,
+    message: Option<Box<[u8]>>,
+    error: ::core::ffi::c_int,
+}
+
+impl GzWriteCloseResources {
+    fn take(
+        buffers: &mut crate::gzguts_h::GzBuffers,
+        fd: &mut Option<rustix::fd::OwnedFd>,
+        path: &mut Option<Box<[u8]>>,
+        message: &mut Option<Box<[u8]>>,
+        error: &mut ::core::ffi::c_int,
+    ) -> Self {
+        Self {
+            buffers: ::core::mem::replace(buffers, crate::gzguts_h::GzBuffers::empty()),
+            fd: fd.take(),
+            path: path.take(),
+            message: message.take(),
+            error: ::core::mem::replace(error, crate::zlib_h::Z_OK),
+        }
+    }
+
+    fn release_write_buffers(&mut self, had_embedded_deflater: bool) {
+        if had_embedded_deflater {
+            self.buffers.output = None;
+        }
+        if self.buffers.size != 0 {
+            self.buffers.input = None;
+        }
+    }
+
+    fn finish(mut self) -> bool {
+        crate::src::gzlib::gz_clear_error(&mut self.message, &mut self.error);
+        self.path = None;
+        self.message = None;
+        self.fd
+            .take()
+            .map(crate::src::gzlib::gz_close_fd)
+            .transpose()
+            .is_err()
+    }
+}
+
 fn gzwrite_length_fits_int(len: usize) -> bool {
     (len as ::core::ffi::c_uint as ::core::ffi::c_int) >= 0
 }
@@ -1257,24 +1307,19 @@ pub unsafe fn gzclose_w(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c
     // The lifecycle tag, not mode or allocated-buffer size, authorizes the
     // matching codec end operation.  Consume it before either buffer is
     // detached so a partial setup cannot erase an initialized deflater.
-    if state.buffers.take_embedded_deflater().is_some() {
+    let had_embedded_deflater = state.buffers.take_embedded_deflater().is_some();
+    if had_embedded_deflater {
         crate::src::deflate::deflateEnd(::core::ptr::NonNull::from(&mut state.strm));
-        state.buffers.output = None;
     }
-    if state.buffers.size != 0 {
-        state.buffers.input = None;
-    }
-    crate::src::gzlib::gz_clear_error(&mut state.msg, &mut state.err);
-    state.path = None;
-    state.msg = None;
-    result.finish(
-        state
-            .fd
-            .take()
-            .map(crate::src::gzlib::gz_close_fd)
-            .transpose()
-            .is_err(),
-    )
+    let mut resources = GzWriteCloseResources::take(
+        &mut state.buffers,
+        &mut state.fd,
+        &mut state.path,
+        &mut state.msg,
+        &mut state.err,
+    );
+    resources.release_write_buffers(had_embedded_deflater);
+    result.finish(resources.finish())
 }
 #[export_name = "gzclose_w"]
 
