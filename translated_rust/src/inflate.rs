@@ -2354,30 +2354,35 @@ pub unsafe extern "C" fn inflate_ffi(
     }
     inflate(&mut *strm, flush)
 }
-pub unsafe extern "C" fn inflateEnd(mut strm: crate::zlib_h::z_streamp) -> ::core::ffi::c_int {
-    let mut state: *mut crate::src::inflate::inflate_state =
-        ::core::ptr::null_mut::<crate::src::inflate::inflate_state>();
-    if inflateStateCheck(strm) != 0 {
+pub unsafe fn inflateEnd(strm: &mut crate::zlib_h::z_stream_s) -> ::core::ffi::c_int {
+    let state = strm.state as *mut crate::src::inflate::inflate_state;
+    if state.is_null() {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    state = (*strm).state as *mut crate::src::inflate::inflate_state;
-    if !(*state).window.is_null() {
-        Some((*strm).zfree.expect("non-null function pointer")).expect("non-null function pointer")(
-            (*strm).opaque,
-            (*state).window as crate::stdlib::voidpf,
+    let state = &mut *state;
+    if !inflate_state_valid(strm, state) {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    }
+    if !state.window.is_null() {
+        Some(strm.zfree.expect("non-null function pointer")).expect("non-null function pointer")(
+            strm.opaque,
+            state.window as crate::stdlib::voidpf,
         );
     }
-    Some((*strm).zfree.expect("non-null function pointer")).expect("non-null function pointer")(
-        (*strm).opaque,
-        (*strm).state as crate::stdlib::voidpf,
+    Some(strm.zfree.expect("non-null function pointer")).expect("non-null function pointer")(
+        strm.opaque,
+        strm.state as crate::stdlib::voidpf,
     );
-    (*strm).state = ::core::ptr::null_mut::<crate::src::deflate::internal_state>();
-    return crate::zlib_h::Z_OK;
+    strm.state = ::core::ptr::null_mut::<crate::src::deflate::internal_state>();
+    crate::zlib_h::Z_OK
 }
 #[export_name = "inflateEnd"]
 
 pub unsafe extern "C" fn inflateEnd_ffi(mut strm: crate::zlib_h::z_streamp) -> ::core::ffi::c_int {
-    inflateEnd(strm)
+    if strm.is_null() {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    }
+    inflateEnd(&mut *strm)
 }
 pub fn inflateGetDictionary(
     whave: crate::stdlib::uInt,

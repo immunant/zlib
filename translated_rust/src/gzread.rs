@@ -852,9 +852,7 @@ pub unsafe extern "C" fn gzclose_r(mut file: crate::zlib_h::gzFile) -> ::core::f
         return crate::zlib_h::Z_STREAM_ERROR;
     }
     if state.size != 0 {
-        crate::src::inflate::inflateEnd(
-            &raw mut state.strm as *mut _ as *mut crate::zlib_h::z_stream_s,
-        );
+        crate::src::inflate::inflateEnd(&mut state.strm);
         crate::stdlib::free(state.in_0 as *mut ::core::ffi::c_void);
     }
     let err = if state.err == crate::zlib_h::Z_BUF_ERROR {

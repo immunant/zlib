@@ -416,7 +416,7 @@ pub unsafe extern "C" fn uncompress2_z(
     left = left.wrapping_add(stream.avail_out as crate::stdlib::z_size_t);
     *sourceLen = (*sourceLen).wrapping_sub(len);
     *destLen = (*destLen).wrapping_sub(left);
-    crate::src::inflate::inflateEnd(&raw mut stream as *mut _ as *mut crate::zlib_h::z_stream_s);
+    crate::src::inflate::inflateEnd(&mut stream);
     return if err == crate::zlib_h::Z_STREAM_END {
         crate::zlib_h::Z_OK
     } else if err == crate::zlib_h::Z_NEED_DICT {
