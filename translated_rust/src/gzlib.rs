@@ -1915,16 +1915,30 @@ fn gzerror(
     };
 }
 
+// `gzFile` values published by this translation are opaque addresses into the
+// owned-state registry. Resolve that address before reading the state, so the
+// public ABI forwarder need not reconstruct a reference from the handle.
+// This mirrors the other gzip query adapters and keeps lookup lifetime-bound
+// to the registry lock for the complete error query.
+fn gzerror_handle(
+    file_key: usize,
+    errnum: Option<&mut ::core::ffi::c_int>,
+) -> usize {
+    gz_with_owned_state(file_key, |state| gzerror(state, errnum).expose_provenance())
+        .unwrap_or(0)
+}
+
 #[export_name = "gzerror"]
 
 pub unsafe extern "C" fn gzerror_ffi(
     mut file: crate::zlib_h::gzFile,
     mut errnum: *mut ::core::ffi::c_int,
 ) -> *const ::core::ffi::c_char {
-    if file.is_null() {
-        return ::core::ptr::null::<::core::ffi::c_char>();
-    }
-    gzerror(&*(file as crate::gzguts_h::gz_statep), errnum.as_mut())
+    // SAFETY: the optional caller error-number output is bound at the ABI
+    // boundary. The opaque gzip handle itself is resolved by the registry
+    // coordinator, rather than being dereferenced here.
+    let errnum = unsafe { errnum.as_mut() };
+    ::core::ptr::with_exposed_provenance(gzerror_handle(file.addr(), errnum))
 }
 pub(crate) fn gzclearerr(state: &mut crate::gzguts_h::gz_state) {
     if !gz_clear_error_state(state) {
