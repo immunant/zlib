@@ -2371,6 +2371,18 @@ fn bi_flush_bytes(
     }
 }
 
+// Flush pending deflate bits through an already-bounded pending-buffer view.
+// State-facing callers construct that view once; bit packing itself needs no
+// raw cursor or allocation pointer.
+pub(crate) fn flush_pending_bits(
+    pending_buf: &mut [crate::stdlib::Bytef],
+    pending: &mut crate::zutil_h::ulg,
+    bi_buf: &mut crate::zutil_h::ush,
+    bi_valid: &mut ::core::ffi::c_int,
+) {
+    bi_flush_bytes(pending_buf, pending, bi_buf, bi_valid);
+}
+
 fn bi_windup_bytes(
     pending_buf: &mut [crate::stdlib::Bytef],
     pending: &mut crate::zutil_h::ulg,
