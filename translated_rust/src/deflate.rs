@@ -588,6 +588,16 @@ pub(crate) struct DeflateOneShotProgress {
     pub(crate) produced: crate::stdlib::z_size_t,
 }
 
+// Each temporary-stream dispatch borrows only the still-available portions
+// of the caller buffers.  The ABI adapter turns these bounded views into
+// cursors for one codec call and commits the returned availability before
+// requesting the next chunk.
+struct DeflateOneShotRequest<'input, 'output> {
+    input: &'input [crate::stdlib::Bytef],
+    output: &'output mut [crate::stdlib::Bytef],
+    flush: ::core::ffi::c_int,
+}
+
 impl<'input, 'output> DeflateOneShotOwner<'input, 'output> {
     pub(crate) fn new(
         input: &'input [crate::stdlib::Bytef],
@@ -625,6 +635,45 @@ impl<'input, 'output> DeflateOneShotOwner<'input, 'output> {
             .output_remaining
             .wrapping_sub(chunk as crate::stdlib::z_size_t);
         chunk
+    }
+
+    fn request(
+        &mut self,
+        max: crate::stdlib::uInt,
+        input_offset: usize,
+        input_available: &mut crate::stdlib::uInt,
+        output_offset: usize,
+        output_available: &mut crate::stdlib::uInt,
+    ) -> DeflateOneShotRequest<'_, '_> {
+        if *output_available == 0 {
+            *output_available = self.next_output_chunk(max);
+        }
+        if *input_available == 0 {
+            *input_available = self.next_input_chunk(max);
+        }
+        let input_end = input_offset + *input_available as usize;
+        let output_end = output_offset + *output_available as usize;
+        let flush = self.flush();
+        DeflateOneShotRequest {
+            input: &self.input[input_offset..input_end],
+            output: &mut self.output[output_offset..output_end],
+            flush,
+        }
+    }
+
+    fn commit(
+        &self,
+        input_offset: &mut usize,
+        input_available: &mut crate::stdlib::uInt,
+        output_offset: &mut usize,
+        output_available: &mut crate::stdlib::uInt,
+        remaining_input: crate::stdlib::uInt,
+        remaining_output: crate::stdlib::uInt,
+    ) {
+        *input_offset += (*input_available - remaining_input) as usize;
+        *output_offset += (*output_available - remaining_output) as usize;
+        *input_available = remaining_input;
+        *output_available = remaining_output;
     }
 
     fn flush(&self) -> ::core::ffi::c_int {
@@ -667,6 +716,10 @@ pub(crate) fn deflate_one_shot(
         reserved: 0,
     };
     let max: crate::stdlib::uInt = -1 as ::core::ffi::c_int as crate::stdlib::uInt;
+    let mut input_offset = 0usize;
+    let mut output_offset = 0usize;
+    let mut input_available = 0 as crate::stdlib::uInt;
+    let mut output_available = 0 as crate::stdlib::uInt;
     let mut status = unsafe {
         deflateInit2_(
             Some(&mut stream),
@@ -685,21 +738,35 @@ pub(crate) fn deflate_one_shot(
             produced: 0,
         };
     }
-    stream.next_out = owner.output.as_mut_ptr();
-    stream.next_in = owner.input.as_ptr().cast_mut();
     loop {
-        if stream.avail_out == 0 {
-            stream.avail_out = owner.next_output_chunk(max);
-        }
-        if stream.avail_in == 0 {
-            stream.avail_in = owner.next_input_chunk(max);
-        }
-        status = unsafe { deflate(&mut stream, owner.flush()) };
+        let (remaining_input, remaining_output) = {
+            let request = owner.request(
+                max,
+                input_offset,
+                &mut input_available,
+                output_offset,
+                &mut output_available,
+            );
+            stream.next_in = request.input.as_ptr().cast_mut();
+            stream.avail_in = request.input.len() as crate::stdlib::uInt;
+            stream.next_out = request.output.as_mut_ptr();
+            stream.avail_out = request.output.len() as crate::stdlib::uInt;
+            status = unsafe { deflate(&mut stream, request.flush) };
+            (stream.avail_in, stream.avail_out)
+        };
+        owner.commit(
+            &mut input_offset,
+            &mut input_available,
+            &mut output_offset,
+            &mut output_available,
+            remaining_input,
+            remaining_output,
+        );
         if status != crate::zlib_h::Z_OK {
             break;
         }
     }
-    let produced = owner.produced(stream.avail_out);
+    let produced = owner.produced(output_available);
     unsafe {
         deflateEnd(::core::ptr::NonNull::from(&mut stream));
     }
