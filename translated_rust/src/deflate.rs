@@ -2464,7 +2464,7 @@ fn install_gzip_header(
 
 pub unsafe fn deflateSetHeader(
     strm: &mut crate::zlib_h::z_stream_s,
-    head: crate::zlib_h::gz_headerp,
+    head: Option<&crate::zlib_h::gz_header_s>,
 ) -> ::core::ffi::c_int {
     let Some((_strm, state, _storage)) =
         deflate_stream_and_state(strm, DeflateStorageProjection::None)
@@ -2473,12 +2473,9 @@ pub unsafe fn deflateSetHeader(
     };
     // Header registration starts only after the stream/state association is
     // known to be valid. The snapshot then owns every caller byte range.
-    let header = if head.is_null() {
-        None
-    } else {
-        let header = &*head;
+    let header = head.map(|header| {
         let extra_len = header.extra_len & 0xffff as crate::stdlib::uInt;
-        Some(GzipHeader {
+        GzipHeader {
             text: header.text,
             time: header.time,
             os: header.os,
@@ -2505,8 +2502,8 @@ pub unsafe fn deflateSetHeader(
                 )
             },
             hcrc: header.hcrc != 0,
-        })
-    };
+        }
+    });
     install_gzip_header(state.wrap, &mut state.gzhead, header)
 }
 #[export_name = "deflateSetHeader"]
@@ -2518,7 +2515,7 @@ pub unsafe extern "C" fn deflateSetHeader_ffi(
     let Some(strm) = strm.as_mut() else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
-    deflateSetHeader(strm, head)
+    deflateSetHeader(strm, head.as_ref())
 }
 
 fn deflate_pending_impl(
