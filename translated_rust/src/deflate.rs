@@ -283,6 +283,19 @@ impl internal_state {
         true
     }
 
+    /// Copy-free view of the symbol overlay after validating both its offset
+    /// and the number of bytes recorded in it.  Tree emission takes a short
+    /// owned snapshot before it starts appending pending output, so the two
+    /// regions never need to be addressed through interior pointers.
+    #[inline]
+    pub fn symbol_bytes(&self) -> Option<&[crate::stdlib::Bytef]> {
+        let next = usize::try_from(self.sym_next).ok()?;
+        let end = self.sym_buf.checked_add(next)?;
+        let start = crate::zutil_h::ulg::try_from(self.sym_buf).ok()?;
+        let end = crate::zutil_h::ulg::try_from(end).ok()?;
+        self.pending_bytes(start, end)
+    }
+
     /// Return one byte from the LZ window after checking it against the
     /// allocation retained by this state.  The window is allocated with a
     /// fixed size for the lifetime of a deflate stream, so this short-lived

@@ -3359,6 +3359,122 @@ unsafe extern "C" fn compress_block(
     };
 }
 
+trait HuffmanEntry {
+    fn code(&self) -> crate::zutil_h::ush;
+    fn len(&self) -> crate::zutil_h::ush;
+}
+
+impl HuffmanEntry for crate::src::deflate::ct_data {
+    #[inline]
+    fn code(&self) -> crate::zutil_h::ush {
+        self.code()
+    }
+
+    #[inline]
+    fn len(&self) -> crate::zutil_h::ush {
+        self.len()
+    }
+}
+
+impl HuffmanEntry for trees_h::StaticCtData {
+    #[inline]
+    fn code(&self) -> crate::zutil_h::ush {
+        self.code
+    }
+
+    #[inline]
+    fn len(&self) -> crate::zutil_h::ush {
+        self.len
+    }
+}
+
+#[inline]
+fn send_huffman_code<T: HuffmanEntry>(
+    s: &mut crate::src::deflate::deflate_state,
+    tree: &[T],
+    symbol: usize,
+) -> bool {
+    let Some(entry) = tree.get(symbol) else {
+        return false;
+    };
+    send_bits(s, entry.code() as ::core::ffi::c_int, entry.len() as ::core::ffi::c_int);
+    true
+}
+
+/// Emit the pending literal/match overlay using bounded symbol and Huffman
+/// views.  The snapshot is intentional: output bytes share the same backing
+/// allocation as the input overlay, so it preserves the original order while
+/// allowing the pending cursor to advance independently.
+fn compress_block_impl<L: HuffmanEntry, D: HuffmanEntry>(
+    s: &mut crate::src::deflate::deflate_state,
+    ltree: &[L],
+    dtree: &[D],
+) {
+    let symbols = if s.sym_next == 0 {
+        Vec::new()
+    } else {
+        let Some(symbols) = s.symbol_bytes() else {
+            return;
+        };
+        symbols.to_vec()
+    };
+
+    for symbol in symbols.chunks_exact(3) {
+        let mut dist = u32::from(symbol[0]) | (u32::from(symbol[1]) << 8);
+        let mut lc = symbol[2] as ::core::ffi::c_int;
+        if dist == 0 {
+            if !send_huffman_code(s, ltree, lc as usize) {
+                return;
+            }
+            continue;
+        }
+
+        let Some(&length_code) = _length_code.get(lc as usize) else {
+            return;
+        };
+        let length_code = length_code as usize;
+        if !send_huffman_code(s, ltree, length_code + 257) {
+            return;
+        }
+        let Some(&length_extra) = extra_lbits.get(length_code) else {
+            return;
+        };
+        if length_extra != 0 {
+            let Some(&base) = base_length.get(length_code) else {
+                return;
+            };
+            lc -= base;
+            send_bits(s, lc, length_extra);
+        }
+
+        dist = dist.wrapping_sub(1);
+        let distance_index = if dist < 256 {
+            dist as usize
+        } else {
+            256 + (dist >> 7) as usize
+        };
+        let Some(&distance_code) = _dist_code.get(distance_index) else {
+            return;
+        };
+        let distance_code = distance_code as usize;
+        if !send_huffman_code(s, dtree, distance_code) {
+            return;
+        }
+        let Some(&distance_extra) = extra_dbits.get(distance_code) else {
+            return;
+        };
+        if distance_extra != 0 {
+            let Some(&base) = base_dist.get(distance_code) else {
+                return;
+            };
+            dist = dist.wrapping_sub(base as u32);
+            send_bits(s, dist as ::core::ffi::c_int, distance_extra);
+        }
+    }
+
+    let _ = send_huffman_code(s, ltree, 256);
+}
+
 unsafe fn detect_data_type(s: &crate::src::deflate::deflate_state) -> ::core::ffi::c_int {
     detect_data_type_impl(s)
 }
@@ -3491,11 +3607,7 @@ pub(crate) unsafe fn tr_flush_block_impl(
                     << s.bi_valid) as crate::zutil_h::ush;
             s.bi_valid += len;
         }
-        unsafe { compress_block(
-            s as *mut crate::src::deflate::deflate_state,
-            static_ltree.as_ptr().cast::<crate::src::deflate::ct_data>(),
-            static_dtree.as_ptr().cast::<crate::src::deflate::ct_data>(),
-        ) };
+        compress_block_impl(s, &static_ltree, &static_dtree);
     } else {
         let mut len_0: ::core::ffi::c_int = 3 as ::core::ffi::c_int;
         if s.bi_valid > crate::src::deflate::Buf_size - len_0 {
@@ -3527,11 +3639,9 @@ pub(crate) unsafe fn tr_flush_block_impl(
             s.d_desc.max_code + 1 as ::core::ffi::c_int,
             max_blindex + 1 as ::core::ffi::c_int,
         ) };
-        unsafe { compress_block(
-            s as *mut crate::src::deflate::deflate_state,
-            s.dyn_ltree.as_ptr().cast::<crate::src::deflate::ct_data>(),
-            s.dyn_dtree.as_ptr().cast::<crate::src::deflate::ct_data>(),
-        ) };
+        let ltree = s.dyn_ltree;
+        let dtree = s.dyn_dtree;
+        compress_block_impl(s, &ltree, &dtree);
     }
     init_block_impl(s);
     if last != 0 {
