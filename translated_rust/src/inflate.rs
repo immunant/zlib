@@ -1638,7 +1638,14 @@ pub fn inflate(
                                                                             }
                                                                         }
                                                                         }
-                                                                        copy = (*state).length;
+                                                                        // Stored-block copying only updates the
+                                                                        // already-validated inflate state around
+                                                                        // its existing raw input/output boundary.
+                                                                        // Keep one local state borrow for this
+                                                                        // bounded phase instead of repeatedly
+                                                                        // dereferencing the legacy state handle.
+                                                                        let state = &mut *state;
+                                                                        copy = state.length;
                                                                         if copy != 0 {
                                                                             if copy > have {
                                                                                 copy = have;
@@ -1673,15 +1680,12 @@ pub fn inflate(
                                                                             put = put.wrapping_add(
                                                                                 copy as usize,
                                                                             );
-                                                                            (*state).length =
-                                                                                (*state)
-                                                                                    .length
-                                                                                    .wrapping_sub(
-                                                                                        copy,
-                                                                                    );
+                                                                            state.length = state
+                                                                                .length
+                                                                                .wrapping_sub(copy);
                                                                             continue '_inf_leave;
                                                                         } else {
-                                                                            (*state).mode = crate::src::inflate::TYPE;
+                                                                            state.mode = crate::src::inflate::TYPE;
                                                                             continue '_inf_leave;
                                                                         }
                                                                     }
