@@ -5285,7 +5285,7 @@ fn detect_data_type_from_ltree(dyn_ltree: &[crate::src::deflate::ct_data]) -> ::
     }
     return crate::zlib_h::Z_BINARY;
 }
-fn tr_flush_block_core(
+pub(crate) fn tr_flush_block_core(
     storage: &mut crate::src::deflate::PendingStorageView<'_>,
     state: &mut crate::src::deflate::deflate_state,
     strm: Option<&mut crate::zlib_h::z_stream>,

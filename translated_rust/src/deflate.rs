@@ -5086,11 +5086,6 @@ unsafe fn deflate_rle(
     mut flush: ::core::ffi::c_int,
 ) -> block_state {
     let mut bflush: ::core::ffi::c_int = 0;
-    let symbol_base = (*s)
-        .pending_buf
-        .expect("validated pending storage")
-        .as_ptr()
-        .wrapping_add((*s).sym_buf_offset);
     loop {
         if (*s).lookahead <= crate::zutil_h::MAX_MATCH as crate::stdlib::uInt {
             fill_window(s);
@@ -5140,13 +5135,21 @@ unsafe fn deflate_rle(
                     deflate_rle_match_length(strend.wrapping_sub(scan), (*s).lookahead);
             }
         }
+        let layout =
+            pending_storage_layout_for_state(&*s).expect("validated pending storage layout");
+        let pending = &mut *core::ptr::slice_from_raw_parts_mut(
+            (*s).pending_buf
+                .expect("validated pending storage")
+                .as_ptr(),
+            layout.total_len,
+        );
+        let mut storage = PendingStorageView::new(pending, layout)
+            .expect("pending storage layout matches its allocation");
         match deflate_rle_tally_plan((*s).match_length) {
             DeflateRleTallyPlan::MatchWithoutCount => {
                 let tally = deflate_rle_match_tally_plan((*s).match_length, (*s).sym_next);
                 (*s).sym_next = tally.next_sym;
-                *symbol_base.wrapping_add(tally.cursors[0] as usize) = tally.symbol_bytes[0];
-                *symbol_base.wrapping_add(tally.cursors[1] as usize) = tally.symbol_bytes[1];
-                *symbol_base.wrapping_add(tally.cursors[2] as usize) = tally.symbol_bytes[2];
+                assert!(storage.write_symbol_triplet(tally.cursors, tally.symbol_bytes));
                 (*s).dyn_ltree[tally.length_tree_index].fc.value = (*s).dyn_ltree
                     [tally.length_tree_index]
                     .fc
@@ -5170,9 +5173,7 @@ unsafe fn deflate_rle(
                     *(*s).window.offset((*s).strstart as isize) as crate::zutil_h::uch;
                 let tally = deflate_literal_tally_plan(literal, (*s).sym_next);
                 (*s).sym_next = tally.next_sym;
-                *symbol_base.wrapping_add(tally.cursors[0] as usize) = tally.symbol_bytes[0];
-                *symbol_base.wrapping_add(tally.cursors[1] as usize) = tally.symbol_bytes[1];
-                *symbol_base.wrapping_add(tally.cursors[2] as usize) = tally.symbol_bytes[2];
+                assert!(storage.write_symbol_triplet(tally.cursors, tally.symbol_bytes));
                 (*s).dyn_ltree[tally.literal_tree_index].fc.value = (*s).dyn_ltree
                     [tally.literal_tree_index]
                     .fc
@@ -5184,19 +5185,27 @@ unsafe fn deflate_rle(
             }
         }
         if bflush != 0 {
-            crate::src::trees::_tr_flush_block(
-                s as *mut crate::src::deflate::internal_state,
-                if (*s).block_start >= 0 as ::core::ffi::c_long {
+            let stored_len = deflate_block_len((*s).strstart, (*s).block_start);
+            let stored_data = if (*s).block_start >= 0 as ::core::ffi::c_long {
+                Some(core::slice::from_raw_parts(
                     (*s).window
-                        .offset((*s).block_start as ::core::ffi::c_uint as isize)
-                        as *mut crate::stdlib::Bytef
-                        as *mut crate::stdlib::charf
-                } else {
-                    ::core::ptr::null_mut::<crate::stdlib::charf>()
-                },
-                deflate_block_len((*s).strstart, (*s).block_start),
+                        .add((*s).block_start as ::core::ffi::c_uint as usize),
+                    stored_len as usize,
+                ))
+            } else {
+                None
+            };
+            let state = &mut *s;
+            let stream = &mut *state.strm;
+            crate::src::trees::tr_flush_block_core(
+                &mut storage,
+                state,
+                Some(stream),
+                stored_data,
+                stored_len,
                 0 as ::core::ffi::c_int,
             );
+            drop(storage);
             (*s).block_start = (*s).strstart as ::core::ffi::c_long;
             flush_pending((*s).strm);
             if let Some(state) =
