@@ -1043,71 +1043,14 @@ pub unsafe extern "C" fn gzfwrite_ffi(
     };
     gzfwrite(state, input, size, nitems)
 }
-// A single-byte write has the same pointer-free admission and error staging
-// as the other text writes.  Keep the ABI-state/compressor projection in the
-// adapter below so a future gzip owner can consume this plan directly.
-enum GzPutcPlan<'input> {
-    Return(::core::ffi::c_int),
-    Write(GzWriteTransaction<'input>),
-}
-
-fn gzputc<'input>(
-    c: ::core::ffi::c_int,
-    input: &'input [u8],
-    policy: GzWritePolicy,
-    mut error: crate::src::gzlib::GzErrorState<'_>,
-) -> GzPutcPlan<'input> {
-    if !policy.accepts_write() {
-        return GzPutcPlan::Return(-1);
-    }
-    error.clear();
-    // `gzip_write_state_adapter()` owns the ABI-state portion of the whole write
-    // transaction: initialization, pending
-    // forward-seek zero fill, bounded input buffering, and the embedded
-    // deflate dispatch.  Feeding it the one-byte slice preserves the full
-    // buffer fallback (flush the old prefix before appending this byte)
-    // without giving this entry point a second cursor transition.
-    let Some(transaction) = gz_write(input) else {
-        return GzPutcPlan::Return(-1);
-    };
-    let _ = c;
-    GzPutcPlan::Write(transaction)
-}
-
-// The byte admission plan is pointer-free, but its accepted branch still
-// needs the established gzip/deflate state projection.  Retain that single
-// boundary here instead of moving compressor work into the export wrapper.
-unsafe fn gzputc_from_state(
-    state: &mut crate::gzguts_h::gz_state,
-    c: ::core::ffi::c_int,
-) -> ::core::ffi::c_int {
-    let buf = [c as ::core::ffi::c_uchar];
-    let plan = gzputc(
-        c,
-        &buf,
-        GzWritePolicy {
-            mode: state.mode,
-            err: state.err,
-            again: state.again,
-            direct: state.direct,
-        },
-        crate::src::gzlib::GzErrorState {
-            message: &mut state.msg,
-            error: &mut state.err,
-            buffered: &mut state.x.have,
-            again: state.again,
-            path: state.path.as_deref(),
-        },
-    );
-    match plan {
-        GzPutcPlan::Return(result) => result,
-        GzPutcPlan::Write(transaction) => {
-            if gzip_write_state_adapter(state, transaction) != 1 as crate::stdlib::z_size_t {
-                -1
-            } else {
-                c & 0xff as ::core::ffi::c_int
-            }
-        }
+// The shared one-byte result convention stays pointer-free.  The write
+// itself uses `gzwrite()`'s established gzip/deflate boundary, so `gzputc`
+// does not need its own unsafe state projection.
+fn gzputc_result(c: ::core::ffi::c_int, written: ::core::ffi::c_int) -> ::core::ffi::c_int {
+    if written == 1 {
+        c & 0xff
+    } else {
+        -1
     }
 }
 #[export_name = "gzputc"]
@@ -1119,7 +1062,8 @@ pub unsafe extern "C" fn gzputc_ffi(
     let Some(state) = (file as crate::gzguts_h::gz_statep).as_mut() else {
         return -1 as ::core::ffi::c_int;
     };
-    gzputc_from_state(state, c)
+    let byte = [c as ::core::ffi::c_uchar];
+    gzputc_result(c, gzwrite(state, &byte))
 }
 // `gzputs()` has no handle-specific policy beyond admission, error staging,
 // and the bounded caller string. Keep that portion pointer-free so the one
