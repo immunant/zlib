@@ -120,8 +120,6 @@ pub use crate::src::inftrees::ENOUGH;
 pub use crate::src::inftrees::ENOUGH_DISTS;
 pub use crate::src::inftrees::ENOUGH_LENS;
 pub use crate::src::inftrees::LENS;
-pub use crate::src::zutil::zcalloc;
-pub use crate::src::zutil::zcfree;
 
 
 pub use crate::stdlib::uInt;
@@ -299,7 +297,7 @@ pub unsafe extern "C" fn inflateInit2_(
     (*strm).msg = ::core::ptr::null_mut::<::core::ffi::c_char>();
     if (*strm).zalloc.is_none() {
         (*strm).zalloc = Some(
-            crate::src::zutil::zcalloc
+            crate::src::zutil::zcalloc_ffi
                 as unsafe extern "C" fn(
                     crate::stdlib::voidpf,
                     ::core::ffi::c_uint,
@@ -310,7 +308,7 @@ pub unsafe extern "C" fn inflateInit2_(
     }
     if (*strm).zfree.is_none() {
         (*strm).zfree = Some(
-            crate::src::zutil::zcfree
+            crate::src::zutil::zcfree_ffi
                 as unsafe extern "C" fn(crate::stdlib::voidpf, crate::stdlib::voidpf) -> (),
         ) as crate::zlib_h::free_func;
     }

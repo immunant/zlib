@@ -161,8 +161,6 @@ pub use crate::src::trees::_tr_flush_block;
 pub use crate::src::trees::_tr_init;
 pub use crate::src::trees::_tr_stored_block;
 pub use crate::src::zutil::z_errmsg;
-pub use crate::src::zutil::zcalloc;
-pub use crate::src::zutil::zcfree;
 pub use crate::stdlib::charf;
 
 
@@ -630,7 +628,7 @@ pub unsafe extern "C" fn deflateInit2_(
     (*strm).msg = ::core::ptr::null_mut::<::core::ffi::c_char>();
     if (*strm).zalloc.is_none() {
         (*strm).zalloc = Some(
-            crate::src::zutil::zcalloc
+            crate::src::zutil::zcalloc_ffi
                 as unsafe extern "C" fn(
                     crate::stdlib::voidpf,
                     ::core::ffi::c_uint,
@@ -641,7 +639,7 @@ pub unsafe extern "C" fn deflateInit2_(
     }
     if (*strm).zfree.is_none() {
         (*strm).zfree = Some(
-            crate::src::zutil::zcfree
+            crate::src::zutil::zcfree_ffi
                 as unsafe extern "C" fn(crate::stdlib::voidpf, crate::stdlib::voidpf) -> (),
         ) as crate::zlib_h::free_func;
     }

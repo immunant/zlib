@@ -144,37 +144,27 @@ pub unsafe extern "C" fn zlibCompileFlags_ffi() -> crate::stdlib::uLong {
 pub unsafe extern "C" fn zError_ffi(err: ::core::ffi::c_int) -> *const ::core::ffi::c_char {
     z_errmsg[z_error_index(err)]
 }
-pub unsafe extern "C" fn zcalloc(
-    mut _opaque: crate::stdlib::voidpf,
-    mut items: ::core::ffi::c_uint,
-    mut size: ::core::ffi::c_uint,
-) -> crate::stdlib::voidpf {
-    return if ::core::mem::size_of::<crate::stdlib::uInt>() > 2 as usize {
-        crate::stdlib::malloc(items.wrapping_mul(size) as crate::__stddef_size_t_h::size_t)
-    } else {
-        crate::stdlib::calloc(
-            items as crate::__stddef_size_t_h::size_t,
-            size as crate::__stddef_size_t_h::size_t,
-        )
-    };
-}
 #[export_name = "zcalloc"]
-
 pub unsafe extern "C" fn zcalloc_ffi(
-    mut opaque: crate::stdlib::voidpf,
-    mut items: ::core::ffi::c_uint,
-    mut size: ::core::ffi::c_uint,
+    _opaque: crate::stdlib::voidpf,
+    items: ::core::ffi::c_uint,
+    size: ::core::ffi::c_uint,
 ) -> crate::stdlib::voidpf {
-    zcalloc(opaque, items, size)
-}
-pub unsafe extern "C" fn zcfree(mut _opaque: crate::stdlib::voidpf, mut ptr: crate::stdlib::voidpf) {
-    crate::stdlib::free(ptr as *mut ::core::ffi::c_void);
+    let items = items as crate::__stddef_size_t_h::size_t;
+    let size = size as crate::__stddef_size_t_h::size_t;
+    if items.checked_mul(size).is_none() {
+        return ::core::ptr::null_mut();
+    }
+    if ::core::mem::size_of::<crate::stdlib::uInt>() > 2 {
+        crate::stdlib::malloc(items * size)
+    } else {
+        crate::stdlib::calloc(items, size)
+    }
 }
 #[export_name = "zcfree"]
-
 pub unsafe extern "C" fn zcfree_ffi(
-    mut opaque: crate::stdlib::voidpf,
-    mut ptr: crate::stdlib::voidpf,
+    _opaque: crate::stdlib::voidpf,
+    ptr: crate::stdlib::voidpf,
 ) {
-    zcfree(opaque, ptr)
+    crate::stdlib::free(ptr as *mut ::core::ffi::c_void);
 }

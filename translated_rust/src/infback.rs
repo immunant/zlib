@@ -97,7 +97,7 @@ pub unsafe extern "C" fn inflateBackInit_(
     (*strm).msg = ::core::ptr::null_mut::<::core::ffi::c_char>();
     if (*strm).zalloc.is_none() {
         (*strm).zalloc = Some(
-            crate::src::zutil::zcalloc
+            crate::src::zutil::zcalloc_ffi
                 as unsafe extern "C" fn(
                     crate::stdlib::voidpf,
                     ::core::ffi::c_uint,
@@ -108,7 +108,7 @@ pub unsafe extern "C" fn inflateBackInit_(
     }
     if (*strm).zfree.is_none() {
         (*strm).zfree = Some(
-            crate::src::zutil::zcfree
+            crate::src::zutil::zcfree_ffi
                 as unsafe extern "C" fn(crate::stdlib::voidpf, crate::stdlib::voidpf) -> (),
         ) as crate::zlib_h::free_func;
     }
