@@ -1581,14 +1581,14 @@ macro_rules! deflate_params_at_boundary {
             }
             let s = (*strm).state as *mut crate::src::deflate::deflate_state;
             let Some(plan) = crate::src::deflate::deflate_params_plan(
-                level,
-                strategy,
-                (*s).level,
-                (*s).strategy,
-                (*s).last_flush,
-            ) else {
-                break 'deflate_params_result crate::zlib_h::Z_STREAM_ERROR;
-            };
+                            level,
+                            strategy,
+                            (*s).level,
+                            (*s).strategy,
+                            (*s).last_flush,
+                        ) else {
+                            break 'deflate_params_result crate::zlib_h::Z_STREAM_ERROR;
+                        };
             if plan.needs_block_flush {
                 let err = crate::src::deflate::deflate(strm, crate::zlib_h::Z_BLOCK);
                 if err == crate::zlib_h::Z_STREAM_ERROR {
@@ -1607,11 +1607,11 @@ macro_rules! deflate_params_at_boundary {
                 {
                     if (*s).matches == 1 as crate::stdlib::uInt {
                         let Ok(head_len) = usize::try_from((*s).hash_size) else {
-                            break 'deflate_params_result crate::zlib_h::Z_STREAM_ERROR;
-                        };
+                                        break 'deflate_params_result crate::zlib_h::Z_STREAM_ERROR;
+                                    };
                         let Ok(prev_len) = usize::try_from((*s).w_size) else {
-                            break 'deflate_params_result crate::zlib_h::Z_STREAM_ERROR;
-                        };
+                                        break 'deflate_params_result crate::zlib_h::Z_STREAM_ERROR;
+                                    };
                         if (head_len != 0 && (*s).head.is_null())
                             || (prev_len != 0 && (*s).prev.is_null())
                         {
@@ -1631,8 +1631,8 @@ macro_rules! deflate_params_at_boundary {
                         (*s).slid = 1;
                     } else {
                         let Ok(head_len) = usize::try_from((*s).hash_size) else {
-                            break 'deflate_params_result crate::zlib_h::Z_STREAM_ERROR;
-                        };
+                                        break 'deflate_params_result crate::zlib_h::Z_STREAM_ERROR;
+                                    };
                         if head_len != 0 && (*s).head.is_null() {
                             break 'deflate_params_result crate::zlib_h::Z_STREAM_ERROR;
                         }
@@ -2906,7 +2906,16 @@ pub unsafe extern "C" fn deflateCopy_ffi(
             .wrapping_mul(::core::mem::size_of::<crate::src::deflate::Pos>()),
     );
     let pending_out_offset = (*ss).pending_out.offset_from((*ss).pending_buf);
-    (*ds).pending_out = (*ds).pending_buf.wrapping_offset(pending_out_offset);
+    // `pending_out` is normally within the pending allocation. Keep the
+    // translated wrapping behavior for malformed state too, but express the
+    // signed cursor as an unsigned direction before forming the new pointer.
+    (*ds).pending_out = if pending_out_offset >= 0 {
+        (*ds).pending_buf.wrapping_add(pending_out_offset as usize)
+    } else {
+        (*ds)
+            .pending_buf
+            .wrapping_sub(pending_out_offset.unsigned_abs())
+    };
     crate::stdlib::memcpy(
         (*ds).pending_out as *mut ::core::ffi::c_void,
         (*ss).pending_out as *const ::core::ffi::c_void,
@@ -3484,14 +3493,23 @@ unsafe extern "C" fn deflate_stored(
     ) {
         len = plan.len;
         last = plan.last;
+        let state = &mut *s;
+        // Match the legacy `c_long` -> pointer-offset narrowing before
+        // splitting the signed cursor into an unsigned direction.
+        let block_start = state.block_start as isize;
+        let stored = if block_start >= 0 {
+            (state.window as *mut crate::stdlib::charf).wrapping_add(block_start as usize)
+        } else {
+            (state.window as *mut crate::stdlib::charf).wrapping_sub(block_start.unsigned_abs())
+        };
         crate::src::trees::_tr_stored_block(
-            s as *mut crate::src::deflate::internal_state,
-            ((*s).window as *mut crate::stdlib::charf).wrapping_offset((*s).block_start as isize),
+            state as *mut crate::src::deflate::internal_state,
+            stored,
             len as crate::zutil_h::ulg,
             last,
         );
-        (*s).block_start += len as ::core::ffi::c_long;
-        flush_pending((*s).strm);
+        state.block_start += len as ::core::ffi::c_long;
+        flush_pending(state.strm);
     }
     if last != 0 {
         (*s).bi_used = 8 as ::core::ffi::c_int;
