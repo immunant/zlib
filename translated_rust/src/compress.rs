@@ -127,12 +127,12 @@ fn compress2_z_bound(
     if err != crate::zlib_h::Z_OK {
         return err;
     }
-    stream.next_out = dest
-        .as_deref_mut()
-        .map_or(::core::ptr::null_mut(), <[crate::stdlib::Bytef]>::as_mut_ptr);
+    stream.next_out = dest.as_deref_mut().map_or(
+        ::core::ptr::null_mut(),
+        <[crate::stdlib::Bytef]>::as_mut_ptr,
+    );
     stream.avail_out = 0 as crate::stdlib::uInt;
-    stream.next_in = source
-        .map_or(::core::ptr::null(), <[crate::stdlib::Bytef]>::as_ptr)
+    stream.next_in = source.map_or(::core::ptr::null(), <[crate::stdlib::Bytef]>::as_ptr)
         as *mut crate::stdlib::Bytef;
     stream.avail_in = 0 as crate::stdlib::uInt;
     loop {
@@ -267,9 +267,7 @@ pub unsafe extern "C" fn compress2_ffi(
     } else if sourceLen == 0 {
         Some(&[] as &[crate::stdlib::Bytef])
     } else {
-        Some(unsafe {
-            ::core::slice::from_raw_parts(source, sourceLen as crate::stdlib::z_size_t)
-        })
+        Some(unsafe { ::core::slice::from_raw_parts(source, sourceLen as crate::stdlib::z_size_t) })
     };
     compress2_legacy_bound(destination, dest_len, source, sourceLen, level)
 }
@@ -346,9 +344,7 @@ pub unsafe extern "C" fn compress_ffi(
     } else if sourceLen == 0 {
         Some(&[] as &[crate::stdlib::Bytef])
     } else {
-        Some(unsafe {
-            ::core::slice::from_raw_parts(source, sourceLen as crate::stdlib::z_size_t)
-        })
+        Some(unsafe { ::core::slice::from_raw_parts(source, sourceLen as crate::stdlib::z_size_t) })
     };
     compress2_legacy_bound(
         destination,

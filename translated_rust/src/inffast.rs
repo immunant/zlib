@@ -162,9 +162,8 @@ fn inflate_fast_impl(
                 op &= 15;
                 if op != 0 {
                     if bits < op {
-                        hold = hold.wrapping_add(
-                            (input[input_index] as ::core::ffi::c_ulong) << bits,
-                        );
+                        hold =
+                            hold.wrapping_add((input[input_index] as ::core::ffi::c_ulong) << bits);
                         input_index += 1;
                         bits = bits.wrapping_add(8);
                     }
@@ -194,9 +193,8 @@ fn inflate_fast_impl(
                         let mut dist = here.val as ::core::ffi::c_uint;
                         op &= 15;
                         if bits < op {
-                            hold = hold.wrapping_add(
-                                (input[input_index] as ::core::ffi::c_ulong) << bits,
-                            );
+                            hold = hold
+                                .wrapping_add((input[input_index] as ::core::ffi::c_ulong) << bits);
                             input_index += 1;
                             bits = bits.wrapping_add(8);
                             if bits < op {
@@ -221,9 +219,9 @@ fn inflate_fast_impl(
                                 error = Some(InflateFastError::DistanceTooFarBack);
                                 break 'outer;
                             }
-                            let mut from = (state.wsize.wrapping_add(state.wnext)
-                                .wrapping_sub(needed)
-                                % state.wsize) as usize;
+                            let mut from =
+                                (state.wsize.wrapping_add(state.wnext).wrapping_sub(needed)
+                                    % state.wsize) as usize;
                             let from_window = len.min(needed) as usize;
                             for _ in 0..from_window {
                                 output[output_index] = window[from];
@@ -482,13 +480,8 @@ pub fn inflate_fast(
         return;
     };
     let _ = start;
-    let _ = crate::src::inflate::inflate(
-        strm,
-        crate::zlib_h::Z_NO_FLUSH,
-        Some(input),
-        output,
-        None,
-    );
+    let _ =
+        crate::src::inflate::inflate(strm, crate::zlib_h::Z_NO_FLUSH, Some(input), output, None);
 }
 
 #[export_name = "inflate_fast"]
@@ -514,8 +507,7 @@ pub unsafe extern "C" fn inflate_fast_ffi(
     } else {
         unsafe { ::core::slice::from_raw_parts(strm.next_in, strm.avail_in as usize) }
     };
-    let output = unsafe {
-        ::core::slice::from_raw_parts_mut(strm.next_out, strm.avail_out as usize)
-    };
+    let output =
+        unsafe { ::core::slice::from_raw_parts_mut(strm.next_out, strm.avail_out as usize) };
     inflate_fast(Some(strm), start, input, output)
 }

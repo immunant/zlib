@@ -1101,18 +1101,12 @@ fn inflateBackInit_(
     // these public accounting fields. Preserve them while reusing the common
     // allocator and state initialization path.
     let public_fields = (strm.total_in, strm.total_out, strm.data_type, strm.adler);
-    let ret = crate::src::inflate::inflateInit2_(
-        Some(strm),
-        windowBits,
-        version_first,
-        stream_size,
-    );
+    let ret =
+        crate::src::inflate::inflateInit2_(Some(strm), windowBits, version_first, stream_size);
     if ret != crate::zlib_h::Z_OK {
         return ret;
     }
-    let Some((strm, state)) =
-        crate::src::inflate::inflateStateCheck(strm)
-    else {
+    let Some((strm, state)) = crate::src::inflate::inflateStateCheck(strm) else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
     (strm.total_in, strm.total_out, strm.data_type, strm.adler) = public_fields;
@@ -1151,9 +1145,7 @@ pub(crate) fn inflateBack(
     let Some(strm) = strm else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
-    let Some((strm, state)) =
-        crate::src::inflate::inflateStateCheck(strm)
-    else {
+    let Some((strm, state)) = crate::src::inflate::inflateStateCheck(strm) else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
     macro_rules! decode_with_window {
@@ -1198,18 +1190,24 @@ pub(crate) fn inflateBack(
                             output_desc,
                             callback_window.as_mut_ptr(),
                             state.wsize,
-                        ) != 0 {
+                        ) != 0
+                        {
                             break crate::zlib_h::Z_BUF_ERROR;
                         }
                         written = 0;
                         continue;
                     }
                     match status {
-                        crate::zlib_h::Z_STREAM_END | crate::zlib_h::Z_DATA_ERROR
-                        | crate::zlib_h::Z_MEM_ERROR | crate::zlib_h::Z_STREAM_ERROR => break status,
+                        crate::zlib_h::Z_STREAM_END
+                        | crate::zlib_h::Z_DATA_ERROR
+                        | crate::zlib_h::Z_MEM_ERROR
+                        | crate::zlib_h::Z_STREAM_ERROR => break status,
                         crate::zlib_h::Z_OK | crate::zlib_h::Z_BUF_ERROR if strm.avail_in == 0 => {
                             let mut next = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
-                            let have = input.expect("non-null function pointer")(input_desc, &raw mut next);
+                            let have = input.expect("non-null function pointer")(
+                                input_desc,
+                                &raw mut next,
+                            );
                             if have == 0 || next.is_null() {
                                 strm.next_in = ::core::ptr::null_mut::<crate::stdlib::Bytef>();
                                 strm.avail_in = 0;
@@ -1232,7 +1230,11 @@ pub(crate) fn inflateBack(
                 }
                 state.window = callback_window.as_mut_ptr();
                 state.wnext = 0;
-                state.whave = if published_full_window { state.wsize } else { 0 };
+                state.whave = if published_full_window {
+                    state.wsize
+                } else {
+                    0
+                };
                 (state.hold, state.bits) = saved_bit_buffer;
                 (strm.total_in, strm.total_out, strm.data_type, strm.adler) = saved_public;
                 strm.next_out = saved_next_out;
@@ -1254,7 +1256,6 @@ pub(crate) fn inflateBack(
     )
     .unwrap_or(crate::zlib_h::Z_STREAM_ERROR)
 }
-
 
 #[export_name = "inflateBack"]
 

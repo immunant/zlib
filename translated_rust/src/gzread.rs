@@ -79,7 +79,9 @@ struct GzLoadResult {
 // state machine only consults it for a negative result, so reading it through
 // Rust's OS-error API preserves the C ordering without a raw errno pointer.
 fn gz_last_errno() -> ::core::ffi::c_int {
-    ::std::io::Error::last_os_error().raw_os_error().unwrap_or(0)
+    ::std::io::Error::last_os_error()
+        .raw_os_error()
+        .unwrap_or(0)
 }
 
 // This is the descriptor-read boundary. Its private callers retain a bounded
@@ -117,11 +119,7 @@ fn gz_load(
     let errno = if ret < 0 { gz_last_errno() } else { 0 };
     if let Err(_) = crate::src::gzlib::gz_load_result(state, ret, loaded, errno) {
         let message = crate::src::gzlib::gz_errno_message();
-        crate::src::gzlib::gz_error(
-            state,
-            crate::zlib_h::Z_ERRNO,
-            Some(&message),
-        );
+        crate::src::gzlib::gz_error(state, crate::zlib_h::Z_ERRNO, Some(&message));
         return GzLoadResult {
             received: loaded,
             status: -1,
@@ -191,8 +189,7 @@ fn gz_avail(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
                         state.strm.next_in.addr(),
                         buffered,
                         buffer.len(),
-                    )
-                    else {
+                    ) else {
                         return None;
                     };
                     buffer.copy_within(range, 0);
@@ -228,7 +225,8 @@ fn gz_look(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
             );
             return -1 as ::core::ffi::c_int;
         };
-        let Some(output) = crate::src::gzlib::gz_owned_buffer(state.want.wrapping_shl(1) as usize) else {
+        let Some(output) = crate::src::gzlib::gz_owned_buffer(state.want.wrapping_shl(1) as usize)
+        else {
             crate::src::gzlib::gz_error(
                 state,
                 crate::zlib_h::Z_MEM_ERROR,
@@ -349,30 +347,31 @@ fn gz_decomp(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
             // both Vecs from that registry rather than reconstructing either
             // slice from a C-facing cursor in the inflater itself.
             let state_key = crate::src::gzlib::gz_owned_buffer_key(state);
-            let result = crate::src::gzlib::gz_with_owned_read_buffers(state_key, |input, output| {
-                if state.in_0 != input.as_mut_ptr() || state.out != output.as_mut_ptr() {
-                    return None;
-                }
-                let input_range = gz_buffered_input_range(
-                    input.as_ptr().addr(),
-                    state.strm.next_in.addr(),
-                    state.strm.avail_in,
-                    input.len(),
-                )?;
-                let output_range = gz_buffered_output_range(
-                    output.as_ptr().addr(),
-                    state.strm.next_out.addr(),
-                    state.strm.avail_out,
-                    output.len(),
-                )?;
-                Some(crate::src::inflate::inflate(
-                    &mut state.strm,
-                    crate::zlib_h::Z_NO_FLUSH,
-                    Some(&input[input_range]),
-                    &mut output[output_range],
-                    None,
-                ))
-            });
+            let result =
+                crate::src::gzlib::gz_with_owned_read_buffers(state_key, |input, output| {
+                    if state.in_0 != input.as_mut_ptr() || state.out != output.as_mut_ptr() {
+                        return None;
+                    }
+                    let input_range = gz_buffered_input_range(
+                        input.as_ptr().addr(),
+                        state.strm.next_in.addr(),
+                        state.strm.avail_in,
+                        input.len(),
+                    )?;
+                    let output_range = gz_buffered_output_range(
+                        output.as_ptr().addr(),
+                        state.strm.next_out.addr(),
+                        state.strm.avail_out,
+                        output.len(),
+                    )?;
+                    Some(crate::src::inflate::inflate(
+                        &mut state.strm,
+                        crate::zlib_h::Z_NO_FLUSH,
+                        Some(&input[input_range]),
+                        &mut output[output_range],
+                        None,
+                    ))
+                });
             let Some(Some(result)) = result else {
                 ret = crate::zlib_h::Z_STREAM_ERROR;
                 break;
@@ -820,10 +819,7 @@ pub unsafe extern "C" fn gzread_ffi(
     {
         Some(0) => Some(&mut [] as &mut [::core::ffi::c_uchar]),
         Some(slice_len) if !buf.is_null() => Some(unsafe {
-            ::core::slice::from_raw_parts_mut(
-                buf as *mut ::core::ffi::c_uchar,
-                slice_len,
-            )
+            ::core::slice::from_raw_parts_mut(buf as *mut ::core::ffi::c_uchar, slice_len)
         }),
         _ => None,
     };
@@ -1162,10 +1158,7 @@ fn gzgets_ffi_dispatch(
     gzgets(state, destination)
 }
 
-fn gzgets_handle(
-    file_key: usize,
-    destination: Option<&mut [::core::ffi::c_char]>,
-) -> bool {
+fn gzgets_handle(file_key: usize, destination: Option<&mut [::core::ffi::c_char]>) -> bool {
     crate::src::gzlib::gz_with_owned_state(file_key, |state| {
         gzgets_ffi_dispatch(Some(state), destination)
     })
@@ -1272,10 +1265,9 @@ pub unsafe extern "C" fn gzclose_r_ffi(mut file: crate::zlib_h::gzFile) -> ::cor
     // The address-keyed registry owns every live gzip state. Taking the box
     // makes close reference-bound without dereferencing the foreign handle.
     // `gzclose_r()`'s legacy registry-release step is then a harmless no-op.
-    let Some(mut state) = crate::src::gzlib::gz_take_owned_state_with_mode(
-        file.addr(),
-        crate::gzguts_h::GZ_READ,
-    ) else {
+    let Some(mut state) =
+        crate::src::gzlib::gz_take_owned_state_with_mode(file.addr(), crate::gzguts_h::GZ_READ)
+    else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
     gzclose_r(&mut state)

@@ -119,8 +119,7 @@ pub mod zlib_h {
         ) -> crate::stdlib::voidpf,
     >;
 
-    pub type free_func =
-        Option<extern "C" fn(crate::stdlib::voidpf, crate::stdlib::voidpf) -> ()>;
+    pub type free_func = Option<extern "C" fn(crate::stdlib::voidpf, crate::stdlib::voidpf) -> ()>;
 
     pub type z_stream = crate::zlib_h::z_stream_s;
 

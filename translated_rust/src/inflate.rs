@@ -87,9 +87,7 @@ pub(crate) const INFLATE_MSG_INVALID_DISTANCE_CODE: &[u8] = b"invalid distance c
 const INFLATE_MSG_HEADER_CRC_MISMATCH: &[u8] = b"header crc mismatch\0";
 pub(crate) const INFLATE_MSG_DISTANCE_TOO_FAR_BACK: &[u8] = b"invalid distance too far back\0";
 
-pub(crate) fn inflate_error_message(
-    strm: &crate::zlib_h::z_stream,
-) -> Option<&'static [u8]> {
+pub(crate) fn inflate_error_message(strm: &crate::zlib_h::z_stream) -> Option<&'static [u8]> {
     [
         INFLATE_MSG_INCORRECT_HEADER_CHECK,
         INFLATE_MSG_UNKNOWN_COMPRESSION_METHOD,
@@ -120,7 +118,10 @@ macro_rules! inflate_input_byte {
     };
 }
 
-fn inflate_lencode(state: &crate::src::inflate::inflate_state, index: usize) -> crate::src::inftrees::code {
+fn inflate_lencode(
+    state: &crate::src::inflate::inflate_state,
+    index: usize,
+) -> crate::src::inftrees::code {
     if ::core::ptr::eq(
         state.lencode,
         crate::src::inftrees::inffixed_h::lenfix.as_ptr(),
@@ -131,7 +132,10 @@ fn inflate_lencode(state: &crate::src::inflate::inflate_state, index: usize) -> 
     }
 }
 
-fn inflate_distcode(state: &crate::src::inflate::inflate_state, index: usize) -> crate::src::inftrees::code {
+fn inflate_distcode(
+    state: &crate::src::inflate::inflate_state,
+    index: usize,
+) -> crate::src::inftrees::code {
     if ::core::ptr::eq(
         state.distcode,
         crate::src::inftrees::inffixed_h::distfix.as_ptr(),
@@ -383,9 +387,7 @@ pub(crate) fn inflate_reset_bound(
 // the validated stream/state binder above instead of dereferencing that
 // pointer themselves. This keeps the reset transition reference-bound at
 // those call sites while preserving inflateStateCheck as the one raw adapter.
-pub(crate) fn inflate_reset_stream_bound(
-    strm: &mut crate::zlib_h::z_stream,
-) -> ::core::ffi::c_int {
+pub(crate) fn inflate_reset_stream_bound(strm: &mut crate::zlib_h::z_stream) -> ::core::ffi::c_int {
     let Some((strm, state)) = inflateStateCheck(strm) else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
@@ -601,11 +603,10 @@ pub(crate) fn inflateInit2_(
     state_ref.strm = strm;
     let ret = inflate_initialize_state(strm, state_ref, windowBits);
     if ret != crate::zlib_h::Z_OK {
-        Some(strm.zfree.expect("non-null function pointer"))
-            .expect("non-null function pointer")(
-                strm.opaque,
-                ::core::ptr::from_mut(state_ref) as crate::stdlib::voidpf,
-            );
+        Some(strm.zfree.expect("non-null function pointer")).expect("non-null function pointer")(
+            strm.opaque,
+            ::core::ptr::from_mut(state_ref) as crate::stdlib::voidpf,
+        );
         strm.state = ::core::ptr::null_mut::<crate::src::deflate::internal_state>();
     }
     ret
@@ -834,9 +835,12 @@ fn inflate_match_copy_from_state_window(
     output: &mut [crate::stdlib::Bytef],
     written: usize,
 ) -> InflateMatchCopy {
-    updatewindow(stream, state, InflateWindowAccess::Existing, |_, state, window| {
-        inflate_match_copy(state, output, written, window.as_deref())
-    })
+    updatewindow(
+        stream,
+        state,
+        InflateWindowAccess::Existing,
+        |_, state, window| inflate_match_copy(state, output, written, window.as_deref()),
+    )
     .expect("existing-window access cannot allocate or fail")
 }
 
@@ -924,9 +928,7 @@ pub(crate) fn updatewindow<T>(
             window[..source.len()].copy_from_slice(source);
             Ok(operation(stream, state, None))
         }
-        InflateWindowAccess::Inspect => {
-            Ok(operation(stream, state, window))
-        }
+        InflateWindowAccess::Inspect => Ok(operation(stream, state, window)),
         InflateWindowAccess::Existing => Ok(operation(stream, state, window)),
     }
 }
@@ -1028,9 +1030,7 @@ pub fn inflate(
     } else {
         None
     };
-    let input = input_storage
-        .or(callback_input.as_deref())
-        .unwrap_or(&[]);
+    let input = input_storage.or(callback_input.as_deref()).unwrap_or(&[]);
     // `inflateGetHeader()` retains an optional caller-owned header. The ABI
     // adapter binds that pointer for this synchronous call; all parsing and
     // publication below remain ordinary reference-based decoder work. The
@@ -1900,7 +1900,9 @@ pub fn inflate(
                                                                         let input_start = in_0
                                                                             .wrapping_sub(have)
                                                                             as usize;
-                                                                        let output_start = output_capacity - left as usize;
+                                                                        let output_start =
+                                                                            output_capacity
+                                                                                - left as usize;
                                                                         let output = &mut output_storage[output_start
                                                                             ..output_start + copy as usize];
                                                                         output.copy_from_slice(
@@ -1953,7 +1955,9 @@ pub fn inflate(
                                                                         8 as ::core::ffi::c_uint,
                                                                     );
                                                                 }
-                                                                if let Some(head) = head.as_deref_mut() {
+                                                                if let Some(head) =
+                                                                    head.as_deref_mut()
+                                                                {
                                                                     head.xflags = (hold
                                                                         & 0xff
                                                                             as ::core::ffi::c_ulong)
@@ -1978,7 +1982,7 @@ pub fn inflate(
                                                                         as ::core::ffi::c_uchar;
                                                                     inflate_update_header_crc(
                                                                         state,
-                                                                        &hbuf[..2]
+                                                                        &hbuf[..2],
                                                                     );
                                                                 }
                                                                 hold = 0 as ::core::ffi::c_ulong;
@@ -2026,8 +2030,7 @@ pub fn inflate(
                                                                 8 as ::core::ffi::c_uint,
                                                             );
                                                         }
-                                                        state.last = (hold
-                                                            as ::core::ffi::c_uint
+                                                        state.last = (hold as ::core::ffi::c_uint
                                                             & ((1 as ::core::ffi::c_uint)
                                                                 << 1 as ::core::ffi::c_int)
                                                                 .wrapping_sub(
@@ -2050,7 +2053,9 @@ pub fn inflate(
                                                                     crate::src::inflate::STORED;
                                                             }
                                                             1 => {
-                                                                crate::src::inftrees::inflate_fixed(state);
+                                                                crate::src::inftrees::inflate_fixed(
+                                                                    state,
+                                                                );
                                                                 state.mode =
                                                                     crate::src::inflate::LEN_;
                                                                 if flush == crate::zlib_h::Z_TREES {
@@ -2082,8 +2087,7 @@ pub fn inflate(
                                                         continue '_inf_leave;
                                                     }
                                                 }
-                                                if state.flags & 0x400 as ::core::ffi::c_int != 0
-                                                {
+                                                if state.flags & 0x400 as ::core::ffi::c_int != 0 {
                                                     while bits
                                                         < 16 as ::core::ffi::c_int
                                                             as ::core::ffi::c_uint
@@ -2103,14 +2107,12 @@ pub fn inflate(
                                                     }
                                                     state.length = hold as ::core::ffi::c_uint;
                                                     if let Some(head) = head.as_deref_mut() {
-                                                        head.extra_len = hold
-                                                            as ::core::ffi::c_uint
+                                                        head.extra_len = hold as ::core::ffi::c_uint
                                                             as crate::stdlib::uInt;
                                                     }
                                                     if state.flags & 0x200 as ::core::ffi::c_int
                                                         != 0
-                                                        && state.wrap & 4 as ::core::ffi::c_int
-                                                            != 0
+                                                        && state.wrap & 4 as ::core::ffi::c_int != 0
                                                     {
                                                         hbuf[0 as ::core::ffi::c_int as usize] =
                                                             hold as ::core::ffi::c_uchar;
@@ -2119,7 +2121,7 @@ pub fn inflate(
                                                                 as ::core::ffi::c_uchar;
                                                         inflate_update_header_crc(
                                                             state,
-                                                            &hbuf[..2]
+                                                            &hbuf[..2],
                                                         );
                                                     }
                                                     hold = 0 as ::core::ffi::c_ulong;
@@ -2163,9 +2165,10 @@ pub fn inflate(
                                             // visible cursor as an offset into the original
                                             // caller-provided range instead of retaining the
                                             // slice's temporary backing pointer.
-                                            next = fast_next.wrapping_add(
-                                                fast_have.wrapping_sub(have) as usize,
-                                            );
+                                            next =
+                                                fast_next.wrapping_add(
+                                                    fast_have.wrapping_sub(have) as usize,
+                                                );
                                             hold = state.hold;
                                             bits = state.bits;
                                             if state.mode as ::core::ffi::c_uint
@@ -2413,8 +2416,7 @@ pub fn inflate(
                                     break '_inf_leave;
                                 }
                             } else if let Some(head) = head.as_deref_mut() {
-                                head.name =
-                                    ::core::ptr::null_mut::<crate::stdlib::Bytef>();
+                                head.name = ::core::ptr::null_mut::<crate::stdlib::Bytef>();
                             }
                             state.length = 0 as ::core::ffi::c_uint;
                             state.mode = crate::src::inflate::COMMENT;
@@ -2569,8 +2571,7 @@ pub fn inflate(
                     );
                     hold >>= state.extra;
                     bits = bits.wrapping_sub(state.extra);
-                    state.back = (state.back as ::core::ffi::c_uint)
-                        .wrapping_add(state.extra)
+                    state.back = (state.back as ::core::ffi::c_uint).wrapping_add(state.extra)
                         as ::core::ffi::c_int;
                 }
                 state.mode = crate::src::inflate::MATCH;
@@ -2591,7 +2592,8 @@ pub fn inflate(
                 if state.wrap & 4 as ::core::ffi::c_int != 0
                     && hold != state.check & 0xffff as ::core::ffi::c_ulong
                 {
-                    strm.msg = INFLATE_MSG_HEADER_CRC_MISMATCH.as_ptr() as *const ::core::ffi::c_char
+                    strm.msg = INFLATE_MSG_HEADER_CRC_MISMATCH.as_ptr()
+                        as *const ::core::ffi::c_char
                         as *mut ::core::ffi::c_char;
                     state.mode = crate::src::inflate::BAD;
                     continue '_inf_leave;
@@ -2601,8 +2603,7 @@ pub fn inflate(
                 }
             }
             if let Some(head) = head.as_deref_mut() {
-                head.hcrc =
-                    state.flags >> 9 as ::core::ffi::c_int & 1 as ::core::ffi::c_int;
+                head.hcrc = state.flags >> 9 as ::core::ffi::c_int & 1 as ::core::ffi::c_int;
                 head.done = 1 as ::core::ffi::c_int;
             }
             state.check = crate::src::crc32::crc32_bytes(0 as crate::stdlib::uLong, &[])
@@ -2623,8 +2624,7 @@ pub fn inflate(
                 put = output_storage[written + copied..].as_mut_ptr();
             }
             InflateMatchCopy::InvalidDistance => {
-                strm.msg = INFLATE_MSG_DISTANCE_TOO_FAR_BACK.as_ptr()
-                    as *const ::core::ffi::c_char
+                strm.msg = INFLATE_MSG_DISTANCE_TOO_FAR_BACK.as_ptr() as *const ::core::ffi::c_char
                     as *mut ::core::ffi::c_char;
                 state.mode = crate::src::inflate::BAD;
                 continue '_inf_leave;
@@ -2665,13 +2665,20 @@ pub fn inflate(
             && ((state.mode as ::core::ffi::c_uint)
                 < crate::src::inflate::CHECK as ::core::ffi::c_int as ::core::ffi::c_uint
                 || flush != crate::zlib_h::Z_FINISH);
-    let output = &output_storage[output_capacity - out as usize
-        ..output_capacity - out as usize + produced as usize];
+    let output = &output_storage
+        [output_capacity - out as usize..output_capacity - out as usize + produced as usize];
     if update_window {
         // `Update` allocates the window on demand before applying this
         // bounded output slice, so it covers the former ensure-then-update
         // sequence with one owner binding.
-        if updatewindow(strm, state, InflateWindowAccess::Update(output), |_, _, _| ()).is_err() {
+        if updatewindow(
+            strm,
+            state,
+            InflateWindowAccess::Update(output),
+            |_, _, _| (),
+        )
+        .is_err()
+        {
             state.mode = crate::src::inflate::MEM;
             return crate::zlib_h::Z_MEM_ERROR;
         }
@@ -2740,9 +2747,8 @@ pub unsafe extern "C" fn inflate_ffi(
     } else {
         unsafe { ::core::slice::from_raw_parts(strm.next_in, strm.avail_in as usize) }
     };
-    let output = unsafe {
-        ::core::slice::from_raw_parts_mut(strm.next_out, strm.avail_out as usize)
-    };
+    let output =
+        unsafe { ::core::slice::from_raw_parts_mut(strm.next_out, strm.avail_out as usize) };
     // Bind the registered caller-owned gzip header at the ABI boundary. The
     // safe decoder receives that temporary reference and retains all header
     // parsing and publication work.
@@ -3232,7 +3238,10 @@ pub fn inflateCopy(
                 return crate::zlib_h::Z_STREAM_ERROR;
             };
             Some(source.zfree.expect("non-null function pointer"))
-                .expect("non-null function pointer")(source.opaque, copy_state_ptr as crate::stdlib::voidpf);
+                .expect("non-null function pointer")(
+                source.opaque,
+                copy_state_ptr as crate::stdlib::voidpf,
+            );
             return crate::zlib_h::Z_MEM_ERROR;
         };
         Some(window)
@@ -3259,8 +3268,8 @@ pub fn inflateCopy(
             &mut source_state,
             InflateWindowAccess::Inspect,
             |_, source_state, source_window| {
-                let source_history = &source_window
-                    .expect("source copy window is bound")[..plan.window_copy_len];
+                let source_history =
+                    &source_window.expect("source copy window is bound")[..plan.window_copy_len];
                 inflate_copy_state(dest, &source_stream, copy, source_state, &plan);
                 // Preserve the copied state's exact window metadata, then
                 // populate its already-allocated storage through the shared
@@ -3425,7 +3434,14 @@ fn inflate_build_dynamic_table(
     let used = {
         let lens = state.lens.get(lens_start..lens_end).ok_or(1)?;
         let table = state.codes.get_mut(next..).ok_or(1)?;
-        crate::src::inftrees::inflate_table_bound(type_0, lens, codes, table, &mut bits, &mut state.work)?
+        crate::src::inftrees::inflate_table_bound(
+            type_0,
+            lens,
+            codes,
+            table,
+            &mut bits,
+            &mut state.work,
+        )?
     };
     state.next = state.codes.get_mut(next + used..).ok_or(1)?.as_mut_ptr();
     Ok(bits)
@@ -3639,9 +3655,7 @@ pub unsafe extern "C" fn inflateCodesUsed_ffi(
     inflateCodesUsed(unsafe { strm.as_mut() })
 }
 
-pub fn inflateCodesUsed(
-    strm: Option<&mut crate::zlib_h::z_stream>,
-) -> ::core::ffi::c_ulong {
+pub fn inflateCodesUsed(strm: Option<&mut crate::zlib_h::z_stream>) -> ::core::ffi::c_ulong {
     let Some(strm) = strm else {
         return -1 as ::core::ffi::c_int as ::core::ffi::c_ulong;
     };

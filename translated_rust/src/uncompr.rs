@@ -355,9 +355,7 @@ pub unsafe extern "C" fn uncompress_ffi(
     } else if sourceLen == 0 {
         Some(&[] as &[crate::stdlib::Bytef])
     } else {
-        Some(unsafe {
-            ::core::slice::from_raw_parts(source, sourceLen as crate::stdlib::z_size_t)
-        })
+        Some(unsafe { ::core::slice::from_raw_parts(source, sourceLen as crate::stdlib::z_size_t) })
     };
     uncompress_legacy_bound(destination, dest_len, source, sourceLen)
 }

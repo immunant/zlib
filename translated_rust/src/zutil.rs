@@ -126,9 +126,9 @@ pub(crate) fn prepare_stream_allocator(stream: &mut crate::zlib_h::z_stream) -> 
         stream.opaque = ::core::ptr::null_mut::<::core::ffi::c_void>();
     }
     if stream.zfree.is_none() {
-        stream.zfree = Some(
-            zcfree as extern "C" fn(crate::stdlib::voidpf, crate::stdlib::voidpf) -> (),
-        ) as crate::zlib_h::free_func;
+        stream.zfree =
+            Some(zcfree as extern "C" fn(crate::stdlib::voidpf, crate::stdlib::voidpf) -> ())
+                as crate::zlib_h::free_func;
     }
     uses_default_allocator
 }

@@ -1349,7 +1349,9 @@ fn gz_open(
     // Reserve the registry slot before opening a descriptor. Holding the
     // registry lock until publication guarantees this cannot fail after the
     // descriptor has become this state’s responsibility.
-    let mut owned_states = gz_owned_states().lock().expect("gzip state registry poisoned");
+    let mut owned_states = gz_owned_states()
+        .lock()
+        .expect("gzip state registry poisoned");
     if owned_states.try_reserve(1).is_err() {
         return ::core::ptr::null_mut::<crate::zlib_h::gzFile_s>();
     }
@@ -1378,8 +1380,7 @@ fn gz_open(
     let oflag = gz_open_flags(state_ref, &options);
     match gz_open_fd_plan(fd, oflag) {
         GzOpenFdPlan::Open => {
-            state_ref.fd =
-                crate::stdlib::open(path.as_ptr(), oflag, 0o666 as ::core::ffi::c_int);
+            state_ref.fd = crate::stdlib::open(path.as_ptr(), oflag, 0o666 as ::core::ffi::c_int);
         }
         GzOpenFdPlan::Use {
             nonblocking,
@@ -1389,8 +1390,7 @@ fn gz_open(
                 crate::stdlib::fcntl(
                     fd,
                     crate::stdlib::F_SETFL,
-                    crate::stdlib::fcntl(fd, crate::stdlib::F_GETFL)
-                        | crate::stdlib::O_NONBLOCK,
+                    crate::stdlib::fcntl(fd, crate::stdlib::F_GETFL) | crate::stdlib::O_NONBLOCK,
                 );
             }
             if close_on_exec {
@@ -1431,7 +1431,10 @@ fn gz_open(
     gz_reset(state_ref);
     gz_error(state_ref, crate::zlib_h::Z_OK, None);
     let state_ptr = ::core::ptr::from_mut(state.as_mut());
-    owned_states.push((state_ptr.addr(), GzOwnedState(send_wrapper::SendWrapper::new(state))));
+    owned_states.push((
+        state_ptr.addr(),
+        GzOwnedState(send_wrapper::SendWrapper::new(state)),
+    ));
     state_ptr as crate::zlib_h::gzFile
 }
 #[export_name = "gzopen"]
@@ -1718,8 +1721,10 @@ fn gzseek64_handle(
     offset: crate::stdlib::off64_t,
     whence: ::core::ffi::c_int,
 ) -> crate::stdlib::off64_t {
-    gz_with_owned_state(file_key, |state| gzseek64_dispatch(Some(state), offset, whence))
-        .unwrap_or(-1)
+    gz_with_owned_state(file_key, |state| {
+        gzseek64_dispatch(Some(state), offset, whence)
+    })
+    .unwrap_or(-1)
 }
 #[export_name = "gzseek64"]
 
@@ -1757,7 +1762,10 @@ fn gzseek_handle(
     offset: crate::stdlib::off_t,
     whence: ::core::ffi::c_int,
 ) -> crate::stdlib::off_t {
-    gz_with_owned_state(file_key, |state| gzseek_dispatch(Some(state), offset, whence)).unwrap_or(-1)
+    gz_with_owned_state(file_key, |state| {
+        gzseek_dispatch(Some(state), offset, whence)
+    })
+    .unwrap_or(-1)
 }
 #[export_name = "gzseek"]
 
@@ -1920,12 +1928,8 @@ fn gzerror(
 // public ABI forwarder need not reconstruct a reference from the handle.
 // This mirrors the other gzip query adapters and keeps lookup lifetime-bound
 // to the registry lock for the complete error query.
-fn gzerror_handle(
-    file_key: usize,
-    errnum: Option<&mut ::core::ffi::c_int>,
-) -> usize {
-    gz_with_owned_state(file_key, |state| gzerror(state, errnum).expose_provenance())
-        .unwrap_or(0)
+fn gzerror_handle(file_key: usize, errnum: Option<&mut ::core::ffi::c_int>) -> usize {
+    gz_with_owned_state(file_key, |state| gzerror(state, errnum).expose_provenance()).unwrap_or(0)
 }
 
 #[export_name = "gzerror"]
@@ -2008,9 +2012,8 @@ struct GzOwnedStrings {
     message: Option<Vec<u8>>,
 }
 
-static GZ_OWNED_STRINGS: ::std::sync::OnceLock<
-    ::std::sync::Mutex<Vec<(usize, GzOwnedStrings)>>,
-> = ::std::sync::OnceLock::new();
+static GZ_OWNED_STRINGS: ::std::sync::OnceLock<::std::sync::Mutex<Vec<(usize, GzOwnedStrings)>>> =
+    ::std::sync::OnceLock::new();
 
 // The registry holds the allocation behind each opaque `gzFile` handle.  It
 // gives the core constructor an owned state without requiring a raw-pointer
@@ -2021,9 +2024,8 @@ struct GzOwnedState(send_wrapper::SendWrapper<Box<crate::gzguts_h::gz_state>>);
 // pointee remains governed by zlib's `gzFile` contract, and the mutex guards
 // only registry insertion/removal, never a gzip operation on the state.
 
-static GZ_OWNED_STATES: ::std::sync::OnceLock<
-    ::std::sync::Mutex<Vec<(usize, GzOwnedState)>>,
-> = ::std::sync::OnceLock::new();
+static GZ_OWNED_STATES: ::std::sync::OnceLock<::std::sync::Mutex<Vec<(usize, GzOwnedState)>>> =
+    ::std::sync::OnceLock::new();
 
 // Gzip's input and output arrays have the same opaque lifetime as the state,
 // but are initialized lazily on the first read.  Retaining their Vec backing
@@ -2044,9 +2046,8 @@ struct GzOwnedWriteBuffers {
     output: Option<Vec<::core::ffi::c_uchar>>,
 }
 
-static GZ_OWNED_BUFFERS: ::std::sync::OnceLock<
-    ::std::sync::Mutex<Vec<(usize, GzOwnedBuffers)>>,
-> = ::std::sync::OnceLock::new();
+static GZ_OWNED_BUFFERS: ::std::sync::OnceLock<::std::sync::Mutex<Vec<(usize, GzOwnedBuffers)>>> =
+    ::std::sync::OnceLock::new();
 
 static GZ_OWNED_WRITE_BUFFERS: ::std::sync::OnceLock<
     ::std::sync::Mutex<Vec<(usize, GzOwnedWriteBuffers)>>,
@@ -2080,7 +2081,9 @@ pub(crate) fn gz_with_owned_state<R>(
     if state_key == 0 {
         return None;
     }
-    let mut states = gz_owned_states().lock().expect("gzip state registry poisoned");
+    let mut states = gz_owned_states()
+        .lock()
+        .expect("gzip state registry poisoned");
     let (_, state) = states.iter_mut().find(|(key, _)| *key == state_key)?;
     Some(operation(state.0.as_mut()))
 }
@@ -2097,23 +2100,25 @@ pub(crate) fn gz_take_owned_state_with_mode(
     if state_key == 0 {
         return None;
     }
-    let mut states = gz_owned_states().lock().expect("gzip state registry poisoned");
+    let mut states = gz_owned_states()
+        .lock()
+        .expect("gzip state registry poisoned");
     let index = states.iter().position(|(key, _)| *key == state_key)?;
-    if !gz_has_mode(states[index].1.0.as_ref(), mode) {
+    if !gz_has_mode(states[index].1 .0.as_ref(), mode) {
         return None;
     }
-    Some(states.swap_remove(index).1.0.take())
+    Some(states.swap_remove(index).1 .0.take())
 }
 
-pub(crate) fn gz_take_owned_state(
-    state_key: usize,
-) -> Option<Box<crate::gzguts_h::gz_state>> {
+pub(crate) fn gz_take_owned_state(state_key: usize) -> Option<Box<crate::gzguts_h::gz_state>> {
     if state_key == 0 {
         return None;
     }
-    let mut states = gz_owned_states().lock().expect("gzip state registry poisoned");
+    let mut states = gz_owned_states()
+        .lock()
+        .expect("gzip state registry poisoned");
     let index = states.iter().position(|(key, _)| *key == state_key)?;
-    let state = states[index].1.0.as_ref();
+    let state = states[index].1 .0.as_ref();
     let closes_as_read = state.mode == crate::gzguts_h::GZ_READ;
     if !(if closes_as_read {
         gz_has_mode(state, crate::gzguts_h::GZ_READ)
@@ -2122,7 +2127,7 @@ pub(crate) fn gz_take_owned_state(
     }) {
         return None;
     }
-    Some(states.swap_remove(index).1.0.take())
+    Some(states.swap_remove(index).1 .0.take())
 }
 
 fn gz_owned_buffers() -> &'static ::std::sync::Mutex<Vec<(usize, GzOwnedBuffers)>> {
@@ -2149,16 +2154,15 @@ pub(crate) fn gz_register_owned_buffers(
     mut input: Vec<::core::ffi::c_uchar>,
     mut output: Vec<::core::ffi::c_uchar>,
 ) -> bool {
-    let mut buffers = gz_owned_buffers().lock().expect("gzip buffer registry poisoned");
+    let mut buffers = gz_owned_buffers()
+        .lock()
+        .expect("gzip buffer registry poisoned");
     if buffers.try_reserve(1).is_err() {
         return false;
     }
     state.in_0 = input.as_mut_ptr();
     state.out = output.as_mut_ptr();
-    buffers.push((
-        gz_state_key(state),
-        GzOwnedBuffers { input, output },
-    ));
+    buffers.push((gz_state_key(state), GzOwnedBuffers { input, output }));
     true
 }
 
@@ -2169,7 +2173,9 @@ pub(crate) fn gz_with_owned_output_buffer<R>(
     state_key: usize,
     operation: impl FnOnce(&mut [::core::ffi::c_uchar]) -> R,
 ) -> Option<R> {
-    let mut buffers = gz_owned_buffers().lock().expect("gzip buffer registry poisoned");
+    let mut buffers = gz_owned_buffers()
+        .lock()
+        .expect("gzip buffer registry poisoned");
     let (_, buffers) = buffers.iter_mut().find(|(key, _)| *key == state_key)?;
     Some(operation(&mut buffers.output))
 }
@@ -2181,7 +2187,9 @@ pub(crate) fn gz_with_owned_input_buffer<R>(
     state_key: usize,
     operation: impl FnOnce(&mut [::core::ffi::c_uchar]) -> R,
 ) -> Option<R> {
-    let mut buffers = gz_owned_buffers().lock().expect("gzip buffer registry poisoned");
+    let mut buffers = gz_owned_buffers()
+        .lock()
+        .expect("gzip buffer registry poisoned");
     let (_, buffers) = buffers.iter_mut().find(|(key, _)| *key == state_key)?;
     Some(operation(&mut buffers.input))
 }
@@ -2194,7 +2202,9 @@ pub(crate) fn gz_with_owned_read_buffers<R>(
     state_key: usize,
     operation: impl FnOnce(&mut [::core::ffi::c_uchar], &mut [::core::ffi::c_uchar]) -> R,
 ) -> Option<R> {
-    let mut buffers = gz_owned_buffers().lock().expect("gzip buffer registry poisoned");
+    let mut buffers = gz_owned_buffers()
+        .lock()
+        .expect("gzip buffer registry poisoned");
     let (_, buffers) = buffers.iter_mut().find(|(key, _)| *key == state_key)?;
     let GzOwnedBuffers { input, output } = buffers;
     Some(operation(input, output))
@@ -2203,7 +2213,9 @@ pub(crate) fn gz_with_owned_read_buffers<R>(
 // The close paths call this only after their last input/output use. Dropping
 // the registry entry releases both lazy arrays before the opaque state box.
 pub(crate) fn gz_release_owned_buffers(state: &crate::gzguts_h::gz_state) {
-    let mut buffers = gz_owned_buffers().lock().expect("gzip buffer registry poisoned");
+    let mut buffers = gz_owned_buffers()
+        .lock()
+        .expect("gzip buffer registry poisoned");
     if let Some(index) = buffers
         .iter()
         .position(|(key, _)| *key == gz_state_key(state))
@@ -2231,10 +2243,7 @@ pub(crate) fn gz_register_owned_write_buffers(
         Some(buffer) => buffer.as_mut_ptr(),
         None => ::core::ptr::null_mut(),
     };
-    buffers.push((
-        gz_state_key(state),
-        GzOwnedWriteBuffers { input, output },
-    ));
+    buffers.push((gz_state_key(state), GzOwnedWriteBuffers { input, output }));
     true
 }
 
@@ -2276,7 +2285,9 @@ pub(crate) fn gz_release_owned_write_buffers(state: &crate::gzguts_h::gz_state) 
 // Removing the matching box returns the opaque handle's allocation to Rust.
 pub(crate) fn gz_release_owned_state(state: &mut crate::gzguts_h::gz_state) {
     let state_key = ::core::ptr::from_mut(state).addr();
-    let mut states = gz_owned_states().lock().expect("gzip state registry poisoned");
+    let mut states = gz_owned_states()
+        .lock()
+        .expect("gzip state registry poisoned");
     if let Some(index) = states.iter().position(|(key, _)| *key == state_key) {
         states.swap_remove(index);
     }
@@ -2292,7 +2303,9 @@ fn gz_register_owned_strings(
         return false;
     }
     path_copy.extend_from_slice(path_bytes);
-    let mut strings = gz_owned_strings().lock().expect("gzip string registry poisoned");
+    let mut strings = gz_owned_strings()
+        .lock()
+        .expect("gzip string registry poisoned");
     if let Some((_, strings)) = strings
         .iter_mut()
         .find(|(key, _)| *key == gz_state_key(state))
@@ -2324,7 +2337,9 @@ fn gz_register_owned_strings(
 }
 
 pub(crate) fn gz_release_owned_strings(state: &crate::gzguts_h::gz_state) {
-    let mut strings = gz_owned_strings().lock().expect("gzip string registry poisoned");
+    let mut strings = gz_owned_strings()
+        .lock()
+        .expect("gzip string registry poisoned");
     if let Some(index) = strings
         .iter()
         .position(|(key, _)| *key == gz_state_key(state))
@@ -2334,7 +2349,9 @@ pub(crate) fn gz_release_owned_strings(state: &crate::gzguts_h::gz_state) {
 }
 
 fn gz_discard_owned_message(state: &mut crate::gzguts_h::gz_state) {
-    let mut strings = gz_owned_strings().lock().expect("gzip string registry poisoned");
+    let mut strings = gz_owned_strings()
+        .lock()
+        .expect("gzip string registry poisoned");
     if let Some((_, strings)) = strings
         .iter_mut()
         .find(|(key, _)| *key == gz_state_key(state))
@@ -2344,11 +2361,10 @@ fn gz_discard_owned_message(state: &mut crate::gzguts_h::gz_state) {
     state.msg = ::core::ptr::null_mut::<::core::ffi::c_char>();
 }
 
-fn gz_store_owned_message(
-    state: &mut crate::gzguts_h::gz_state,
-    msg: &[u8],
-) -> bool {
-    let mut strings = gz_owned_strings().lock().expect("gzip string registry poisoned");
+fn gz_store_owned_message(state: &mut crate::gzguts_h::gz_state, msg: &[u8]) -> bool {
+    let mut strings = gz_owned_strings()
+        .lock()
+        .expect("gzip string registry poisoned");
     let Some((_, strings)) = strings
         .iter_mut()
         .find(|(key, _)| *key == gz_state_key(state))
@@ -2358,7 +2374,11 @@ fn gz_store_owned_message(
     let Some(path) = strings.path.strip_suffix(&[0]) else {
         return false;
     };
-    let Some(message_len) = path.len().checked_add(2).and_then(|len| len.checked_add(msg.len())) else {
+    let Some(message_len) = path
+        .len()
+        .checked_add(2)
+        .and_then(|len| len.checked_add(msg.len()))
+    else {
         return false;
     };
     let mut message = Vec::new();

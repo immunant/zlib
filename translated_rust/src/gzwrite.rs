@@ -47,7 +47,9 @@ pub use crate::zlib_h::Z_STREAM_ERROR;
 // A failed POSIX syscall sets the thread-local OS error. The gzip write paths
 // inspect it only after a negative result, avoiding a raw errno-pointer read.
 fn gz_last_errno() -> ::core::ffi::c_int {
-    ::std::io::Error::last_os_error().raw_os_error().unwrap_or(0)
+    ::std::io::Error::last_os_error()
+        .raw_os_error()
+        .unwrap_or(0)
 }
 
 // Initial deflater fields are ordinary gzip state.  Keep their setup outside
@@ -187,8 +189,9 @@ fn gz_comp(
                     .cast_const()
                     .cast::<::core::ffi::c_void>();
                 crate::src::gzlib::gz_begin_io(state);
-                let written = crate::stdlib::write(fd, input, put as crate::__stddef_size_t_h::size_t)
-                    as ::core::ffi::c_int;
+                let written =
+                    crate::stdlib::write(fd, input, put as crate::__stddef_size_t_h::size_t)
+                        as ::core::ffi::c_int;
                 let errno = if written < 0 { gz_last_errno() } else { 0 };
                 if let Err(_) = crate::src::gzlib::gz_io_result(state, written, errno) {
                     let message = crate::src::gzlib::gz_errno_message();
@@ -221,8 +224,9 @@ fn gz_comp(
                 let fd = state.fd;
                 let output = state.x.next.cast_const().cast::<::core::ffi::c_void>();
                 crate::src::gzlib::gz_begin_io(state);
-                let written = crate::stdlib::write(fd, output, put as crate::__stddef_size_t_h::size_t)
-                    as ::core::ffi::c_int;
+                let written =
+                    crate::stdlib::write(fd, output, put as crate::__stddef_size_t_h::size_t)
+                        as ::core::ffi::c_int;
                 let errno = if written < 0 { gz_last_errno() } else { 0 };
                 if let Err(_) = crate::src::gzlib::gz_io_result(state, written, errno) {
                     let message = crate::src::gzlib::gz_errno_message();
@@ -247,7 +251,11 @@ fn gz_comp(
         let consumed = input.len().wrapping_sub(state.strm.avail_in as usize);
         let state_key = crate::src::gzlib::gz_owned_buffer_key(state);
         ret = crate::src::gzlib::gz_with_owned_write_output_buffer(state_key, |output| {
-            let offset = state.strm.next_out.addr().checked_sub(output.as_ptr().addr());
+            let offset = state
+                .strm
+                .next_out
+                .addr()
+                .checked_sub(output.as_ptr().addr());
             let output = offset.and_then(|offset| {
                 output.get_mut(offset..offset.checked_add(state.strm.avail_out as usize)?)
             });
@@ -327,14 +335,11 @@ fn gz_zero(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
         n = crate::src::gzlib::gz_skip_chunk(state.size, state.skip);
         if first != 0 {
             let state_key = crate::src::gzlib::gz_owned_buffer_key(state);
-            let zeroed = crate::src::gzlib::gz_with_owned_write_input_buffer(
-                state_key,
-                |input| {
-                    for byte in &mut input[..n as usize] {
-                        *byte = 0;
-                    }
-                },
-            );
+            let zeroed = crate::src::gzlib::gz_with_owned_write_input_buffer(state_key, |input| {
+                for byte in &mut input[..n as usize] {
+                    *byte = 0;
+                }
+            });
             if zeroed.is_none() {
                 crate::src::gzlib::gz_error(
                     state,
@@ -394,17 +399,14 @@ fn gz_write(
         loop {
             let plan = crate::src::gzlib::gz_buffered_copy_plan(state, len);
             let state_key = crate::src::gzlib::gz_owned_buffer_key(state);
-            let copied = crate::src::gzlib::gz_with_owned_write_input_buffer(
-                state_key,
-                |input| {
-                    let end = plan.offset as usize + plan.len as usize;
-                    let Some(destination) = input.get_mut(plan.offset as usize..end) else {
-                        return false;
-                    };
-                    destination.copy_from_slice(&source[..plan.len as usize]);
-                    true
-                },
-            );
+            let copied = crate::src::gzlib::gz_with_owned_write_input_buffer(state_key, |input| {
+                let end = plan.offset as usize + plan.len as usize;
+                let Some(destination) = input.get_mut(plan.offset as usize..end) else {
+                    return false;
+                };
+                destination.copy_from_slice(&source[..plan.len as usize]);
+                true
+            });
             if copied != Some(true) {
                 crate::src::gzlib::gz_error(
                     state,
@@ -418,13 +420,16 @@ fn gz_write(
             if len == 0 as crate::stdlib::z_size_t {
                 break;
             }
-            if gz_comp_with_owned_input(state, crate::zlib_h::Z_NO_FLUSH) == -1 as ::core::ffi::c_int {
+            if gz_comp_with_owned_input(state, crate::zlib_h::Z_NO_FLUSH)
+                == -1 as ::core::ffi::c_int
+            {
                 return crate::src::gzlib::gz_write_error_result(state, put, len);
             }
         }
     } else {
         if state.strm.avail_in != 0
-            && gz_comp_with_owned_input(state, crate::zlib_h::Z_NO_FLUSH) == -1 as ::core::ffi::c_int
+            && gz_comp_with_owned_input(state, crate::zlib_h::Z_NO_FLUSH)
+                == -1 as ::core::ffi::c_int
         {
             return 0 as crate::stdlib::z_size_t;
         }
@@ -711,10 +716,8 @@ fn gzputc_ffi_dispatch(
 // keeps the public dispatch reference-bound without recreating a mutable
 // reference from the foreign handle in the ABI wrapper.
 fn gzputc_handle(file_key: usize, c: ::core::ffi::c_int) -> ::core::ffi::c_int {
-    crate::src::gzlib::gz_with_owned_state(file_key, |state| {
-        gzputc_ffi_dispatch(Some(state), c)
-    })
-    .unwrap_or(-1)
+    crate::src::gzlib::gz_with_owned_state(file_key, |state| gzputc_ffi_dispatch(Some(state), c))
+        .unwrap_or(-1)
 }
 #[export_name = "gzputc"]
 
@@ -890,18 +893,16 @@ pub fn gzsetparams(
         };
         let state_key = crate::src::gzlib::gz_owned_buffer_key(state);
         let _ = crate::src::gzlib::gz_with_owned_write_output_buffer(state_key, |output| {
-            let offset = state.strm.next_out.addr().checked_sub(output.as_ptr().addr());
+            let offset = state
+                .strm
+                .next_out
+                .addr()
+                .checked_sub(output.as_ptr().addr());
             let output = offset.and_then(|offset| {
                 output.get_mut(offset..offset.checked_add(state.strm.avail_out as usize)?)
             });
             output.map_or(crate::zlib_h::Z_STREAM_ERROR, |output| {
-                crate::src::deflate::deflateParams(
-                    &mut state.strm,
-                    level,
-                    strategy,
-                    &input,
-                    output,
-                )
+                crate::src::deflate::deflateParams(&mut state.strm, level, strategy, &input, output)
             })
         });
     }
@@ -1000,10 +1001,9 @@ pub fn gzclose_w(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
 pub unsafe extern "C" fn gzclose_w_ffi(mut file: crate::zlib_h::gzFile) -> ::core::ffi::c_int {
     // See `gzclose_r_ffi`: close takes the registry-owned box, rather than
     // binding the opaque foreign handle as a mutable reference.
-    let Some(mut state) = crate::src::gzlib::gz_take_owned_state_with_mode(
-        file.addr(),
-        crate::gzguts_h::GZ_WRITE,
-    ) else {
+    let Some(mut state) =
+        crate::src::gzlib::gz_take_owned_state_with_mode(file.addr(), crate::gzguts_h::GZ_WRITE)
+    else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
     gzclose_w(&mut state)

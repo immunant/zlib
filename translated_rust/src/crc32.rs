@@ -4944,9 +4944,7 @@ pub extern "C" fn crc32_combine_gen(mut len2: crate::stdlib::off_t) -> crate::st
 }
 #[export_name = "crc32_combine_gen"]
 
-pub extern "C" fn crc32_combine_gen_ffi(
-    mut len2: crate::stdlib::off_t,
-) -> crate::stdlib::uLong {
+pub extern "C" fn crc32_combine_gen_ffi(mut len2: crate::stdlib::off_t) -> crate::stdlib::uLong {
     crc32_combine_gen(len2)
 }
 pub extern "C" fn crc32_combine_op(
