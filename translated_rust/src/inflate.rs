@@ -64,6 +64,13 @@ pub const BAD: crate::src::inflate::inflate_mode = 16209;
 pub const MEM: crate::src::inflate::inflate_mode = 16210;
 
 pub const SYNC: crate::src::inflate::inflate_mode = 16211;
+
+macro_rules! inflate_input_byte {
+    ($input:expr, $initial_have:expr, $have:expr) => {
+        $input[$initial_have.wrapping_sub($have).wrapping_sub(1) as usize]
+    };
+}
+
 #[derive(Copy, Clone)]
 #[repr(C)]
 
@@ -605,6 +612,11 @@ pub unsafe extern "C" fn inflate(
     left = (*strm).avail_out as ::core::ffi::c_uint;
     next = (*strm).next_in as *mut ::core::ffi::c_uchar;
     have = (*strm).avail_in as ::core::ffi::c_uint;
+    let input = if have == 0 {
+        &[]
+    } else {
+        ::core::slice::from_raw_parts(next, have as usize)
+    };
     hold = (*state).hold;
     bits = (*state).bits;
     in_0 = have;
@@ -644,11 +656,10 @@ pub unsafe extern "C" fn inflate(
                                                                                                                 break '_inf_leave;
                                                                                                             }
                                                                                                             have = have.wrapping_sub(1);
-                                                                                                            let c2rust_fresh0 = next;
                                                                                                             next = next.offset(1);
                                                                                                             hold = hold
                                                                                                                 .wrapping_add(
-                                                                                                                    (*c2rust_fresh0 as ::core::ffi::c_ulong) << bits,
+                                                                                                                    (inflate_input_byte!(input, in_0, have) as ::core::ffi::c_ulong) << bits,
                                                                                                                 );
                                                                                                             bits = bits.wrapping_add(8 as ::core::ffi::c_uint);
                                                                                                         }
@@ -750,11 +761,10 @@ pub unsafe extern "C" fn inflate(
                                                                                                             break '_inf_leave;
                                                                                                         }
                                                                                                         have = have.wrapping_sub(1);
-                                                                                                        let c2rust_fresh1 = next;
                                                                                                         next = next.offset(1);
                                                                                                         hold = hold
                                                                                                             .wrapping_add(
-                                                                                                                (*c2rust_fresh1 as ::core::ffi::c_ulong) << bits,
+                                                                                                                (inflate_input_byte!(input, in_0, have) as ::core::ffi::c_ulong) << bits,
                                                                                                             );
                                                                                                         bits = bits.wrapping_add(8 as ::core::ffi::c_uint);
                                                                                                     }
@@ -823,11 +833,10 @@ pub unsafe extern "C" fn inflate(
                                                                                                             break '_inf_leave;
                                                                                                         }
                                                                                                         have = have.wrapping_sub(1);
-                                                                                                        let c2rust_fresh10 = next;
                                                                                                         next = next.offset(1);
                                                                                                         hold = hold
                                                                                                             .wrapping_add(
-                                                                                                                (*c2rust_fresh10 as ::core::ffi::c_ulong) << bits,
+                                                                                                                (inflate_input_byte!(input, in_0, have) as ::core::ffi::c_ulong) << bits,
                                                                                                             );
                                                                                                         bits = bits.wrapping_add(8 as ::core::ffi::c_uint);
                                                                                                     }
@@ -869,11 +878,10 @@ pub unsafe extern "C" fn inflate(
                                                                                                             break '_inf_leave;
                                                                                                         }
                                                                                                         have = have.wrapping_sub(1);
-                                                                                                        let c2rust_fresh12 = next;
                                                                                                         next = next.offset(1);
                                                                                                         hold = hold
                                                                                                             .wrapping_add(
-                                                                                                                (*c2rust_fresh12 as ::core::ffi::c_ulong) << bits,
+                                                                                                                (inflate_input_byte!(input, in_0, have) as ::core::ffi::c_ulong) << bits,
                                                                                                             );
                                                                                                         bits = bits.wrapping_add(8 as ::core::ffi::c_uint);
                                                                                                     }
@@ -911,11 +919,10 @@ pub unsafe extern "C" fn inflate(
                                                                                                             break '_inf_leave;
                                                                                                         }
                                                                                                         have = have.wrapping_sub(1);
-                                                                                                        let c2rust_fresh13 = next;
                                                                                                         next = next.offset(1);
                                                                                                         hold = hold
                                                                                                             .wrapping_add(
-                                                                                                                (*c2rust_fresh13 as ::core::ffi::c_ulong) << bits,
+                                                                                                                (inflate_input_byte!(input, in_0, have) as ::core::ffi::c_ulong) << bits,
                                                                                                             );
                                                                                                         bits = bits.wrapping_add(8 as ::core::ffi::c_uint);
                                                                                                     }
@@ -1003,11 +1010,10 @@ pub unsafe extern "C" fn inflate(
                                                                                                                 break '_inf_leave;
                                                                                                             }
                                                                                                             have = have.wrapping_sub(1);
-                                                                                                            let c2rust_fresh33 = next;
                                                                                                             next = next.offset(1);
                                                                                                             hold = hold
                                                                                                                 .wrapping_add(
-                                                                                                                    (*c2rust_fresh33 as ::core::ffi::c_ulong) << bits,
+                                                                                                                    (inflate_input_byte!(input, in_0, have) as ::core::ffi::c_ulong) << bits,
                                                                                                                 );
                                                                                                             bits = bits.wrapping_add(8 as ::core::ffi::c_uint);
                                                                                                         }
@@ -1085,11 +1091,10 @@ pub unsafe extern "C" fn inflate(
                                                                                                         break '_inf_leave;
                                                                                                     }
                                                                                                     have = have.wrapping_sub(1);
-                                                                                                    let c2rust_fresh34 = next;
                                                                                                     next = next.offset(1);
                                                                                                     hold = hold
                                                                                                         .wrapping_add(
-                                                                                                            (*c2rust_fresh34 as ::core::ffi::c_ulong) << bits,
+                                                                                                            (inflate_input_byte!(input, in_0, have) as ::core::ffi::c_ulong) << bits,
                                                                                                         );
                                                                                                     bits = bits.wrapping_add(8 as ::core::ffi::c_uint);
                                                                                                 }
@@ -1116,11 +1121,10 @@ pub unsafe extern "C" fn inflate(
                                                                                                     break '_inf_leave;
                                                                                                 }
                                                                                                 have = have.wrapping_sub(1);
-                                                                                                let c2rust_fresh14 = next;
                                                                                                 next = next.offset(1);
                                                                                                 hold = hold
                                                                                                     .wrapping_add(
-                                                                                                        (*c2rust_fresh14 as ::core::ffi::c_ulong) << bits,
+                                                                                                        (inflate_input_byte!(input, in_0, have) as ::core::ffi::c_ulong) << bits,
                                                                                                     );
                                                                                                 bits = bits.wrapping_add(8 as ::core::ffi::c_uint);
                                                                                             }
@@ -1196,11 +1200,10 @@ pub unsafe extern "C" fn inflate(
                                                                                         break '_inf_leave;
                                                                                     }
                                                                                     have = have.wrapping_sub(1);
-                                                                                    let c2rust_fresh2 = next;
                                                                                     next = next.offset(1);
                                                                                     hold = hold
                                                                                         .wrapping_add(
-                                                                                            (*c2rust_fresh2 as ::core::ffi::c_ulong) << bits,
+                                                                                            (inflate_input_byte!(input, in_0, have) as ::core::ffi::c_ulong) << bits,
                                                                                         );
                                                                                     bits = bits.wrapping_add(8 as ::core::ffi::c_uint);
                                                                                 }
@@ -1263,13 +1266,11 @@ pub unsafe extern "C" fn inflate(
                                                                                     .wrapping_sub(
                                                                                         1,
                                                                                     );
-                                                                                let c2rust_fresh17 =
-                                                                                    next;
                                                                                 next =
                                                                                     next.offset(1);
                                                                                 hold = hold
                                                                                     .wrapping_add(
-                                                                                        (*c2rust_fresh17 as ::core::ffi::c_ulong) << bits,
+                                                                                        (inflate_input_byte!(input, in_0, have) as ::core::ffi::c_ulong) << bits,
                                                                                     );
                                                                                 bits = bits.wrapping_add(8 as ::core::ffi::c_uint);
                                                                             }
@@ -1293,11 +1294,10 @@ pub unsafe extern "C" fn inflate(
                                                                                             break '_inf_leave;
                                                                                         }
                                                                                         have = have.wrapping_sub(1);
-                                                                                        let c2rust_fresh19 = next;
                                                                                         next = next.offset(1);
                                                                                         hold = hold
                                                                                             .wrapping_add(
-                                                                                                (*c2rust_fresh19 as ::core::ffi::c_ulong) << bits,
+                                                                                                (inflate_input_byte!(input, in_0, have) as ::core::ffi::c_ulong) << bits,
                                                                                             );
                                                                                         bits = bits.wrapping_add(8 as ::core::ffi::c_uint);
                                                                                     }
@@ -1335,11 +1335,10 @@ pub unsafe extern "C" fn inflate(
                                                                                             break '_inf_leave;
                                                                                         }
                                                                                         have = have.wrapping_sub(1);
-                                                                                        let c2rust_fresh20 = next;
                                                                                         next = next.offset(1);
                                                                                         hold = hold
                                                                                             .wrapping_add(
-                                                                                                (*c2rust_fresh20 as ::core::ffi::c_ulong) << bits,
+                                                                                                (inflate_input_byte!(input, in_0, have) as ::core::ffi::c_ulong) << bits,
                                                                                             );
                                                                                         bits = bits.wrapping_add(8 as ::core::ffi::c_uint);
                                                                                     }
@@ -1366,11 +1365,10 @@ pub unsafe extern "C" fn inflate(
                                                                                             break '_inf_leave;
                                                                                         }
                                                                                         have = have.wrapping_sub(1);
-                                                                                        let c2rust_fresh21 = next;
                                                                                         next = next.offset(1);
                                                                                         hold = hold
                                                                                             .wrapping_add(
-                                                                                                (*c2rust_fresh21 as ::core::ffi::c_ulong) << bits,
+                                                                                                (inflate_input_byte!(input, in_0, have) as ::core::ffi::c_ulong) << bits,
                                                                                             );
                                                                                         bits = bits.wrapping_add(8 as ::core::ffi::c_uint);
                                                                                     }
@@ -1516,10 +1514,9 @@ pub unsafe extern "C" fn inflate(
                                                                         break '_inf_leave;
                                                                     }
                                                                     have = have.wrapping_sub(1);
-                                                                    let c2rust_fresh3 = next;
                                                                     next = next.offset(1);
                                                                     hold = hold.wrapping_add(
-                                                                        (*c2rust_fresh3
+                                                                        (inflate_input_byte!(input, in_0, have)
                                                                             as ::core::ffi::c_ulong)
                                                                             << bits,
                                                                     );
@@ -1589,10 +1586,9 @@ pub unsafe extern "C" fn inflate(
                                                                 break '_inf_leave;
                                                             }
                                                             have = have.wrapping_sub(1);
-                                                            let c2rust_fresh11 = next;
                                                             next = next.offset(1);
                                                             hold = hold.wrapping_add(
-                                                                (*c2rust_fresh11
+                                                                (inflate_input_byte!(input, in_0, have)
                                                                     as ::core::ffi::c_ulong)
                                                                     << bits,
                                                             );
@@ -1666,10 +1662,9 @@ pub unsafe extern "C" fn inflate(
                                                             break '_inf_leave;
                                                         }
                                                         have = have.wrapping_sub(1);
-                                                        let c2rust_fresh4 = next;
                                                         next = next.offset(1);
                                                         hold = hold.wrapping_add(
-                                                            (*c2rust_fresh4
+                                                            (inflate_input_byte!(input, in_0, have)
                                                                 as ::core::ffi::c_ulong)
                                                                 << bits,
                                                         );
@@ -1756,10 +1751,9 @@ pub unsafe extern "C" fn inflate(
                                                     break '_inf_leave;
                                                 }
                                                 have = have.wrapping_sub(1);
-                                                let c2rust_fresh24 = next;
                                                 next = next.offset(1);
                                                 hold = hold.wrapping_add(
-                                                    (*c2rust_fresh24 as ::core::ffi::c_ulong)
+                                                    (inflate_input_byte!(input, in_0, have) as ::core::ffi::c_ulong)
                                                         << bits,
                                                 );
                                                 bits = bits.wrapping_add(8 as ::core::ffi::c_uint);
@@ -1798,10 +1792,9 @@ pub unsafe extern "C" fn inflate(
                                                         break '_inf_leave;
                                                     }
                                                     have = have.wrapping_sub(1);
-                                                    let c2rust_fresh25 = next;
                                                     next = next.offset(1);
                                                     hold = hold.wrapping_add(
-                                                        (*c2rust_fresh25 as ::core::ffi::c_ulong)
+                                                        (inflate_input_byte!(input, in_0, have) as ::core::ffi::c_ulong)
                                                             << bits,
                                                     );
                                                     bits =
@@ -1906,10 +1899,9 @@ pub unsafe extern "C" fn inflate(
                                             break '_inf_leave;
                                         }
                                         have = have.wrapping_sub(1);
-                                        let c2rust_fresh26 = next;
                                         next = next.offset(1);
                                         hold = hold.wrapping_add(
-                                            (*c2rust_fresh26 as ::core::ffi::c_ulong) << bits,
+                                            (inflate_input_byte!(input, in_0, have) as ::core::ffi::c_ulong) << bits,
                                         );
                                         bits = bits.wrapping_add(8 as ::core::ffi::c_uint);
                                     }
@@ -1936,8 +1928,10 @@ pub unsafe extern "C" fn inflate(
                                 loop {
                                     let c2rust_fresh5 = copy;
                                     copy = copy.wrapping_add(1);
-                                    len =
-                                        *next.offset(c2rust_fresh5 as isize) as ::core::ffi::c_uint;
+                                    len = input[in_0
+                                        .wrapping_sub(have)
+                                        .wrapping_add(c2rust_fresh5) as usize]
+                                        as ::core::ffi::c_uint;
                                     if !(*state).head.is_null()
                                         && !(*(*state).head).name.is_null()
                                         && (*state).length < (*(*state).head).name_max
@@ -1988,10 +1982,9 @@ pub unsafe extern "C" fn inflate(
                                 break '_inf_leave;
                             }
                             have = have.wrapping_sub(1);
-                            let c2rust_fresh27 = next;
                             next = next.offset(1);
                             hold = hold
-                                .wrapping_add((*c2rust_fresh27 as ::core::ffi::c_ulong) << bits);
+                                .wrapping_add((inflate_input_byte!(input, in_0, have) as ::core::ffi::c_ulong) << bits);
                             bits = bits.wrapping_add(8 as ::core::ffi::c_uint);
                         }
                         if here.op as ::core::ffi::c_int & 0xf0 as ::core::ffi::c_int
@@ -2020,10 +2013,9 @@ pub unsafe extern "C" fn inflate(
                                     break '_inf_leave;
                                 }
                                 have = have.wrapping_sub(1);
-                                let c2rust_fresh28 = next;
                                 next = next.offset(1);
                                 hold = hold.wrapping_add(
-                                    (*c2rust_fresh28 as ::core::ffi::c_ulong) << bits,
+                                    (inflate_input_byte!(input, in_0, have) as ::core::ffi::c_ulong) << bits,
                                 );
                                 bits = bits.wrapping_add(8 as ::core::ffi::c_uint);
                             }
@@ -2056,7 +2048,10 @@ pub unsafe extern "C" fn inflate(
                         loop {
                             let c2rust_fresh7 = copy;
                             copy = copy.wrapping_add(1);
-                            len = *next.offset(c2rust_fresh7 as isize) as ::core::ffi::c_uint;
+                            len = input[in_0
+                                .wrapping_sub(have)
+                                .wrapping_add(c2rust_fresh7) as usize]
+                                as ::core::ffi::c_uint;
                             if !(*state).head.is_null()
                                 && !(*(*state).head).comment.is_null()
                                 && (*state).length < (*(*state).head).comm_max
@@ -2096,9 +2091,8 @@ pub unsafe extern "C" fn inflate(
                             break '_inf_leave;
                         }
                         have = have.wrapping_sub(1);
-                        let c2rust_fresh29 = next;
                         next = next.offset(1);
-                        hold = hold.wrapping_add((*c2rust_fresh29 as ::core::ffi::c_ulong) << bits);
+                        hold = hold.wrapping_add((inflate_input_byte!(input, in_0, have) as ::core::ffi::c_ulong) << bits);
                         bits = bits.wrapping_add(8 as ::core::ffi::c_uint);
                     }
                     (*state).offset = (*state).offset.wrapping_add(
@@ -2121,9 +2115,8 @@ pub unsafe extern "C" fn inflate(
                         break '_inf_leave;
                     }
                     have = have.wrapping_sub(1);
-                    let c2rust_fresh9 = next;
                     next = next.offset(1);
-                    hold = hold.wrapping_add((*c2rust_fresh9 as ::core::ffi::c_ulong) << bits);
+                    hold = hold.wrapping_add((inflate_input_byte!(input, in_0, have) as ::core::ffi::c_ulong) << bits);
                     bits = bits.wrapping_add(8 as ::core::ffi::c_uint);
                 }
                 if (*state).wrap & 4 as ::core::ffi::c_int != 0
