@@ -1181,15 +1181,25 @@ pub unsafe extern "C" fn deflateReset_ffi(
     let head = ::core::slice::from_raw_parts_mut(state.head, state.hash_size as usize);
     deflate_reset(stream, state, head)
 }
-pub unsafe extern "C" fn deflateSetHeader(
-    mut strm: crate::zlib_h::z_streamp,
-    mut head: crate::zlib_h::gz_headerp,
+fn deflate_set_header(
+    state: &mut crate::src::deflate::deflate_state,
+    head: &mut crate::zlib_h::gz_header_s,
 ) -> ::core::ffi::c_int {
-    if deflateStateCheck(strm) != 0 || (*(*strm).state).wrap != 2 as ::core::ffi::c_int {
+    if state.wrap != 2 as ::core::ffi::c_int {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    (*(*strm).state).gzhead = head;
-    return crate::zlib_h::Z_OK;
+    state.gzhead = head;
+    crate::zlib_h::Z_OK
+}
+
+fn deflate_clear_header(
+    state: &mut crate::src::deflate::deflate_state,
+) -> ::core::ffi::c_int {
+    if state.wrap != 2 as ::core::ffi::c_int {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    }
+    state.gzhead = ::core::ptr::null_mut();
+    crate::zlib_h::Z_OK
 }
 #[export_name = "deflateSetHeader"]
 
@@ -1197,7 +1207,16 @@ pub unsafe extern "C" fn deflateSetHeader_ffi(
     mut strm: crate::zlib_h::z_streamp,
     mut head: crate::zlib_h::gz_headerp,
 ) -> ::core::ffi::c_int {
-    deflateSetHeader(strm, head)
+    if deflateStateCheck(strm) != 0 {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    }
+    let stream = &mut *strm;
+    let state = &mut *(stream.state as *mut crate::src::deflate::deflate_state);
+    if head.is_null() {
+        deflate_clear_header(state)
+    } else {
+        deflate_set_header(state, &mut *head)
+    }
 }
 fn deflate_pending(
     state: &crate::src::deflate::deflate_state,
