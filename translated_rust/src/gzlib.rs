@@ -61,16 +61,26 @@ pub use crate::zlib_h::Z_MEM_ERROR;
 pub use crate::zlib_h::Z_OK;
 pub use crate::zlib_h::Z_RLE;
 
-fn gz_tell_position(
+// This is the scalar portion of a gzip handle that position queries need.
+// Keep it pointer-free so the query rules can move out of the ABI state before
+// the resource-owning gzip facade is introduced.
+struct GzPosition {
     mode: ::core::ffi::c_int,
     pos: crate::stdlib::off64_t,
     past: ::core::ffi::c_int,
     skip: crate::stdlib::off64_t,
-) -> crate::stdlib::off64_t {
-    if mode != crate::gzguts_h::GZ_READ && mode != crate::gzguts_h::GZ_WRITE {
+}
+
+fn gz_tell_position(position: &GzPosition) -> crate::stdlib::off64_t {
+    if position.mode != crate::gzguts_h::GZ_READ && position.mode != crate::gzguts_h::GZ_WRITE {
         return -1 as crate::stdlib::off64_t;
     }
-    pos + if past != 0 { 0 as crate::stdlib::off64_t } else { skip }
+    position.pos
+        + if position.past != 0 {
+            0 as crate::stdlib::off64_t
+        } else {
+            position.skip
+        }
 }
 
 pub fn gzeof(mode: ::core::ffi::c_int, past: ::core::ffi::c_int) -> ::core::ffi::c_int {
@@ -552,13 +562,8 @@ pub unsafe extern "C" fn gzseek_ffi(
 ) -> crate::stdlib::off_t {
     gzseek(file, offset, whence)
 }
-pub fn gztell64(
-    mode: ::core::ffi::c_int,
-    pos: crate::stdlib::off64_t,
-    past: ::core::ffi::c_int,
-    skip: crate::stdlib::off64_t,
-) -> crate::stdlib::off64_t {
-    gz_tell_position(mode, pos, past, skip)
+fn gztell64(position: &GzPosition) -> crate::stdlib::off64_t {
+    gz_tell_position(position)
 }
 #[export_name = "gztell64"]
 
@@ -567,15 +572,15 @@ pub unsafe extern "C" fn gztell64_ffi(mut file: crate::zlib_h::gzFile) -> crate:
         return -1 as crate::stdlib::off64_t;
     };
     let state = state.as_ref();
-    gztell64(state.mode, state.x.pos, state.past, state.skip)
+    gztell64(&GzPosition {
+        mode: state.mode,
+        pos: state.x.pos,
+        past: state.past,
+        skip: state.skip,
+    })
 }
-pub fn gztell(
-    mode: ::core::ffi::c_int,
-    pos: crate::stdlib::off64_t,
-    past: ::core::ffi::c_int,
-    skip: crate::stdlib::off64_t,
-) -> crate::stdlib::off_t {
-    let ret = gztell64(mode, pos, past, skip);
+fn gztell(position: &GzPosition) -> crate::stdlib::off_t {
+    let ret = gztell64(position);
     return if ret == ret {
         ret
     } else {
@@ -589,7 +594,12 @@ pub unsafe extern "C" fn gztell_ffi(mut file: crate::zlib_h::gzFile) -> crate::s
         return -1 as crate::stdlib::off_t;
     };
     let state = state.as_ref();
-    gztell(state.mode, state.x.pos, state.past, state.skip)
+    gztell(&GzPosition {
+        mode: state.mode,
+        pos: state.x.pos,
+        past: state.past,
+        skip: state.skip,
+    })
 }
 pub unsafe extern "C" fn gzoffset64(mut file: crate::zlib_h::gzFile) -> crate::stdlib::off64_t {
     let mut offset: crate::stdlib::off64_t = 0;
