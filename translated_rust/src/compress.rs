@@ -55,119 +55,17 @@ impl OneShotCursor {
     }
 }
 
-// The one-shot API owns all of its byte-range accounting.  Keep that
-// accounting separate from the temporary ABI stream: a later deflate owner
-// can consume this plan without reconstructing progress from raw cursors.
-struct OneShotDeflatePlan {
-    input: OneShotCursor,
-    output: OneShotCursor,
-    output_capacity: crate::stdlib::z_size_t,
-}
-
-impl OneShotDeflatePlan {
-    fn new(input_len: usize, output_capacity: crate::stdlib::z_size_t) -> Self {
-        Self {
-            input: OneShotCursor::new(input_len),
-            output: OneShotCursor::new(output_capacity),
-            output_capacity,
-        }
-    }
-
-    fn flush(&self) -> ::core::ffi::c_int {
-        if self.input.remaining() == 0 {
-            crate::zlib_h::Z_FINISH
-        } else {
-            crate::zlib_h::Z_NO_FLUSH
-        }
-    }
-
-    fn produced(&self, remaining_output: crate::stdlib::uInt) -> crate::stdlib::z_size_t {
-        self.output_capacity.wrapping_sub(
-            self.output
-                .remaining()
-                .wrapping_add(remaining_output as crate::stdlib::z_size_t),
-        )
-    }
-}
-
 fn compress2_z(
     dest: &mut [crate::stdlib::Bytef],
     dest_len: &mut crate::stdlib::z_size_t,
     source: &[crate::stdlib::Bytef],
     mut level: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
-    let mut stream: crate::zlib_h::z_stream = crate::zlib_h::z_stream {
-        next_in: ::core::ptr::null_mut::<crate::stdlib::Bytef>(),
-        avail_in: 0,
-        total_in: 0,
-        next_out: ::core::ptr::null_mut::<crate::stdlib::Bytef>(),
-        avail_out: 0,
-        total_out: 0,
-        msg: ::core::ptr::null_mut::<::core::ffi::c_char>(),
-        state: ::core::ptr::null_mut::<crate::src::deflate::internal_state>(),
-        zalloc: None,
-        zfree: None,
-        opaque: ::core::ptr::null_mut::<::core::ffi::c_void>(),
-        data_type: 0,
-        adler: 0,
-        reserved: 0,
-    };
-    let mut err: ::core::ffi::c_int = 0;
-    let max: crate::stdlib::uInt = -1 as ::core::ffi::c_int as crate::stdlib::uInt;
-    let mut plan = OneShotDeflatePlan::new(source.len(), *dest_len);
     *dest_len = 0 as crate::stdlib::z_size_t;
-    stream.zalloc = None;
-    stream.zfree = None;
-    stream.opaque = ::core::ptr::null_mut::<::core::ffi::c_void>();
-    // The stream itself is an ABI mirror used only while this slice-based
-    // one-shot loop is active.
-    unsafe {
-        err = crate::src::deflate::deflateInit2_(
-            &raw mut stream as *mut _ as *mut crate::zlib_h::z_stream_s,
-            level,
-            crate::zlib_h::Z_DEFLATED,
-            crate::stdlib::MAX_WBITS,
-            crate::zutil_h::DEF_MEM_LEVEL,
-            crate::zlib_h::Z_DEFAULT_STRATEGY,
-            crate::zlib_h::ZLIB_VERSION.as_ptr(),
-            ::core::mem::size_of::<crate::zlib_h::z_stream>() as ::core::ffi::c_int,
-        );
-    }
-    if err != crate::zlib_h::Z_OK {
-        return err;
-    }
-    stream.next_out = dest.as_mut_ptr();
-    stream.avail_out = 0 as crate::stdlib::uInt;
-    stream.next_in = source.as_ptr().cast_mut();
-    stream.avail_in = 0 as crate::stdlib::uInt;
-    loop {
-        if stream.avail_out == 0 as crate::stdlib::uInt {
-            stream.avail_out = plan.output.next_chunk(max);
-        }
-        if stream.avail_in == 0 as crate::stdlib::uInt {
-            stream.avail_in = plan.input.next_chunk(max);
-        }
-        unsafe {
-            err = crate::src::deflate::deflate(
-                &raw mut stream as *mut _ as *mut crate::zlib_h::z_stream_s,
-                plan.flush(),
-            );
-        }
-        if err != crate::zlib_h::Z_OK {
-            break;
-        }
-    }
-    *dest_len = plan.produced(stream.avail_out);
-    unsafe {
-        crate::src::deflate::deflateEnd(
-            &raw mut stream as *mut _ as *mut crate::zlib_h::z_stream_s,
-        );
-    }
-    return if err == crate::zlib_h::Z_STREAM_END {
-        crate::zlib_h::Z_OK
-    } else {
-        err
-    };
+    let mut owner = crate::src::deflate::DeflateOneShotOwner::new(source, dest);
+    let progress = crate::src::deflate::deflate_one_shot(&mut owner, level);
+    *dest_len = progress.produced;
+    progress.status
 }
 #[export_name = "compress2_z"]
 

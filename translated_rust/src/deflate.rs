@@ -489,6 +489,153 @@ struct DeflateInitialState {
     hash_shift: crate::stdlib::uInt,
 }
 
+// The one-shot APIs never expose their temporary stream.  Keep their bounded
+// input and output borrows, along with the uInt-sized request accounting, in
+// a pointer-free owner.  The small ABI adapter below is then the only place
+// that needs to publish those borrows to z_stream for the existing codec.
+pub(crate) struct DeflateOneShotOwner<'input, 'output> {
+    input: &'input [crate::stdlib::Bytef],
+    output: &'output mut [crate::stdlib::Bytef],
+    input_remaining: crate::stdlib::z_size_t,
+    output_remaining: crate::stdlib::z_size_t,
+    output_capacity: crate::stdlib::z_size_t,
+}
+
+pub(crate) struct DeflateOneShotProgress {
+    pub(crate) status: ::core::ffi::c_int,
+    pub(crate) produced: crate::stdlib::z_size_t,
+}
+
+impl<'input, 'output> DeflateOneShotOwner<'input, 'output> {
+    pub(crate) fn new(
+        input: &'input [crate::stdlib::Bytef],
+        output: &'output mut [crate::stdlib::Bytef],
+    ) -> Self {
+        let output_len = output.len();
+        Self {
+            input,
+            output_capacity: output_len,
+            output,
+            input_remaining: input.len(),
+            output_remaining: output_len,
+        }
+    }
+
+    fn next_input_chunk(&mut self, max: crate::stdlib::uInt) -> crate::stdlib::uInt {
+        let chunk = if self.input_remaining > max as crate::stdlib::z_size_t {
+            max
+        } else {
+            self.input_remaining as crate::stdlib::uInt
+        };
+        self.input_remaining = self
+            .input_remaining
+            .wrapping_sub(chunk as crate::stdlib::z_size_t);
+        chunk
+    }
+
+    fn next_output_chunk(&mut self, max: crate::stdlib::uInt) -> crate::stdlib::uInt {
+        let chunk = if self.output_remaining > max as crate::stdlib::z_size_t {
+            max
+        } else {
+            self.output_remaining as crate::stdlib::uInt
+        };
+        self.output_remaining = self
+            .output_remaining
+            .wrapping_sub(chunk as crate::stdlib::z_size_t);
+        chunk
+    }
+
+    fn flush(&self) -> ::core::ffi::c_int {
+        if self.input_remaining == 0 {
+            crate::zlib_h::Z_FINISH
+        } else {
+            crate::zlib_h::Z_NO_FLUSH
+        }
+    }
+
+    fn produced(&self, available_output: crate::stdlib::uInt) -> crate::stdlib::z_size_t {
+        self.output_capacity.wrapping_sub(
+            self.output_remaining
+                .wrapping_add(available_output as crate::stdlib::z_size_t),
+        )
+    }
+}
+
+// This adapter owns the complete temporary ABI lifecycle for compress2_z().
+// Its interface is pointer-free, so all chunking and result accounting remain
+// in `DeflateOneShotOwner`; only the established codec boundary is unsafe.
+pub(crate) fn deflate_one_shot(
+    owner: &mut DeflateOneShotOwner<'_, '_>,
+    level: ::core::ffi::c_int,
+) -> DeflateOneShotProgress {
+    let mut stream: crate::zlib_h::z_stream = crate::zlib_h::z_stream {
+        next_in: ::core::ptr::null_mut::<crate::stdlib::Bytef>(),
+        avail_in: 0,
+        total_in: 0,
+        next_out: ::core::ptr::null_mut::<crate::stdlib::Bytef>(),
+        avail_out: 0,
+        total_out: 0,
+        msg: ::core::ptr::null_mut::<::core::ffi::c_char>(),
+        state: ::core::ptr::null_mut::<crate::src::deflate::internal_state>(),
+        zalloc: None,
+        zfree: None,
+        opaque: ::core::ptr::null_mut::<::core::ffi::c_void>(),
+        data_type: 0,
+        adler: 0,
+        reserved: 0,
+    };
+    let max: crate::stdlib::uInt = -1 as ::core::ffi::c_int as crate::stdlib::uInt;
+    let mut status = unsafe {
+        deflateInit2_(
+            &raw mut stream as *mut _ as *mut crate::zlib_h::z_stream_s,
+            level,
+            crate::zlib_h::Z_DEFLATED,
+            crate::stdlib::MAX_WBITS,
+            crate::zutil_h::DEF_MEM_LEVEL,
+            crate::zlib_h::Z_DEFAULT_STRATEGY,
+            crate::zlib_h::ZLIB_VERSION.as_ptr(),
+            ::core::mem::size_of::<crate::zlib_h::z_stream>() as ::core::ffi::c_int,
+        )
+    };
+    if status != crate::zlib_h::Z_OK {
+        return DeflateOneShotProgress {
+            status,
+            produced: 0,
+        };
+    }
+    stream.next_out = owner.output.as_mut_ptr();
+    stream.next_in = owner.input.as_ptr().cast_mut();
+    loop {
+        if stream.avail_out == 0 {
+            stream.avail_out = owner.next_output_chunk(max);
+        }
+        if stream.avail_in == 0 {
+            stream.avail_in = owner.next_input_chunk(max);
+        }
+        status = unsafe {
+            deflate(
+                &raw mut stream as *mut _ as *mut crate::zlib_h::z_stream_s,
+                owner.flush(),
+            )
+        };
+        if status != crate::zlib_h::Z_OK {
+            break;
+        }
+    }
+    let produced = owner.produced(stream.avail_out);
+    unsafe {
+        deflateEnd(&raw mut stream as *mut _ as *mut crate::zlib_h::z_stream_s);
+    }
+    DeflateOneShotProgress {
+        status: if status == crate::zlib_h::Z_STREAM_END {
+            crate::zlib_h::Z_OK
+        } else {
+            status
+        },
+        produced,
+    }
+}
+
 impl DeflateLayout {
     fn storage(&self) -> DeflateStorageLayout {
         DeflateStorageLayout::new(self.w_size, self.hash_size, self.lit_bufsize)
