@@ -1095,7 +1095,11 @@ pub unsafe extern "C" fn inflateBack_ffi(
 ) -> ::core::ffi::c_int {
     inflateBack(strm, in_0, in_desc, out, out_desc)
 }
-pub unsafe extern "C" fn inflateBackEnd(mut strm: crate::zlib_h::z_streamp) -> ::core::ffi::c_int {
+#[export_name = "inflateBackEnd"]
+
+pub unsafe extern "C" fn inflateBackEnd_ffi(
+    mut strm: crate::zlib_h::z_streamp,
+) -> ::core::ffi::c_int {
     if strm.is_null() || (*strm).state.is_null() || (*strm).zfree.is_none() {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
@@ -1104,14 +1108,7 @@ pub unsafe extern "C" fn inflateBackEnd(mut strm: crate::zlib_h::z_streamp) -> :
         (*strm).state as crate::stdlib::voidpf,
     );
     (*strm).state = ::core::ptr::null_mut::<crate::src::deflate::internal_state>();
-    return crate::zlib_h::Z_OK;
-}
-#[export_name = "inflateBackEnd"]
-
-pub unsafe extern "C" fn inflateBackEnd_ffi(
-    mut strm: crate::zlib_h::z_streamp,
-) -> ::core::ffi::c_int {
-    inflateBackEnd(strm)
+    crate::zlib_h::Z_OK
 }
 
 #[cfg(test)]
@@ -1119,8 +1116,9 @@ mod tests {
     use super::{
         inflate_back_block_header, inflate_back_consume_input_byte, inflate_back_copy_count,
         inflate_back_distance_exceeds_window, inflate_back_init_metadata_is_valid,
-        inflate_back_stored_block_length, inflate_back_window_bits_are_valid,
-        inflate_back_window_size, InflateBackBlockKind,
+        inflate_back_match_copy_plan, inflate_back_stored_block_length,
+        inflate_back_window_bits_are_valid, inflate_back_window_size, InflateBackBlockKind,
+        InflateBackMatchSource,
     };
 
     #[test]
@@ -1194,6 +1192,22 @@ mod tests {
         assert_eq!(inflate_back_copy_count(20, 12, 16), 12);
         assert_eq!(inflate_back_copy_count(20, 24, 16), 16);
         assert_eq!(inflate_back_copy_count(20, 0, 16), 0);
+    }
+
+    #[test]
+    fn inflate_back_match_copy_plan_selects_window_side_and_count() {
+        assert_eq!(
+            inflate_back_match_copy_plan(32, 20, 16, 7),
+            (InflateBackMatchSource::Ahead(12), 4)
+        );
+        assert_eq!(
+            inflate_back_match_copy_plan(32, 20, 12, 7),
+            (InflateBackMatchSource::Behind(20), 7)
+        );
+        assert_eq!(
+            inflate_back_match_copy_plan(32, 20, 0, 7),
+            (InflateBackMatchSource::Behind(20), 0)
+        );
     }
 
     #[test]
