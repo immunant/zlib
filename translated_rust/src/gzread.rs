@@ -906,6 +906,21 @@ pub unsafe extern "C" fn gzungetc_ffi(
     }
     gzungetc(c, &mut *(file as crate::gzguts_h::gz_statep))
 }
+// Copying a fetched chunk into the caller's already-bound destination is
+// ordinary slice work.  Return the exact amount consumed so the read loop can
+// keep its gzip-buffer bookkeeping separate from newline detection.
+fn gzgets_copy_chunk(
+    destination: &mut [::core::ffi::c_char],
+    source: &[::core::ffi::c_uchar],
+) -> (usize, bool) {
+    let newline = source.iter().position(|byte| *byte == b'\n');
+    let len = newline.map(|position| position + 1).unwrap_or(source.len());
+    for (destination, source) in destination[..len].iter_mut().zip(&source[..len]) {
+        *destination = *source as ::core::ffi::c_char;
+    }
+    (len, newline.is_some())
+}
+
 // The ABI wrapper binds the caller's writable string once.  The read loop can
 // then use a Rust slice for its cursor and terminator, leaving only the
 // already-owned gzip output buffer as a raw boundary here.
@@ -933,18 +948,11 @@ fn gzgets(state: &mut crate::gzguts_h::gz_state, buf: &mut [::core::ffi::c_char]
                     let source = unsafe {
                         ::core::slice::from_raw_parts(state.x.next, n as usize)
                     };
-                    let found_eol = if let Some(eol) = source.iter().position(|byte| *byte == b'\n') {
-                        n = (eol as ::core::ffi::c_uint).wrapping_add(1);
-                        true
-                    } else {
-                        false
-                    };
-                    for (destination, source) in buf[written..written + n as usize]
-                        .iter_mut()
-                        .zip(&source[..n as usize])
-                    {
-                        *destination = *source as ::core::ffi::c_char;
-                    }
+                    let (copied, found_eol) = gzgets_copy_chunk(
+                        &mut buf[written..written + n as usize],
+                        source,
+                    );
+                    n = copied as ::core::ffi::c_uint;
                     gz_consume(state, n as crate::stdlib::off64_t);
                     crate::src::gzlib::gz_gets_after_copy(&mut left, n);
                     written += n as usize;
