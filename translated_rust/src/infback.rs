@@ -254,6 +254,35 @@ fn inflate_back_distance_code(code: crate::src::inftrees::code) -> InflateBackDi
     }
 }
 
+// Decode-table entries carry both their semantic meaning and the initial
+// length or distance value.  Apply that value-only transition through a
+// state reference before the FFI-facing loop performs any callback or byte
+// access.  In particular, an invalid distance entry must leave `offset` and
+// `extra` untouched, matching the original control flow.
+fn inflate_back_start_length_code(
+    state: &mut crate::src::inflate::inflate_state,
+    code: crate::src::inftrees::code,
+) -> InflateBackLengthCode {
+    let decoded = inflate_back_length_code(code);
+    state.length = code.val as ::core::ffi::c_uint;
+    if let InflateBackLengthCode::Match { extra } = decoded {
+        state.extra = extra;
+    }
+    decoded
+}
+
+fn inflate_back_start_distance_code(
+    state: &mut crate::src::inflate::inflate_state,
+    code: crate::src::inftrees::code,
+) -> InflateBackDistanceCode {
+    let decoded = inflate_back_distance_code(code);
+    if let InflateBackDistanceCode::Distance { offset, extra } = decoded {
+        state.offset = offset;
+        state.extra = extra;
+    }
+    decoded
+}
+
 fn inflate_back_length_code_needs_subtable(code: crate::src::inftrees::code) -> bool {
     let op = code.op as ::core::ffi::c_uint;
     op != 0 && op & 0xf0 == 0
@@ -1028,8 +1057,7 @@ pub unsafe extern "C" fn inflateBack(
                 &mut bits,
                 here.bits as ::core::ffi::c_uint,
             );
-            (*state).length = here.val as ::core::ffi::c_uint;
-            match inflate_back_length_code(here) {
+            match inflate_back_start_length_code(&mut *state, here) {
                 InflateBackLengthCode::Literal => {
                 if left == 0 as ::core::ffi::c_uint {
                     put = (*state).window;
@@ -1055,8 +1083,7 @@ pub unsafe extern "C" fn inflateBack(
                     as *mut ::core::ffi::c_char;
                 (*state).mode = crate::src::inflate::BAD;
                 }
-                InflateBackLengthCode::Match { extra } => {
-                (*state).extra = extra;
+                InflateBackLengthCode::Match { .. } => {
                 if (*state).extra != 0 as ::core::ffi::c_uint {
                     while bits < (*state).extra {
                         if have == 0 as ::core::ffi::c_uint {
@@ -1141,15 +1168,13 @@ pub unsafe extern "C" fn inflateBack(
                     &mut bits,
                     here.bits as ::core::ffi::c_uint,
                 );
-                match inflate_back_distance_code(here) {
+                match inflate_back_start_distance_code(&mut *state, here) {
                     InflateBackDistanceCode::Invalid => {
                     (*strm).msg = b"invalid distance code\0".as_ptr() as *const ::core::ffi::c_char
                         as *mut ::core::ffi::c_char;
                     (*state).mode = crate::src::inflate::BAD;
                     }
-                    InflateBackDistanceCode::Distance { offset, extra } => {
-                    (*state).offset = offset;
-                    (*state).extra = extra;
+                    InflateBackDistanceCode::Distance { .. } => {
                     if (*state).extra != 0 as ::core::ffi::c_uint {
                         while bits < (*state).extra {
                             if have == 0 as ::core::ffi::c_uint {
