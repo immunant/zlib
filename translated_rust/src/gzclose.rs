@@ -35,11 +35,6 @@ fn gzclose_impl(owned: Box<crate::gzguts_h::gz_state>) -> ::core::ffi::c_int {
     }
 }
 
-/// Compatibility entry point for Rust callers using the legacy unsafe
-/// contract.  All implementation callers dispatch through `gzclose_impl`.
-pub unsafe fn gzclose(owned: Box<crate::gzguts_h::gz_state>) -> ::core::ffi::c_int {
-    gzclose_impl(owned)
-}
 #[export_name = "gzclose"]
 
 pub unsafe extern "C" fn gzclose_ffi(file: crate::zlib_h::gzFile) -> ::core::ffi::c_int {
