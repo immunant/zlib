@@ -6,7 +6,6 @@ pub use crate::gzguts_h::COPY;
 pub use crate::gzguts_h::GZIP;
 pub use crate::gzguts_h::GZ_READ;
 pub use crate::gzguts_h::LOOK;
-pub use crate::src::gzlib::gz_error;
 pub use crate::src::gzlib::gz_intmax;
 pub use crate::stdlib::EAGAIN;
 pub use crate::stdlib::EWOULDBLOCK;

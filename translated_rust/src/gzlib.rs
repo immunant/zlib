@@ -2497,12 +2497,19 @@ pub unsafe extern "C" fn gzclearerr_ffi(mut file: crate::zlib_h::gzFile) {
         &mut state.err,
     )
 }
-pub unsafe extern "C" fn gz_error(
+#[export_name = "gz_error"]
+
+pub unsafe extern "C" fn gz_error_ffi(
     mut state: crate::gzguts_h::gz_statep,
     mut err: ::core::ffi::c_int,
     mut msg: *const ::core::ffi::c_char,
 ) {
-    let state = &mut *state;
+    // This callback is the ABI boundary for both pointers.  Convert them
+    // before dispatching the error policy so no implementation function
+    // carries an ABI-shaped state or message pointer.
+    let Some(state) = state.as_mut() else {
+        return;
+    };
     let message = (!msg.is_null()).then(|| ::core::ffi::CStr::from_ptr(msg).to_bytes());
     gz_set_error(
         &mut state.msg,
@@ -2513,15 +2520,6 @@ pub unsafe extern "C" fn gz_error(
         err,
         message,
     );
-}
-#[export_name = "gz_error"]
-
-pub unsafe extern "C" fn gz_error_ffi(
-    mut state: crate::gzguts_h::gz_statep,
-    mut err: ::core::ffi::c_int,
-    mut msg: *const ::core::ffi::c_char,
-) {
-    gz_error(state, err, msg)
 }
 pub fn gz_intmax() -> ::core::ffi::c_uint {
     return crate::limits_h::INT_MAX as ::core::ffi::c_uint;

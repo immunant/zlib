@@ -3,7 +3,6 @@ pub use crate::__stddef_size_t_h::size_t;
 pub use crate::gzguts_h::gz_state;
 pub use crate::gzguts_h::gz_statep;
 pub use crate::gzguts_h::GZ_WRITE;
-pub use crate::src::gzlib::gz_error;
 pub use crate::src::gzlib::gz_intmax;
 pub use crate::stdlib::EAGAIN;
 pub use crate::stdlib::EWOULDBLOCK;
