@@ -671,7 +671,7 @@ pub unsafe extern "C" fn gzclearerr(mut file: crate::zlib_h::gzFile) {
 pub unsafe extern "C" fn gzclearerr_ffi(mut file: crate::zlib_h::gzFile) {
     gzclearerr(file)
 }
-fn gz_error_state(
+pub(crate) fn gz_error_state(
     state: &mut crate::gzguts_h::gz_state,
     err: ::core::ffi::c_int,
     msg: Option<&::core::ffi::CStr>,
