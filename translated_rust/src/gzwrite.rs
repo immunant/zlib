@@ -736,50 +736,61 @@ fn gz_write_buffered_progress(
     }
 }
 
-unsafe fn gz_init(mut state: crate::gzguts_h::gz_statep) -> ::core::ffi::c_int {
-    let state = &mut *state;
+fn gz_init(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
     let allocation = gz_init_allocation_plan(state.want, state.direct);
-    state.in_0 = crate::stdlib::malloc(allocation.input_len as crate::__stddef_size_t_h::size_t)
-        as *mut ::core::ffi::c_uchar;
+    state.in_0 = unsafe {
+        crate::stdlib::malloc(allocation.input_len as crate::__stddef_size_t_h::size_t)
+            as *mut ::core::ffi::c_uchar
+    };
     if state.in_0.is_null() {
-        crate::src::gzlib::gz_error(
-            state as *mut crate::gzguts_h::gz_state,
-            crate::zlib_h::Z_MEM_ERROR,
-            b"out of memory\0".as_ptr() as *const ::core::ffi::c_char,
-        );
+        unsafe {
+            crate::src::gzlib::gz_error(
+                state as *mut crate::gzguts_h::gz_state,
+                crate::zlib_h::Z_MEM_ERROR,
+                b"out of memory\0".as_ptr() as *const ::core::ffi::c_char,
+            );
+        }
         return -1 as ::core::ffi::c_int;
     }
     if let Some(output_len) = allocation.output_len {
-        state.out = crate::stdlib::malloc(output_len as crate::__stddef_size_t_h::size_t)
-            as *mut ::core::ffi::c_uchar;
+        state.out = unsafe {
+            crate::stdlib::malloc(output_len as crate::__stddef_size_t_h::size_t)
+                as *mut ::core::ffi::c_uchar
+        };
         if state.out.is_null() {
-            crate::stdlib::free(state.in_0 as *mut ::core::ffi::c_void);
-            crate::src::gzlib::gz_error(
-                state as *mut crate::gzguts_h::gz_state,
-                crate::zlib_h::Z_MEM_ERROR,
-                b"out of memory\0".as_ptr() as *const ::core::ffi::c_char,
-            );
+            unsafe {
+                crate::stdlib::free(state.in_0 as *mut ::core::ffi::c_void);
+                crate::src::gzlib::gz_error(
+                    state as *mut crate::gzguts_h::gz_state,
+                    crate::zlib_h::Z_MEM_ERROR,
+                    b"out of memory\0".as_ptr() as *const ::core::ffi::c_char,
+                );
+            }
             return -1 as ::core::ffi::c_int;
         }
         gz_init_stream_defaults(&mut state.strm);
-        if crate::src::deflate::deflateInit2_(
-            &mut state.strm as *mut crate::zlib_h::z_stream_s,
-            state.level,
-            8 as ::core::ffi::c_int,
-            15 as ::core::ffi::c_int + 16 as ::core::ffi::c_int,
-            8 as ::core::ffi::c_int,
-            state.strategy,
-            crate::zlib_h::ZLIB_VERSION.as_ptr(),
-            ::core::mem::size_of::<crate::zlib_h::z_stream>() as ::core::ffi::c_int,
-        ) != crate::zlib_h::Z_OK
+        if unsafe {
+            crate::src::deflate::deflateInit2_(
+                &mut state.strm as *mut crate::zlib_h::z_stream_s,
+                state.level,
+                8 as ::core::ffi::c_int,
+                15 as ::core::ffi::c_int + 16 as ::core::ffi::c_int,
+                8 as ::core::ffi::c_int,
+                state.strategy,
+                crate::zlib_h::ZLIB_VERSION.as_ptr(),
+                ::core::mem::size_of::<crate::zlib_h::z_stream>() as ::core::ffi::c_int,
+            )
+        } != crate::zlib_h::Z_OK
         {
-            crate::stdlib::free((*state).out as *mut ::core::ffi::c_void);
-            crate::stdlib::free(state.in_0 as *mut ::core::ffi::c_void);
-            crate::src::gzlib::gz_error(
-                state as *mut crate::gzguts_h::gz_state,
-                crate::zlib_h::Z_MEM_ERROR,
-                b"out of memory\0".as_ptr() as *const ::core::ffi::c_char,
-            );
+            unsafe {
+                crate::stdlib::free(state.out as *mut ::core::ffi::c_void);
+                crate::stdlib::free(state.in_0 as *mut ::core::ffi::c_void);
+                crate::src::gzlib::gz_error(
+                    state as *mut crate::gzguts_h::gz_state,
+                    crate::zlib_h::Z_MEM_ERROR,
+                    b"out of memory\0".as_ptr() as *const ::core::ffi::c_char,
+                );
+            }
             return -1 as ::core::ffi::c_int;
         }
     }
