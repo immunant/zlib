@@ -2447,28 +2447,39 @@ fn write_block_header(
     );
 }
 
+pub(crate) enum BitOutputAction {
+    Flush,
+    Windup,
+    Align,
+}
+
 pub(crate) unsafe fn bi_flush_or_windup(
     mut s: *mut crate::src::deflate::deflate_state,
-    windup: bool,
+    action: BitOutputAction,
 ) {
     let state = &mut *s;
     let pending_buf =
         ::core::slice::from_raw_parts_mut(state.pending_buf, state.pending_buf_size as usize);
-    if windup {
-        bi_windup_bytes(
+    match action {
+        BitOutputAction::Flush => bi_flush_bytes(
+            pending_buf,
+            &mut state.pending,
+            &mut state.bi_buf,
+            &mut state.bi_valid,
+        ),
+        BitOutputAction::Windup => bi_windup_bytes(
             pending_buf,
             &mut state.pending,
             &mut state.bi_buf,
             &mut state.bi_valid,
             &mut state.bi_used,
-        );
-    } else {
-        bi_flush_bytes(
+        ),
+        BitOutputAction::Align => tr_align_bytes(
             pending_buf,
             &mut state.pending,
             &mut state.bi_buf,
             &mut state.bi_valid,
-        );
+        ),
     }
 }
 
@@ -3206,23 +3217,12 @@ pub unsafe extern "C" fn _tr_stored_block_ffi(
 #[export_name = "_tr_flush_bits"]
 
 pub unsafe extern "C" fn _tr_flush_bits_ffi(mut s: *mut crate::src::deflate::deflate_state) {
-    bi_flush_or_windup(s, false)
-}
-pub unsafe extern "C" fn _tr_align(mut s: *mut crate::src::deflate::deflate_state) {
-    let state = &mut *s;
-    let pending_buf =
-        ::core::slice::from_raw_parts_mut(state.pending_buf, state.pending_buf_size as usize);
-    tr_align_bytes(
-        pending_buf,
-        &mut state.pending,
-        &mut state.bi_buf,
-        &mut state.bi_valid,
-    );
+    bi_flush_or_windup(s, BitOutputAction::Flush)
 }
 #[export_name = "_tr_align"]
 
 pub unsafe extern "C" fn _tr_align_ffi(mut s: *mut crate::src::deflate::deflate_state) {
-    _tr_align(s)
+    bi_flush_or_windup(s, BitOutputAction::Align)
 }
 fn compress_block(
     pending_buf: &mut [crate::stdlib::Bytef],
@@ -3457,7 +3457,7 @@ pub unsafe extern "C" fn _tr_flush_block(
         &mut state.sym_next,
     );
     if last != 0 {
-        bi_flush_or_windup(s, true);
+        bi_flush_or_windup(s, BitOutputAction::Windup);
     }
 }
 #[export_name = "_tr_flush_block"]
