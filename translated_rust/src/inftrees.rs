@@ -2848,6 +2848,11 @@ pub use crate::zlib_h::z_stream_s;
 pub use crate::zlib_h::z_streamp;
 
 pub const MAXBITS: ::core::ffi::c_int = 15 as ::core::ffi::c_int;
+/// Deflate has at most 286 literal/length and 32 distance code lengths.
+/// Keeping the combined bound at the safe builder boundary prevents a
+/// malformed internal caller from allocating unbounded work storage or
+/// narrowing a symbol index to `c_ushort`.
+const MAX_CODE_LENGTHS: usize = 320;
 #[no_mangle]
 
 pub static inflate_copyright: [::core::ffi::c_char; 49] = [
@@ -2915,6 +2920,9 @@ fn inflate_table_build(
     lens: &[::core::ffi::c_ushort],
     mut root: ::core::ffi::c_uint,
 ) -> Result<InflateTableBuild, ::core::ffi::c_int> {
+    if lens.len() > MAX_CODE_LENGTHS {
+        return Err(-1);
+    }
     let mut len: ::core::ffi::c_uint = 0;
     let mut sym: ::core::ffi::c_uint = 0;
     let mut min: ::core::ffi::c_uint = 0;
@@ -3300,7 +3308,11 @@ pub unsafe extern "C" fn inflate_table(
     table_capacity: usize,
     work_capacity: usize,
 ) -> ::core::ffi::c_int {
-    if lens.is_null() || table.is_null() || bits.is_null() || work.is_null() || codes as usize > 320
+    if lens.is_null()
+        || table.is_null()
+        || bits.is_null()
+        || work.is_null()
+        || codes as usize > MAX_CODE_LENGTHS
     {
         return 1;
     }
