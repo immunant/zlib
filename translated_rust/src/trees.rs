@@ -3136,23 +3136,27 @@ unsafe extern "C" fn compress_block(
     let mut sx: ::core::ffi::c_uint = 0 as ::core::ffi::c_uint;
     let mut code: ::core::ffi::c_uint = 0;
     let mut extra: ::core::ffi::c_int = 0;
-    let sym_buf = (*s).pending_buf.offset((*s).sym_buf as isize);
+    // Symbol descriptors live in the pending allocation's overlay.  Take a
+    // short snapshot before appending encoded bytes to that same allocation.
+    let sym_buf = (*s)
+        .symbol_bytes()
+        .map_or_else(Vec::new, |bytes| bytes.to_vec());
     if (*s).sym_next != 0 as crate::stdlib::uInt {
         loop {
             let c2rust_fresh10 = sx;
             sx = sx.wrapping_add(1);
-            dist = (*sym_buf.offset(c2rust_fresh10 as isize) as ::core::ffi::c_int
+            dist = (sym_buf[c2rust_fresh10 as usize] as ::core::ffi::c_int
                 & 0xff as ::core::ffi::c_int) as ::core::ffi::c_uint;
             let c2rust_fresh11 = sx;
             sx = sx.wrapping_add(1);
             dist = dist.wrapping_add(
-                ((*sym_buf.offset(c2rust_fresh11 as isize) as ::core::ffi::c_int
+                ((sym_buf[c2rust_fresh11 as usize] as ::core::ffi::c_int
                     & 0xff as ::core::ffi::c_int) as ::core::ffi::c_uint)
                     << 8 as ::core::ffi::c_int,
             );
             let c2rust_fresh12 = sx;
             sx = sx.wrapping_add(1);
-            lc = *sym_buf.offset(c2rust_fresh12 as isize) as ::core::ffi::c_int;
+            lc = sym_buf[c2rust_fresh12 as usize] as ::core::ffi::c_int;
             if dist == 0 as ::core::ffi::c_uint {
                 let mut len: ::core::ffi::c_int =
                     (*ltree.offset(lc as isize)).dl as ::core::ffi::c_int;
@@ -3162,16 +3166,8 @@ unsafe extern "C" fn compress_block(
                     (*s).bi_buf = ((*s).bi_buf as ::core::ffi::c_int
                         | (val as crate::zutil_h::ush as ::core::ffi::c_int) << (*s).bi_valid)
                         as crate::zutil_h::ush;
-                    let c2rust_fresh13 = (*s).pending;
-                    (*s).pending = (*s).pending.wrapping_add(1);
-                    *(*s).pending_buf.offset(c2rust_fresh13 as isize) =
-                        ((*s).bi_buf as ::core::ffi::c_int & 0xff as ::core::ffi::c_int)
-                            as crate::zutil_h::uch;
-                    let c2rust_fresh14 = (*s).pending;
-                    (*s).pending = (*s).pending.wrapping_add(1);
-                    *(*s).pending_buf.offset(c2rust_fresh14 as isize) =
-                        ((*s).bi_buf as ::core::ffi::c_int >> 8 as ::core::ffi::c_int)
-                            as crate::zutil_h::uch;
+                    (*s).put_pending_byte(((*s).bi_buf as i32 & 0xff) as crate::zutil_h::uch);
+                    (*s).put_pending_byte(((*s).bi_buf as i32 >> 8) as crate::zutil_h::uch);
                     (*s).bi_buf = (val as crate::zutil_h::ush as ::core::ffi::c_int
                         >> crate::src::deflate::Buf_size - (*s).bi_valid)
                         as crate::zutil_h::ush;
@@ -3201,16 +3197,8 @@ unsafe extern "C" fn compress_block(
                     (*s).bi_buf = ((*s).bi_buf as ::core::ffi::c_int
                         | (val_0 as crate::zutil_h::ush as ::core::ffi::c_int) << (*s).bi_valid)
                         as crate::zutil_h::ush;
-                    let c2rust_fresh15 = (*s).pending;
-                    (*s).pending = (*s).pending.wrapping_add(1);
-                    *(*s).pending_buf.offset(c2rust_fresh15 as isize) =
-                        ((*s).bi_buf as ::core::ffi::c_int & 0xff as ::core::ffi::c_int)
-                            as crate::zutil_h::uch;
-                    let c2rust_fresh16 = (*s).pending;
-                    (*s).pending = (*s).pending.wrapping_add(1);
-                    *(*s).pending_buf.offset(c2rust_fresh16 as isize) =
-                        ((*s).bi_buf as ::core::ffi::c_int >> 8 as ::core::ffi::c_int)
-                            as crate::zutil_h::uch;
+                    (*s).put_pending_byte(((*s).bi_buf as i32 & 0xff) as crate::zutil_h::uch);
+                    (*s).put_pending_byte(((*s).bi_buf as i32 >> 8) as crate::zutil_h::uch);
                     (*s).bi_buf = (val_0 as crate::zutil_h::ush as ::core::ffi::c_int
                         >> crate::src::deflate::Buf_size - (*s).bi_valid)
                         as crate::zutil_h::ush;
@@ -3236,16 +3224,8 @@ unsafe extern "C" fn compress_block(
                         (*s).bi_buf = ((*s).bi_buf as ::core::ffi::c_int
                             | (val_1 as crate::zutil_h::ush as ::core::ffi::c_int) << (*s).bi_valid)
                             as crate::zutil_h::ush;
-                        let c2rust_fresh17 = (*s).pending;
-                        (*s).pending = (*s).pending.wrapping_add(1);
-                        *(*s).pending_buf.offset(c2rust_fresh17 as isize) =
-                            ((*s).bi_buf as ::core::ffi::c_int & 0xff as ::core::ffi::c_int)
-                                as crate::zutil_h::uch;
-                        let c2rust_fresh18 = (*s).pending;
-                        (*s).pending = (*s).pending.wrapping_add(1);
-                        *(*s).pending_buf.offset(c2rust_fresh18 as isize) =
-                            ((*s).bi_buf as ::core::ffi::c_int >> 8 as ::core::ffi::c_int)
-                                as crate::zutil_h::uch;
+                        (*s).put_pending_byte(((*s).bi_buf as i32 & 0xff) as crate::zutil_h::uch);
+                        (*s).put_pending_byte(((*s).bi_buf as i32 >> 8) as crate::zutil_h::uch);
                         (*s).bi_buf = (val_1 as crate::zutil_h::ush as ::core::ffi::c_int
                             >> crate::src::deflate::Buf_size - (*s).bi_valid)
                             as crate::zutil_h::ush;
@@ -3273,16 +3253,8 @@ unsafe extern "C" fn compress_block(
                     (*s).bi_buf = ((*s).bi_buf as ::core::ffi::c_int
                         | (val_2 as crate::zutil_h::ush as ::core::ffi::c_int) << (*s).bi_valid)
                         as crate::zutil_h::ush;
-                    let c2rust_fresh19 = (*s).pending;
-                    (*s).pending = (*s).pending.wrapping_add(1);
-                    *(*s).pending_buf.offset(c2rust_fresh19 as isize) =
-                        ((*s).bi_buf as ::core::ffi::c_int & 0xff as ::core::ffi::c_int)
-                            as crate::zutil_h::uch;
-                    let c2rust_fresh20 = (*s).pending;
-                    (*s).pending = (*s).pending.wrapping_add(1);
-                    *(*s).pending_buf.offset(c2rust_fresh20 as isize) =
-                        ((*s).bi_buf as ::core::ffi::c_int >> 8 as ::core::ffi::c_int)
-                            as crate::zutil_h::uch;
+                    (*s).put_pending_byte(((*s).bi_buf as i32 & 0xff) as crate::zutil_h::uch);
+                    (*s).put_pending_byte(((*s).bi_buf as i32 >> 8) as crate::zutil_h::uch);
                     (*s).bi_buf = (val_2 as crate::zutil_h::ush as ::core::ffi::c_int
                         >> crate::src::deflate::Buf_size - (*s).bi_valid)
                         as crate::zutil_h::ush;
@@ -3303,16 +3275,8 @@ unsafe extern "C" fn compress_block(
                         (*s).bi_buf = ((*s).bi_buf as ::core::ffi::c_int
                             | (val_3 as crate::zutil_h::ush as ::core::ffi::c_int) << (*s).bi_valid)
                             as crate::zutil_h::ush;
-                        let c2rust_fresh21 = (*s).pending;
-                        (*s).pending = (*s).pending.wrapping_add(1);
-                        *(*s).pending_buf.offset(c2rust_fresh21 as isize) =
-                            ((*s).bi_buf as ::core::ffi::c_int & 0xff as ::core::ffi::c_int)
-                                as crate::zutil_h::uch;
-                        let c2rust_fresh22 = (*s).pending;
-                        (*s).pending = (*s).pending.wrapping_add(1);
-                        *(*s).pending_buf.offset(c2rust_fresh22 as isize) =
-                            ((*s).bi_buf as ::core::ffi::c_int >> 8 as ::core::ffi::c_int)
-                                as crate::zutil_h::uch;
+                        (*s).put_pending_byte(((*s).bi_buf as i32 & 0xff) as crate::zutil_h::uch);
+                        (*s).put_pending_byte(((*s).bi_buf as i32 >> 8) as crate::zutil_h::uch);
                         (*s).bi_buf = (val_3 as crate::zutil_h::ush as ::core::ffi::c_int
                             >> crate::src::deflate::Buf_size - (*s).bi_valid)
                             as crate::zutil_h::ush;
@@ -3339,14 +3303,8 @@ unsafe extern "C" fn compress_block(
         (*s).bi_buf = ((*s).bi_buf as ::core::ffi::c_int
             | (val_4 as crate::zutil_h::ush as ::core::ffi::c_int) << (*s).bi_valid)
             as crate::zutil_h::ush;
-        let c2rust_fresh23 = (*s).pending;
-        (*s).pending = (*s).pending.wrapping_add(1);
-        *(*s).pending_buf.offset(c2rust_fresh23 as isize) =
-            ((*s).bi_buf as ::core::ffi::c_int & 0xff as ::core::ffi::c_int) as crate::zutil_h::uch;
-        let c2rust_fresh24 = (*s).pending;
-        (*s).pending = (*s).pending.wrapping_add(1);
-        *(*s).pending_buf.offset(c2rust_fresh24 as isize) =
-            ((*s).bi_buf as ::core::ffi::c_int >> 8 as ::core::ffi::c_int) as crate::zutil_h::uch;
+        (*s).put_pending_byte(((*s).bi_buf as i32 & 0xff) as crate::zutil_h::uch);
+        (*s).put_pending_byte(((*s).bi_buf as i32 >> 8) as crate::zutil_h::uch);
         (*s).bi_buf = (val_4 as crate::zutil_h::ush as ::core::ffi::c_int
             >> crate::src::deflate::Buf_size - (*s).bi_valid)
             as crate::zutil_h::ush;
