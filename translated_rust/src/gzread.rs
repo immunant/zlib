@@ -1971,10 +1971,7 @@ pub unsafe extern "C" fn gzgetc(mut file: crate::zlib_h::gzFile) -> ::core::ffi:
         return -1 as ::core::ffi::c_int;
     }
     state = file as crate::gzguts_h::gz_statep;
-    if (*state).mode != crate::gzguts_h::GZ_READ {
-        return -1 as ::core::ffi::c_int;
-    }
-    if !gz_read_error_is_recoverable((*state).err, (*state).again) {
+    if !gz_read_state_is_usable((*state).mode, (*state).err, (*state).again) {
         return -1 as ::core::ffi::c_int;
     }
     crate::src::gzlib::gz_error(
