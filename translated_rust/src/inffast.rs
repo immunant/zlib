@@ -323,6 +323,10 @@ enum FastDistanceSource {
     Window,
 }
 
+fn fast_distance_requires_window_copy(source: FastDistanceSource) -> bool {
+    source == FastDistanceSource::Window
+}
+
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 struct FastDistance {
     distance: ::core::ffi::c_uint,
@@ -619,7 +623,7 @@ pub unsafe extern "C" fn inflate_fast(
                             dist = distance.distance;
                             hold = distance.hold;
                             bits = distance.bits;
-                            if distance.source == FastDistanceSource::Window {
+                            if fast_distance_requires_window_copy(distance.source) {
                                 c2rust_current_block_141 = 5235537862154438448;
                                 break;
                             } else {
@@ -833,10 +837,10 @@ mod tests {
         add_and_consume_extra_bits, append_input_byte, bit_mask, code, consume_bits,
         fast_code_entry, fast_decode_error_message, fast_decode_failure,
         fast_decode_needs_prefetch, fast_decode_prefetch_byte_count, fast_dist_action,
-        fast_length_extra_bits_refill_byte_count, fast_litlen_action, fast_match_copy_layout,
-        fast_match_uses_window, fast_window_copy_plan, fast_window_distance_back,
-        fast_window_distance_is_invalid, finish_fast_distance, input_bytes_needed,
-        input_remaining_after_read, low_bits, output_cursor_after_write,
+        fast_distance_requires_window_copy, fast_length_extra_bits_refill_byte_count,
+        fast_litlen_action, fast_match_copy_layout, fast_match_uses_window, fast_window_copy_plan,
+        fast_window_distance_back, fast_window_distance_is_invalid, finish_fast_distance,
+        input_bytes_needed, input_remaining_after_read, low_bits, output_cursor_after_write,
         output_produced_at_fast_path_start, refill_input_byte, subtable_index, table_index,
         trailing_match_copy_byte_count, trailing_match_copy_needs_second_byte, unread_input_state,
         validate_fast_window_distance, FastCodeEntry, FastDecodeError, FastDecodeFailure,
@@ -931,6 +935,16 @@ mod tests {
         assert!(!fast_match_uses_window(4, 4));
         assert!(!fast_match_uses_window(3, 4));
         assert!(fast_match_uses_window(5, 4));
+    }
+
+    #[test]
+    fn fast_distance_requires_window_copy_only_for_window_source() {
+        assert!(!fast_distance_requires_window_copy(
+            FastDistanceSource::Output
+        ));
+        assert!(fast_distance_requires_window_copy(
+            FastDistanceSource::Window
+        ));
     }
 
     #[test]

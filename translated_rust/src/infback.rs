@@ -105,6 +105,17 @@ fn inflate_back_copy_count(
     requested.min(available_input).min(available_output)
 }
 
+fn inflate_back_initial_input_count(
+    input_is_present: bool,
+    available_input: crate::stdlib::uInt,
+) -> ::core::ffi::c_uint {
+    if input_is_present {
+        available_input as ::core::ffi::c_uint
+    } else {
+        0
+    }
+}
+
 fn inflate_back_finish_flush_status(
     ret: ::core::ffi::c_int,
     output_failed: bool,
@@ -501,11 +512,7 @@ pub unsafe extern "C" fn inflateBack(
     (*state).last = 0 as ::core::ffi::c_int;
     (*state).whave = 0 as ::core::ffi::c_uint;
     next = (*strm).next_in as *mut ::core::ffi::c_uchar;
-    have = (if !next.is_null() {
-        (*strm).avail_in
-    } else {
-        0 as crate::stdlib::uInt
-    }) as ::core::ffi::c_uint;
+    have = inflate_back_initial_input_count(!next.is_null(), (*strm).avail_in);
     hold = 0 as ::core::ffi::c_ulong;
     bits = 0 as ::core::ffi::c_uint;
     put = (*state).window;
@@ -1190,11 +1197,12 @@ mod tests {
         inflate_back_copy_count, inflate_back_copy_match, inflate_back_discard_bits,
         inflate_back_distance_exceeds_window, inflate_back_fill_code_length_run,
         inflate_back_finish_flush_status, inflate_back_init_metadata_is_valid,
-        inflate_back_litlen_action, inflate_back_low_bits, inflate_back_match_copy_plan,
-        inflate_back_root_table_index, inflate_back_stored_block_length,
-        inflate_back_subtable_index, inflate_back_take_bits, inflate_back_window_bits_are_valid,
-        inflate_back_window_size, InflateBackBlockKind, InflateBackCodeLengthRepeat,
-        InflateBackCodeLengthRepeatPlan, InflateBackLitLenAction, InflateBackMatchSource,
+        inflate_back_initial_input_count, inflate_back_litlen_action, inflate_back_low_bits,
+        inflate_back_match_copy_plan, inflate_back_root_table_index,
+        inflate_back_stored_block_length, inflate_back_subtable_index, inflate_back_take_bits,
+        inflate_back_window_bits_are_valid, inflate_back_window_size, InflateBackBlockKind,
+        InflateBackCodeLengthRepeat, InflateBackCodeLengthRepeatPlan, InflateBackLitLenAction,
+        InflateBackMatchSource,
     };
 
     #[test]
@@ -1334,6 +1342,12 @@ mod tests {
         assert_eq!(inflate_back_copy_count(20, 12, 16), 12);
         assert_eq!(inflate_back_copy_count(20, 24, 16), 16);
         assert_eq!(inflate_back_copy_count(20, 0, 16), 0);
+    }
+
+    #[test]
+    fn inflate_back_initial_input_count_requires_an_input_pointer() {
+        assert_eq!(inflate_back_initial_input_count(true, 17), 17);
+        assert_eq!(inflate_back_initial_input_count(false, 17), 0);
     }
 
     #[test]
