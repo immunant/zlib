@@ -923,6 +923,25 @@ fn gzgets(state: &mut crate::gzguts_h::gz_state, buf: &mut [::core::ffi::c_char]
     buf[written] = 0 as ::core::ffi::c_char;
     true
 }
+
+// Keep the gzip handle and read-mode preflight out of the FFI adapter. That
+// adapter only converts its caller-owned destination, while this dispatcher
+// decides whether the operation may proceed.
+fn gzgets_ffi_dispatch(
+    state: Option<&mut crate::gzguts_h::gz_state>,
+    destination: Option<&mut [::core::ffi::c_char]>,
+) -> bool {
+    let Some(state) = state else {
+        return false;
+    };
+    if !crate::src::gzlib::gz_has_mode(state, crate::gzguts_h::GZ_READ) {
+        return false;
+    }
+    let Some(destination) = destination else {
+        return false;
+    };
+    gzgets(state, destination)
+}
 #[export_name = "gzgets"]
 
 pub unsafe extern "C" fn gzgets_ffi(
@@ -930,14 +949,22 @@ pub unsafe extern "C" fn gzgets_ffi(
     mut buf: *mut ::core::ffi::c_char,
     mut len: ::core::ffi::c_int,
 ) -> *mut ::core::ffi::c_char {
-    if file.is_null() || buf.is_null() || len < 1 as ::core::ffi::c_int {
-        return ::core::ptr::null_mut::<::core::ffi::c_char>();
-    }
-    // SAFETY: C's `gzgets` contract supplies a writable `len`-byte buffer.
-    // Keep that caller-buffer conversion at this ABI boundary; the read loop
-    // itself only sees the resulting bounded Rust slice.
-    let destination = ::core::slice::from_raw_parts_mut(buf, len as usize);
-    if gzgets(&mut *(file as crate::gzguts_h::gz_statep), destination) {
+    let state = if file.is_null() {
+        None
+    } else {
+        // SAFETY: a non-null gzip handle identifies the state bound by this
+        // ABI entry. Its read-mode preflight remains in the dispatcher.
+        Some(unsafe { &mut *(file as crate::gzguts_h::gz_statep) })
+    };
+    let destination = if file.is_null() || buf.is_null() || len < 1 {
+        None
+    } else {
+        // SAFETY: C's `gzgets` contract supplies a writable `len`-byte
+        // buffer. This ABI adapter performs the raw conversion; the
+        // dispatcher owns gzip-state validation and the read operation.
+        Some(unsafe { ::core::slice::from_raw_parts_mut(buf, len as usize) })
+    };
+    if gzgets_ffi_dispatch(state, destination) {
         buf
     } else {
         ::core::ptr::null_mut::<::core::ffi::c_char>()

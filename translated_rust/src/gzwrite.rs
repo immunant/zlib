@@ -604,17 +604,12 @@ pub unsafe extern "C" fn gzputc_ffi(
     }
     gzputc(&mut *(file as crate::gzguts_h::gz_statep), c)
 }
-// The ABI wrapper validates the caller's nul-terminated string before this
-// coordinator runs. Keeping that conversion at the boundary means the write
-// operation itself only needs a safe C-string view and can pass its bytes to
-// `gz_write()` without a raw caller buffer.
-pub fn gzputs(
+// Once the dispatcher has accepted the write state and bound the caller's
+// string, the write itself needs only a safe C-string view.
+fn gzputs_write(
     state: &mut crate::gzguts_h::gz_state,
     s: &::core::ffi::CStr,
 ) -> ::core::ffi::c_int {
-    if !crate::src::gzlib::gz_begin_write_operation(state) {
-        return -1 as ::core::ffi::c_int;
-    }
     let source = s.to_bytes();
     let len = source.len() as crate::stdlib::z_size_t;
     if !crate::src::gzlib::gz_string_len_fits_int(len) {
@@ -628,21 +623,56 @@ pub fn gzputs(
     let put = gz_write(state, source);
     crate::src::gzlib::gz_puts_result(len, put)
 }
+
+pub fn gzputs(
+    state: &mut crate::gzguts_h::gz_state,
+    s: &::core::ffi::CStr,
+) -> ::core::ffi::c_int {
+    if !crate::src::gzlib::gz_begin_write_operation(state) {
+        return -1 as ::core::ffi::c_int;
+    }
+    gzputs_write(state, s)
+}
+
+// Keep gzip-state preflight out of the FFI adapter. It receives the bound
+// caller string but decides whether the write operation may proceed.
+fn gzputs_ffi_dispatch(
+    state: Option<&mut crate::gzguts_h::gz_state>,
+    source: Option<&::core::ffi::CStr>,
+) -> ::core::ffi::c_int {
+    let Some(state) = state else {
+        return -1;
+    };
+    if !crate::src::gzlib::gz_begin_write_operation(state) {
+        return -1;
+    }
+    let Some(source) = source else {
+        return -1;
+    };
+    gzputs_write(state, source)
+}
 #[export_name = "gzputs"]
 
 pub unsafe extern "C" fn gzputs_ffi(
     mut file: crate::zlib_h::gzFile,
     mut s: *const ::core::ffi::c_char,
 ) -> ::core::ffi::c_int {
-    if file.is_null() {
-        return -1 as ::core::ffi::c_int;
-    }
-    // SAFETY: C's `gzputs` contract requires a valid nul-terminated string;
-    // retain that raw-pointer contract at the exported ABI boundary.
-    gzputs(
-        &mut *(file as crate::gzguts_h::gz_statep),
-        ::core::ffi::CStr::from_ptr(s),
-    )
+    let state = if file.is_null() {
+        None
+    } else {
+        // SAFETY: a non-null gzip handle identifies the state bound by this
+        // ABI entry. Its mode is checked by the implementation dispatcher.
+        Some(unsafe { &mut *(file as crate::gzguts_h::gz_statep) })
+    };
+    let source = if file.is_null() {
+        None
+    } else {
+        // SAFETY: C's `gzputs` contract supplies a nul-terminated string.
+        // This exported adapter owns that caller-pointer conversion; the
+        // dispatcher below owns all gzip-state preflight and operation work.
+        Some(unsafe { ::core::ffi::CStr::from_ptr(s) })
+    };
+    gzputs_ffi_dispatch(state, source)
 }
 fn gzflush(
     state: &mut crate::gzguts_h::gz_state,
