@@ -189,16 +189,6 @@ fn gz_write_buffered_copy_len(
     }
 }
 
-fn gz_buffered_have(
-    buffer_address: usize,
-    next_in_address: usize,
-    avail_in: crate::stdlib::uInt,
-) -> ::core::ffi::c_uint {
-    next_in_address
-        .wrapping_sub(buffer_address)
-        .wrapping_add(avail_in as usize) as ::core::ffi::c_uint
-}
-
 fn gz_write_chunk_len(remaining: crate::stdlib::z_size_t) -> ::core::ffi::c_uint {
     if ::core::ffi::c_uint::MAX as crate::stdlib::z_size_t > remaining {
         remaining as ::core::ffi::c_uint
@@ -376,6 +366,13 @@ fn gz_comp_has_output(produced: ::core::ffi::c_uint) -> bool {
 
 fn gz_comp_deflate_stream_is_corrupt(ret: ::core::ffi::c_int) -> bool {
     ret == crate::zlib_h::Z_STREAM_ERROR
+}
+
+fn gz_write_buffered_have_after_copy(
+    have: ::core::ffi::c_uint,
+    copy: ::core::ffi::c_uint,
+) -> ::core::ffi::c_uint {
+    have.wrapping_add(copy)
 }
 
 fn gz_write_buffered_step(
@@ -626,12 +623,9 @@ unsafe fn gz_write(
             let mut copy: ::core::ffi::c_uint = 0;
             if gz_write_needs_input_reset((*state).strm.avail_in) {
                 (*state).strm.next_in = (*state).in_0;
+                (*state).x.have = 0;
             }
-            have = gz_buffered_have(
-                (*state).in_0 as usize,
-                (*state).strm.next_in as usize,
-                (*state).strm.avail_in,
-            );
+            have = (*state).x.have;
             (copy, (*state).strm.avail_in, (*state).x.pos, len) = gz_write_buffered_step(
                 (*state).size,
                 have,
@@ -639,6 +633,7 @@ unsafe fn gz_write(
                 (*state).x.pos,
                 len,
             );
+            (*state).x.have = gz_write_buffered_have_after_copy(have, copy);
             crate::stdlib::memcpy(
                 (*state).in_0.wrapping_add(have as usize) as *mut ::core::ffi::c_void,
                 buf as *const ::core::ffi::c_void,
@@ -981,20 +976,20 @@ pub unsafe extern "C" fn gzclose_w_ffi(mut file: crate::zlib_h::gzFile) -> ::cor
 #[cfg(test)]
 mod tests {
     use super::{
-        gz_buffer_is_initialized, gz_buffered_have, gz_comp_deflate_stream_is_corrupt,
-        gz_comp_direct_write_progress, gz_comp_has_output, gz_comp_max_write_chunk,
-        gz_comp_needs_output_buffer_reset, gz_comp_needs_output_write, gz_comp_needs_reset,
-        gz_comp_output_produced, gz_comp_output_write_chunk_len, gz_comp_reset_action,
-        gz_comp_reset_after_flush, gz_comp_skips_empty_flush, gz_comp_write_chunk_len,
-        gz_comp_write_failed, gz_has_pending_input, gz_has_pending_skip, gz_write_advanced_pos,
+        gz_buffer_is_initialized, gz_comp_deflate_stream_is_corrupt, gz_comp_direct_write_progress,
+        gz_comp_has_output, gz_comp_max_write_chunk, gz_comp_needs_output_buffer_reset,
+        gz_comp_needs_output_write, gz_comp_needs_reset, gz_comp_output_produced,
+        gz_comp_output_write_chunk_len, gz_comp_reset_action, gz_comp_reset_after_flush,
+        gz_comp_skips_empty_flush, gz_comp_write_chunk_len, gz_comp_write_failed,
+        gz_has_pending_input, gz_has_pending_skip, gz_write_advanced_pos,
         gz_write_apply_chunk_progress, gz_write_apply_direct_progress, gz_write_buffered_copy_len,
-        gz_write_buffered_step, gz_write_chunk_len, gz_write_errno_is_retryable,
-        gz_write_error_result, gz_write_is_empty, gz_write_needs_input_reset,
-        gz_write_state_is_usable, gz_write_uses_buffered_path, gz_zero_apply_progress,
-        gz_zero_chunk_len, gz_zero_needs_initialization, gzclose_mode_is_writable,
-        gzclose_w_result, gzflush_mode_is_valid, gzfwrite_len, gzfwrite_result, gzputc_result,
-        gzputs_len_fits_int, gzputs_result, gzsetparams_settings_match,
-        gzsetparams_state_is_usable, gzwrite_len_fits_int,
+        gz_write_buffered_have_after_copy, gz_write_buffered_step, gz_write_chunk_len,
+        gz_write_errno_is_retryable, gz_write_error_result, gz_write_is_empty,
+        gz_write_needs_input_reset, gz_write_state_is_usable, gz_write_uses_buffered_path,
+        gz_zero_apply_progress, gz_zero_chunk_len, gz_zero_needs_initialization,
+        gzclose_mode_is_writable, gzclose_w_result, gzflush_mode_is_valid, gzfwrite_len,
+        gzfwrite_result, gzputc_result, gzputs_len_fits_int, gzputs_result,
+        gzsetparams_settings_match, gzsetparams_state_is_usable, gzwrite_len_fits_int,
     };
 
     #[test]
@@ -1488,27 +1483,24 @@ mod tests {
     }
 
     #[test]
-    fn gz_write_buffered_step_handles_partial_buffer() {
+    fn gz_write_buffered_have_after_copy_tracks_appended_bytes() {
+        assert_eq!(gz_write_buffered_have_after_copy(0, 0), 0);
+        assert_eq!(gz_write_buffered_have_after_copy(3, 2), 5);
+    }
+
+    #[test]
+    fn gz_write_buffered_have_after_copy_preserves_wrapping_accounting() {
         assert_eq!(
-            gz_write_buffered_step(1024, 1000, 17, 10, 99),
-            (24, 41, 34, 75)
+            gz_write_buffered_have_after_copy(::core::ffi::c_uint::MAX, 1),
+            0
         );
     }
 
     #[test]
-    fn gz_buffered_have_counts_buffered_bytes() {
-        let buffer = [0_u8; 8];
+    fn gz_write_buffered_step_handles_partial_buffer() {
         assert_eq!(
-            gz_buffered_have(buffer.as_ptr() as usize, buffer.as_ptr() as usize, 0),
-            0
-        );
-        assert_eq!(
-            gz_buffered_have(
-                buffer.as_ptr() as usize,
-                buffer.as_ptr().wrapping_add(3) as usize,
-                2,
-            ),
-            5
+            gz_write_buffered_step(1024, 1000, 17, 10, 99),
+            (24, 41, 34, 75)
         );
     }
 

@@ -58,6 +58,11 @@ struct GzLoadDecision {
     error: Option<::core::ffi::c_int>,
 }
 
+struct GzLoadResult {
+    have: ::core::ffi::c_uint,
+    failed: bool,
+}
+
 fn gz_load_decision(
     have: ::core::ffi::c_uint,
     len: ::core::ffi::c_uint,
@@ -416,22 +421,21 @@ fn gz_ungetc_progress(
     (gz_ungetc_next_have(have), pos - 1, 0)
 }
 
-unsafe extern "C" fn gz_load(
+unsafe fn gz_load(
     state: crate::gzguts_h::gz_statep,
     buf: *mut ::core::ffi::c_uchar,
     len: ::core::ffi::c_uint,
-    have: *mut ::core::ffi::c_uint,
-) -> ::core::ffi::c_int {
+) -> GzLoadResult {
     let max = gz_load_max_read_len();
     let state_ref = &mut *state;
+    let mut have = 0 as ::core::ffi::c_uint;
     state_ref.again = 0 as ::core::ffi::c_int;
     *crate::stdlib::__errno_location() = 0 as ::core::ffi::c_int;
-    *have = 0 as ::core::ffi::c_uint;
     loop {
-        let get = gz_load_read_len(len, *have, max);
+        let get = gz_load_read_len(len, have, max);
         let ret = crate::stdlib::read(
             state_ref.fd,
-            buf.wrapping_add(*have as usize) as *mut ::core::ffi::c_void,
+            buf.wrapping_add(have as usize) as *mut ::core::ffi::c_void,
             get as crate::__stddef_size_t_h::size_t,
         ) as ::core::ffi::c_int;
         let read = if ret < 0 {
@@ -439,24 +443,27 @@ unsafe extern "C" fn gz_load(
         } else {
             Ok(ret as ::core::ffi::c_uint)
         };
-        let decision = gz_load_decision(*have, len, read);
+        let decision = gz_load_decision(have, len, read);
         if decision.eof {
             state_ref.eof = 1 as ::core::ffi::c_int;
         }
         if decision.again {
             state_ref.again = 1 as ::core::ffi::c_int;
         }
-        *have = decision.have;
+        have = decision.have;
         if let Some(errno) = decision.error {
             crate::src::gzlib::gz_error(
                 state as *mut crate::gzguts_h::gz_state,
                 crate::zlib_h::Z_ERRNO,
                 crate::stdlib::strerror(errno),
             );
-            return -1 as ::core::ffi::c_int;
+            return GzLoadResult { have, failed: true };
         }
         if !decision.more {
-            return 0 as ::core::ffi::c_int;
+            return GzLoadResult {
+                have,
+                failed: false,
+            };
         }
     }
 }
@@ -475,15 +482,15 @@ unsafe extern "C" fn gz_avail(mut state: crate::gzguts_h::gz_statep) -> ::core::
                     core::ptr::copy_nonoverlapping(q, p, (*strm).avail_in as usize);
                 }
             }
-            if gz_load(
+            let load = gz_load(
                 state,
                 (*state).in_0.wrapping_add((*strm).avail_in as usize),
                 gz_avail_refill_len((*state).size, (*strm).avail_in),
-                &raw mut got,
-            ) == -1 as ::core::ffi::c_int
-            {
+            );
+            if load.failed {
                 return -1 as ::core::ffi::c_int;
             }
+            got = load.have;
             (*strm).avail_in = (*strm).avail_in.wrapping_add(got);
             (*strm).next_in = (*state).in_0 as *mut crate::stdlib::Bytef;
         }
@@ -829,13 +836,9 @@ unsafe extern "C" fn gz_fetch(mut state: crate::gzguts_h::gz_statep) -> ::core::
                 }
             }
             GzFetchAction::Copy => {
-                if gz_load(
-                    state,
-                    (*state).out,
-                    gz_output_buffer_len((*state).size),
-                    &raw mut (*state).x.have,
-                ) == -1 as ::core::ffi::c_int
-                {
+                let load = gz_load(state, (*state).out, gz_output_buffer_len((*state).size));
+                (*state).x.have = load.have;
+                if load.failed {
                     return -1 as ::core::ffi::c_int;
                 }
                 (*state).x.next = (*state).out;
@@ -1961,7 +1964,9 @@ unsafe extern "C" fn gz_read(
                 false
             }
             GzReadAction::Load => {
-                err = gz_load(state, buf as *mut ::core::ffi::c_uchar, n, &raw mut n);
+                let load = gz_load(state, buf as *mut ::core::ffi::c_uchar, n);
+                n = load.have;
+                err = if load.failed { -1 } else { 0 };
                 true
             }
             GzReadAction::Decompress => {

@@ -727,7 +727,7 @@ unsafe extern "C" fn updatewindow(
     let produced = if copy == 0 {
         &[]
     } else {
-        core::slice::from_raw_parts(end.sub(copy as usize), copy as usize)
+        core::slice::from_raw_parts(end.wrapping_sub(copy as usize), copy as usize)
     };
     plan = apply_window_update(window, (*state).wnext, (*state).whave, produced);
     (*state).wnext = plan.wnext;
