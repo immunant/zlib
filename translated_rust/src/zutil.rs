@@ -106,3 +106,29 @@ pub unsafe extern "C" fn zcfree_ffi(
 ) {
     zcfree(opaque, ptr)
 }
+
+// Initialization entry points share zlib's allocator-defaulting rule: only
+// a stream that arrived with no allocator gets the default allocator and a
+// reset opaque value.  A supplied deallocator must be retained, including
+// when the allocator is supplied separately.  Keeping that decision here
+// prevents the three stream initializers from drifting on either detail.
+pub(crate) fn prepare_stream_allocator(stream: &mut crate::zlib_h::z_stream) -> bool {
+    let uses_default_allocator = stream.zalloc.is_none();
+    if uses_default_allocator {
+        stream.zalloc = Some(
+            zcalloc
+                as unsafe extern "C" fn(
+                    crate::stdlib::voidpf,
+                    ::core::ffi::c_uint,
+                    ::core::ffi::c_uint,
+                ) -> crate::stdlib::voidpf,
+        ) as crate::zlib_h::alloc_func;
+        stream.opaque = ::core::ptr::null_mut::<::core::ffi::c_void>();
+    }
+    if stream.zfree.is_none() {
+        stream.zfree = Some(
+            zcfree as unsafe extern "C" fn(crate::stdlib::voidpf, crate::stdlib::voidpf) -> (),
+        ) as crate::zlib_h::free_func;
+    }
+    uses_default_allocator
+}

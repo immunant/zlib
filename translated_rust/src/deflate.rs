@@ -608,25 +608,7 @@ fn fill_window_bound(
 // to validate and bind its caller-provided stream once.
 fn deflate_prepare_stream(stream: &mut crate::zlib_h::z_stream) -> bool {
     stream.msg = ::core::ptr::null_mut::<::core::ffi::c_char>();
-    let uses_default_allocator = stream.zalloc.is_none();
-    if uses_default_allocator {
-        stream.zalloc = Some(
-            crate::src::zutil::zcalloc
-                as unsafe extern "C" fn(
-                    crate::stdlib::voidpf,
-                    ::core::ffi::c_uint,
-                    ::core::ffi::c_uint,
-                ) -> crate::stdlib::voidpf,
-        ) as crate::zlib_h::alloc_func;
-        stream.opaque = ::core::ptr::null_mut::<::core::ffi::c_void>();
-    }
-    if stream.zfree.is_none() {
-        stream.zfree = Some(
-            crate::src::zutil::zcfree
-                as unsafe extern "C" fn(crate::stdlib::voidpf, crate::stdlib::voidpf) -> (),
-        ) as crate::zlib_h::free_func;
-    }
-    uses_default_allocator
+    crate::src::zutil::prepare_stream_allocator(stream)
 }
 
 // This internal parameter-defaulting dispatcher only accepts references
