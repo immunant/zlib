@@ -410,9 +410,19 @@ fn read_buf_bytes(
     len
 }
 
-// This private adapter binds the allocations owned by a validated deflater;
-// the window algorithm itself is reference-and-slice based below.
-fn fill_window(s: *mut crate::src::deflate::deflate_state) {
+// This private adapter binds the allocations owned by a validated deflater
+// before passing them to a bounded operation.
+fn fill_window<T>(
+    s: *mut crate::src::deflate::deflate_state,
+    operation: impl FnOnce(
+        &mut crate::src::deflate::deflate_state,
+        &mut crate::zlib_h::z_stream,
+        &mut [crate::stdlib::Bytef],
+        &mut [crate::src::deflate::Posf],
+        &mut [crate::src::deflate::Posf],
+        &[crate::stdlib::Bytef],
+    ) -> T,
+) -> T {
     // SAFETY: all callers operate on a live deflater state initialized by
     // `deflateInit2_()` and associated with its stream.
     let state = unsafe { &mut *s };
@@ -434,11 +444,7 @@ fn fill_window(s: *mut crate::src::deflate::deflate_state) {
         // SAFETY: a nonempty input cursor has `avail_in` readable bytes.
         unsafe { ::core::slice::from_raw_parts(stream.next_in, stream.avail_in as usize) }
     };
-    let consumed = fill_window_bytes(state, stream, window, head, prev, input);
-    // `consumed` is bounded by the input slice above. Advancing the cursor
-    // does not need `offset`'s in-bounds unsafe operation, and wrapping
-    // arithmetic also preserves the permitted null cursor for an empty input.
-    stream.next_in = stream.next_in.wrapping_add(consumed);
+    operation(state, stream, window, head, prev, input)
 }
 
 fn fill_window_bytes(
@@ -830,103 +836,140 @@ pub unsafe extern "C" fn deflateSetDictionary(
     mut dictionary: *const crate::stdlib::Bytef,
     mut dictLength: crate::stdlib::uInt,
 ) -> ::core::ffi::c_int {
-    let mut s: *mut crate::src::deflate::deflate_state =
-        ::core::ptr::null_mut::<crate::src::deflate::deflate_state>();
-    let mut str: crate::stdlib::uInt = 0;
-    let mut n: crate::stdlib::uInt = 0;
-    let mut wrap: ::core::ffi::c_int = 0;
-    let mut avail: ::core::ffi::c_uint = 0;
-    let mut next: *mut ::core::ffi::c_uchar = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
     if deflateStateCheck(strm) != 0 || dictionary.is_null() {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    s = (*strm).state as *mut crate::src::deflate::deflate_state;
-    wrap = (*s).wrap;
-    if wrap == 2 as ::core::ffi::c_int
-        || wrap == 1 as ::core::ffi::c_int && (*s).status != crate::src::deflate::INIT_STATE
-        || (*s).lookahead != 0
+    let state = (*strm).state as *mut crate::src::deflate::deflate_state;
+    let avail_in = (*strm).avail_in;
+    let next_in = (*strm).next_in;
+    (*strm).avail_in = dictLength;
+    (*strm).next_in = dictionary as *mut crate::stdlib::Bytef;
+    let result = fill_window(state, |state, stream, window, head, prev, dictionary| {
+        deflate_set_dictionary(state, stream, window, head, prev, dictionary)
+    });
+    (*strm).next_in = next_in;
+    (*strm).avail_in = avail_in;
+    result
+}
+
+// After the raw caller dictionary and deflater allocations are bound, zlib's
+// dictionary prefill is entirely cursor and slice work. In particular, keep
+// the temporary stream input binding local so the original caller input is
+// restored exactly as in the C implementation.
+fn deflate_set_dictionary(
+    state: &mut crate::src::deflate::deflate_state,
+    stream: &mut crate::zlib_h::z_stream,
+    window: &mut [crate::stdlib::Bytef],
+    head: &mut [crate::src::deflate::Posf],
+    prev: &mut [crate::src::deflate::Posf],
+    dictionary: &[crate::stdlib::Bytef],
+) -> ::core::ffi::c_int {
+    let wrap = state.wrap;
+    if wrap == 2
+        || wrap == 1 && state.status != crate::src::deflate::INIT_STATE
+        || state.lookahead != 0
     {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    if wrap == 1 as ::core::ffi::c_int {
-        (*strm).adler = crate::src::adler32::adler32_z_ffi(
-            (*strm).adler,
+    if wrap == 1 {
+        stream.adler = crate::src::adler32::adler32_bytes(stream.adler, dictionary);
+    }
+    state.wrap = 0;
+    let dictionary = if dictionary.len() >= state.w_size as usize {
+        if wrap == 0 {
+            head.fill(NIL as crate::src::deflate::Posf);
+            state.slid = 0;
+            state.strstart = 0;
+            state.block_start = 0;
+            state.insert = 0;
+        }
+        &dictionary[dictionary.len() - state.w_size as usize..]
+    } else {
+        dictionary
+    };
+    let avail_in = stream.avail_in;
+    let next_in = stream.next_in;
+    stream.avail_in = dictionary.len() as crate::stdlib::uInt;
+    stream.next_in = dictionary.as_ptr() as *mut crate::stdlib::Bytef;
+    let mut dictionary_used = 0usize;
+    deflate_fill_dictionary_window(
+        state,
+        stream,
+        window,
+        head,
+        prev,
+        dictionary,
+        &mut dictionary_used,
+    );
+    while state.lookahead >= crate::zutil_h::MIN_MATCH as crate::stdlib::uInt {
+        let mut strstart = state.strstart;
+        let mut entries = state.lookahead.wrapping_sub(
+            (crate::zutil_h::MIN_MATCH - 1) as crate::stdlib::uInt,
+        );
+        while entries != 0 {
+            insert_dictionary_hash_entry(state, window, head, prev, strstart);
+            strstart = strstart.wrapping_add(1);
+            entries = entries.wrapping_sub(1);
+        }
+        state.strstart = strstart;
+        state.lookahead = (crate::zutil_h::MIN_MATCH - 1) as crate::stdlib::uInt;
+        deflate_fill_dictionary_window(
+            state,
+            stream,
+            window,
+            head,
+            prev,
             dictionary,
-            dictLength as crate::stdlib::z_size_t,
+            &mut dictionary_used,
         );
     }
-    (*s).wrap = 0 as ::core::ffi::c_int;
-    if dictLength >= (*s).w_size {
-        if wrap == 0 as ::core::ffi::c_int {
-            // The initialized head table has `hash_size` entries, so this
-            // selects its final entry without using `offset`'s in-bounds raw
-            // pointer operation.
-            *(*s)
-                .head
-                .wrapping_add((*s).hash_size.wrapping_sub(1 as crate::stdlib::uInt) as usize) =
-                NIL as crate::src::deflate::Posf;
-            crate::stdlib::memset(
-                (*s).head as *mut ::core::ffi::c_void,
-                0 as ::core::ffi::c_int,
-                ((*s).hash_size.wrapping_sub(1 as crate::stdlib::uInt)
-                    as crate::__stddef_size_t_h::size_t)
-                    .wrapping_mul(::core::mem::size_of::<crate::src::deflate::Posf>()),
-            );
-            (*s).slid = 0 as ::core::ffi::c_int;
-            (*s).strstart = 0 as crate::stdlib::uInt;
-            (*s).block_start = 0 as ::core::ffi::c_long;
-            (*s).insert = 0 as crate::stdlib::uInt;
-        }
-        // The caller-provided dictionary covers `dictLength` bytes, and the
-        // retained suffix starts at this validated in-range byte position.
-        // Preserve the cursor semantics without an in-bounds raw-pointer
-        // operation.
-        dictionary = dictionary.wrapping_add(dictLength.wrapping_sub((*s).w_size) as usize);
-        dictLength = (*s).w_size;
-    }
-    avail = (*strm).avail_in as ::core::ffi::c_uint;
-    next = (*strm).next_in as *mut ::core::ffi::c_uchar;
-    (*strm).avail_in = dictLength;
-    (*strm).next_in = dictionary as *mut crate::stdlib::Bytef;
-    fill_window(s);
-    while (*s).lookahead >= crate::zutil_h::MIN_MATCH as crate::stdlib::uInt {
-        str = (*s).strstart;
-        n = (*s).lookahead.wrapping_sub(
-            (crate::zutil_h::MIN_MATCH - 1 as ::core::ffi::c_int) as crate::stdlib::uInt,
-        );
-        loop {
-            (*s).ins_h = ((*s).ins_h << (*s).hash_shift
-                ^ *(*s).window.wrapping_add(
-                    str.wrapping_add(3 as crate::stdlib::uInt)
-                        .wrapping_sub(1 as crate::stdlib::uInt) as usize,
-                ) as crate::stdlib::uInt)
-                & (*s).hash_mask;
-            *(*s).prev.wrapping_add((str & (*s).w_mask) as usize) =
-                *(*s).head.wrapping_add((*s).ins_h as usize);
-            *(*s).head.wrapping_add((*s).ins_h as usize) =
-                str as crate::src::deflate::Pos as crate::src::deflate::Posf;
-            str = str.wrapping_add(1);
-            n = n.wrapping_sub(1);
-            if n == 0 {
-                break;
-            }
-        }
-        (*s).strstart = str;
-        (*s).lookahead =
-            (crate::zutil_h::MIN_MATCH - 1 as ::core::ffi::c_int) as crate::stdlib::uInt;
-        fill_window(s);
-    }
-    (*s).strstart = (*s).strstart.wrapping_add((*s).lookahead);
-    (*s).block_start = (*s).strstart as ::core::ffi::c_long;
-    (*s).insert = (*s).lookahead;
-    (*s).lookahead = 0 as crate::stdlib::uInt;
-    (*s).prev_length = (crate::zutil_h::MIN_MATCH - 1 as ::core::ffi::c_int) as crate::stdlib::uInt;
-    (*s).match_length = (*s).prev_length;
-    (*s).match_available = 0 as ::core::ffi::c_int;
-    (*strm).next_in = next as *mut crate::stdlib::Bytef;
-    (*strm).avail_in = avail as crate::stdlib::uInt;
-    (*s).wrap = wrap;
-    return crate::zlib_h::Z_OK;
+    state.strstart = state.strstart.wrapping_add(state.lookahead);
+    state.block_start = state.strstart as ::core::ffi::c_long;
+    state.insert = state.lookahead;
+    state.lookahead = 0;
+    state.prev_length = (crate::zutil_h::MIN_MATCH - 1) as crate::stdlib::uInt;
+    state.match_length = state.prev_length;
+    state.match_available = 0;
+    stream.next_in = next_in;
+    stream.avail_in = avail_in;
+    state.wrap = wrap;
+    crate::zlib_h::Z_OK
+}
+
+fn deflate_fill_dictionary_window(
+    state: &mut crate::src::deflate::deflate_state,
+    stream: &mut crate::zlib_h::z_stream,
+    window: &mut [crate::stdlib::Bytef],
+    head: &mut [crate::src::deflate::Posf],
+    prev: &mut [crate::src::deflate::Posf],
+    dictionary: &[crate::stdlib::Bytef],
+    dictionary_used: &mut usize,
+) {
+    let consumed = fill_window_bytes(
+        state,
+        stream,
+        window,
+        head,
+        prev,
+        &dictionary[*dictionary_used..],
+    );
+    *dictionary_used += consumed;
+    stream.next_in = stream.next_in.wrapping_add(consumed);
+}
+
+fn insert_dictionary_hash_entry(
+    state: &mut crate::src::deflate::deflate_state,
+    window: &[crate::stdlib::Bytef],
+    head: &mut [crate::src::deflate::Posf],
+    prev: &mut [crate::src::deflate::Posf],
+    strstart: crate::stdlib::uInt,
+) {
+    let next = window[strstart
+        .wrapping_add((crate::zutil_h::MIN_MATCH - 1) as crate::stdlib::uInt)
+        as usize];
+    state.ins_h = update_hash(state.ins_h, state.hash_shift, state.hash_mask, next);
+    prev[(strstart & state.w_mask) as usize] = head[state.ins_h as usize];
+    head[state.ins_h as usize] = strstart as crate::src::deflate::Pos as crate::src::deflate::Posf;
 }
 #[export_name = "deflateSetDictionary"]
 
