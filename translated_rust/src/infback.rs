@@ -415,16 +415,18 @@ pub unsafe extern "C" fn inflateBack(
                         if copy > left {
                             copy = left;
                         }
-                        // This is the translated C `memcpy` path: input and
-                        // caller window are distinct callback buffers, so
-                        // preserve its non-overlap requirement without a C
-                        // memory call. The callback-state slice facade will
-                        // eventually make this copy fully safe.
-                        ::core::ptr::copy_nonoverlapping(next, put, copy as usize);
+                        // The callback contract provides `have` input bytes,
+                        // and `left` bounds the caller window.  The original
+                        // memcpy path requires these buffers not to overlap,
+                        // so form only the transfer-sized views and let the
+                        // slice copy own the byte movement.
+                        let input = ::core::slice::from_raw_parts(next, copy as usize);
+                        let output = ::core::slice::from_raw_parts_mut(put, copy as usize);
+                        output.copy_from_slice(input);
                         have = have.wrapping_sub(copy);
-                        next = next.offset(copy as isize);
+                        next = next.wrapping_add(copy as usize);
                         left = left.wrapping_sub(copy);
-                        put = put.offset(copy as isize);
+                        put = put.wrapping_add(copy as usize);
                         (*state).length = (*state).length.wrapping_sub(copy);
                     }
                     (*state).mode = crate::src::inflate::TYPE;
