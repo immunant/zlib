@@ -245,9 +245,9 @@ fn gz_comp(
             }
         }
         have = state.strm.avail_out as ::core::ffi::c_uint;
-        // SAFETY: `gz_init` configured this deflater and its input/output
-        // fields are maintained by this validated write-state machine.
-        ret = unsafe { crate::src::deflate::deflate(&mut state.strm, flush) };
+        // `gz_init` configured this deflater, and the dispatcher validates
+        // its state before advancing the gzip write machine.
+        ret = crate::src::deflate::deflate(&mut state.strm, flush);
         if ret == crate::zlib_h::Z_STREAM_ERROR {
             crate::src::gzlib::gz_error(
                 state,

@@ -2382,7 +2382,10 @@ fn deflate_finish_gzip_header(
     crate::zlib_h::Z_STREAM_END
 }
 
-pub unsafe extern "C" fn deflate(
+// The raw stream handle is validated and bound by `deflateStateCheck()` before
+// any state transition. Keep the core dispatcher safe; the exported adapter
+// below retains the foreign-call boundary.
+pub extern "C" fn deflate(
     mut strm: crate::zlib_h::z_streamp,
     mut flush: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
