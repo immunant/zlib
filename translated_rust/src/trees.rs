@@ -3649,6 +3649,16 @@ fn pending_cursor_after_bytes(pending: crate::zutil_h::ulg, count: usize) -> cra
     pending.wrapping_add(count as crate::zutil_h::ulg)
 }
 
+fn heap_node_precedes(
+    left_frequency: crate::zutil_h::ush,
+    left_depth: crate::zutil_h::uch,
+    right_frequency: crate::zutil_h::ush,
+    right_depth: crate::zutil_h::uch,
+) -> bool {
+    left_frequency < right_frequency
+        || left_frequency == right_frequency && left_depth <= right_depth
+}
+
 fn tally_symbol_bytes(
     dist: ::core::ffi::c_uint,
     lc: ::core::ffi::c_uint,
@@ -3804,32 +3814,28 @@ unsafe extern "C" fn pqdownheap(
     let mut v: ::core::ffi::c_int = (*s).heap[k as usize];
     let mut j: ::core::ffi::c_int = k << 1 as ::core::ffi::c_int;
     while j <= (*s).heap_len {
-        if j < (*s).heap_len
-            && (((*tree.offset((*s).heap[(j + 1 as ::core::ffi::c_int) as usize] as isize))
-                .fc
-                .value as ::core::ffi::c_int)
-                < (*tree.offset((*s).heap[j as usize] as isize)).fc.value as ::core::ffi::c_int
-                || (*tree.offset((*s).heap[(j + 1 as ::core::ffi::c_int) as usize] as isize))
-                    .fc
-                    .value as ::core::ffi::c_int
-                    == (*tree.offset((*s).heap[j as usize] as isize)).fc.value
-                        as ::core::ffi::c_int
-                    && (*s).depth[(*s).heap[(j + 1 as ::core::ffi::c_int) as usize] as usize]
-                        as ::core::ffi::c_int
-                        <= (*s).depth[(*s).heap[j as usize] as usize] as ::core::ffi::c_int)
-        {
-            j += 1;
+        if j < (*s).heap_len {
+            let right = (*s).heap[(j + 1 as ::core::ffi::c_int) as usize];
+            let left = (*s).heap[j as usize];
+            if heap_node_precedes(
+                (*tree.offset(right as isize)).fc.value,
+                (*s).depth[right as usize],
+                (*tree.offset(left as isize)).fc.value,
+                (*s).depth[left as usize],
+            ) {
+                j += 1;
+            }
         }
-        if ((*tree.offset(v as isize)).fc.value as ::core::ffi::c_int)
-            < (*tree.offset((*s).heap[j as usize] as isize)).fc.value as ::core::ffi::c_int
-            || (*tree.offset(v as isize)).fc.value as ::core::ffi::c_int
-                == (*tree.offset((*s).heap[j as usize] as isize)).fc.value as ::core::ffi::c_int
-                && (*s).depth[v as usize] as ::core::ffi::c_int
-                    <= (*s).depth[(*s).heap[j as usize] as usize] as ::core::ffi::c_int
-        {
+        let child = (*s).heap[j as usize];
+        if heap_node_precedes(
+            (*tree.offset(v as isize)).fc.value,
+            (*s).depth[v as usize],
+            (*tree.offset(child as isize)).fc.value,
+            (*s).depth[child as usize],
+        ) {
             break;
         }
-        (*s).heap[k as usize] = (*s).heap[j as usize];
+        (*s).heap[k as usize] = child;
         k = j;
         j <<= 1 as ::core::ffi::c_int;
     }
@@ -5124,9 +5130,10 @@ pub unsafe extern "C" fn _tr_tally_ffi(
 mod tests {
     use super::{
         bi_flush_core, bi_reverse, bi_windup_core, bl_order, detect_data_type_from_ltree,
-        dist_code_index, next_code_for_len, next_codes, pending_cursor_after_bytes,
-        reset_block_trees, static_bl_desc, static_d_desc, static_l_desc, tally_match_tree_indices,
-        tally_symbol_bytes, tree_run_limits, END_BLOCK, MAX_BITS,
+        dist_code_index, heap_node_precedes, next_code_for_len, next_codes,
+        pending_cursor_after_bytes, reset_block_trees, static_bl_desc, static_d_desc,
+        static_l_desc, tally_match_tree_indices, tally_symbol_bytes, tree_run_limits, END_BLOCK,
+        MAX_BITS,
     };
 
     fn ltree_with_frequency(
@@ -5284,6 +5291,15 @@ mod tests {
         assert_eq!(pending_cursor_after_bytes(5, 0), 5);
         assert_eq!(pending_cursor_after_bytes(5, 2), 7);
         assert_eq!(pending_cursor_after_bytes(crate::zutil_h::ulg::MAX, 2), 1);
+    }
+
+    #[test]
+    fn heap_order_uses_frequency_then_depth() {
+        assert!(heap_node_precedes(1, 255, 2, 0));
+        assert!(!heap_node_precedes(2, 0, 1, 255));
+        assert!(heap_node_precedes(3, 4, 3, 4));
+        assert!(heap_node_precedes(3, 4, 3, 5));
+        assert!(!heap_node_precedes(3, 5, 3, 4));
     }
 
     #[test]

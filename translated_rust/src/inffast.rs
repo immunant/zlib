@@ -98,6 +98,17 @@ fn unread_bit_state(
     )
 }
 
+fn fast_input_available(input_remaining: crate::stdlib::uInt) -> bool {
+    input_remaining > 5 as crate::stdlib::uInt
+}
+
+fn input_remaining_after_unread(
+    input_remaining: crate::stdlib::uInt,
+    unread_bytes: ::core::ffi::c_uint,
+) -> crate::stdlib::uInt {
+    input_remaining.wrapping_add(unread_bytes as crate::stdlib::uInt)
+}
+
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 enum FastLitLenAction {
     Literal,
@@ -149,7 +160,7 @@ pub unsafe extern "C" fn inflate_fast(
     let mut state: *mut crate::src::inflate::inflate_state =
         ::core::ptr::null_mut::<crate::src::inflate::inflate_state>();
     let mut in_0: *mut ::core::ffi::c_uchar = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
-    let mut last: *mut ::core::ffi::c_uchar = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
+    let mut input_remaining: crate::stdlib::uInt = 0;
     let mut out: *mut ::core::ffi::c_uchar = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
     let mut beg: *mut ::core::ffi::c_uchar = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
     let mut end: *mut ::core::ffi::c_uchar = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
@@ -173,7 +184,7 @@ pub unsafe extern "C" fn inflate_fast(
     let mut from: *mut ::core::ffi::c_uchar = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
     state = (*strm).state as *mut crate::src::inflate::inflate_state;
     in_0 = (*strm).next_in as *mut ::core::ffi::c_uchar;
-    last = in_0.offset((*strm).avail_in.wrapping_sub(5 as crate::stdlib::uInt) as isize);
+    input_remaining = (*strm).avail_in;
     out = (*strm).next_out as *mut ::core::ffi::c_uchar;
     beg = out.offset(-((start as crate::stdlib::uInt).wrapping_sub((*strm).avail_out) as isize));
     end = out.offset((*strm).avail_out.wrapping_sub(257 as crate::stdlib::uInt) as isize);
@@ -192,9 +203,11 @@ pub unsafe extern "C" fn inflate_fast(
         if bits < 15 as ::core::ffi::c_uint {
             let c2rust_fresh0 = in_0;
             in_0 = in_0.offset(1);
+            input_remaining = input_remaining.wrapping_sub(1);
             (hold, bits) = append_input_byte(hold, bits, *c2rust_fresh0);
             let c2rust_fresh1 = in_0;
             in_0 = in_0.offset(1);
+            input_remaining = input_remaining.wrapping_sub(1);
             (hold, bits) = append_input_byte(hold, bits, *c2rust_fresh1);
         }
         here = lcode.offset((hold & lmask as ::core::ffi::c_ulong) as isize);
@@ -216,6 +229,7 @@ pub unsafe extern "C" fn inflate_fast(
                         if bits < extra_bits {
                             let c2rust_fresh3 = in_0;
                             in_0 = in_0.offset(1);
+                            input_remaining = input_remaining.wrapping_sub(1);
                             (hold, bits) = append_input_byte(hold, bits, *c2rust_fresh3);
                         }
                         len = len.wrapping_add(low_bits(hold, extra_bits));
@@ -224,9 +238,11 @@ pub unsafe extern "C" fn inflate_fast(
                     if bits < 15 as ::core::ffi::c_uint {
                         let c2rust_fresh4 = in_0;
                         in_0 = in_0.offset(1);
+                        input_remaining = input_remaining.wrapping_sub(1);
                         (hold, bits) = append_input_byte(hold, bits, *c2rust_fresh4);
                         let c2rust_fresh5 = in_0;
                         in_0 = in_0.offset(1);
+                        input_remaining = input_remaining.wrapping_sub(1);
                         (hold, bits) = append_input_byte(hold, bits, *c2rust_fresh5);
                     }
                     here = dcode.offset((hold & dmask as ::core::ffi::c_ulong) as isize);
@@ -258,10 +274,12 @@ pub unsafe extern "C" fn inflate_fast(
                             if bits < extra_bits {
                                 let c2rust_fresh6 = in_0;
                                 in_0 = in_0.offset(1);
+                                input_remaining = input_remaining.wrapping_sub(1);
                                 (hold, bits) = append_input_byte(hold, bits, *c2rust_fresh6);
                                 if bits < extra_bits {
                                     let c2rust_fresh7 = in_0;
                                     in_0 = in_0.offset(1);
+                                    input_remaining = input_remaining.wrapping_sub(1);
                                     (hold, bits) = append_input_byte(hold, bits, *c2rust_fresh7);
                                 }
                             }
@@ -456,7 +474,7 @@ pub unsafe extern "C" fn inflate_fast(
             }
             _ => {}
         }
-        if !(in_0 < last && out < end) {
+        if !(fast_input_available(input_remaining) && out < end) {
             break;
         }
     }
@@ -464,11 +482,7 @@ pub unsafe extern "C" fn inflate_fast(
     in_0 = in_0.offset(-(len as isize));
     (*strm).next_in = in_0 as *mut crate::stdlib::Bytef;
     (*strm).next_out = out as *mut crate::stdlib::Bytef;
-    (*strm).avail_in = (if in_0 < last {
-        5 as ::core::ffi::c_long + last.offset_from(in_0) as ::core::ffi::c_long
-    } else {
-        5 as ::core::ffi::c_long - in_0.offset_from(last) as ::core::ffi::c_long
-    }) as ::core::ffi::c_uint as crate::stdlib::uInt;
+    (*strm).avail_in = input_remaining_after_unread(input_remaining, len);
     (*strm).avail_out = (if out < end {
         257 as ::core::ffi::c_long + end.offset_from(out) as ::core::ffi::c_long
     } else {
@@ -489,8 +503,9 @@ pub unsafe extern "C" fn inflate_fast_ffi(
 #[cfg(test)]
 mod tests {
     use super::{
-        append_input_byte, bit_mask, code, consume_bits, fast_dist_action, fast_litlen_action,
-        low_bits, subtable_offset, unread_bit_state, FastDistAction, FastLitLenAction,
+        append_input_byte, bit_mask, code, consume_bits, fast_dist_action, fast_input_available,
+        fast_litlen_action, input_remaining_after_unread, low_bits, subtable_offset,
+        unread_bit_state, FastDistAction, FastLitLenAction,
     };
 
     #[test]
@@ -590,5 +605,13 @@ mod tests {
     fn unread_bit_state_clears_aligned_and_preserves_sub_byte_buffers() {
         assert_eq!(unread_bit_state(0xfeed, 16), (0, 0, 2));
         assert_eq!(unread_bit_state(0xff, 7), (0x7f, 7, 0));
+    }
+
+    #[test]
+    fn fast_input_cursor_reserves_five_bytes_and_restores_unread_bytes() {
+        assert!(!fast_input_available(5));
+        assert!(fast_input_available(6));
+        assert_eq!(input_remaining_after_unread(4, 2), 6);
+        assert_eq!(input_remaining_after_unread(::core::ffi::c_uint::MAX, 1), 0);
     }
 }
