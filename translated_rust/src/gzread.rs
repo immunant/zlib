@@ -374,11 +374,11 @@ unsafe fn gz_decomp(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int
     };
 }
 
-unsafe fn gz_fetch(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
+fn gz_fetch(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
     loop {
         match state.how {
             crate::gzguts_h::LOOK => {
-                if gz_look(state) == -1 as ::core::ffi::c_int {
+                if unsafe { gz_look(state) } == -1 as ::core::ffi::c_int {
                     return -1 as ::core::ffi::c_int;
                 }
                 if state.how == crate::gzguts_h::LOOK {
@@ -389,7 +389,7 @@ unsafe fn gz_fetch(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int 
                 let mut loaded = 0 as ::core::ffi::c_uint;
                 let out = state.out;
                 let len = state.size << 1 as ::core::ffi::c_int;
-                let ret = gz_load(state, out, len, &mut loaded);
+                let ret = unsafe { gz_load(state, out, len, &mut loaded) };
                 state.x.have = loaded;
                 if ret == -1 as ::core::ffi::c_int {
                     return -1 as ::core::ffi::c_int;
@@ -399,7 +399,7 @@ unsafe fn gz_fetch(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int 
             }
             crate::gzguts_h::GZIP => {
                 gz_prepare_fetch_output(state);
-                if gz_decomp(state) == -1 as ::core::ffi::c_int {
+                if unsafe { gz_decomp(state) } == -1 as ::core::ffi::c_int {
                     return -1 as ::core::ffi::c_int;
                 }
             }
@@ -419,7 +419,7 @@ unsafe fn gz_fetch(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int 
     return 0 as ::core::ffi::c_int;
 }
 
-unsafe fn gz_skip(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
+fn gz_skip(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
     loop {
         if state.x.have != 0 {
             gz_consume_skip_buffer(state);
