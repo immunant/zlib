@@ -1899,10 +1899,7 @@ fn gz_reset(mut reset: GzResetState) -> GzResetState {
 // Build the opaque handle while it is still owned. The FFI entry points are
 // solely responsible for publishing this Box as the C handle. Raw-FD
 // adoption remains here, after mode/path validation, for gzdopen().
-unsafe fn gz_open(
-    path: GzOpenPath<'_>,
-    mode: &[u8],
-) -> Option<Box<crate::gzguts_h::gz_state>> {
+unsafe fn gz_open(path: GzOpenPath<'_>, mode: &[u8]) -> Option<Box<crate::gzguts_h::gz_state>> {
     // The gzip handle is opaque at the ABI.  Keep its allocation owned until
     // the handle is successfully returned, rather than using malloc/free for
     // the state record itself.
@@ -1940,53 +1937,56 @@ unsafe fn gz_open(
     let Some(initial) = gz_open_state(config, path, source) else {
         return None;
     };
-    let state_owner = Box::write(state_owner, crate::gzguts_h::gz_state {
-        x: crate::zlib_h::gzFile_s {
-            have: initial.reset.have,
-            next: ::core::ptr::null_mut(),
-            pos: initial.reset.pos,
+    let state_owner = Box::write(
+        state_owner,
+        crate::gzguts_h::gz_state {
+            x: crate::zlib_h::gzFile_s {
+                have: initial.reset.have,
+                next: ::core::ptr::null_mut(),
+                pos: initial.reset.pos,
+            },
+            mode: initial.reset.mode,
+            fd: Some(initial.fd),
+            path: Some(initial.path),
+            want: initial.want,
+            buffers: crate::gzguts_h::GzBuffers {
+                size: initial.size,
+                input: None,
+                output: None,
+                input_cursor: None,
+                output_cursor: None,
+            },
+            direct: initial.direct,
+            junk: initial.reset.junk,
+            how: initial.reset.how,
+            again: initial.reset.again,
+            start: initial.start,
+            eof: initial.reset.eof,
+            past: initial.reset.past,
+            level: initial.level,
+            strategy: initial.strategy,
+            reset: initial.reset.reset,
+            skip: initial.reset.skip,
+            err: initial.reset.err,
+            msg: None,
+            strm: crate::zlib_h::z_stream {
+                next_in: ::core::ptr::null_mut(),
+                avail_in: initial.reset.codec.available_input,
+                total_in: initial.reset.codec.total_in,
+                next_out: ::core::ptr::null_mut(),
+                avail_out: initial.reset.codec.available_output,
+                total_out: initial.reset.codec.total_out,
+                msg: ::core::ptr::null_mut(),
+                state: ::core::ptr::null_mut(),
+                zalloc: None,
+                zfree: None,
+                opaque: ::core::ptr::null_mut(),
+                data_type: 0,
+                adler: 0,
+                reserved: 0,
+            },
         },
-        mode: initial.reset.mode,
-        fd: Some(initial.fd),
-        path: Some(initial.path),
-        want: initial.want,
-        buffers: crate::gzguts_h::GzBuffers {
-            size: initial.size,
-            input: None,
-            output: None,
-            input_cursor: None,
-            output_cursor: None,
-        },
-        direct: initial.direct,
-        junk: initial.reset.junk,
-        how: initial.reset.how,
-        again: initial.reset.again,
-        start: initial.start,
-        eof: initial.reset.eof,
-        past: initial.reset.past,
-        level: initial.level,
-        strategy: initial.strategy,
-        reset: initial.reset.reset,
-        skip: initial.reset.skip,
-        err: initial.reset.err,
-        msg: None,
-        strm: crate::zlib_h::z_stream {
-            next_in: ::core::ptr::null_mut(),
-            avail_in: initial.reset.codec.available_input,
-            total_in: initial.reset.codec.total_in,
-            next_out: ::core::ptr::null_mut(),
-            avail_out: initial.reset.codec.available_output,
-            total_out: initial.reset.codec.total_out,
-            msg: ::core::ptr::null_mut(),
-            state: ::core::ptr::null_mut(),
-            zalloc: None,
-            zfree: None,
-            opaque: ::core::ptr::null_mut(),
-            data_type: 0,
-            adler: 0,
-            reserved: 0,
-        },
-    });
+    );
     Some(state_owner)
 }
 
@@ -2037,10 +2037,9 @@ pub unsafe extern "C" fn gzdopen_ffi(
         GzOpenPath::Descriptor(fd),
         ::core::ffi::CStr::from_ptr(mode).to_bytes(),
     )
-    .map_or(
-        ::core::ptr::null_mut(),
-        |state| Box::into_raw(state).cast::<crate::zlib_h::gzFile_s>(),
-    )
+    .map_or(::core::ptr::null_mut(), |state| {
+        Box::into_raw(state).cast::<crate::zlib_h::gzFile_s>()
+    })
 }
 fn gzbuffer(
     mode: ::core::ffi::c_int,

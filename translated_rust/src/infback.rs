@@ -320,7 +320,9 @@ pub unsafe extern "C" fn inflateBack(
                     continue;
                 } else {
                     while bits < 3 as ::core::ffi::c_int as ::core::ffi::c_uint {
-                        let Some(byte) = inflate_back_pull_byte(in_0, in_desc, &mut next, &mut have) else {
+                        let Some(byte) =
+                            inflate_back_pull_byte(in_0, in_desc, &mut next, &mut have)
+                        else {
                             ret = crate::zlib_h::Z_BUF_ERROR;
                             break '_inf_leave;
                         };
@@ -368,7 +370,8 @@ pub unsafe extern "C" fn inflateBack(
                 hold >>= bits & 7 as ::core::ffi::c_uint;
                 bits = bits.wrapping_sub(bits & 7 as ::core::ffi::c_uint);
                 while bits < 32 as ::core::ffi::c_int as ::core::ffi::c_uint {
-                    let Some(byte) = inflate_back_pull_byte(in_0, in_desc, &mut next, &mut have) else {
+                    let Some(byte) = inflate_back_pull_byte(in_0, in_desc, &mut next, &mut have)
+                    else {
                         ret = crate::zlib_h::Z_BUF_ERROR;
                         break '_inf_leave;
                     };
@@ -430,7 +433,8 @@ pub unsafe extern "C" fn inflateBack(
             }
             16196 => {
                 while bits < 14 as ::core::ffi::c_int as ::core::ffi::c_uint {
-                    let Some(byte) = inflate_back_pull_byte(in_0, in_desc, &mut next, &mut have) else {
+                    let Some(byte) = inflate_back_pull_byte(in_0, in_desc, &mut next, &mut have)
+                    else {
                         ret = crate::zlib_h::Z_BUF_ERROR;
                         break '_inf_leave;
                     };
@@ -467,7 +471,9 @@ pub unsafe extern "C" fn inflateBack(
                     (*state).have = 0 as ::core::ffi::c_uint;
                     while (*state).have < (*state).ncode {
                         while bits < 3 as ::core::ffi::c_int as ::core::ffi::c_uint {
-                            let Some(byte) = inflate_back_pull_byte(in_0, in_desc, &mut next, &mut have) else {
+                            let Some(byte) =
+                                inflate_back_pull_byte(in_0, in_desc, &mut next, &mut have)
+                            else {
                                 ret = crate::zlib_h::Z_BUF_ERROR;
                                 break '_inf_leave;
                             };
@@ -538,7 +544,9 @@ pub unsafe extern "C" fn inflateBack(
                                 if here.bits as ::core::ffi::c_uint <= bits {
                                     break;
                                 }
-                                let Some(byte) = inflate_back_pull_byte(in_0, in_desc, &mut next, &mut have) else {
+                                let Some(byte) =
+                                    inflate_back_pull_byte(in_0, in_desc, &mut next, &mut have)
+                                else {
                                     ret = crate::zlib_h::Z_BUF_ERROR;
                                     break '_inf_leave;
                                 };
@@ -558,11 +566,14 @@ pub unsafe extern "C" fn inflateBack(
                                             + 2 as ::core::ffi::c_int)
                                             as ::core::ffi::c_uint
                                     {
-                                        let Some(byte) = inflate_back_pull_byte(in_0, in_desc, &mut next, &mut have) else {
+                                        let Some(byte) = inflate_back_pull_byte(
+                                            in_0, in_desc, &mut next, &mut have,
+                                        ) else {
                                             ret = crate::zlib_h::Z_BUF_ERROR;
                                             break '_inf_leave;
                                         };
-                                        hold = hold.wrapping_add((byte as ::core::ffi::c_ulong) << bits);
+                                        hold = hold
+                                            .wrapping_add((byte as ::core::ffi::c_ulong) << bits);
                                         bits = bits.wrapping_add(8 as ::core::ffi::c_uint);
                                     }
                                     hold >>= here.bits as ::core::ffi::c_int;
@@ -597,11 +608,14 @@ pub unsafe extern "C" fn inflateBack(
                                             + 3 as ::core::ffi::c_int)
                                             as ::core::ffi::c_uint
                                     {
-                                        let Some(byte) = inflate_back_pull_byte(in_0, in_desc, &mut next, &mut have) else {
+                                        let Some(byte) = inflate_back_pull_byte(
+                                            in_0, in_desc, &mut next, &mut have,
+                                        ) else {
                                             ret = crate::zlib_h::Z_BUF_ERROR;
                                             break '_inf_leave;
                                         };
-                                        hold = hold.wrapping_add((byte as ::core::ffi::c_ulong) << bits);
+                                        hold = hold
+                                            .wrapping_add((byte as ::core::ffi::c_ulong) << bits);
                                         bits = bits.wrapping_add(8 as ::core::ffi::c_uint);
                                     }
                                     hold >>= here.bits as ::core::ffi::c_int;
@@ -623,11 +637,14 @@ pub unsafe extern "C" fn inflateBack(
                                             + 7 as ::core::ffi::c_int)
                                             as ::core::ffi::c_uint
                                     {
-                                        let Some(byte) = inflate_back_pull_byte(in_0, in_desc, &mut next, &mut have) else {
+                                        let Some(byte) = inflate_back_pull_byte(
+                                            in_0, in_desc, &mut next, &mut have,
+                                        ) else {
                                             ret = crate::zlib_h::Z_BUF_ERROR;
                                             break '_inf_leave;
                                         };
-                                        hold = hold.wrapping_add((byte as ::core::ffi::c_ulong) << bits);
+                                        hold = hold
+                                            .wrapping_add((byte as ::core::ffi::c_ulong) << bits);
                                         bits = bits.wrapping_add(8 as ::core::ffi::c_uint);
                                     }
                                     hold >>= here.bits as ::core::ffi::c_int;
@@ -873,7 +890,8 @@ pub unsafe extern "C" fn inflateBack(
                     {
                         break;
                     }
-                    let Some(byte) = inflate_back_pull_byte(in_0, in_desc, &mut next, &mut have) else {
+                    let Some(byte) = inflate_back_pull_byte(in_0, in_desc, &mut next, &mut have)
+                    else {
                         ret = crate::zlib_h::Z_BUF_ERROR;
                         break '_inf_leave;
                     };
@@ -912,7 +930,9 @@ pub unsafe extern "C" fn inflateBack(
                 (*state).extra = here.op as ::core::ffi::c_uint & 15 as ::core::ffi::c_uint;
                 if (*state).extra != 0 as ::core::ffi::c_uint {
                     while bits < (*state).extra {
-                        let Some(byte) = inflate_back_pull_byte(in_0, in_desc, &mut next, &mut have) else {
+                        let Some(byte) =
+                            inflate_back_pull_byte(in_0, in_desc, &mut next, &mut have)
+                        else {
                             ret = crate::zlib_h::Z_BUF_ERROR;
                             break '_inf_leave;
                         };
@@ -940,7 +960,8 @@ pub unsafe extern "C" fn inflateBack(
                     if here.bits as ::core::ffi::c_uint <= bits {
                         break;
                     }
-                    let Some(byte) = inflate_back_pull_byte(in_0, in_desc, &mut next, &mut have) else {
+                    let Some(byte) = inflate_back_pull_byte(in_0, in_desc, &mut next, &mut have)
+                    else {
                         ret = crate::zlib_h::Z_BUF_ERROR;
                         break '_inf_leave;
                     };
@@ -971,7 +992,9 @@ pub unsafe extern "C" fn inflateBack(
                         {
                             break;
                         }
-                        let Some(byte) = inflate_back_pull_byte(in_0, in_desc, &mut next, &mut have) else {
+                        let Some(byte) =
+                            inflate_back_pull_byte(in_0, in_desc, &mut next, &mut have)
+                        else {
                             ret = crate::zlib_h::Z_BUF_ERROR;
                             break '_inf_leave;
                         };
@@ -992,7 +1015,9 @@ pub unsafe extern "C" fn inflateBack(
                     (*state).extra = here.op as ::core::ffi::c_uint & 15 as ::core::ffi::c_uint;
                     if (*state).extra != 0 as ::core::ffi::c_uint {
                         while bits < (*state).extra {
-                            let Some(byte) = inflate_back_pull_byte(in_0, in_desc, &mut next, &mut have) else {
+                            let Some(byte) =
+                                inflate_back_pull_byte(in_0, in_desc, &mut next, &mut have)
+                            else {
                                 ret = crate::zlib_h::Z_BUF_ERROR;
                                 break '_inf_leave;
                             };

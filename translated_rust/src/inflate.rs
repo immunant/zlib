@@ -2545,10 +2545,8 @@ pub unsafe extern "C" fn inflateSetDictionary(
     {
         dictid =
             crate::src::adler32::adler32_z(0 as crate::stdlib::uLong, None) as ::core::ffi::c_ulong;
-        dictid = crate::src::adler32::adler32(
-            dictid as crate::stdlib::uLong,
-            dictionary,
-        ) as ::core::ffi::c_ulong;
+        dictid = crate::src::adler32::adler32(dictid as crate::stdlib::uLong, dictionary)
+            as ::core::ffi::c_ulong;
         if dictid != state.check {
             return crate::zlib_h::Z_DATA_ERROR;
         }
