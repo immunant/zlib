@@ -2366,33 +2366,39 @@ pub unsafe extern "C" fn inflateGetHeader_ffi(
 ) -> ::core::ffi::c_int {
     inflateGetHeader(strm, head)
 }
+fn syncsearch_byte(
+    mut have: ::core::ffi::c_uint,
+    byte: ::core::ffi::c_uchar,
+) -> ::core::ffi::c_uint {
+    if byte as ::core::ffi::c_int
+        == if have < 2 as ::core::ffi::c_uint {
+            0 as ::core::ffi::c_int
+        } else {
+            0xff as ::core::ffi::c_int
+        }
+    {
+        have = have.wrapping_add(1);
+    } else if byte != 0 {
+        have = 0 as ::core::ffi::c_uint;
+    } else {
+        have = (4 as ::core::ffi::c_uint).wrapping_sub(have);
+    }
+    have
+}
+
 unsafe extern "C" fn syncsearch(
     mut have: *mut ::core::ffi::c_uint,
     mut buf: *const ::core::ffi::c_uchar,
     mut len: ::core::ffi::c_uint,
 ) -> ::core::ffi::c_uint {
-    let mut got: ::core::ffi::c_uint = 0;
-    let mut next: ::core::ffi::c_uint = 0;
-    got = *have;
-    next = 0 as ::core::ffi::c_uint;
+    let mut got = *have;
+    let mut next = 0 as ::core::ffi::c_uint;
     while next < len && got < 4 as ::core::ffi::c_uint {
-        if *buf.offset(next as isize) as ::core::ffi::c_int
-            == (if got < 2 as ::core::ffi::c_uint {
-                0 as ::core::ffi::c_int
-            } else {
-                0xff as ::core::ffi::c_int
-            })
-        {
-            got = got.wrapping_add(1);
-        } else if *buf.offset(next as isize) != 0 {
-            got = 0 as ::core::ffi::c_uint;
-        } else {
-            got = (4 as ::core::ffi::c_uint).wrapping_sub(got);
-        }
+        got = syncsearch_byte(got, *buf.offset(next as isize));
         next = next.wrapping_add(1);
     }
     *have = got;
-    return next;
+    next
 }
 pub unsafe extern "C" fn inflateSync(mut strm: crate::zlib_h::z_streamp) -> ::core::ffi::c_int {
     let mut len: ::core::ffi::c_uint = 0;
