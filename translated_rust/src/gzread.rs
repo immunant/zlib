@@ -150,51 +150,59 @@ fn gz_avail(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
     0
 }
 
-// All callers have already validated and bound the gzip state.  Allocation
-// and input-buffer access remain raw within this internal adapter.
-unsafe fn gz_look(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
+// All callers have already validated and bound the gzip state. Allocation,
+// inflater setup, and input-buffer operations stay in documented, scoped raw
+// boundaries within this adapter.
+fn gz_look(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
     if state.size == 0 as ::core::ffi::c_uint {
-        state.in_0 = crate::stdlib::malloc(state.want as crate::__stddef_size_t_h::size_t)
-            as *mut ::core::ffi::c_uchar;
-        state.out = crate::stdlib::malloc(
-            (state.want << 1 as ::core::ffi::c_int) as crate::__stddef_size_t_h::size_t,
-        ) as *mut ::core::ffi::c_uchar;
-        if state.in_0.is_null() || state.out.is_null() {
-            crate::stdlib::free(state.out as *mut ::core::ffi::c_void);
-            crate::stdlib::free(state.in_0 as *mut ::core::ffi::c_void);
-            crate::src::gzlib::gz_error(
-                state,
-                crate::zlib_h::Z_MEM_ERROR,
-                b"out of memory\0".as_ptr() as *const ::core::ffi::c_char,
-            );
-            return -1 as ::core::ffi::c_int;
-        }
-        state.size = state.want;
-        state.strm.zalloc = None;
-        state.strm.zfree = None;
-        state.strm.opaque = ::core::ptr::null_mut::<::core::ffi::c_void>();
-        state.strm.avail_in = 0 as crate::stdlib::uInt;
-        state.strm.next_in = ::core::ptr::null_mut::<crate::stdlib::Bytef>();
-        if crate::src::inflate::inflateInit2_(
-            &mut state.strm,
-            15 as ::core::ffi::c_int + 16 as ::core::ffi::c_int,
-            crate::zlib_h::ZLIB_VERSION.as_ptr(),
-            ::core::mem::size_of::<crate::zlib_h::z_stream>() as ::core::ffi::c_int,
-        ) != crate::zlib_h::Z_OK
-        {
-            crate::stdlib::free(state.out as *mut ::core::ffi::c_void);
-            crate::stdlib::free(state.in_0 as *mut ::core::ffi::c_void);
-            state.size = 0 as ::core::ffi::c_uint;
-            crate::src::gzlib::gz_error(
-                state,
-                crate::zlib_h::Z_MEM_ERROR,
-                b"out of memory\0".as_ptr() as *const ::core::ffi::c_char,
-            );
-            return -1 as ::core::ffi::c_int;
+        // SAFETY: this state has not allocated its gzip buffers yet. These
+        // allocations, cleanup calls, and inflater initialization all use
+        // the fields configured here; `gz_error` updates this same state.
+        unsafe {
+            state.in_0 = crate::stdlib::malloc(state.want as crate::__stddef_size_t_h::size_t)
+                as *mut ::core::ffi::c_uchar;
+            state.out = crate::stdlib::malloc(
+                (state.want << 1 as ::core::ffi::c_int) as crate::__stddef_size_t_h::size_t,
+            ) as *mut ::core::ffi::c_uchar;
+            if state.in_0.is_null() || state.out.is_null() {
+                crate::stdlib::free(state.out as *mut ::core::ffi::c_void);
+                crate::stdlib::free(state.in_0 as *mut ::core::ffi::c_void);
+                crate::src::gzlib::gz_error(
+                    state,
+                    crate::zlib_h::Z_MEM_ERROR,
+                    b"out of memory\0".as_ptr() as *const ::core::ffi::c_char,
+                );
+                return -1 as ::core::ffi::c_int;
+            }
+            state.size = state.want;
+            state.strm.zalloc = None;
+            state.strm.zfree = None;
+            state.strm.opaque = ::core::ptr::null_mut::<::core::ffi::c_void>();
+            state.strm.avail_in = 0 as crate::stdlib::uInt;
+            state.strm.next_in = ::core::ptr::null_mut::<crate::stdlib::Bytef>();
+            if crate::src::inflate::inflateInit2_(
+                &mut state.strm,
+                15 as ::core::ffi::c_int + 16 as ::core::ffi::c_int,
+                crate::zlib_h::ZLIB_VERSION.as_ptr(),
+                ::core::mem::size_of::<crate::zlib_h::z_stream>() as ::core::ffi::c_int,
+            ) != crate::zlib_h::Z_OK
+            {
+                crate::stdlib::free(state.out as *mut ::core::ffi::c_void);
+                crate::stdlib::free(state.in_0 as *mut ::core::ffi::c_void);
+                state.size = 0 as ::core::ffi::c_uint;
+                crate::src::gzlib::gz_error(
+                    state,
+                    crate::zlib_h::Z_MEM_ERROR,
+                    b"out of memory\0".as_ptr() as *const ::core::ffi::c_char,
+                );
+                return -1 as ::core::ffi::c_int;
+            }
         }
     }
     if state.direct == -1 as ::core::ffi::c_int || state.junk == 0 as ::core::ffi::c_int {
-        crate::src::inflate::inflateReset(&mut state.strm);
+        // SAFETY: initialization above, or the existing read state, provides
+        // the live inflater stream required by this reset.
+        unsafe { crate::src::inflate::inflateReset(&mut state.strm) };
         crate::src::gzlib::gz_set_gzip_input(state, state.junk != -1 as ::core::ffi::c_int);
         return 0 as ::core::ffi::c_int;
     }
@@ -203,30 +211,40 @@ unsafe fn gz_look(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
     }
     let available = state.strm.avail_in;
     let gzip_header = if available > 3 {
-        // Only the raw input adapter touches the untrusted input pointer.
-        let input = state.strm.next_in;
-        crate::src::gzlib::gz_is_gzip_header([
-            *input,
-            *input.wrapping_add(1),
-            *input.wrapping_add(2),
-            *input.wrapping_add(3),
-        ])
+        // SAFETY: `gz_avail` maintains `next_in` within the initialized input
+        // buffer and `available > 3` makes these four header bytes readable.
+        unsafe {
+            let input = state.strm.next_in;
+            crate::src::gzlib::gz_is_gzip_header([
+                *input,
+                *input.wrapping_add(1),
+                *input.wrapping_add(2),
+                *input.wrapping_add(3),
+            ])
+        }
     } else {
         false
     };
     match crate::src::gzlib::gz_look_plan(available, state.again != 0, gzip_header) {
         crate::src::gzlib::GzLookPlan::NeedMore => return 0 as ::core::ffi::c_int,
         crate::src::gzlib::GzLookPlan::Gzip => {
-            crate::src::inflate::inflateReset(&mut state.strm);
+            // SAFETY: `gz_look` has initialized the stream before classifying
+            // a gzip member, so resetting it is valid here.
+            unsafe { crate::src::inflate::inflateReset(&mut state.strm) };
             crate::src::gzlib::gz_set_gzip_input(state, true);
             return 0 as ::core::ffi::c_int;
         }
         crate::src::gzlib::GzLookPlan::Copy { copied } => {
-            crate::stdlib::memcpy(
-                state.out as *mut ::core::ffi::c_void,
-                state.strm.next_in as *const ::core::ffi::c_void,
-                copied as crate::__stddef_size_t_h::size_t,
-            );
+            // SAFETY: `gz_avail` has made `copied` input bytes available, and
+            // `out` was allocated with twice the input-buffer capacity. The
+            // ranges are distinct gzip buffers.
+            unsafe {
+                crate::stdlib::memcpy(
+                    state.out as *mut ::core::ffi::c_void,
+                    state.strm.next_in as *const ::core::ffi::c_void,
+                    copied as crate::__stddef_size_t_h::size_t,
+                );
+            }
             crate::src::gzlib::gz_set_copy_input(state, copied);
             return 0 as ::core::ffi::c_int;
         }
@@ -334,10 +352,7 @@ fn gz_fetch(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
     loop {
         match crate::src::gzlib::gz_fetch_plan(state) {
             crate::src::gzlib::GzFetchPlan::Look => {
-                // SAFETY: `state` is the validated read-state reference
-                // passed to this coordinator; `gz_look` owns its raw buffer
-                // and allocation boundary.
-                if unsafe { gz_look(state) } == -1 as ::core::ffi::c_int {
+                if gz_look(state) == -1 as ::core::ffi::c_int {
                     return -1 as ::core::ffi::c_int;
                 }
                 if state.how == crate::gzguts_h::LOOK {
