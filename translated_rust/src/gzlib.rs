@@ -638,7 +638,82 @@ pub unsafe extern "C" fn gzseek_ffi(
     mut whence: ::core::ffi::c_int,
 ) -> crate::stdlib::off_t {
     let mut ret: crate::stdlib::off64_t = 0;
-    ret = gzseek64_ffi(file, offset, whence);
+    let mut state: crate::gzguts_h::gz_statep =
+        ::core::ptr::null_mut::<crate::gzguts_h::gz_state>();
+    if file.is_null() {
+        return -1 as ::core::ffi::c_int as crate::stdlib::off_t;
+    }
+    state = file as crate::gzguts_h::gz_statep;
+    let state_ref = &mut *state;
+    if !gz_seek64_state_ready(state_ref, whence) {
+        return -1 as ::core::ffi::c_int as crate::stdlib::off_t;
+    }
+    let clear_skip = {
+        let normalized = gz_seek64_normalize(
+            offset,
+            whence,
+            state_ref.x.pos,
+            state_ref.past,
+            state_ref.skip,
+        );
+        offset = normalized.0;
+        normalized.1
+    };
+    if clear_skip {
+        state_ref.skip = 0 as crate::stdlib::off64_t;
+    }
+    if gz_seek64_can_seek_copy(state_ref, offset) {
+        ret = crate::stdlib::lseek64(
+            state_ref.fd,
+            offset as crate::stdlib::__off64_t - state_ref.x.have as crate::stdlib::__off64_t,
+            crate::stdlib::SEEK_CUR,
+        ) as crate::stdlib::off64_t;
+        if ret == -1 as ::core::ffi::c_int as crate::stdlib::off64_t {
+            return -1 as ::core::ffi::c_int as crate::stdlib::off_t;
+        }
+        gz_seek64_prepare_copy_seek(state_ref);
+        gz_error(
+            state_ref,
+            crate::zlib_h::Z_OK,
+            ::core::ptr::null::<::core::ffi::c_char>(),
+        );
+        ret = gz_seek64_finish_copy_seek(state_ref, offset);
+        return if ret == ret {
+            ret
+        } else {
+            -1 as ::core::ffi::c_int as crate::stdlib::off_t
+        };
+    }
+    if offset < 0 as crate::stdlib::off_t {
+        if state_ref.mode != crate::gzguts_h::GZ_READ {
+            return -1 as ::core::ffi::c_int as crate::stdlib::off_t;
+        }
+        offset += state_ref.x.pos;
+        if offset < 0 as crate::stdlib::off_t {
+            return -1 as ::core::ffi::c_int as crate::stdlib::off_t;
+        }
+        if crate::stdlib::lseek64(
+            state_ref.fd,
+            state_ref.start as crate::stdlib::__off64_t,
+            crate::stdlib::SEEK_SET,
+        ) == -1 as ::core::ffi::c_int as crate::stdlib::__off64_t
+        {
+            return -1 as ::core::ffi::c_int as crate::stdlib::off_t;
+        }
+        gz_reset_before_error(state_ref);
+        gz_error(
+            state_ref,
+            crate::zlib_h::Z_OK,
+            ::core::ptr::null::<::core::ffi::c_char>(),
+        );
+        gz_reset_after_error(state_ref);
+    }
+    let state_ref = &mut *(file as crate::gzguts_h::gz_statep);
+    if state_ref.mode == crate::gzguts_h::GZ_READ {
+        gz_consume_buffered_read_cursor(state_ref, &mut offset);
+    }
+    state_ref.skip = offset;
+    ret = state_ref.x.pos + offset;
     return if ret == ret {
         ret
     } else {
