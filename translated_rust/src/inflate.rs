@@ -2055,7 +2055,24 @@ pub fn inflate(
                                                                             }
                                                                             // This no-callback transition uses the decoder
                                                                             // entry's validated stream/state records for its
-                                                                            // code-length cursor and error publication.
+                                                                            // code-length cursor and error publication. Resolve
+                                                                            // its compatibility cursor once to a bounded table
+                                                                            // view, so every subsequent table read is checked
+                                                                            // slice access rather than raw interior-pointer
+                                                                            // arithmetic.
+                                                                            let Some(lcode) = inflate_fast_table(
+                                                                                &state_ref.codes,
+                                                                                state_ref.lencode as usize,
+                                                                                crate::src::inftrees::inffixed_h::lenfix.as_ptr()
+                                                                                    as usize,
+                                                                                &crate::src::inftrees::inffixed_h::lenfix,
+                                                                            ) else {
+                                                                                strm_ref.msg = INFLATE_ERROR_MESSAGES[8].as_ptr()
+                                                                                    as *const ::core::ffi::c_char
+                                                                                    as *mut ::core::ffi::c_char;
+                                                                                state_ref.mode = crate::src::inflate::BAD;
+                                                                                continue '_inf_leave;
+                                                                            };
                                                                             while state_ref.have
                                                                                 < state_ref
                                                                                     .nlen
@@ -2065,13 +2082,18 @@ pub fn inflate(
                                                                                     )
                                                                             {
                                                                                 loop {
-                                                                                    here = *state_ref
-                                                                                    .lencode
-                                                                                    .wrapping_add(
-                                                                                        (hold as ::core::ffi::c_uint
-                                                                                            & ((1 as ::core::ffi::c_uint) << state_ref.lenbits)
-                                                                                                .wrapping_sub(1 as ::core::ffi::c_uint)) as usize,
-                                                                                    );
+                                                                                    let index = (hold as ::core::ffi::c_uint
+                                                                                        & ((1 as ::core::ffi::c_uint) << state_ref.lenbits)
+                                                                                            .wrapping_sub(1 as ::core::ffi::c_uint)) as usize;
+                                                                                    let Some(code) = lcode.get(index).copied() else {
+                                                                                        strm_ref.msg = INFLATE_ERROR_MESSAGES[8]
+                                                                                            .as_ptr()
+                                                                                            as *const ::core::ffi::c_char
+                                                                                            as *mut ::core::ffi::c_char;
+                                                                                        state_ref.mode = crate::src::inflate::BAD;
+                                                                                        continue '_inf_leave;
+                                                                                    };
+                                                                                    here = code;
                                                                                     if here.bits as ::core::ffi::c_uint <= bits {
                                                                                     break;
                                                                                 }
