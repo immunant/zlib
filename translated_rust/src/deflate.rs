@@ -2851,28 +2851,43 @@ fn drain_pending(
 }
 
 unsafe fn flush_pending(mut strm: crate::zlib_h::z_streamp) {
-    let state = &mut *((*strm).state as *mut crate::src::deflate::deflate_state);
-    crate::src::trees::_tr_flush_bits_ffi(state as *mut crate::src::deflate::internal_state);
-    let Some(result) = flush_pending_core(
-        PendingDrainState {
-            pending: state.pending,
-            pending_out_offset: state.pending_out_offset,
-        },
-        (*strm).avail_out,
-        (*strm).total_out,
+    let stream = &mut *strm;
+    let state = &mut *(stream.state as *mut crate::src::deflate::deflate_state);
+    let pending_storage =
+        core::slice::from_raw_parts_mut(state.pending_buf, state.pending_buf_size as usize);
+    let layout = pending_storage_layout(state.lit_bufsize);
+    assert!(with_pending_storage(pending_storage, layout, |storage| {
+        crate::src::trees::tr_flush_bits_core(
+            storage,
+            &mut state.pending,
+            &mut state.bi_buf,
+            &mut state.bi_valid,
+        )
+    })
+    .expect("pending storage layout matches its allocation"));
+    let drain = PendingDrainState {
+        pending: state.pending,
+        pending_out_offset: state.pending_out_offset,
+    };
+    let Some(preview) = flush_pending_core(drain, stream.avail_out, stream.total_out) else {
+        return;
+    };
+    // These raw allocations are established by the exported deflate
+    // initializer.  Once their bounded views exist, the drain itself uses
+    // checked ranges and a safe slice copy in `drain_pending()`.
+    let output = core::slice::from_raw_parts_mut(stream.next_out, preview.copied as usize);
+    let Some(result) = drain_pending(
+        pending_storage,
+        drain,
+        output,
+        stream.avail_out,
+        stream.total_out,
     ) else {
         return;
     };
-    crate::stdlib::memcpy(
-        (*strm).next_out as *mut ::core::ffi::c_void,
-        state
-            .pending_buf
-            .wrapping_add(state.pending_out_offset) as *const ::core::ffi::c_void,
-        result.copied as crate::__stddef_size_t_h::size_t,
-    );
-    (*strm).next_out = (*strm).next_out.wrapping_add(result.copied as usize);
-    (*strm).total_out = result.total_out;
-    (*strm).avail_out = result.avail_out;
+    stream.next_out = stream.next_out.wrapping_add(result.copied as usize);
+    stream.total_out = result.total_out;
+    stream.avail_out = result.avail_out;
     state.pending = result.next.pending;
     state.pending_out_offset = result.next.pending_out_offset;
 }

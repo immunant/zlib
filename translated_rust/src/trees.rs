@@ -3678,7 +3678,7 @@ fn pending_cursor_after_bytes(pending: crate::zutil_h::ulg, count: usize) -> cra
     pending.wrapping_add(count as crate::zutil_h::ulg)
 }
 
-fn tr_flush_bits_core(
+pub(crate) fn tr_flush_bits_core(
     storage: &mut crate::src::deflate::PendingStorageView<'_>,
     pending: &mut crate::zutil_h::ulg,
     bi_buf: &mut crate::zutil_h::ush,
