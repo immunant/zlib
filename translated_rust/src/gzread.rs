@@ -173,6 +173,23 @@ fn gz_avail(
     return 0 as ::core::ffi::c_int;
 }
 
+fn gz_input_range(state: &crate::gzguts_h::gz_state) -> Option<::core::ops::Range<usize>> {
+    let available = state.strm.avail_in as usize;
+    if available == 0 {
+        return Some(0..0);
+    }
+    if state.strm.next_in.is_null() {
+        return None;
+    }
+    let offset = state
+        .strm
+        .next_in
+        .addr()
+        .checked_sub(state.in_0.as_ptr().addr())?;
+    let end = offset.checked_add(available)?;
+    (end <= state.in_0.len()).then_some(offset..end)
+}
+
 unsafe extern "C" fn gz_look(mut state: crate::gzguts_h::gz_statep) -> ::core::ffi::c_int {
     let state = &mut *state;
     if state.size == 0 as ::core::ffi::c_uint {
@@ -240,36 +257,46 @@ unsafe extern "C" fn gz_look(mut state: crate::gzguts_h::gz_statep) -> ::core::f
     if gz_avail(state, fd) == -1 as ::core::ffi::c_int {
         return -1 as ::core::ffi::c_int;
     }
-    let strm = &mut state.strm;
-    if strm.avail_in == 0 as crate::stdlib::uInt
-        || state.again != 0 && strm.avail_in < 4 as crate::stdlib::uInt
+    if state.strm.avail_in == 0 as crate::stdlib::uInt
+        || state.again != 0 && state.strm.avail_in < 4 as crate::stdlib::uInt
     {
         return 0 as ::core::ffi::c_int;
     }
-    if strm.avail_in > 3 as crate::stdlib::uInt
-        && *strm.next_in.offset(0 as ::core::ffi::c_int as isize) as ::core::ffi::c_int
-            == 31 as ::core::ffi::c_int
-        && *strm.next_in.offset(1 as ::core::ffi::c_int as isize) as ::core::ffi::c_int
-            == 139 as ::core::ffi::c_int
-        && *strm.next_in.offset(2 as ::core::ffi::c_int as isize) as ::core::ffi::c_int
-            == 8 as ::core::ffi::c_int
-        && (*strm.next_in.offset(3 as ::core::ffi::c_int as isize) as ::core::ffi::c_int)
-            < 32 as ::core::ffi::c_int
+    let Some(input) = gz_input_range(state) else {
+        crate::src::gzlib::gz_static_error(
+            state,
+            crate::zlib_h::Z_STREAM_ERROR,
+            b"internal read buffer corrupt\0",
+        );
+        return -1 as ::core::ffi::c_int;
+    };
+    if input.len() > 3
+        && state.in_0[input.start] == 31
+        && state.in_0[input.start + 1] == 139
+        && state.in_0[input.start + 2] == 8
+        && state.in_0[input.start + 3] < 32
     {
-        crate::src::inflate::inflateReset(strm as *mut crate::zlib_h::z_stream_s);
+        crate::src::inflate::inflateReset(&mut state.strm as *mut crate::zlib_h::z_stream_s);
         state.how = crate::gzguts_h::GZIP;
         state.junk = 1 as ::core::ffi::c_int;
         state.direct = 0 as ::core::ffi::c_int;
         return 0 as ::core::ffi::c_int;
     }
-    state.x.next = state.out.as_mut_ptr();
-    crate::stdlib::memcpy(
-        state.x.next as *mut ::core::ffi::c_void,
-        strm.next_in as *const ::core::ffi::c_void,
-        strm.avail_in as crate::__stddef_size_t_h::size_t,
-    );
-    state.x.have = strm.avail_in as ::core::ffi::c_uint;
-    strm.avail_in = 0 as crate::stdlib::uInt;
+    let (output, have) = {
+        let Some(output) = state.out.get_mut(..input.len()) else {
+            crate::src::gzlib::gz_static_error(
+                state,
+                crate::zlib_h::Z_STREAM_ERROR,
+                b"internal read buffer corrupt\0",
+            );
+            return -1 as ::core::ffi::c_int;
+        };
+        output.copy_from_slice(&state.in_0[input]);
+        (output.as_mut_ptr(), output.len() as ::core::ffi::c_uint)
+    };
+    state.x.next = output;
+    state.x.have = have;
+    state.strm.avail_in = 0 as crate::stdlib::uInt;
     state.how = crate::gzguts_h::COPY;
     return 0 as ::core::ffi::c_int;
 }
