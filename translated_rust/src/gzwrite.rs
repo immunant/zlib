@@ -345,6 +345,63 @@ fn gz_write_direct_commit_state(
     remaining.wrapping_sub(consumed as crate::stdlib::z_size_t)
 }
 
+/// Write a direct (transparent) gzip payload through the owned descriptor.
+/// The result includes the completed prefix on failure, matching the old
+/// `write()` loop's partial-progress behavior without exposing a raw buffer
+/// or descriptor to the gzip implementation.
+fn gz_direct_write_file(
+    file: &mut ::std::fs::File,
+    source: &[u8],
+) -> Result<usize, (usize, ::core::ffi::c_int)> {
+    use std::io::Write;
+
+    let max = (-1 as ::core::ffi::c_int as ::core::ffi::c_uint >> 2).wrapping_add(1) as usize;
+    let mut written = 0usize;
+    while written != source.len() {
+        let end = written.saturating_add(max).min(source.len());
+        match file.write(&source[written..end]) {
+            Ok(0) => return Err((written, 0)),
+            Ok(count) => written += count,
+            Err(error) => return Err((written, error.raw_os_error().unwrap_or(0))),
+        }
+    }
+    Ok(written)
+}
+
+/// Commit a direct-write result and map descriptor failure to gzip's stable
+/// owned diagnostic.  This keeps error and position updates independent of
+/// the particular owned slice used for the write (caller input or zero fill).
+fn gz_direct_write_commit(
+    state: &mut crate::gzguts_h::gz_state,
+    result: Result<usize, (usize, ::core::ffi::c_int)>,
+) -> Result<usize, usize> {
+    match result {
+        Ok(written) => {
+            state.again = 0;
+            state.x.pos = state.x.pos.wrapping_add(written as crate::stdlib::off64_t);
+            Ok(written)
+        }
+        Err((written, code)) => {
+            state.again = (code == crate::stdlib::EAGAIN || code == crate::stdlib::EWOULDBLOCK)
+                as ::core::ffi::c_int;
+            state.x.pos = state.x.pos.wrapping_add(written as crate::stdlib::off64_t);
+            crate::src::gzlib::gz_error_io(state, code);
+            Err(written)
+        }
+    }
+}
+
+/// Write a caller-supplied transparent payload through the state's RAII
+/// descriptor.  The slice remains call-scoped and no stream cursor needs to
+/// point at caller memory.
+fn gz_write_direct(state: &mut crate::gzguts_h::gz_state, source: &[u8]) -> Result<usize, usize> {
+    let result = match state.file.as_mut() {
+        Some(file) => gz_direct_write_file(file, source),
+        None => Err((0, 0)),
+    };
+    gz_direct_write_commit(state, result)
+}
+
 /// Convert a failed compression step into zlib's public write progress.  A
 /// retryable descriptor error reports the completed prefix; every other
 /// error reports no completed write.
@@ -522,6 +579,12 @@ unsafe fn gz_write(
     }
     if state.skip != 0 && gz_zero(state) == -1 as ::core::ffi::c_int {
         return 0 as crate::stdlib::z_size_t;
+    }
+    if state.direct != 0 {
+        return match gz_write_direct(state, source) {
+            Ok(written) => written,
+            Err(written) => gz_write_failure_result(state.again, put, put - written),
+        };
     }
     if len < state.size as crate::stdlib::z_size_t {
         loop {
