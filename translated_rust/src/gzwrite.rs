@@ -300,6 +300,30 @@ fn gz_write_direct_commit_state(
     remaining.wrapping_sub(consumed as crate::stdlib::z_size_t)
 }
 
+/// Compute the byte length requested by `gzfwrite`.  `None` preserves the
+/// API's overflow failure, while `Some(0)` remains an ordinary empty request.
+fn gzfwrite_request_len(
+    size: crate::stdlib::z_size_t,
+    nitems: crate::stdlib::z_size_t,
+) -> Option<crate::stdlib::z_size_t> {
+    let len = nitems.wrapping_mul(size);
+    if size != 0 && len.wrapping_div(size) != nitems {
+        None
+    } else {
+        Some(len)
+    }
+}
+
+/// Convert completed byte count back to completed items after a non-empty
+/// `gzfwrite` request.  The caller keeps the raw write and handle access at
+/// the boundary.
+fn gzfwrite_completed_items(
+    written: crate::stdlib::z_size_t,
+    size: crate::stdlib::z_size_t,
+) -> crate::stdlib::z_size_t {
+    written.wrapping_div(size)
+}
+
 unsafe extern "C" fn gz_zero(mut state: crate::gzguts_h::gz_statep) -> ::core::ffi::c_int {
     let mut first: ::core::ffi::c_int = 0;
     let mut ret: ::core::ffi::c_int = 0;
@@ -458,7 +482,6 @@ pub unsafe extern "C" fn gzfwrite(
     mut nitems: crate::stdlib::z_size_t,
     mut file: crate::zlib_h::gzFile,
 ) -> crate::stdlib::z_size_t {
-    let mut len: crate::stdlib::z_size_t = 0;
     let mut state: crate::gzguts_h::gz_statep =
         ::core::ptr::null_mut::<crate::gzguts_h::gz_state>();
     if file.is_null() {
@@ -475,20 +498,18 @@ pub unsafe extern "C" fn gzfwrite(
         crate::zlib_h::Z_OK,
         ::core::ptr::null::<::core::ffi::c_char>(),
     );
-    len = nitems.wrapping_mul(size);
-    if size != 0 && len.wrapping_div(size) != nitems {
-        crate::src::gzlib::gz_error(
-            state as *mut crate::gzguts_h::gz_state,
-            crate::zlib_h::Z_STREAM_ERROR,
-            b"request does not fit in a size_t\0".as_ptr() as *const ::core::ffi::c_char,
-        );
-        return 0 as crate::stdlib::z_size_t;
+    match gzfwrite_request_len(size, nitems) {
+        None => {
+            crate::src::gzlib::gz_error(
+                state as *mut crate::gzguts_h::gz_state,
+                crate::zlib_h::Z_STREAM_ERROR,
+                b"request does not fit in a size_t\0".as_ptr() as *const ::core::ffi::c_char,
+            );
+            0
+        }
+        Some(0) => 0,
+        Some(len) => gzfwrite_completed_items(gz_write(state, buf, len), size),
     }
-    return if len != 0 {
-        gz_write(state, buf, len).wrapping_div(size)
-    } else {
-        0 as crate::stdlib::z_size_t
-    };
 }
 #[export_name = "gzfwrite"]
 
