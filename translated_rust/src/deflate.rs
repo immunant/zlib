@@ -2020,20 +2020,15 @@ fn deflate_used_impl(
     crate::zlib_h::Z_OK
 }
 
-pub unsafe extern "C" fn deflateUsed(
-    mut strm: crate::zlib_h::z_streamp,
-    mut bits: *mut ::core::ffi::c_int,
+// The C boundary validates both optional handles before dispatching here.
+// This keeps the implementation's output publication as an ordinary mutable
+// borrow; only the opaque deflate-state association remains unsafe.
+pub unsafe fn deflateUsed(
+    strm: &mut crate::zlib_h::z_stream_s,
+    bits: Option<&mut ::core::ffi::c_int>,
 ) -> ::core::ffi::c_int {
-    let Some((_strm, state)) = strm
-        .as_mut()
-        .and_then(|strm| deflate_stream_and_state(strm))
-    else {
+    let Some((_strm, state)) = deflate_stream_and_state(strm) else {
         return crate::zlib_h::Z_STREAM_ERROR;
-    };
-    let bits = if bits.is_null() {
-        None
-    } else {
-        Some(&mut *bits)
     };
     deflate_used_impl(state.bi_used, bits)
 }
@@ -2043,7 +2038,10 @@ pub unsafe extern "C" fn deflateUsed_ffi(
     mut strm: crate::zlib_h::z_streamp,
     mut bits: *mut ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
-    deflateUsed(strm, bits)
+    let Some(strm) = strm.as_mut() else {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    };
+    deflateUsed(strm, bits.as_mut())
 }
 
 fn deflate_prime_bits(
