@@ -3672,6 +3672,7 @@ unsafe extern "C" fn deflate_slow(
     // the lazy-match state machine below only works through this scoped
     // state view and bounded allocation slices.
     let state = &mut *s;
+    let stream = &mut *state.strm.as_ptr();
     let sym_buf_start = state.sym_buf_start;
     // `pending_buf` is the full allocation; symbols occupy its suffix after
     // the literal area. Keeping one full-capacity view avoids a raw cursor.
@@ -3681,7 +3682,6 @@ unsafe extern "C" fn deflate_slow(
             .as_ptr(),
         state.pending_buf_size as usize,
     );
-    let sym_buf = &mut pending_buf[sym_buf_start..];
     loop {
         if state.lookahead < crate::src::deflate::MIN_LOOKAHEAD as crate::stdlib::uInt {
             fill_window(s);
@@ -3776,16 +3776,19 @@ unsafe extern "C" fn deflate_slow(
             strstart: state.strstart,
             lookahead: state.lookahead,
         };
-        let action = advance_slow_match(
-            &mut slow_state,
-            sym_buf,
-            &mut state.sym_next,
-            state.sym_end,
-            &mut state.dyn_ltree,
-            &mut state.dyn_dtree,
-            &mut state.matches,
-            delayed_literal,
-        );
+        let action = {
+            let sym_buf = &mut pending_buf[sym_buf_start..];
+            advance_slow_match(
+                &mut slow_state,
+                sym_buf,
+                &mut state.sym_next,
+                state.sym_end,
+                &mut state.dyn_ltree,
+                &mut state.dyn_dtree,
+                &mut state.matches,
+                delayed_literal,
+            )
+        };
         state.prev_length = slow_state.prev_length;
         state.match_length = slow_state.match_length;
         state.match_available = slow_state.match_available;
@@ -3823,24 +3826,52 @@ unsafe extern "C" fn deflate_slow(
                     );
                 }
                 if bflush != 0 {
-                    crate::src::trees::_tr_flush_block(
-                        s as *mut crate::src::deflate::internal_state,
-                        if state.block_start >= 0 as ::core::ffi::c_long {
-                            state.window
-                                .expect("initialized window")
-                                .as_ptr()
-                                .wrapping_add(state.block_start as ::core::ffi::c_uint as usize)
-                                as *mut crate::stdlib::charf
-                        } else {
-                            ::core::ptr::null_mut::<crate::stdlib::charf>()
-                        },
-                        (state.strstart as ::core::ffi::c_long - state.block_start)
-                            as crate::zutil_h::ulg,
-                        0,
+                    let stored_len = (state.strstart as ::core::ffi::c_long
+                        - state.block_start) as crate::zutil_h::ulg;
+                    let input = if state.block_start >= 0 {
+                        let start = state.block_start as usize;
+                        Some(&window[start..start + stored_len as usize])
+                    } else {
+                        None
+                    };
+                    crate::src::trees::flush_block_from_views(
+                            if state.level > 0 {
+                                Some(&mut stream.data_type)
+                            } else {
+                                None
+                            },
+                            crate::src::trees::BlockFlushState {
+                            level: state.level,
+                            strategy: state.strategy,
+                            pending_buf,
+                            pending: &mut state.pending,
+                            bi_buf: &mut state.bi_buf,
+                            bi_valid: &mut state.bi_valid,
+                            bi_used: &mut state.bi_used,
+                            dyn_ltree: &mut state.dyn_ltree,
+                            dyn_dtree: &mut state.dyn_dtree,
+                            bl_tree: &mut state.bl_tree,
+                            l_desc: &mut state.l_desc,
+                            d_desc: &mut state.d_desc,
+                            bl_desc: &mut state.bl_desc,
+                            heap: &mut state.heap,
+                            heap_len: &mut state.heap_len,
+                            heap_max: &mut state.heap_max,
+                            depth: &mut state.depth,
+                            bl_count: &mut state.bl_count,
+                            opt_len: &mut state.opt_len,
+                            static_len: &mut state.static_len,
+                            matches: &mut state.matches,
+                            sym_buf_start: state.sym_buf_start,
+                                sym_next: &mut state.sym_next,
+                            },
+                            input,
+                            stored_len,
+                            0,
                     );
                     state.block_start = state.strstart as ::core::ffi::c_long;
                     flush_pending(state.strm.as_ptr());
-                    if (&*state.strm.as_ptr()).avail_out == 0 as crate::stdlib::uInt {
+                    if stream.avail_out == 0 as crate::stdlib::uInt {
                         return need_more;
                     }
                 }
@@ -3848,27 +3879,55 @@ unsafe extern "C" fn deflate_slow(
             SlowMatchAction::Literal(next_bflush) => {
                 bflush = next_bflush;
                 if bflush != 0 {
-                    crate::src::trees::_tr_flush_block(
-                        s as *mut crate::src::deflate::internal_state,
-                        if state.block_start >= 0 as ::core::ffi::c_long {
-                            state.window
-                                .expect("initialized window")
-                                .as_ptr()
-                                .wrapping_add(state.block_start as ::core::ffi::c_uint as usize)
-                                as *mut crate::stdlib::charf
-                        } else {
-                            ::core::ptr::null_mut::<crate::stdlib::charf>()
-                        },
-                        (state.strstart as ::core::ffi::c_long - state.block_start)
-                            as crate::zutil_h::ulg,
-                        0,
+                    let stored_len = (state.strstart as ::core::ffi::c_long
+                        - state.block_start) as crate::zutil_h::ulg;
+                    let input = if state.block_start >= 0 {
+                        let start = state.block_start as usize;
+                        Some(&window[start..start + stored_len as usize])
+                    } else {
+                        None
+                    };
+                    crate::src::trees::flush_block_from_views(
+                            if state.level > 0 {
+                                Some(&mut stream.data_type)
+                            } else {
+                                None
+                            },
+                            crate::src::trees::BlockFlushState {
+                            level: state.level,
+                            strategy: state.strategy,
+                            pending_buf,
+                            pending: &mut state.pending,
+                            bi_buf: &mut state.bi_buf,
+                            bi_valid: &mut state.bi_valid,
+                            bi_used: &mut state.bi_used,
+                            dyn_ltree: &mut state.dyn_ltree,
+                            dyn_dtree: &mut state.dyn_dtree,
+                            bl_tree: &mut state.bl_tree,
+                            l_desc: &mut state.l_desc,
+                            d_desc: &mut state.d_desc,
+                            bl_desc: &mut state.bl_desc,
+                            heap: &mut state.heap,
+                            heap_len: &mut state.heap_len,
+                            heap_max: &mut state.heap_max,
+                            depth: &mut state.depth,
+                            bl_count: &mut state.bl_count,
+                            opt_len: &mut state.opt_len,
+                            static_len: &mut state.static_len,
+                            matches: &mut state.matches,
+                            sym_buf_start: state.sym_buf_start,
+                                sym_next: &mut state.sym_next,
+                            },
+                            input,
+                            stored_len,
+                            0,
                     );
                     state.block_start = state.strstart as ::core::ffi::c_long;
                     flush_pending(state.strm.as_ptr());
                 }
                 state.strstart = state.strstart.wrapping_add(1);
                 state.lookahead = state.lookahead.wrapping_sub(1);
-                if (&*state.strm.as_ptr()).avail_out == 0 as crate::stdlib::uInt {
+                if stream.avail_out == 0 as crate::stdlib::uInt {
                     return need_more;
                 }
             }
@@ -3881,16 +3940,19 @@ unsafe extern "C" fn deflate_slow(
             state.window_size as usize,
         );
         let cc_0 = window[state.strstart.wrapping_sub(1) as usize] as crate::zutil_h::uch;
-        bflush = tally_slow_symbol(
-            sym_buf,
-            &mut state.sym_next,
-            state.sym_end,
-            &mut state.dyn_ltree,
-            &mut state.dyn_dtree,
-            &mut state.matches,
-            0,
-            cc_0 as ::core::ffi::c_uint,
-        );
+        bflush = {
+            let sym_buf = &mut pending_buf[sym_buf_start..];
+            tally_slow_symbol(
+                sym_buf,
+                &mut state.sym_next,
+                state.sym_end,
+                &mut state.dyn_ltree,
+                &mut state.dyn_dtree,
+                &mut state.matches,
+                0,
+                cc_0 as ::core::ffi::c_uint,
+            )
+        };
         state.match_available = 0;
     }
     state.insert = if state.strstart
@@ -3901,23 +3963,56 @@ unsafe extern "C" fn deflate_slow(
         (crate::zutil_h::MIN_MATCH - 1 as ::core::ffi::c_int) as crate::stdlib::uInt
     };
     if flush == crate::zlib_h::Z_FINISH {
-        crate::src::trees::_tr_flush_block(
-            s as *mut crate::src::deflate::internal_state,
-            if state.block_start >= 0 as ::core::ffi::c_long {
-                state.window
-                    .expect("initialized window")
-                    .as_ptr()
-                    .wrapping_add(state.block_start as ::core::ffi::c_uint as usize)
-                    as *mut crate::stdlib::charf
-            } else {
-                ::core::ptr::null_mut::<crate::stdlib::charf>()
-            },
-            (state.strstart as ::core::ffi::c_long - state.block_start) as crate::zutil_h::ulg,
-            1 as ::core::ffi::c_int,
+        let stored_len =
+            (state.strstart as ::core::ffi::c_long - state.block_start) as crate::zutil_h::ulg;
+        let window = ::core::slice::from_raw_parts(
+            state.window.expect("initialized window").as_ptr(),
+            state.window_size as usize,
+        );
+        let input = if state.block_start >= 0 {
+            let start = state.block_start as usize;
+            Some(&window[start..start + stored_len as usize])
+        } else {
+            None
+        };
+        crate::src::trees::flush_block_from_views(
+                if state.level > 0 {
+                    Some(&mut stream.data_type)
+                } else {
+                    None
+                },
+                crate::src::trees::BlockFlushState {
+                level: state.level,
+                strategy: state.strategy,
+                pending_buf,
+                pending: &mut state.pending,
+                bi_buf: &mut state.bi_buf,
+                bi_valid: &mut state.bi_valid,
+                bi_used: &mut state.bi_used,
+                dyn_ltree: &mut state.dyn_ltree,
+                dyn_dtree: &mut state.dyn_dtree,
+                bl_tree: &mut state.bl_tree,
+                l_desc: &mut state.l_desc,
+                d_desc: &mut state.d_desc,
+                bl_desc: &mut state.bl_desc,
+                heap: &mut state.heap,
+                heap_len: &mut state.heap_len,
+                heap_max: &mut state.heap_max,
+                depth: &mut state.depth,
+                bl_count: &mut state.bl_count,
+                opt_len: &mut state.opt_len,
+                static_len: &mut state.static_len,
+                matches: &mut state.matches,
+                sym_buf_start: state.sym_buf_start,
+                    sym_next: &mut state.sym_next,
+                },
+                input,
+                stored_len,
+                1,
         );
         state.block_start = state.strstart as ::core::ffi::c_long;
         flush_pending(state.strm.as_ptr());
-        if (&*state.strm.as_ptr()).avail_out == 0 as crate::stdlib::uInt {
+        if stream.avail_out == 0 as crate::stdlib::uInt {
             return (if true {
                 finish_started as ::core::ffi::c_int
             } else {
@@ -3927,23 +4022,56 @@ unsafe extern "C" fn deflate_slow(
         return finish_done;
     }
     if state.sym_next != 0 {
-        crate::src::trees::_tr_flush_block(
-            s as *mut crate::src::deflate::internal_state,
-            if state.block_start >= 0 as ::core::ffi::c_long {
-                state.window
-                    .expect("initialized window")
-                    .as_ptr()
-                    .wrapping_add(state.block_start as ::core::ffi::c_uint as usize)
-                    as *mut crate::stdlib::charf
-            } else {
-                ::core::ptr::null_mut::<crate::stdlib::charf>()
-            },
-            (state.strstart as ::core::ffi::c_long - state.block_start) as crate::zutil_h::ulg,
-            0 as ::core::ffi::c_int,
+        let stored_len =
+            (state.strstart as ::core::ffi::c_long - state.block_start) as crate::zutil_h::ulg;
+        let window = ::core::slice::from_raw_parts(
+            state.window.expect("initialized window").as_ptr(),
+            state.window_size as usize,
+        );
+        let input = if state.block_start >= 0 {
+            let start = state.block_start as usize;
+            Some(&window[start..start + stored_len as usize])
+        } else {
+            None
+        };
+        crate::src::trees::flush_block_from_views(
+                if state.level > 0 {
+                    Some(&mut stream.data_type)
+                } else {
+                    None
+                },
+                crate::src::trees::BlockFlushState {
+                level: state.level,
+                strategy: state.strategy,
+                pending_buf,
+                pending: &mut state.pending,
+                bi_buf: &mut state.bi_buf,
+                bi_valid: &mut state.bi_valid,
+                bi_used: &mut state.bi_used,
+                dyn_ltree: &mut state.dyn_ltree,
+                dyn_dtree: &mut state.dyn_dtree,
+                bl_tree: &mut state.bl_tree,
+                l_desc: &mut state.l_desc,
+                d_desc: &mut state.d_desc,
+                bl_desc: &mut state.bl_desc,
+                heap: &mut state.heap,
+                heap_len: &mut state.heap_len,
+                heap_max: &mut state.heap_max,
+                depth: &mut state.depth,
+                bl_count: &mut state.bl_count,
+                opt_len: &mut state.opt_len,
+                static_len: &mut state.static_len,
+                matches: &mut state.matches,
+                sym_buf_start: state.sym_buf_start,
+                    sym_next: &mut state.sym_next,
+                },
+                input,
+                stored_len,
+                0,
         );
         state.block_start = state.strstart as ::core::ffi::c_long;
         flush_pending(state.strm.as_ptr());
-        if (&*state.strm.as_ptr()).avail_out == 0 as crate::stdlib::uInt {
+        if stream.avail_out == 0 as crate::stdlib::uInt {
             return (if false {
                 finish_started as ::core::ffi::c_int
             } else {
