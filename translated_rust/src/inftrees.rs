@@ -2824,6 +2824,39 @@ const DEXT: [u16; 32] = [
     27, 27, 28, 28, 29, 29, 64, 64,
 ];
 
+fn table_entry_for_symbol(
+    type_0: crate::src::inftrees::codetype,
+    symbol: u16,
+    bits: u8,
+) -> Option<crate::src::inftrees::code> {
+    let (base, extra, match_symbol): (&[u16], &[u16], u16) = match type_0 {
+        crate::src::inftrees::CODES => (&[], &[], 20),
+        crate::src::inftrees::LENS => (&LBASE, &LEXT, 257),
+        crate::src::inftrees::DISTS => (&DBASE, &DEXT, 0),
+        _ => return None,
+    };
+    if u32::from(symbol) + 1 < u32::from(match_symbol) {
+        Some(crate::src::inftrees::code {
+            op: 0,
+            bits,
+            val: symbol,
+        })
+    } else if symbol >= match_symbol {
+        let index = (symbol - match_symbol) as usize;
+        Some(crate::src::inftrees::code {
+            op: *extra.get(index)? as u8,
+            bits,
+            val: *base.get(index)?,
+        })
+    } else {
+        Some(crate::src::inftrees::code {
+            op: 96,
+            bits,
+            val: 0,
+        })
+    }
+}
+
 /// Builds an inflate decoding table using bounded Rust slices.
 ///
 /// `table_cursor` is the index at which the table starts and is advanced by
@@ -2843,12 +2876,12 @@ pub fn inflate_table_safe(
         return 1;
     }
 
-    let (base, extra, match_symbol): (&[u16], &[u16], u16) = match type_0 {
-        crate::src::inftrees::CODES => (&[], &[], 20),
-        crate::src::inftrees::LENS => (&LBASE, &LEXT, 257),
-        crate::src::inftrees::DISTS => (&DBASE, &DEXT, 0),
-        _ => return -1,
-    };
+    if !matches!(
+        type_0,
+        crate::src::inftrees::CODES | crate::src::inftrees::LENS | crate::src::inftrees::DISTS
+    ) {
+        return -1;
+    }
 
     let mut count = [0u16; MAXBITS as usize + 1];
     for &length in lens {
@@ -2945,29 +2978,9 @@ pub fn inflate_table_safe(
         let Some(&work_code) = work.get(symbol) else {
             return 1;
         };
-        let work_symbol = work_code as usize;
-        let here = if (work_symbol as u32) + 1 < match_symbol as u32 {
-            crate::src::inftrees::code {
-                op: 0,
-                bits: (length - drop_bits) as u8,
-                val: work_code,
-            }
-        } else if work_symbol >= match_symbol as usize {
-            let index = work_symbol - match_symbol as usize;
-            let (Some(&op), Some(&val)) = (extra.get(index), base.get(index)) else {
-                return -1;
-            };
-            crate::src::inftrees::code {
-                op: op as u8,
-                bits: (length - drop_bits) as u8,
-                val,
-            }
-        } else {
-            crate::src::inftrees::code {
-                op: 96,
-                bits: (length - drop_bits) as u8,
-                val: 0,
-            }
+        let Some(here) = table_entry_for_symbol(type_0, work_code, (length - drop_bits) as u8)
+        else {
+            return -1;
         };
 
         let increment = 1u32 << (length - drop_bits);
@@ -3120,6 +3133,38 @@ pub unsafe extern "C" fn inflate_fixed_ffi(mut state: *mut crate::src::inflate::
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn assert_table_entry(entry: Option<code>, op: u8, bits: u8, val: u16) {
+        let entry = entry.expect("expected a table entry");
+        assert_eq!(entry.op, op);
+        assert_eq!(entry.bits, bits);
+        assert_eq!(entry.val, val);
+    }
+
+    #[test]
+    fn table_entry_for_symbol_classifies_code_entries() {
+        assert_table_entry(table_entry_for_symbol(CODES, 18, 7), 0, 7, 18);
+        assert_table_entry(table_entry_for_symbol(CODES, 19, 7), 96, 7, 0);
+        assert!(table_entry_for_symbol(CODES, 20, 7).is_none());
+    }
+
+    #[test]
+    fn table_entry_for_symbol_classifies_length_and_distance_entries() {
+        assert_table_entry(
+            table_entry_for_symbol(LENS, 257, 4),
+            LEXT[0] as u8,
+            4,
+            LBASE[0],
+        );
+        assert!(table_entry_for_symbol(LENS, 288, 4).is_none());
+        assert_table_entry(
+            table_entry_for_symbol(DISTS, 29, 3),
+            DEXT[29] as u8,
+            3,
+            DBASE[29],
+        );
+        assert!(table_entry_for_symbol(DISTS, 32, 3).is_none());
+    }
 
     #[test]
     fn copyright_export_has_stable_bytes() {

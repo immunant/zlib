@@ -318,6 +318,29 @@ fn gz_look_needs_more_input(avail_in: crate::stdlib::uInt, again: ::core::ffi::c
     avail_in == 0 || again != 0 && avail_in < 4
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum GzLookAction {
+    NeedMoreInput,
+    Gzip,
+    TransparentCopy,
+}
+
+fn gz_look_action(
+    avail_in: crate::stdlib::uInt,
+    again: ::core::ffi::c_int,
+    header: Option<[::core::ffi::c_uchar; 4]>,
+) -> GzLookAction {
+    if gz_look_needs_more_input(avail_in, again) {
+        GzLookAction::NeedMoreInput
+    } else if header.is_some_and(|[first, second, third, fourth]| {
+        gz_is_gzip_header(first, second, third, fourth)
+    }) {
+        GzLookAction::Gzip
+    } else {
+        GzLookAction::TransparentCopy
+    }
+}
+
 unsafe extern "C" fn gz_look(mut state: crate::gzguts_h::gz_statep) -> ::core::ffi::c_int {
     let mut strm: crate::zlib_h::z_streamp = &raw mut (*state).strm;
     if (*state).size == 0 as ::core::ffi::c_uint {
@@ -370,22 +393,26 @@ unsafe extern "C" fn gz_look(mut state: crate::gzguts_h::gz_statep) -> ::core::f
     if gz_avail(state) == -1 as ::core::ffi::c_int {
         return -1 as ::core::ffi::c_int;
     }
-    if gz_look_needs_more_input((*strm).avail_in, (*state).again) {
-        return 0 as ::core::ffi::c_int;
-    }
-    if (*strm).avail_in > 3 as crate::stdlib::uInt
-        && gz_is_gzip_header(
+    let header = if (*strm).avail_in > 3 as crate::stdlib::uInt {
+        Some([
             *(*strm).next_in.offset(0 as ::core::ffi::c_int as isize),
             *(*strm).next_in.offset(1 as ::core::ffi::c_int as isize),
             *(*strm).next_in.offset(2 as ::core::ffi::c_int as isize),
             *(*strm).next_in.offset(3 as ::core::ffi::c_int as isize),
-        )
-    {
-        crate::src::inflate::inflateReset(strm as *mut crate::zlib_h::z_stream_s);
-        (*state).how = crate::gzguts_h::GZIP;
-        (*state).junk = 1 as ::core::ffi::c_int;
-        (*state).direct = 0 as ::core::ffi::c_int;
-        return 0 as ::core::ffi::c_int;
+        ])
+    } else {
+        None
+    };
+    match gz_look_action((*strm).avail_in, (*state).again, header) {
+        GzLookAction::NeedMoreInput => return 0 as ::core::ffi::c_int,
+        GzLookAction::Gzip => {
+            crate::src::inflate::inflateReset(strm as *mut crate::zlib_h::z_stream_s);
+            (*state).how = crate::gzguts_h::GZIP;
+            (*state).junk = 1 as ::core::ffi::c_int;
+            (*state).direct = 0 as ::core::ffi::c_int;
+            return 0 as ::core::ffi::c_int;
+        }
+        GzLookAction::TransparentCopy => {}
     }
     (*state).x.next = (*state).out;
     crate::stdlib::memcpy(
@@ -844,6 +871,21 @@ mod tests {
     fn gz_look_needs_more_input_retries_until_header_is_wide_enough() {
         assert!(gz_look_needs_more_input(3, 1));
         assert!(!gz_look_needs_more_input(4, 1));
+    }
+
+    #[test]
+    fn gz_look_action_preserves_partial_and_transparent_input_rules() {
+        assert_eq!(gz_look_action(0, 0, None), GzLookAction::NeedMoreInput);
+        assert_eq!(gz_look_action(3, 1, None), GzLookAction::NeedMoreInput);
+        assert_eq!(
+            gz_look_action(4, 0, Some([31, 139, 8, 31])),
+            GzLookAction::Gzip
+        );
+        assert_eq!(
+            gz_look_action(4, 0, Some([31, 139, 8, 32])),
+            GzLookAction::TransparentCopy
+        );
+        assert_eq!(gz_look_action(3, 0, None), GzLookAction::TransparentCopy);
     }
 
     #[test]
