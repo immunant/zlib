@@ -162,7 +162,8 @@ unsafe extern "C" fn gz_avail(mut state: crate::gzguts_h::gz_statep) -> ::core::
         {
             let strm = &mut state.strm;
             if strm.avail_in != 0 {
-                let p = state.in_0.as_deref_mut().unwrap().as_mut_ptr();
+                let buffer = state.in_0.as_deref_mut().unwrap();
+                let p = buffer.as_mut_ptr();
                 let q: *const ::core::ffi::c_uchar = strm.next_in;
                 if q != p as *const ::core::ffi::c_uchar {
                     let n = strm.avail_in as usize;
@@ -170,7 +171,6 @@ unsafe extern "C" fn gz_avail(mut state: crate::gzguts_h::gz_statep) -> ::core::
                     if p.is_null() || q.is_null() || n > size {
                         return -1 as ::core::ffi::c_int;
                     }
-                    let buffer = ::core::slice::from_raw_parts_mut(p, size);
                     // `strm.next_in` is always a cursor in `in_0`: gz_load()
                     // installs the buffer, and inflate only advances that cursor.
                     let Some(source_start) = q.addr().checked_sub(p.addr()) else {
