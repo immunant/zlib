@@ -2159,81 +2159,100 @@ fn normalize_deflate_params(
     }
 }
 
-pub unsafe extern "C" fn deflateParams(
-    mut strm: crate::zlib_h::z_streamp,
-    mut level: ::core::ffi::c_int,
-    mut strategy: ::core::ffi::c_int,
-) -> ::core::ffi::c_int {
-    let mut s: *mut crate::src::deflate::deflate_state =
-        ::core::ptr::null_mut::<crate::src::deflate::deflate_state>();
-    let mut func: compress_func = None;
-    if deflateStateCheck(strm) != 0 {
-        return crate::zlib_h::Z_STREAM_ERROR;
-    }
-    s = (*strm).state as *mut crate::src::deflate::deflate_state;
-    let s = &mut *s;
-    let (level, strategy) = match normalize_deflate_params(level, strategy) {
-        Some(params) => params,
-        None => return crate::zlib_h::Z_STREAM_ERROR,
-    };
-    func = configuration_table[s.level as usize].func;
-    if (strategy != s.strategy || func != configuration_table[level as usize].func)
-        && s.last_flush != -2 as ::core::ffi::c_int
-    {
-        let mut err: ::core::ffi::c_int = deflate(strm, crate::zlib_h::Z_BLOCK);
-        if err == crate::zlib_h::Z_STREAM_ERROR {
-            return err;
-        }
-        if (*strm).avail_in != 0
-            || s.strstart as ::core::ffi::c_long - s.block_start + s.lookahead as ::core::ffi::c_long
-                != 0
-        {
-            return crate::zlib_h::Z_BUF_ERROR;
-        }
-    }
-    if s.level != level {
-        if s.level == 0 as ::core::ffi::c_int && s.matches != 0 as crate::stdlib::uInt {
-            if s.matches == 1 as crate::stdlib::uInt {
-                // `s` is validated by this exported boundary.  Keep the raw
-                // table views local and delegate the actual rebase to the
-                // safe slice algorithm.
-                let head = &mut *::core::ptr::slice_from_raw_parts_mut(
-                    s.head,
-                    s.hash_size as usize,
-                );
-                let prev = &mut *::core::ptr::slice_from_raw_parts_mut(
-                    s.prev,
-                    s.w_size as usize,
-                );
-                slide_hash_core(head, prev, s.w_size);
-                s.slid = 1;
-            } else {
-                *s
-                    .head
-                    .wrapping_add(s.hash_size.wrapping_sub(1 as crate::stdlib::uInt) as usize) =
-                    NIL as crate::src::deflate::Posf;
-                crate::stdlib::memset(
-                    s.head as *mut ::core::ffi::c_void,
-                    0 as ::core::ffi::c_int,
-                    (s.hash_size.wrapping_sub(1 as crate::stdlib::uInt)
-                        as crate::__stddef_size_t_h::size_t)
-                        .wrapping_mul(::core::mem::size_of::<crate::src::deflate::Posf>()
-                            as crate::__stddef_size_t_h::size_t),
-                );
-                s.slid = 0 as ::core::ffi::c_int;
-            }
-            s.matches = 0 as crate::stdlib::uInt;
-        }
-        s.level = level;
-        s.max_lazy_match = configuration_table[level as usize].max_lazy as crate::stdlib::uInt;
-        s.good_match = configuration_table[level as usize].good_length as crate::stdlib::uInt;
-        s.nice_match = configuration_table[level as usize].nice_length as ::core::ffi::c_int;
-        s.max_chain_length =
-            configuration_table[level as usize].max_chain as crate::stdlib::uInt;
-    }
-    s.strategy = strategy;
-    return crate::zlib_h::Z_OK;
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+enum DeflateParamsHashAction {
+    None,
+    Rebase,
+    Clear,
 }
+
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+struct DeflateParamsPlan {
+    level: ::core::ffi::c_int,
+    strategy: ::core::ffi::c_int,
+    flush_before_apply: bool,
+    hash_action: DeflateParamsHashAction,
+}
+
+fn deflate_params_plan(
+    state: &crate::src::deflate::deflate_state,
+    level: ::core::ffi::c_int,
+    strategy: ::core::ffi::c_int,
+) -> Option<DeflateParamsPlan> {
+    let (level, strategy) = normalize_deflate_params(level, strategy)?;
+    let flush_before_apply = (strategy != state.strategy
+        || configuration_table[state.level as usize].func
+            != configuration_table[level as usize].func)
+        && state.last_flush != -2;
+    let hash_action = if state.level != level
+        && state.level == 0
+        && state.matches != 0
+    {
+        if state.matches == 1 {
+            DeflateParamsHashAction::Rebase
+        } else {
+            DeflateParamsHashAction::Clear
+        }
+    } else {
+        DeflateParamsHashAction::None
+    };
+
+    Some(DeflateParamsPlan {
+        level,
+        strategy,
+        flush_before_apply,
+        hash_action,
+    })
+}
+
+fn deflate_params_flush_is_complete(
+    stream: &crate::zlib_h::z_stream,
+    state: &crate::src::deflate::deflate_state,
+) -> bool {
+    stream.avail_in == 0
+        && state.strstart as ::core::ffi::c_long - state.block_start
+            + state.lookahead as ::core::ffi::c_long
+            == 0
+}
+
+fn deflate_params_apply_hash_action(
+    action: DeflateParamsHashAction,
+    head: &mut [crate::src::deflate::Posf],
+    prev: Option<&mut [crate::src::deflate::Posf]>,
+    wsize: crate::stdlib::uInt,
+) {
+    match action {
+        DeflateParamsHashAction::None => {}
+        DeflateParamsHashAction::Rebase => {
+            if let Some(prev) = prev {
+                slide_hash_core(head, prev, wsize);
+            }
+        }
+        DeflateParamsHashAction::Clear => head.fill(NIL as crate::src::deflate::Posf),
+    }
+}
+
+fn deflate_params_apply(
+    state: &mut crate::src::deflate::deflate_state,
+    plan: DeflateParamsPlan,
+) {
+    if state.level != plan.level {
+        if state.level == 0 && state.matches != 0 {
+            state.slid = match plan.hash_action {
+                DeflateParamsHashAction::Rebase => 1,
+                DeflateParamsHashAction::Clear | DeflateParamsHashAction::None => 0,
+            };
+            state.matches = 0;
+        }
+        state.level = plan.level;
+        state.max_lazy_match = configuration_table[plan.level as usize].max_lazy as crate::stdlib::uInt;
+        state.good_match = configuration_table[plan.level as usize].good_length as crate::stdlib::uInt;
+        state.nice_match = configuration_table[plan.level as usize].nice_length as ::core::ffi::c_int;
+        state.max_chain_length = configuration_table[plan.level as usize].max_chain as crate::stdlib::uInt;
+    }
+    state.strategy = plan.strategy;
+}
+
 #[export_name = "deflateParams"]
 
 pub unsafe extern "C" fn deflateParams_ffi(
@@ -2241,7 +2260,55 @@ pub unsafe extern "C" fn deflateParams_ffi(
     mut level: ::core::ffi::c_int,
     mut strategy: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
-    deflateParams(strm, level, strategy)
+    if deflateStateCheck(strm) != 0 {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    }
+    let plan = {
+        let stream = &mut *strm;
+        let state = &mut *(stream.state as *mut crate::src::deflate::deflate_state);
+        match deflate_params_plan(state, level, strategy) {
+            Some(plan) => plan,
+            None => return crate::zlib_h::Z_STREAM_ERROR,
+        }
+    };
+
+    if plan.flush_before_apply {
+        let err = deflate(strm, crate::zlib_h::Z_BLOCK);
+        if err == crate::zlib_h::Z_STREAM_ERROR {
+            return err;
+        }
+        let stream = &mut *strm;
+        let state = &mut *(stream.state as *mut crate::src::deflate::deflate_state);
+        if !deflate_params_flush_is_complete(stream, state) {
+            return crate::zlib_h::Z_BUF_ERROR;
+        }
+    }
+
+    let stream = &mut *strm;
+    let state = &mut *(stream.state as *mut crate::src::deflate::deflate_state);
+    match plan.hash_action {
+        DeflateParamsHashAction::None => {}
+        DeflateParamsHashAction::Rebase => {
+            let head = &mut *::core::ptr::slice_from_raw_parts_mut(
+                state.head,
+                state.hash_size as usize,
+            );
+            let prev = &mut *::core::ptr::slice_from_raw_parts_mut(
+                state.prev,
+                state.w_size as usize,
+            );
+            deflate_params_apply_hash_action(plan.hash_action, head, Some(prev), state.w_size);
+        }
+        DeflateParamsHashAction::Clear => {
+            let head = &mut *::core::ptr::slice_from_raw_parts_mut(
+                state.head,
+                state.hash_size as usize,
+            );
+            deflate_params_apply_hash_action(plan.hash_action, head, None, state.w_size);
+        }
+    }
+    deflate_params_apply(state, plan);
+    crate::zlib_h::Z_OK
 }
 fn deflate_tune_core(
     good_match: &mut crate::stdlib::uInt,
@@ -4817,6 +4884,53 @@ mod tests {
         assert_eq!(state.l_desc.max_code, 0);
         assert_eq!(state.d_desc.max_code, 0);
         assert_eq!(state.bl_desc.max_code, 0);
+    }
+
+    #[test]
+    fn deflate_params_plan_and_apply_keep_hash_work_at_the_boundary() {
+        let mut state = super::internal_state::newly_allocated();
+        state.level = 0;
+        state.strategy = crate::zlib_h::Z_DEFAULT_STRATEGY;
+        state.last_flush = -2;
+        state.matches = 1;
+
+        let plan = super::deflate_params_plan(&state, 1, crate::zlib_h::Z_DEFAULT_STRATEGY)
+            .expect("valid parameters must produce a plan");
+        assert!(!plan.flush_before_apply);
+        assert_eq!(plan.hash_action, super::DeflateParamsHashAction::Rebase);
+
+        super::deflate_params_apply(&mut state, plan);
+        assert_eq!(state.level, 1);
+        assert_eq!(state.strategy, crate::zlib_h::Z_DEFAULT_STRATEGY);
+        assert_eq!(state.matches, 0);
+        assert_eq!(state.slid, 1);
+        assert_eq!(state.max_lazy_match, 4);
+        assert_eq!(state.good_match, 4);
+        assert_eq!(state.nice_match, 8);
+        assert_eq!(state.max_chain_length, 4);
+    }
+
+    #[test]
+    fn deflate_params_hash_actions_use_only_safe_table_views() {
+        let mut head = [7, 3, 0, 12];
+        super::deflate_params_apply_hash_action(
+            super::DeflateParamsHashAction::Clear,
+            &mut head,
+            None,
+            4,
+        );
+        assert_eq!(head, [0; 4]);
+
+        let mut head = [0, 4, 6, 8];
+        let mut prev = [1, 2, 5, 9];
+        super::deflate_params_apply_hash_action(
+            super::DeflateParamsHashAction::Rebase,
+            &mut head,
+            Some(&mut prev),
+            4,
+        );
+        assert_eq!(head, [0, 0, 2, 4]);
+        assert_eq!(prev, [0, 0, 1, 5]);
     }
 
     #[test]

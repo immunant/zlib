@@ -17,7 +17,6 @@ pub use crate::stdlib::ssize_t;
 pub use crate::src::deflate::deflate;
 pub use crate::src::deflate::deflateEnd;
 pub use crate::src::deflate::deflateInit2_;
-pub use crate::src::deflate::deflateParams;
 pub use crate::src::deflate::deflateReset_ffi as deflateReset;
 pub use crate::src::deflate::internal_state;
 
@@ -1947,7 +1946,7 @@ pub unsafe extern "C" fn gzsetparams_ffi(
         return state.err;
     }
     if gzsetparams_requires_deflate(action) {
-        crate::src::deflate::deflateParams(
+        crate::src::deflate::deflateParams_ffi(
             &mut state.strm as *mut crate::zlib_h::z_stream_s,
             level,
             strategy,
