@@ -4223,17 +4223,16 @@ fn deflate_stored(
         let mut first_block = true;
         loop {
             let (initial_avail_in, initial_input, plan) = {
-                let state = &mut *s;
                 (
                     strm.avail_in,
                     strm.next_in,
                     stored_initial_block_plan(
-                        state.pending_buf_size,
-                        state.w_size,
-                        state.bi_valid,
+                        s.pending_buf_size,
+                        s.w_size,
+                        s.bi_valid,
                         strm.avail_out,
-                        state.strstart,
-                        state.block_start,
+                        s.strstart,
+                        s.block_start,
                         strm.avail_in,
                         flush,
                     ),
@@ -4255,25 +4254,23 @@ fn deflate_stored(
             // buffer.  Lend that validated buffer directly to the safe core
             // instead of round-tripping through the raw `_tr_stored_block`
             // adapter.
-            let state = &mut *s;
-            let Ok(pending_len) = usize::try_from(state.pending_buf_size) else {
+            let Ok(pending_len) = usize::try_from(s.pending_buf_size) else {
                 return need_more;
             };
-            if pending_len != 0 && state.pending_buf.is_null() {
+            if pending_len != 0 && s.pending_buf.is_null() {
                 return need_more;
             }
             let pending_buf = if pending_len == 0 {
                 &mut []
             } else {
-                ::core::slice::from_raw_parts_mut(state.pending_buf, pending_len)
+                ::core::slice::from_raw_parts_mut(s.pending_buf, pending_len)
             };
-            if !emit_stored_direct_header_state(state, pending_buf, len, last) {
+            if !emit_stored_direct_header_state(s, pending_buf, len, last) {
                 return need_more;
             }
-            flush_pending(state.strm);
+            flush_pending(s.strm);
             if left != 0 || len != 0 {
-                let state = &mut *s;
-                let stream = state.strm;
+                let stream = s.strm;
                 let strm = &mut *stream;
                 let Ok(output_len) = usize::try_from(strm.avail_out) else {
                     return need_more;
@@ -4288,21 +4285,21 @@ fn deflate_stored(
                 };
                 let mut output_used = 0usize;
                 if left != 0 {
-                    let Ok(window_len) = usize::try_from(state.window_size) else {
+                    let Ok(window_len) = usize::try_from(s.window_size) else {
                         return need_more;
                     };
-                    if window_len != 0 && state.window.is_null() {
+                    if window_len != 0 && s.window.is_null() {
                         return need_more;
                     }
                     let window = if window_len == 0 {
                         &[]
                     } else {
-                        ::core::slice::from_raw_parts(state.window, window_len)
+                        ::core::slice::from_raw_parts(s.window, window_len)
                     };
                     let Some(copy) = copy_stored_window_to_output_state(
                         window,
                         output,
-                        state.block_start,
+                        s.block_start,
                         left,
                         len,
                     ) else {
@@ -4322,14 +4319,14 @@ fn deflate_stored(
                     ) {
                         return need_more;
                     }
-                    state.block_start = copy.block_start;
+                    s.block_start = copy.block_start;
                     len = copy.remaining;
                 }
                 if len != 0 {
                     let Some(destination) = output.get_mut(output_used..) else {
                         return need_more;
                     };
-                    let progress = read_buf(strm, destination, len, state.wrap);
+                    let progress = read_buf(strm, destination, len, s.wrap);
                     remaining_avail_in = progress.avail_in;
                     // Advance by the bytes actually copied. On valid zlib state
                     // this equals `len`; retaining the returned value keeps a
@@ -4351,19 +4348,18 @@ fn deflate_stored(
         }
         used = stored_input_consumed(used, remaining_avail_in);
         if used != 0 {
-            let state = &mut *s;
-            let Ok(window_len) = usize::try_from(state.window_size) else {
+            let Ok(window_len) = usize::try_from(s.window_size) else {
                 return need_more;
             };
             let Ok(used_len) = usize::try_from(used) else {
                 return need_more;
             };
-            if state.window.is_null() || input_start.is_null() {
+            if s.window.is_null() || input_start.is_null() {
                 return need_more;
             }
-            let window = ::core::slice::from_raw_parts_mut(state.window, window_len);
+            let window = ::core::slice::from_raw_parts_mut(s.window, window_len);
             let consumed = ::core::slice::from_raw_parts(input_start, used_len);
-            if !update_stored_history_state(state, window, consumed) {
+            if !update_stored_history_state(s, window, consumed) {
                 return need_more;
             }
         }
@@ -4371,26 +4367,25 @@ fn deflate_stored(
             return finish_done;
         }
         {
-            let state = &mut *s;
             if flush != crate::zlib_h::Z_NO_FLUSH
                 && flush != crate::zlib_h::Z_FINISH
                 && strm.avail_in == 0 as crate::stdlib::uInt
-                && state.strstart as ::core::ffi::c_long == state.block_start
+                && s.strstart as ::core::ffi::c_long == s.block_start
             {
                 return block_done;
             }
-            let Ok(window_len) = usize::try_from(state.window_size) else {
+            let Ok(window_len) = usize::try_from(s.window_size) else {
                 return need_more;
             };
-            if window_len != 0 && state.window.is_null() {
+            if window_len != 0 && s.window.is_null() {
                 return need_more;
             }
             let window = if window_len == 0 {
                 &mut []
             } else {
-                ::core::slice::from_raw_parts_mut(state.window, window_len)
+                ::core::slice::from_raw_parts_mut(s.window, window_len)
             };
-            let Some(next_have) = rebalance_stored_window_state(state, window, strm.avail_in)
+            let Some(next_have) = rebalance_stored_window_state(s, window, strm.avail_in)
             else {
                 return need_more;
             };
@@ -4406,58 +4401,58 @@ fn deflate_stored(
                 // Validate the complete possible state commit before reading:
                 // `read_buf()` may advance the ABI input cursor, so a malformed
                 // history state must be rejected before that observable change.
-                if stored_input_progress_state(state, have).is_none() {
+                if stored_input_progress_state(s, have).is_none() {
                     return need_more;
                 }
                 let Some(write_span) =
-                    fill_window_write_span(window.len(), state.strstart, 0, have)
+                    fill_window_write_span(window.len(), s.strstart, 0, have)
                 else {
                     return need_more;
                 };
                 let Some(output) = window.get_mut(write_span) else {
                     return need_more;
                 };
-                let progress = read_buf(strm, output, have, state.wrap);
-                if progress.copied > have || !record_stored_input_state(state, progress.copied) {
+                let progress = read_buf(strm, output, have, s.wrap);
+                if progress.copied > have || !record_stored_input_state(s, progress.copied) {
                     return need_more;
                 }
             }
             let tail_plan = stored_tail_block_plan(
-                state.pending_buf_size,
-                state.bi_valid,
-                state.w_size,
-                state.strstart,
-                state.block_start,
+                s.pending_buf_size,
+                s.bi_valid,
+                s.w_size,
+                s.strstart,
+                s.block_start,
                 strm.avail_in,
                 flush,
             );
             if let Some(plan) = tail_plan {
                 len = plan.len;
                 last = plan.last;
-                let Ok(pending_len) = usize::try_from(state.pending_buf_size) else {
+                let Ok(pending_len) = usize::try_from(s.pending_buf_size) else {
                     return need_more;
                 };
-                if pending_len != 0 && state.pending_buf.is_null() {
+                if pending_len != 0 && s.pending_buf.is_null() {
                     return need_more;
                 }
                 let pending_buf = if pending_len == 0 {
                     &mut []
                 } else {
-                    ::core::slice::from_raw_parts_mut(state.pending_buf, pending_len)
+                    ::core::slice::from_raw_parts_mut(s.pending_buf, pending_len)
                 };
                 let stored = if len == 0 {
                     &[]
                 } else {
-                    let Some(stored) = stored_block_window_slice(window, state.block_start, len)
+                    let Some(stored) = stored_block_window_slice(window, s.block_start, len)
                     else {
                         return need_more;
                     };
                     stored
                 };
-                if !emit_stored_window_block_state(state, pending_buf, stored, last) {
+                if !emit_stored_window_block_state(s, pending_buf, stored, last) {
                     return need_more;
                 }
-                flush_pending(state.strm);
+                flush_pending(s.strm);
             }
         }
         return (if last != 0 {
