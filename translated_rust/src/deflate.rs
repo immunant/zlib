@@ -1839,6 +1839,32 @@ fn append_gzip_trailer_state(
     true
 }
 
+/// Append the two-byte gzip header CRC after all optional header fields.
+///
+/// The wire format stores the low sixteen bits in little-endian order.  Check
+/// both bytes before changing the pending cursor so a malformed pending buffer
+/// cannot leave a partial header CRC behind.
+fn append_gzip_hcrc_state(
+    pending_buf: &mut [crate::stdlib::Byte],
+    pending: &mut crate::zutil_h::ulg,
+    hcrc: crate::stdlib::uLong,
+) -> bool {
+    let Ok(start) = usize::try_from(*pending) else {
+        return false;
+    };
+    let Some(end) = start.checked_add(2) else {
+        return false;
+    };
+    let Some(bytes) = pending_buf.get_mut(start..end) else {
+        return false;
+    };
+
+    bytes[0] = hcrc as crate::stdlib::Byte;
+    bytes[1] = (hcrc >> 8) as crate::stdlib::Byte;
+    *pending = end as crate::zutil_h::ulg;
+    true
+}
+
 /// The pointer-free portion of a gzip header that is emitted before optional
 /// extra/name/comment fields.  The ABI header is observed at the raw state
 /// boundary and reduced to these values before touching callback-owned output.
@@ -2429,15 +2455,22 @@ pub unsafe extern "C" fn deflate(
                     return crate::zlib_h::Z_OK;
                 }
             }
-            let c2rust_fresh23 = (*s).pending;
-            (*s).pending = (*s).pending.wrapping_add(1);
-            *(*s).pending_buf.offset(c2rust_fresh23 as isize) =
-                ((*strm).adler & 0xff as crate::stdlib::uLong) as crate::stdlib::Byte;
-            let c2rust_fresh24 = (*s).pending;
-            (*s).pending = (*s).pending.wrapping_add(1);
-            *(*s).pending_buf.offset(c2rust_fresh24 as isize) =
-                ((*strm).adler >> 8 as ::core::ffi::c_int & 0xff as crate::stdlib::uLong)
-                    as crate::stdlib::Byte;
+            let hcrc = (*strm).adler;
+            let state = &mut *s;
+            let Ok(pending_len) = usize::try_from(state.pending_buf_size) else {
+                return crate::zlib_h::Z_STREAM_ERROR;
+            };
+            if pending_len != 0 && state.pending_buf.is_null() {
+                return crate::zlib_h::Z_STREAM_ERROR;
+            }
+            let pending_buf = if pending_len == 0 {
+                &mut []
+            } else {
+                ::core::slice::from_raw_parts_mut(state.pending_buf, pending_len)
+            };
+            if !append_gzip_hcrc_state(pending_buf, &mut state.pending, hcrc) {
+                return crate::zlib_h::Z_STREAM_ERROR;
+            }
             (*strm).adler = crate::src::crc32::crc32(
                 0 as crate::stdlib::uLong,
                 ::core::ptr::null::<crate::stdlib::Bytef>(),
