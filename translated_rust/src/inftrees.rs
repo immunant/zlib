@@ -3237,8 +3237,7 @@ pub unsafe extern "C" fn inflate_table_ffi(
 ) -> ::core::ffi::c_int {
     inflate_table(type_0, lens, codes, table, bits, work)
 }
-pub unsafe extern "C" fn inflate_fixed(mut state: *mut crate::src::inflate::inflate_state) {
-    let state = unsafe { &mut *state };
+pub unsafe fn inflate_fixed(state: &mut crate::src::inflate::inflate_state) {
     state.lencode = lenfix.as_ptr();
     state.lenbits = 9 as ::core::ffi::c_uint;
     state.distcode = crate::src::inflate::distance_table::Fixed;
@@ -3247,5 +3246,5 @@ pub unsafe extern "C" fn inflate_fixed(mut state: *mut crate::src::inflate::infl
 #[export_name = "inflate_fixed"]
 
 pub unsafe extern "C" fn inflate_fixed_ffi(mut state: *mut crate::src::inflate::inflate_state) {
-    inflate_fixed(state)
+    inflate_fixed(&mut *state)
 }
