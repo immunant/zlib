@@ -551,26 +551,34 @@ fn deflate_prepare_stream(stream: &mut crate::zlib_h::z_stream) {
 // This internal parameter-defaulting dispatcher only accepts references
 // already bound by its callers. The actual raw initialization boundary
 // remains `deflateInit2_` below.
+//
+// zlib checks the version byte and stream layout before it considers the
+// stream pointer. Keep that scalar preflight separate so both initializers
+// preserve the same externally visible error ordering without duplicating
+// the condition at a pointer-handling boundary.
+fn deflate_init_version_and_size_valid(
+    version: Option<::core::ffi::c_char>,
+    stream_size: ::core::ffi::c_int,
+) -> bool {
+    let Some(version) = version else {
+        return false;
+    };
+    version as ::core::ffi::c_int == crate::zlib_h::ZLIB_VERSION[0] as ::core::ffi::c_int
+        && stream_size == ::core::mem::size_of::<crate::zlib_h::z_stream>() as ::core::ffi::c_int
+}
+
 pub fn deflateInit_(
     strm: Option<&mut crate::zlib_h::z_stream>,
     mut level: ::core::ffi::c_int,
     version: Option<&::core::ffi::c_char>,
     mut stream_size: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
-    let Some(version) = version else {
+    let version_first = version.copied();
+    if !deflate_init_version_and_size_valid(version_first, stream_size) {
         return crate::zlib_h::Z_VERSION_ERROR;
-    };
+    }
     let Some(strm) = strm else {
-        // `deflateInit2_` checks version and stream size before the stream
-        // pointer, so preserve that externally visible error ordering.
-        return if *version as ::core::ffi::c_int
-            != crate::zlib_h::ZLIB_VERSION[0] as ::core::ffi::c_int
-            || stream_size != ::core::mem::size_of::<crate::zlib_h::z_stream>() as ::core::ffi::c_int
-        {
-            crate::zlib_h::Z_VERSION_ERROR
-        } else {
-            crate::zlib_h::Z_STREAM_ERROR
-        };
+        return crate::zlib_h::Z_STREAM_ERROR;
     };
     unsafe {
         deflateInit2_(
@@ -580,7 +588,7 @@ pub fn deflateInit_(
             crate::stdlib::MAX_WBITS,
             crate::zutil_h::DEF_MEM_LEVEL,
             crate::zlib_h::Z_DEFAULT_STRATEGY,
-            version,
+            &version_first.expect("preflight accepted version"),
             stream_size,
         )
     }
@@ -612,12 +620,8 @@ pub unsafe extern "C" fn deflateInit2_(
     let mut s: *mut crate::src::deflate::deflate_state =
         ::core::ptr::null_mut::<crate::src::deflate::deflate_state>();
     let mut wrap: ::core::ffi::c_int = 1 as ::core::ffi::c_int;
-    static my_version: [::core::ffi::c_char; 15] = crate::zlib_h::ZLIB_VERSION;
-    if version.is_null()
-        || *version as ::core::ffi::c_int
-            != my_version[0 as ::core::ffi::c_int as usize] as ::core::ffi::c_int
-        || stream_size as usize != ::core::mem::size_of::<crate::zlib_h::z_stream>()
-    {
+    let version_first = if version.is_null() { None } else { Some(*version) };
+    if !deflate_init_version_and_size_valid(version_first, stream_size) {
         return crate::zlib_h::Z_VERSION_ERROR;
     }
     if strm.is_null() {
