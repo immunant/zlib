@@ -2684,6 +2684,19 @@ fn longest_match_next_chain_length(
     (next_chain_length != 0).then_some(next_chain_length)
 }
 
+fn longest_match_candidate_update(
+    candidate_length: ::core::ffi::c_int,
+    best_length: ::core::ffi::c_int,
+    candidate_start: crate::src::deflate::IPos,
+    nice_match: ::core::ffi::c_int,
+) -> Option<(crate::src::deflate::IPos, ::core::ffi::c_int, bool)> {
+    (candidate_length > best_length).then_some((
+        candidate_start,
+        candidate_length,
+        candidate_length >= nice_match,
+    ))
+}
+
 fn longest_match_clamp_length(
     best_len: ::core::ffi::c_int,
     lookahead: crate::stdlib::uInt,
@@ -2783,10 +2796,12 @@ unsafe fn longest_match(
             len = crate::zutil_h::MAX_MATCH
                 - strend.offset_from(scan) as ::core::ffi::c_long as ::core::ffi::c_int;
             scan = strend.offset(-(crate::zutil_h::MAX_MATCH as isize));
-            if len > best_len {
-                (*s).match_start = cur_match as crate::stdlib::uInt;
-                best_len = len;
-                if len >= nice_match {
+            if let Some((match_start, new_best_length, reached_nice_match)) =
+                longest_match_candidate_update(len, best_len, cur_match, nice_match)
+            {
+                (*s).match_start = match_start as crate::stdlib::uInt;
+                best_len = new_best_length;
+                if reached_nice_match {
                     break;
                 }
                 scan_end1 = *scan.offset((best_len - 1 as ::core::ffi::c_int) as isize)
@@ -3992,14 +4007,14 @@ mod tests {
         fill_window_cursor, fill_window_insert_after_slide, fill_window_should_refill,
         fill_window_should_slide, fill_window_zero_range, flush_pending_accounting,
         gzip_default_xfl, gzip_header_crc, gzip_header_crc_pending, gzip_header_crc_pending_range,
-        lm_match_parameters, longest_match_clamp_length, longest_match_limit,
-        longest_match_next_chain_length, longest_match_search_parameters, normalize_deflate_params,
-        pending_buffer_needs_flush, pending_output_len, pending_short_cursors, read_buf_len,
-        read_buf_total_in_after_copy, short_msb_bytes, slide_hash_entry,
-        stored_block_available_output, stored_block_can_emit, stored_block_is_last,
-        stored_block_min_size, stored_block_payload_len, stored_block_should_wait,
-        stored_insert_after_input, symbol_triplet_cursors, zlib_header, DeflateMatchRefillAction,
-        DeflatePreflight, DeflateRleRefillAction,
+        lm_match_parameters, longest_match_candidate_update, longest_match_clamp_length,
+        longest_match_limit, longest_match_next_chain_length, longest_match_search_parameters,
+        normalize_deflate_params, pending_buffer_needs_flush, pending_output_len,
+        pending_short_cursors, read_buf_len, read_buf_total_in_after_copy, short_msb_bytes,
+        slide_hash_entry, stored_block_available_output, stored_block_can_emit,
+        stored_block_is_last, stored_block_min_size, stored_block_payload_len,
+        stored_block_should_wait, stored_insert_after_input, symbol_triplet_cursors, zlib_header,
+        DeflateMatchRefillAction, DeflatePreflight, DeflateRleRefillAction,
     };
 
     #[test]
@@ -4422,6 +4437,28 @@ mod tests {
         assert_eq!(
             longest_match_next_chain_length(6, 5, 0),
             Some(::core::ffi::c_uint::MAX),
+        );
+    }
+
+    #[test]
+    fn longest_match_candidate_update_accepts_only_longer_matches() {
+        assert_eq!(
+            longest_match_candidate_update(8, 7, 123, 8),
+            Some((123, 8, true))
+        );
+        assert_eq!(longest_match_candidate_update(8, 8, 123, 8), None);
+        assert_eq!(longest_match_candidate_update(7, 8, 123, 8), None);
+    }
+
+    #[test]
+    fn longest_match_candidate_update_preserves_nice_match_boundary() {
+        assert_eq!(
+            longest_match_candidate_update(9, 8, 123, 10),
+            Some((123, 9, false))
+        );
+        assert_eq!(
+            longest_match_candidate_update(::core::ffi::c_int::MAX, -1, 0, -1),
+            Some((0, ::core::ffi::c_int::MAX, true)),
         );
     }
 

@@ -516,6 +516,17 @@ fn gz_comp_reset_action(
     }
 }
 
+fn gz_comp_reset_value(
+    action: &GzCompResetAction,
+    current_reset: ::core::ffi::c_int,
+) -> ::core::ffi::c_int {
+    if matches!(action, GzCompResetAction::Reset) {
+        0
+    } else {
+        current_reset
+    }
+}
+
 fn gz_comp_reset_after_flush(
     flush: ::core::ffi::c_int,
     current_reset: ::core::ffi::c_int,
@@ -800,15 +811,16 @@ unsafe fn gz_comp(
         return 0 as ::core::ffi::c_int;
     }
     let mut reset = (*state).reset;
-    match gz_comp_reset_action(reset, (*strm).avail_in, flush) {
+    let reset_action = gz_comp_reset_action(reset, (*strm).avail_in, flush);
+    match &reset_action {
         GzCompResetAction::Skip => return 0 as ::core::ffi::c_int,
         GzCompResetAction::Reset => {
             crate::src::deflate::deflateReset(strm as *mut crate::zlib_h::z_stream_s);
-            (*state).reset = 0 as ::core::ffi::c_int;
-            reset = 0 as ::core::ffi::c_int;
         }
         GzCompResetAction::Continue => {}
     }
+    reset = gz_comp_reset_value(&reset_action, reset);
+    (*state).reset = reset;
     ret = crate::zlib_h::Z_OK;
     loop {
         if gz_comp_needs_output_write((*strm).avail_out, flush, ret) {
@@ -1360,13 +1372,14 @@ mod tests {
         gz_comp_max_write_chunk, gz_comp_needs_output_write, gz_comp_needs_reset,
         gz_comp_output_buffer_action, gz_comp_output_produced, gz_comp_output_write_chunk_len,
         gz_comp_output_write_progress, gz_comp_pending_after_write, gz_comp_reset_action,
-        gz_comp_reset_after_flush, gz_comp_skips_empty_flush, gz_comp_write_again,
-        gz_comp_write_chunk_len, gz_comp_write_failed, gz_comp_write_failure, gz_comp_write_result,
-        gz_has_pending_input, gz_has_pending_skip, gz_init_allocation_plan, gz_init_mode,
-        gz_init_stream_defaults, gz_write_advanced_pos, gz_write_apply_chunk_progress,
-        gz_write_apply_direct_progress, gz_write_buffered_copy_len, gz_write_buffered_input_action,
-        gz_write_buffered_progress, gz_write_chunk_len, gz_write_consumed, gz_write_direct_action,
-        gz_write_errno_is_retryable, gz_write_error_result, gz_write_is_empty, gz_write_progress,
+        gz_comp_reset_after_flush, gz_comp_reset_value, gz_comp_skips_empty_flush,
+        gz_comp_write_again, gz_comp_write_chunk_len, gz_comp_write_failed, gz_comp_write_failure,
+        gz_comp_write_result, gz_has_pending_input, gz_has_pending_skip, gz_init_allocation_plan,
+        gz_init_mode, gz_init_stream_defaults, gz_write_advanced_pos,
+        gz_write_apply_chunk_progress, gz_write_apply_direct_progress, gz_write_buffered_copy_len,
+        gz_write_buffered_input_action, gz_write_buffered_progress, gz_write_chunk_len,
+        gz_write_consumed, gz_write_direct_action, gz_write_errno_is_retryable,
+        gz_write_error_result, gz_write_is_empty, gz_write_progress,
         gz_write_remaining_after_consumption, gz_write_state_is_usable,
         gz_write_uses_buffered_path, gz_zero_action, gz_zero_apply_progress, gz_zero_chunk_len,
         gz_zero_chunk_step, gz_zero_initial_step, gz_zero_needs_initialization,
@@ -1875,6 +1888,14 @@ mod tests {
             gz_comp_reset_action(1, 0, crate::zlib_h::Z_BLOCK),
             GzCompResetAction::Reset
         ));
+    }
+
+    #[test]
+    fn gz_comp_reset_value_clears_only_after_reset_action() {
+        assert_eq!(gz_comp_reset_value(&GzCompResetAction::Reset, 1), 0);
+        assert_eq!(gz_comp_reset_value(&GzCompResetAction::Reset, -1), 0);
+        assert_eq!(gz_comp_reset_value(&GzCompResetAction::Continue, 1), 1);
+        assert_eq!(gz_comp_reset_value(&GzCompResetAction::Skip, -1), -1);
     }
 
     #[test]

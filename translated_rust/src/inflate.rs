@@ -1987,10 +1987,8 @@ pub unsafe extern "C" fn inflate(
             }
             7763740415849674987 => {
                 if inflate_gzip_header_has_extra((*state).flags) {
-                    copy = (*state).length;
-                    if copy > have {
-                        copy = have;
-                    }
+                    let extra_progress = inflate_gzip_extra_progress((*state).length, have);
+                    copy = extra_progress.copy;
                     if copy != 0 {
                         if !(*state).head.is_null() && !(*(*state).head).extra.is_null() {
                             if let Some((offset, copy_len)) = gzip_extra_copy_bounds(
@@ -2016,7 +2014,7 @@ pub unsafe extern "C" fn inflate(
                         }
                         have = have.wrapping_sub(copy);
                         next = next.wrapping_add(copy as usize);
-                        (*state).length = (*state).length.wrapping_sub(copy);
+                        (*state).length = extra_progress.remaining;
                     }
                     if (*state).length != 0 {
                         break;
@@ -2562,6 +2560,23 @@ fn inflate_gzip_header_has_name(flags: ::core::ffi::c_int) -> bool {
     flags & 0x800 != 0
 }
 
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+struct InflateGzipExtraProgress {
+    copy: ::core::ffi::c_uint,
+    remaining: ::core::ffi::c_uint,
+}
+
+fn inflate_gzip_extra_progress(
+    remaining: ::core::ffi::c_uint,
+    available_input: ::core::ffi::c_uint,
+) -> InflateGzipExtraProgress {
+    let copy = remaining.min(available_input);
+    InflateGzipExtraProgress {
+        copy,
+        remaining: remaining.wrapping_sub(copy),
+    }
+}
+
 fn gzip_extra_copy_bounds(
     extra_len: ::core::ffi::c_uint,
     remaining: ::core::ffi::c_uint,
@@ -3024,27 +3039,63 @@ mod tests {
         inflateSyncPoint_ffi, inflate_block_header, inflate_can_use_fast_path,
         inflate_codes_used_offset_value, inflate_copy_match_from_output, inflate_copy_progress,
         inflate_data_type_value, inflate_dictionary_id_from_hold, inflate_dictionary_is_allowed,
-        inflate_get_dictionary_result, inflate_gzip_flags, inflate_gzip_flags_error,
-        inflate_gzip_header_has_extra, inflate_gzip_header_has_name, inflate_header_crc_enabled,
-        inflate_header_wrap_allows_capture, inflate_is_gzip_header, inflate_mark_progress,
-        inflate_mark_value, inflate_match_copy_plan, inflate_mode_data_type_flags,
-        inflate_mode_is_valid, inflate_needs_buffer_error, inflate_output_checksum,
-        inflate_prime_update, inflate_reset2_discards_window, inflate_reset2_params,
-        inflate_should_update_window, inflate_state_check_impl, inflate_state_check_result,
-        inflate_state_is_usable, inflate_state_metadata_is_valid, inflate_stream_buffers_are_valid,
-        inflate_stream_has_allocator_callbacks, inflate_sync_input_progress,
-        inflate_sync_normalized_wrap, inflate_sync_point_value, inflate_sync_remaining_input,
-        inflate_sync_search_core, inflate_undermine_core, inflate_validate_core,
-        inflate_validate_wrap, inflate_zlib_header_error, inflate_zlib_header_transition,
-        inflate_zlib_window_params, initial_window_metadata, reset_window_history,
-        stored_block_length, syncsearch_safe, update_window_core, window_allocation_failed,
-        window_allocation_request, window_needs_allocation, window_update_plan,
-        DynamicCodeLengthRepeat, InflateBlockKind, InflateCopyProgress, InflateGzipFlags,
-        InflateGzipFlagsError, InflateMatchPlan, InflateMatchSource, InflateOutputChecksum,
-        InflatePrimeUpdate, InflateSyncSearch, InflateZlibHeaderError, InflateZlibHeaderTransition,
-        InflateZlibWindowParams, BAD, CHECK, CODE_LENGTH_ORDER, COPY_, COPY_1, DICT, DICTID, HEAD,
-        LEN_, MATCH, STORED, SYNC, TYPE,
+        inflate_get_dictionary_result, inflate_gzip_extra_progress, inflate_gzip_flags,
+        inflate_gzip_flags_error, inflate_gzip_header_has_extra, inflate_gzip_header_has_name,
+        inflate_header_crc_enabled, inflate_header_wrap_allows_capture, inflate_is_gzip_header,
+        inflate_mark_progress, inflate_mark_value, inflate_match_copy_plan,
+        inflate_mode_data_type_flags, inflate_mode_is_valid, inflate_needs_buffer_error,
+        inflate_output_checksum, inflate_prime_update, inflate_reset2_discards_window,
+        inflate_reset2_params, inflate_should_update_window, inflate_state_check_impl,
+        inflate_state_check_result, inflate_state_is_usable, inflate_state_metadata_is_valid,
+        inflate_stream_buffers_are_valid, inflate_stream_has_allocator_callbacks,
+        inflate_sync_input_progress, inflate_sync_normalized_wrap, inflate_sync_point_value,
+        inflate_sync_remaining_input, inflate_sync_search_core, inflate_undermine_core,
+        inflate_validate_core, inflate_validate_wrap, inflate_zlib_header_error,
+        inflate_zlib_header_transition, inflate_zlib_window_params, initial_window_metadata,
+        reset_window_history, stored_block_length, syncsearch_safe, update_window_core,
+        window_allocation_failed, window_allocation_request, window_needs_allocation,
+        window_update_plan, DynamicCodeLengthRepeat, InflateBlockKind, InflateCopyProgress,
+        InflateGzipExtraProgress, InflateGzipFlags, InflateGzipFlagsError, InflateMatchPlan,
+        InflateMatchSource, InflateOutputChecksum, InflatePrimeUpdate, InflateSyncSearch,
+        InflateZlibHeaderError, InflateZlibHeaderTransition, InflateZlibWindowParams, BAD, CHECK,
+        CODE_LENGTH_ORDER, COPY_, COPY_1, DICT, DICTID, HEAD, LEN_, MATCH, STORED, SYNC, TYPE,
     };
+
+    #[test]
+    fn inflate_gzip_extra_progress_preserves_partial_input() {
+        assert_eq!(
+            inflate_gzip_extra_progress(8, 3),
+            InflateGzipExtraProgress {
+                copy: 3,
+                remaining: 5,
+            }
+        );
+        assert_eq!(
+            inflate_gzip_extra_progress(5, 0),
+            InflateGzipExtraProgress {
+                copy: 0,
+                remaining: 5,
+            }
+        );
+    }
+
+    #[test]
+    fn inflate_gzip_extra_progress_completes_with_available_input() {
+        assert_eq!(
+            inflate_gzip_extra_progress(5, 8),
+            InflateGzipExtraProgress {
+                copy: 5,
+                remaining: 0,
+            }
+        );
+        assert_eq!(
+            inflate_gzip_extra_progress(0, 0),
+            InflateGzipExtraProgress {
+                copy: 0,
+                remaining: 0,
+            }
+        );
+    }
 
     #[test]
     fn gzip_extra_copy_bounds_preserves_destination_limits() {
