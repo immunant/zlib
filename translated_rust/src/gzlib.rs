@@ -71,6 +71,15 @@ struct GzPosition {
     skip: crate::stdlib::off64_t,
 }
 
+// The offset query needs one resource in addition to the scalar position
+// state.  Borrow it separately so the query implementation stays independent
+// of the ABI-shaped gzip handle.
+struct GzOffsetQuery<'a> {
+    position: GzPosition,
+    fd: Option<&'a rustix::fd::OwnedFd>,
+    buffered_input: crate::stdlib::uInt,
+}
+
 impl GzPosition {
     fn active(&self) -> bool {
         self.mode == crate::gzguts_h::GZ_READ || self.mode == crate::gzguts_h::GZ_WRITE
@@ -893,34 +902,39 @@ pub unsafe extern "C" fn gztell_ffi(mut file: crate::zlib_h::gzFile) -> crate::s
         skip: state.skip,
     })
 }
-pub unsafe extern "C" fn gzoffset64(mut file: crate::zlib_h::gzFile) -> crate::stdlib::off64_t {
-    if file.is_null() {
+fn gzoffset64(query: GzOffsetQuery<'_>) -> crate::stdlib::off64_t {
+    if !query.position.active() {
         return -1 as crate::stdlib::off64_t;
     }
-    let state = &*(file as crate::gzguts_h::gz_statep);
-    let position = GzPosition {
-        mode: state.mode,
-        pos: 0 as crate::stdlib::off64_t,
-        past: 0 as ::core::ffi::c_int,
-        skip: 0 as crate::stdlib::off64_t,
+    let Some(fd) = query.fd else {
+        return -1 as crate::stdlib::off64_t;
     };
-    if !position.active() {
-        return -1 as crate::stdlib::off64_t;
-    }
-    let Ok(offset) = rustix::fs::tell(state.fd.as_ref().unwrap()) else {
+    let Ok(offset) = rustix::fs::tell(fd) else {
         return -1 as crate::stdlib::off64_t;
     };
     let offset = offset as crate::stdlib::off64_t;
-    position.offset(offset, state.strm.avail_in)
+    query.position.offset(offset, query.buffered_input)
 }
 #[export_name = "gzoffset64"]
 
 pub unsafe extern "C" fn gzoffset64_ffi(mut file: crate::zlib_h::gzFile) -> crate::stdlib::off64_t {
-    gzoffset64(file)
+    let Some(state) = ::core::ptr::NonNull::new(file as crate::gzguts_h::gz_statep) else {
+        return -1 as crate::stdlib::off64_t;
+    };
+    let state = state.as_ref();
+    gzoffset64(GzOffsetQuery {
+        position: GzPosition {
+            mode: state.mode,
+            pos: 0 as crate::stdlib::off64_t,
+            past: 0 as ::core::ffi::c_int,
+            skip: 0 as crate::stdlib::off64_t,
+        },
+        fd: state.fd.as_ref(),
+        buffered_input: state.strm.avail_in,
+    })
 }
-pub unsafe extern "C" fn gzoffset(mut file: crate::zlib_h::gzFile) -> crate::stdlib::off_t {
-    let mut ret: crate::stdlib::off64_t = 0;
-    ret = gzoffset64(file);
+fn gzoffset(query: GzOffsetQuery<'_>) -> crate::stdlib::off_t {
+    let ret = gzoffset64(query);
     return if ret == ret {
         ret
     } else {
@@ -930,7 +944,20 @@ pub unsafe extern "C" fn gzoffset(mut file: crate::zlib_h::gzFile) -> crate::std
 #[export_name = "gzoffset"]
 
 pub unsafe extern "C" fn gzoffset_ffi(mut file: crate::zlib_h::gzFile) -> crate::stdlib::off_t {
-    gzoffset(file)
+    let Some(state) = ::core::ptr::NonNull::new(file as crate::gzguts_h::gz_statep) else {
+        return -1 as crate::stdlib::off_t;
+    };
+    let state = state.as_ref();
+    gzoffset(GzOffsetQuery {
+        position: GzPosition {
+            mode: state.mode,
+            pos: 0 as crate::stdlib::off64_t,
+            past: 0 as ::core::ffi::c_int,
+            skip: 0 as crate::stdlib::off64_t,
+        },
+        fd: state.fd.as_ref(),
+        buffered_input: state.strm.avail_in,
+    })
 }
 #[export_name = "gzeof"]
 
