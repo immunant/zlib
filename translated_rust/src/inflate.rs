@@ -155,6 +155,10 @@ fn inflate_mode_is_valid(mode: inflate_mode) -> bool {
     mode >= HEAD && mode <= SYNC
 }
 
+fn inflate_state_metadata_is_valid(stream_matches: bool, mode: inflate_mode) -> bool {
+    stream_matches && inflate_mode_is_valid(mode)
+}
+
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 struct WindowUpdate {
     replace: bool,
@@ -259,7 +263,7 @@ unsafe extern "C" fn inflateStateCheck(mut strm: crate::zlib_h::z_streamp) -> ::
         return 1 as ::core::ffi::c_int;
     }
     state = (*strm).state as *mut crate::src::inflate::inflate_state;
-    if state.is_null() || (*state).strm != strm || !inflate_mode_is_valid((*state).mode) {
+    if state.is_null() || !inflate_state_metadata_is_valid((*state).strm == strm, (*state).mode) {
         return 1 as ::core::ffi::c_int;
     }
     return 0 as ::core::ffi::c_int;
@@ -2573,9 +2577,9 @@ pub unsafe extern "C" fn inflateCodesUsed_ffi(
 #[cfg(test)]
 mod tests {
     use super::{
-        apply_window_update, inflate_mode_is_valid, inflate_sync_search_core,
-        initial_window_metadata, syncsearch_safe, window_update_plan, InflateSyncSearch, BAD, HEAD,
-        SYNC,
+        apply_window_update, inflate_mode_is_valid, inflate_state_metadata_is_valid,
+        inflate_sync_search_core, initial_window_metadata, syncsearch_safe, window_update_plan,
+        InflateSyncSearch, BAD, HEAD, SYNC,
     };
 
     #[test]
@@ -2647,6 +2651,13 @@ mod tests {
         assert!(inflate_mode_is_valid(SYNC));
         assert!(!inflate_mode_is_valid(HEAD - 1));
         assert!(!inflate_mode_is_valid(SYNC + 1));
+    }
+
+    #[test]
+    fn inflate_state_metadata_requires_matching_stream_and_valid_mode() {
+        assert!(inflate_state_metadata_is_valid(true, HEAD));
+        assert!(!inflate_state_metadata_is_valid(false, HEAD));
+        assert!(!inflate_state_metadata_is_valid(true, SYNC + 1));
     }
 
     #[test]

@@ -67,6 +67,11 @@ pub use crate::zlib_h::Z_OK;
 pub use crate::zlib_h::Z_STREAM_END;
 pub use crate::zlib_h::Z_STREAM_ERROR;
 pub use crate::zlib_h::Z_VERSION_ERROR;
+
+fn inflate_back_window_bits_are_valid(window_bits: ::core::ffi::c_int) -> bool {
+    window_bits >= 8 as ::core::ffi::c_int && window_bits <= 15 as ::core::ffi::c_int
+}
+
 pub unsafe extern "C" fn inflateBackInit_(
     mut strm: crate::zlib_h::z_streamp,
     mut windowBits: ::core::ffi::c_int,
@@ -83,11 +88,7 @@ pub unsafe extern "C" fn inflateBackInit_(
     {
         return crate::zlib_h::Z_VERSION_ERROR;
     }
-    if strm.is_null()
-        || window.is_null()
-        || windowBits < 8 as ::core::ffi::c_int
-        || windowBits > 15 as ::core::ffi::c_int
-    {
+    if strm.is_null() || window.is_null() || !inflate_back_window_bits_are_valid(windowBits) {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
     (*strm).msg = ::core::ptr::null_mut::<::core::ffi::c_char>();
@@ -1037,4 +1038,18 @@ pub unsafe extern "C" fn inflateBackEnd_ffi(
     mut strm: crate::zlib_h::z_streamp,
 ) -> ::core::ffi::c_int {
     inflateBackEnd(strm)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::inflate_back_window_bits_are_valid;
+
+    #[test]
+    fn inflate_back_window_bits_validation_accepts_only_supported_range() {
+        for window_bits in 8..=15 {
+            assert!(inflate_back_window_bits_are_valid(window_bits));
+        }
+        assert!(!inflate_back_window_bits_are_valid(7));
+        assert!(!inflate_back_window_bits_are_valid(16));
+    }
 }
