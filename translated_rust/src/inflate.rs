@@ -3177,13 +3177,9 @@ pub(crate) unsafe fn inflate_from_stream(
             state.decoder.normal.have = sync_state.have;
             state.decoder.normal.flags = sync_state.flags;
             state.decoder.normal.wrap = sync_state.wrap;
-            strm.avail_in = strm
-                .avail_in
-                .wrapping_sub(consumed as crate::stdlib::uInt);
+            strm.avail_in = strm.avail_in.wrapping_sub(consumed as crate::stdlib::uInt);
             strm.next_in = strm.next_in.wrapping_add(consumed);
-            strm.total_in = strm
-                .total_in
-                .wrapping_add(consumed as crate::stdlib::uLong);
+            strm.total_in = strm.total_in.wrapping_add(consumed as crate::stdlib::uLong);
             if status != crate::zlib_h::Z_OK {
                 return InflateStreamResult::Status(status);
             }
@@ -3692,9 +3688,12 @@ pub unsafe extern "C" fn inflateSyncPoint_ffi(
     let Some(strm) = strm.as_mut() else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
-    inflate_from_stream(strm, InflateStreamRequest::Scalar(InflateNormalScalarAction::SyncPoint))
-        .scalar()
-        .status()
+    inflate_from_stream(
+        strm,
+        InflateStreamRequest::Scalar(InflateNormalScalarAction::SyncPoint),
+    )
+    .scalar()
+    .status()
 }
 
 // The export validates the source handle and creates this scoped borrow.  The
@@ -3748,41 +3747,41 @@ pub unsafe fn inflateCopy(
             back_window: state.back_window.clone(),
             decoder: InflateOwnedDecoder {
                 normal: InflateNormalState {
-                mode: state.decoder.normal.mode,
-                last: state.decoder.normal.last,
-                wrap: state.decoder.normal.wrap,
-                havedict: state.decoder.normal.havedict,
-                flags: state.decoder.normal.flags,
-                dmax: state.decoder.normal.dmax,
-                check: state.decoder.normal.check,
-                total: state.decoder.normal.total,
-                wbits: state.decoder.normal.wbits,
-                wsize: state.decoder.normal.wsize,
-                whave: state.decoder.normal.whave,
-                wnext: state.decoder.normal.wnext,
-                owned_window,
-                hold: state.decoder.normal.hold,
-                bits: state.decoder.normal.bits,
-                length: state.decoder.normal.length,
-                offset: state.decoder.normal.offset,
-                extra: state.decoder.normal.extra,
-                lencode: state.decoder.normal.lencode,
-                distcode: state.decoder.normal.distcode,
-                lenbits: state.decoder.normal.lenbits,
-                distbits: state.decoder.normal.distbits,
-                ncode: state.decoder.normal.ncode,
-                nlen: state.decoder.normal.nlen,
-                ndist: state.decoder.normal.ndist,
-                have: state.decoder.normal.have,
-                next: state.decoder.normal.next,
-                lens: state.decoder.normal.lens,
-                work: state.decoder.normal.work,
-                codes: core::array::from_fn(|index| {
-                    crate::src::inftrees::code::copied_from(&state.decoder.normal.codes[index])
-                }),
-                sane: state.decoder.normal.sane,
-                back: state.decoder.normal.back,
-                was: state.decoder.normal.was,
+                    mode: state.decoder.normal.mode,
+                    last: state.decoder.normal.last,
+                    wrap: state.decoder.normal.wrap,
+                    havedict: state.decoder.normal.havedict,
+                    flags: state.decoder.normal.flags,
+                    dmax: state.decoder.normal.dmax,
+                    check: state.decoder.normal.check,
+                    total: state.decoder.normal.total,
+                    wbits: state.decoder.normal.wbits,
+                    wsize: state.decoder.normal.wsize,
+                    whave: state.decoder.normal.whave,
+                    wnext: state.decoder.normal.wnext,
+                    owned_window,
+                    hold: state.decoder.normal.hold,
+                    bits: state.decoder.normal.bits,
+                    length: state.decoder.normal.length,
+                    offset: state.decoder.normal.offset,
+                    extra: state.decoder.normal.extra,
+                    lencode: state.decoder.normal.lencode,
+                    distcode: state.decoder.normal.distcode,
+                    lenbits: state.decoder.normal.lenbits,
+                    distbits: state.decoder.normal.distbits,
+                    ncode: state.decoder.normal.ncode,
+                    nlen: state.decoder.normal.nlen,
+                    ndist: state.decoder.normal.ndist,
+                    have: state.decoder.normal.have,
+                    next: state.decoder.normal.next,
+                    lens: state.decoder.normal.lens,
+                    work: state.decoder.normal.work,
+                    codes: core::array::from_fn(|index| {
+                        crate::src::inftrees::code::copied_from(&state.decoder.normal.codes[index])
+                    }),
+                    sane: state.decoder.normal.sane,
+                    back: state.decoder.normal.back,
+                    was: state.decoder.normal.was,
                 },
                 stream: InflateDecoderStream {
                     total_in: state.decoder.stream.total_in,
@@ -3847,9 +3846,12 @@ pub unsafe extern "C" fn inflateUndermine_ffi(
     let Some(strm) = strm.as_mut() else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
-    inflate_from_stream(strm, InflateStreamRequest::Scalar(InflateNormalScalarAction::Undermine))
-        .scalar()
-        .status()
+    inflate_from_stream(
+        strm,
+        InflateStreamRequest::Scalar(InflateNormalScalarAction::Undermine),
+    )
+    .scalar()
+    .status()
 }
 
 fn inflate_validate_wrap(
@@ -3913,9 +3915,12 @@ pub unsafe extern "C" fn inflateMark_ffi(
     let Some(strm) = strm.as_mut() else {
         return -((1 as ::core::ffi::c_long) << 16 as ::core::ffi::c_int);
     };
-    inflate_from_stream(strm, InflateStreamRequest::Scalar(InflateNormalScalarAction::Mark))
-        .scalar()
-        .mark()
+    inflate_from_stream(
+        strm,
+        InflateStreamRequest::Scalar(InflateNormalScalarAction::Mark),
+    )
+    .scalar()
+    .mark()
 }
 
 fn inflate_codes_used(next: usize) -> ::core::ffi::c_ulong {

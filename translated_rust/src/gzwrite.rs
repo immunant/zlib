@@ -580,106 +580,35 @@ unsafe fn gz_comp(
             .as_ref()
             .is_some_and(|owner| owner.input().available() == 0);
     if !retune_empty_owner {
-    if state.direct != 0 {
-        while state.strm.avail_in != 0 {
-            state.again = 0;
-            put = if state.strm.avail_in > max {
-                max
-            } else {
-                state.strm.avail_in as ::core::ffi::c_uint
-            };
-            let write = {
-                let Some(buffer) = state.buffers.input.as_deref() else {
-                    return -1;
+        if state.direct != 0 {
+            while state.strm.avail_in != 0 {
+                state.again = 0;
+                put = if state.strm.avail_in > max {
+                    max
+                } else {
+                    state.strm.avail_in as ::core::ffi::c_uint
                 };
-                let Some(buffered) = crate::src::gzlib::GzBufferedCursor::from_owned_buffer(
-                    buffer,
-                    state.strm.next_in.addr(),
-                    state.strm.avail_in,
-                ) else {
-                    return -1;
-                };
-                let Some((input, _)) = buffered.consume(put as usize) else {
-                    return -1;
-                };
-                gz_direct_write(state.fd.as_ref().unwrap(), input)
-            };
-            match write {
-                Ok(written) => writ = written as ::core::ffi::c_int,
-                Err(failure) => {
-                    if failure.would_block {
-                        state.again = 1;
-                    }
-                    let message = errno::Errno(failure.errno_value).to_string();
-                    crate::src::gzlib::GzErrorState {
-                        message: &mut state.msg,
-                        error: &mut state.err,
-                        buffered: &mut state.x.have,
-                        again: state.again,
-                        path: state.path.as_deref(),
-                    }
-                    .set(crate::zlib_h::Z_ERRNO, Some(message.as_bytes()));
-                    return -1;
-                }
-            }
-            state.strm.avail_in = state
-                .strm
-                .avail_in
-                .wrapping_sub(writ as crate::stdlib::uInt);
-            state.strm.next_in = state.strm.next_in.wrapping_add(writ as usize);
-        }
-        return 0;
-    }
-    if state.reset != 0 {
-        if state.strm.avail_in == 0 as crate::stdlib::uInt && flush == crate::zlib_h::Z_NO_FLUSH {
-            return 0 as ::core::ffi::c_int;
-        }
-        deflate_reset_keep_from_stream(&mut state.strm, DeflateResetKind::Full);
-        state.reset = 0 as ::core::ffi::c_int;
-    }
-    ret = crate::zlib_h::Z_OK;
-    loop {
-        if state.strm.avail_out == 0 as crate::stdlib::uInt
-            || flush != crate::zlib_h::Z_NO_FLUSH
-                && (flush != crate::zlib_h::Z_FINISH || ret == crate::zlib_h::Z_STREAM_END)
-        {
-            while state.strm.next_out > state.x.next {
-                state.again = 0 as ::core::ffi::c_int;
                 let write = {
-                    let Some(buffer) = state.buffers.output.as_deref() else {
-                        return -1;
-                    };
-                    let Some(buffered_len) =
-                        state.strm.next_out.addr().checked_sub(state.x.next.addr())
-                    else {
-                        return -1;
-                    };
-                    let Some(buffered_len) = ::core::ffi::c_uint::try_from(buffered_len).ok()
-                    else {
+                    let Some(buffer) = state.buffers.input.as_deref() else {
                         return -1;
                     };
                     let Some(buffered) = crate::src::gzlib::GzBufferedCursor::from_owned_buffer(
                         buffer,
-                        state.x.next.addr(),
-                        buffered_len,
+                        state.strm.next_in.addr(),
+                        state.strm.avail_in,
                     ) else {
                         return -1;
                     };
-                    put = buffered_len.min(max);
                     let Some((input, _)) = buffered.consume(put as usize) else {
                         return -1;
                     };
-                    let result = gz_direct_write(state.fd.as_ref().unwrap(), input);
-                    result
+                    gz_direct_write(state.fd.as_ref().unwrap(), input)
                 };
                 match write {
-                    Ok(written) => {
-                        writ = written as ::core::ffi::c_int;
-                        state.x.next = state.x.next.wrapping_add(written);
-                    }
+                    Ok(written) => writ = written as ::core::ffi::c_int,
                     Err(failure) => {
                         if failure.would_block {
-                            state.again = 1 as ::core::ffi::c_int;
+                            state.again = 1;
                         }
                         let message = errno::Errno(failure.errno_value).to_string();
                         crate::src::gzlib::GzErrorState {
@@ -690,161 +619,236 @@ unsafe fn gz_comp(
                             path: state.path.as_deref(),
                         }
                         .set(crate::zlib_h::Z_ERRNO, Some(message.as_bytes()));
-                        return -1 as ::core::ffi::c_int;
+                        return -1;
                     }
                 }
+                state.strm.avail_in = state
+                    .strm
+                    .avail_in
+                    .wrapping_sub(writ as crate::stdlib::uInt);
+                state.strm.next_in = state.strm.next_in.wrapping_add(writ as usize);
             }
-            if state.strm.avail_out == 0 as crate::stdlib::uInt {
-                state.strm.avail_out = state.buffers.size as crate::stdlib::uInt;
-                state.strm.next_out = state.buffers.output.as_deref_mut().unwrap().as_mut_ptr();
-                state.x.next = state.strm.next_out;
-            }
+            return 0;
         }
-        // Form one complete bounded embedded-deflate request before
-        // publishing its cursors to the ABI stream.  Buffered callers borrow
-        // the owned input allocation; large writes pass their caller slice
-        // explicitly, so this layer never reconstructs that range from an
-        // unchecked state cursor.
-        let input_available = state.strm.avail_in;
-        let output_available = state.strm.avail_out;
-        let output_cursor = state.strm.next_out.addr();
-        // Availability belongs to this request, since callers may have
-        // staged fresh input since the last pass. Totals persist with the
-        // paired gzip buffers so later write policy need not trust ABI
-        // counters between calls.
-        // `gz_init()` installs this tag immediately after `deflateInit2_()`
-        // succeeds.  Do not recreate it from allocation state here: that
-        // would allow a failed setup to masquerade as an initialized codec.
-        let Some(persisted) = state
-            .buffers
-            .write_owner
-            .as_ref()
-            .and_then(crate::src::gzlib::GzWriteOwner::deflater)
-        else {
-            return -1;
-        };
-        let codec_state = crate::src::gzlib::GzEmbeddedDeflateState::new(
-            input_available,
-            output_available,
-            persisted.total_in(),
-            persisted.total_out(),
-        );
-        let input = if input_available == 0 {
-            // zlib permits a flush/finalization pass with no current input;
-            // `next_in` may then still be null, so no cursor validation is
-            // meaningful or required for the empty request.
-            &[]
-        } else {
-            match external_input {
-                Some(input) => match input.get(..input_available as usize) {
-                    Some(input) => input,
-                    None => return -1,
-                },
-                None => {
-                    let Some(cursor) = state
-                        .buffers
-                        .write_owner
-                        .as_ref()
-                        .map(crate::src::gzlib::GzWriteOwner::input)
-                    else {
-                        return -1;
+        if state.reset != 0 {
+            if state.strm.avail_in == 0 as crate::stdlib::uInt && flush == crate::zlib_h::Z_NO_FLUSH
+            {
+                return 0 as ::core::ffi::c_int;
+            }
+            deflate_reset_keep_from_stream(&mut state.strm, DeflateResetKind::Full);
+            state.reset = 0 as ::core::ffi::c_int;
+        }
+        ret = crate::zlib_h::Z_OK;
+        loop {
+            if state.strm.avail_out == 0 as crate::stdlib::uInt
+                || flush != crate::zlib_h::Z_NO_FLUSH
+                    && (flush != crate::zlib_h::Z_FINISH || ret == crate::zlib_h::Z_STREAM_END)
+            {
+                while state.strm.next_out > state.x.next {
+                    state.again = 0 as ::core::ffi::c_int;
+                    let write = {
+                        let Some(buffer) = state.buffers.output.as_deref() else {
+                            return -1;
+                        };
+                        let Some(buffered_len) =
+                            state.strm.next_out.addr().checked_sub(state.x.next.addr())
+                        else {
+                            return -1;
+                        };
+                        let Some(buffered_len) = ::core::ffi::c_uint::try_from(buffered_len).ok()
+                        else {
+                            return -1;
+                        };
+                        let Some(buffered) = crate::src::gzlib::GzBufferedCursor::from_owned_buffer(
+                            buffer,
+                            state.x.next.addr(),
+                            buffered_len,
+                        ) else {
+                            return -1;
+                        };
+                        put = buffered_len.min(max);
+                        let Some((input, _)) = buffered.consume(put as usize) else {
+                            return -1;
+                        };
+                        let result = gz_direct_write(state.fd.as_ref().unwrap(), input);
+                        result
                     };
-                    let Some(buffer) = state.buffers.input.as_deref() else {
-                        return -1;
-                    };
-                    let Some(input) = cursor.bytes(buffer) else {
-                        return -1;
-                    };
-                    input
+                    match write {
+                        Ok(written) => {
+                            writ = written as ::core::ffi::c_int;
+                            state.x.next = state.x.next.wrapping_add(written);
+                        }
+                        Err(failure) => {
+                            if failure.would_block {
+                                state.again = 1 as ::core::ffi::c_int;
+                            }
+                            let message = errno::Errno(failure.errno_value).to_string();
+                            crate::src::gzlib::GzErrorState {
+                                message: &mut state.msg,
+                                error: &mut state.err,
+                                buffered: &mut state.x.have,
+                                again: state.again,
+                                path: state.path.as_deref(),
+                            }
+                            .set(crate::zlib_h::Z_ERRNO, Some(message.as_bytes()));
+                            return -1 as ::core::ffi::c_int;
+                        }
+                    }
+                }
+                if state.strm.avail_out == 0 as crate::stdlib::uInt {
+                    state.strm.avail_out = state.buffers.size as crate::stdlib::uInt;
+                    state.strm.next_out = state.buffers.output.as_deref_mut().unwrap().as_mut_ptr();
+                    state.x.next = state.strm.next_out;
                 }
             }
-        };
-        let output_size = state.buffers.size;
-        let Some(output) = state.buffers.output.as_deref_mut() else {
-            return -1;
-        };
-        let Some(setup) =
-            crate::src::gzlib::GzEmbeddedDeflateSetup::from_output(output, output_size)
-        else {
-            return -1;
-        };
-        let Some(call) =
-            setup.call_at_output_cursor(input, input_available, output_cursor, output_available)
-        else {
-            return -1;
-        };
-        let dispatch = crate::src::gzlib::GzEmbeddedDeflateDispatch::new(codec_state, call);
-        let Some((codec_state, snapshot)) =
-            dispatch.dispatch(|input, input_available, output, output_available| {
-                let strm = &mut state.strm;
-                strm.next_in = input.as_ptr().cast_mut();
-                strm.avail_in = input_available;
-                strm.next_out = output.as_mut_ptr();
-                strm.avail_out = output_available;
-                let result = crate::src::deflate::deflate_dispatch_from_abi_stream(strm, flush);
-                crate::src::gzlib::GzEmbeddedDeflateResult {
-                    result,
-                    remaining_input: strm.avail_in,
-                    output_available: strm.avail_out,
-                    total_in: strm.total_in,
-                    total_out: strm.total_out,
-                }
-            })
-        else {
-            return -1;
-        };
-        ret = snapshot.result;
-        state.strm.avail_in = codec_state.input_available();
-        state.strm.avail_out = codec_state.output_available();
-        state.strm.total_in = codec_state.total_in();
-        state.strm.total_out = codec_state.total_out();
-        state
-            .buffers
-            .write_owner
-            .as_mut()
-            .unwrap()
-            .set_deflater(codec_state);
-        if external_input.is_none() {
-            let Some(cursor) = state
+            // Form one complete bounded embedded-deflate request before
+            // publishing its cursors to the ABI stream.  Buffered callers borrow
+            // the owned input allocation; large writes pass their caller slice
+            // explicitly, so this layer never reconstructs that range from an
+            // unchecked state cursor.
+            let input_available = state.strm.avail_in;
+            let output_available = state.strm.avail_out;
+            let output_cursor = state.strm.next_out.addr();
+            // Availability belongs to this request, since callers may have
+            // staged fresh input since the last pass. Totals persist with the
+            // paired gzip buffers so later write policy need not trust ABI
+            // counters between calls.
+            // `gz_init()` installs this tag immediately after `deflateInit2_()`
+            // succeeds.  Do not recreate it from allocation state here: that
+            // would allow a failed setup to masquerade as an initialized codec.
+            let Some(persisted) = state
                 .buffers
                 .write_owner
                 .as_ref()
-                .map(crate::src::gzlib::GzWriteOwner::input)
+                .and_then(crate::src::gzlib::GzWriteOwner::deflater)
             else {
                 return -1;
             };
-            let Some(cursor) = cursor.after_codec(snapshot.remaining_input) else {
+            let codec_state = crate::src::gzlib::GzEmbeddedDeflateState::new(
+                input_available,
+                output_available,
+                persisted.total_in(),
+                persisted.total_out(),
+            );
+            let input = if input_available == 0 {
+                // zlib permits a flush/finalization pass with no current input;
+                // `next_in` may then still be null, so no cursor validation is
+                // meaningful or required for the empty request.
+                &[]
+            } else {
+                match external_input {
+                    Some(input) => match input.get(..input_available as usize) {
+                        Some(input) => input,
+                        None => return -1,
+                    },
+                    None => {
+                        let Some(cursor) = state
+                            .buffers
+                            .write_owner
+                            .as_ref()
+                            .map(crate::src::gzlib::GzWriteOwner::input)
+                        else {
+                            return -1;
+                        };
+                        let Some(buffer) = state.buffers.input.as_deref() else {
+                            return -1;
+                        };
+                        let Some(input) = cursor.bytes(buffer) else {
+                            return -1;
+                        };
+                        input
+                    }
+                }
+            };
+            let output_size = state.buffers.size;
+            let Some(output) = state.buffers.output.as_deref_mut() else {
                 return -1;
             };
+            let Some(setup) =
+                crate::src::gzlib::GzEmbeddedDeflateSetup::from_output(output, output_size)
+            else {
+                return -1;
+            };
+            let Some(call) = setup.call_at_output_cursor(
+                input,
+                input_available,
+                output_cursor,
+                output_available,
+            ) else {
+                return -1;
+            };
+            let dispatch = crate::src::gzlib::GzEmbeddedDeflateDispatch::new(codec_state, call);
+            let Some((codec_state, snapshot)) =
+                dispatch.dispatch(|input, input_available, output, output_available| {
+                    let strm = &mut state.strm;
+                    strm.next_in = input.as_ptr().cast_mut();
+                    strm.avail_in = input_available;
+                    strm.next_out = output.as_mut_ptr();
+                    strm.avail_out = output_available;
+                    let result = crate::src::deflate::deflate_dispatch_from_abi_stream(strm, flush);
+                    crate::src::gzlib::GzEmbeddedDeflateResult {
+                        result,
+                        remaining_input: strm.avail_in,
+                        output_available: strm.avail_out,
+                        total_in: strm.total_in,
+                        total_out: strm.total_out,
+                    }
+                })
+            else {
+                return -1;
+            };
+            ret = snapshot.result;
+            state.strm.avail_in = codec_state.input_available();
+            state.strm.avail_out = codec_state.output_available();
+            state.strm.total_in = codec_state.total_in();
+            state.strm.total_out = codec_state.total_out();
             state
                 .buffers
                 .write_owner
                 .as_mut()
                 .unwrap()
-                .set_input(cursor);
-        }
-        if ret == crate::zlib_h::Z_STREAM_ERROR {
-            crate::src::gzlib::GzErrorState {
-                message: &mut state.msg,
-                error: &mut state.err,
-                buffered: &mut state.x.have,
-                again: state.again,
-                path: state.path.as_deref(),
+                .set_deflater(codec_state);
+            if external_input.is_none() {
+                let Some(cursor) = state
+                    .buffers
+                    .write_owner
+                    .as_ref()
+                    .map(crate::src::gzlib::GzWriteOwner::input)
+                else {
+                    return -1;
+                };
+                let Some(cursor) = cursor.after_codec(snapshot.remaining_input) else {
+                    return -1;
+                };
+                state
+                    .buffers
+                    .write_owner
+                    .as_mut()
+                    .unwrap()
+                    .set_input(cursor);
             }
-            .set(
-                crate::zlib_h::Z_STREAM_ERROR,
-                Some(b"internal error: deflate stream corrupt"),
-            );
-            return -1 as ::core::ffi::c_int;
+            if ret == crate::zlib_h::Z_STREAM_ERROR {
+                crate::src::gzlib::GzErrorState {
+                    message: &mut state.msg,
+                    error: &mut state.err,
+                    buffered: &mut state.x.have,
+                    again: state.again,
+                    path: state.path.as_deref(),
+                }
+                .set(
+                    crate::zlib_h::Z_STREAM_ERROR,
+                    Some(b"internal error: deflate stream corrupt"),
+                );
+                return -1 as ::core::ffi::c_int;
+            }
+            have = snapshot.output_used;
+            if have == 0 {
+                break;
+            }
         }
-        have = snapshot.output_used;
-        if have == 0 {
-            break;
+        if flush == crate::zlib_h::Z_FINISH {
+            state.reset = 1 as ::core::ffi::c_int;
         }
-    }
-    if flush == crate::zlib_h::Z_FINISH {
-        state.reset = 1 as ::core::ffi::c_int;
-    }
     }
     if let Some(retune) = retune {
         crate::src::deflate::deflate_params_from_stream(
@@ -1064,9 +1068,10 @@ unsafe fn gzwrite(
     );
     match plan {
         GzWritePlan::Return(result) => result,
-        GzWritePlan::Dispatch { transaction, result } => {
-            result.finish(gzip_write_state_adapter(state, transaction))
-        }
+        GzWritePlan::Dispatch {
+            transaction,
+            result,
+        } => result.finish(gzip_write_state_adapter(state, transaction)),
     }
 }
 #[export_name = "gzwrite"]

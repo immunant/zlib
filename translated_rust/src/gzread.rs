@@ -41,9 +41,7 @@ pub use crate::zlib_h::Z_OK;
 pub use crate::zlib_h::Z_STREAM_END;
 pub use crate::zlib_h::Z_STREAM_ERROR;
 
-use crate::src::gzlib::{
-    GzCodecInput, GzCodecResult, GzEmbeddedInflateCall,
-};
+use crate::src::gzlib::{GzCodecInput, GzCodecResult, GzEmbeddedInflateCall};
 
 fn is_gzip_header(input: &[u8]) -> bool {
     input.len() >= 4 && input[0] == 31 && input[1] == 139 && input[2] == 8 && input[3] < 32
@@ -1108,14 +1106,8 @@ fn gz_look(owner: &mut GzFetchOwner<'_>) -> ::core::ffi::c_int {
         };
         *owner.buffers = buffers;
         *owner.codec_available_input = 0;
-        owner.buffers.inflate_state = Some(
-            crate::src::gzlib::GzEmbeddedInflateState::from_stream_fields(
-                0,
-                0,
-                0,
-                0,
-            ),
-        );
+        owner.buffers.inflate_state =
+            Some(crate::src::gzlib::GzEmbeddedInflateState::from_stream_fields(0, 0, 0, 0));
     }
     // This reset is intentionally before refill: opening a normal gzip read
     // starts with `junk == 0`, and the original ordering resets the embedded
@@ -1237,12 +1229,14 @@ fn gz_decomp(owner: &mut GzFetchOwner<'_>) -> ::core::ffi::c_int {
             .inflate_state
             .as_ref()
             .map(crate::src::gzlib::GzEmbeddedInflateState::counters)
-            .unwrap_or_else(|| crate::src::gzlib::GzCodecCounters::from_stream_fields(
-                *owner.codec_available_input,
-                *owner.codec_available_output,
-                *owner.codec_total_in,
-                *owner.codec_total_out,
-            )),
+            .unwrap_or_else(|| {
+                crate::src::gzlib::GzCodecCounters::from_stream_fields(
+                    *owner.codec_available_input,
+                    *owner.codec_available_output,
+                    *owner.codec_total_in,
+                    *owner.codec_total_out,
+                )
+            }),
         *owner.junk,
         *owner.eof,
         *owner.how,
@@ -1264,7 +1258,9 @@ fn gz_decomp(owner: &mut GzFetchOwner<'_>) -> ::core::ffi::c_int {
         let Some(inflate) = owner.buffers.inflate_state.as_mut() else {
             return -1;
         };
-        gz_decomp_loop(decomp, &mut loop_state, output, |call| inflate.inflate(call))
+        gz_decomp_loop(decomp, &mut loop_state, output, |call| {
+            inflate.inflate(call)
+        })
     };
     // The core transition returns the checked start of its owned output span,
     // not the ABI cursor that `inflate()` advanced. Rebuild that cursor only
