@@ -928,13 +928,6 @@ fn gzflush_impl(
     compressor.state.err
 }
 
-unsafe fn gzflush(
-    state: &mut crate::gzguts_h::gz_state,
-    flush: ::core::ffi::c_int,
-    behavior: GzFlushBehavior<'_>,
-) -> ::core::ffi::c_int {
-    gzflush_impl(&mut GzCompressor { state }, flush, behavior)
-}
 #[export_name = "gzflush"]
 
 pub unsafe extern "C" fn gzflush_ffi(
@@ -944,7 +937,7 @@ pub unsafe extern "C" fn gzflush_ffi(
     let Some(state) = (file as crate::gzguts_h::gz_statep).as_mut() else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
-    gzflush(state, flush, GzFlushBehavior::Public)
+    gzflush_impl(&mut GzCompressor { state }, flush, GzFlushBehavior::Public)
 }
 fn gzsetparams_impl(
     compressor: &mut GzCompressor<'_>,
