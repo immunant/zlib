@@ -1317,7 +1317,10 @@ pub fn inflate(
                                                                                                                 );
                                                                                                             bits = bits.wrapping_add(8 as ::core::ffi::c_uint);
                                                                                                         }
-                                                                                                        out = out.wrapping_sub(left);
+                                                                                                        let Some(produced_len) = produced_output_len(out, left) else {
+                                                                                                            return crate::zlib_h::Z_STREAM_ERROR;
+                                                                                                        };
+                                                                                                        out = produced_len as ::core::ffi::c_uint;
                                                                                                         strm.total_out = strm
                                                                                                             .total_out
                                                                                                             .wrapping_add(out as crate::stdlib::uLong);
@@ -1326,25 +1329,23 @@ pub fn inflate(
                                                                                                             .wrapping_add(out as ::core::ffi::c_ulong);
                                                                                                         if state.wrap & 4 as ::core::ffi::c_int != 0 && out != 0
                                                                                                         {
+                                                                                                            // `produced_len` was checked against the call's original
+                                                                                                            // output availability before forming this one temporary
+                                                                                                            // checksum view. It starts at the validated ABI output
+                                                                                                            // pointer, rather than deriving a new span from `put`.
+                                                                                                            let produced_output = ::core::slice::from_raw_parts(
+                                                                                                                output_start,
+                                                                                                                produced_len,
+                                                                                                            );
                                                                                                             state.check = (if state.flags != 0 {
                                                                                                                 crate::src::crc32::crc32(
                                                                                                                     state.check as crate::stdlib::uLong,
-                                                                                                                    Some(::core::slice::from_raw_parts(
-                                                                                                                        // `out` is the number of bytes just produced from this
-                                                                                                                        // output cursor, so this remains within the caller's
-                                                                                                                        // validated output range.  Cursor arithmetic itself need
-                                                                                                                        // not be an unsafe operation.
-                                                                                                                        put.wrapping_offset(-(out as isize)),
-                                                                                                                        out as usize,
-                                                                                                                    )),
+                                                                                                                    Some(produced_output),
                                                                                                                 )
                                                                                                             } else {
                                                                                                                 crate::src::adler32::adler32(
                                                                                                                     state.check as crate::stdlib::uLong,
-                                                                                                                    Some(::core::slice::from_raw_parts(
-                                                                                                                        put.wrapping_offset(-(out as isize)),
-                                                                                                                        out as crate::stdlib::z_size_t,
-                                                                                                                    )),
+                                                                                                                    Some(produced_output),
                                                                                                                 )
                                                                                                             }) as ::core::ffi::c_ulong;
                                                                                                             strm.adler = state.check as crate::stdlib::uLong;
