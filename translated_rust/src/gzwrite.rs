@@ -13,7 +13,6 @@ pub use crate::stdlib::ssize_t;
 
 pub use crate::src::deflate::deflateEnd;
 pub use crate::src::deflate::deflateInit2_;
-pub use crate::src::deflate::deflate_dispatch_from_abi_stream as deflate;
 pub use crate::src::deflate::internal_state;
 use crate::src::deflate::DeflateResetKind;
 use crate::src::deflate::{deflate_scalar_from_abi_stream, DeflateAbiAction};
@@ -1723,10 +1722,13 @@ pub(crate) unsafe fn gzip_write_state_adapter(
                                         strm.avail_in = input_available;
                                         strm.next_out = output.as_mut_ptr();
                                         strm.avail_out = output_available;
-                                        let result =
-                                            crate::src::deflate::deflate_dispatch_from_abi_stream(
-                                                strm, flush, None,
-                                            );
+                                        let result = deflate_scalar_from_abi_stream(
+                                            strm,
+                                            DeflateAbiAction::Dispatch {
+                                                flush,
+                                                parameter_update: None,
+                                            },
+                                        );
                                         crate::src::gzlib::GzEmbeddedDeflateResult {
                                             result,
                                             remaining_input: strm.avail_in,

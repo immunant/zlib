@@ -5860,21 +5860,11 @@ pub unsafe extern "C" fn deflate_ffi(
     let Some(strm) = strm.as_mut() else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
-    deflate_dispatch_from_abi_stream(strm, flush, None)
-}
-
-// Retain the internal stream-dispatch surface used by the one-shot and gzip
-// callers.  Scalar controls use the shared action boundary above directly.
-pub unsafe fn deflate_dispatch_from_abi_stream(
-    strm: &mut crate::zlib_h::z_stream_s,
-    flush: ::core::ffi::c_int,
-    parameter_update: Option<DeflateParameterPlan>,
-) -> ::core::ffi::c_int {
     deflate_scalar_from_abi_stream(
         strm,
         DeflateAbiAction::Dispatch {
             flush,
-            parameter_update,
+            parameter_update: None,
         },
     )
 }
