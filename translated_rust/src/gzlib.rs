@@ -188,6 +188,14 @@ pub(crate) struct GzEmbeddedInflateCall<'input, 'output> {
     output: GzCodecOutputView<'output>,
 }
 
+// Own one complete bounded gzip-to-inflate request while the current ABI
+// adapter projects it into `z_stream`.  The owner deliberately contains no
+// stream or raw cursor: it is the hand-off seam for moving the embedded codec
+// itself out of gzip state once the inflate-state owner is available.
+pub(crate) struct GzEmbeddedInflateDispatch<'input, 'output> {
+    call: GzEmbeddedInflateCall<'input, 'output>,
+}
+
 pub(crate) struct GzCodecOutputView<'a> {
     bytes: &'a mut [u8],
 }
@@ -486,6 +494,35 @@ impl<'input, 'output> GzEmbeddedInflateCall<'input, 'output> {
                 None
             },
         })
+    }
+}
+
+impl<'input, 'output> GzEmbeddedInflateDispatch<'input, 'output> {
+    pub(crate) fn new(call: GzEmbeddedInflateCall<'input, 'output>) -> Self {
+        Self { call }
+    }
+
+    pub(crate) fn input(&self) -> &'input [u8] {
+        self.call.input()
+    }
+
+    pub(crate) fn input_available(&self) -> crate::stdlib::uInt {
+        self.call.input_available()
+    }
+
+    pub(crate) fn output_available(&self) -> crate::stdlib::uInt {
+        self.call.output_available()
+    }
+
+    pub(crate) fn output_mut(&mut self) -> &mut [u8] {
+        self.call.output_mut()
+    }
+
+    // Finishing consumes the exact request that supplied the stream cursors,
+    // so the result can retain checked input progress without observing the
+    // ABI stream after the projection has ended.
+    pub(crate) fn finish(self, snapshot: GzEmbeddedInflateResult) -> Option<GzCodecResult> {
+        self.call.into_codec_result(snapshot)
     }
 }
 

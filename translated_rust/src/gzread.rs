@@ -46,7 +46,9 @@ pub use crate::zlib_h::Z_OK;
 pub use crate::zlib_h::Z_STREAM_END;
 pub use crate::zlib_h::Z_STREAM_ERROR;
 
-use crate::src::gzlib::{GzCodecInput, GzCodecResult, GzEmbeddedInflateCall};
+use crate::src::gzlib::{
+    GzCodecInput, GzCodecResult, GzEmbeddedInflateCall, GzEmbeddedInflateDispatch,
+};
 
 fn is_gzip_header(input: &[u8]) -> bool {
     input.len() >= 4 && input[0] == 31 && input[1] == 139 && input[2] == 8 && input[3] < 32
@@ -853,15 +855,16 @@ unsafe fn gz_decomp(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int
             buffered: &mut state.x.have,
             path: state.path.as_deref(),
         };
-        gz_decomp_loop(decomp, &mut loop_state, output, |mut call| {
+        gz_decomp_loop(decomp, &mut loop_state, output, |call| {
             // The ABI stream projection consumes only this bounded codec
-            // request.  Cursor accounting remains with `call`, so a future
-            // owned embedded codec can replace this projection without
+            // request owner.  Cursor accounting remains with that owner, so
+            // a future embedded codec can replace this projection without
             // changing the gzip decompression state machine.
-            strm.next_in = call.input().as_ptr().cast_mut();
-            strm.avail_in = call.input_available();
-            strm.avail_out = call.output_available();
-            strm.next_out = call.output_mut().as_mut_ptr();
+            let mut dispatch = GzEmbeddedInflateDispatch::new(call);
+            strm.next_in = dispatch.input().as_ptr().cast_mut();
+            strm.avail_in = dispatch.input_available();
+            strm.avail_out = dispatch.output_available();
+            strm.next_out = dispatch.output_mut().as_mut_ptr();
             let result = crate::src::inflate::inflate(
                 strm as *mut crate::zlib_h::z_stream_s,
                 crate::zlib_h::Z_NO_FLUSH,
@@ -877,7 +880,7 @@ unsafe fn gz_decomp(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int
                 strm.total_out,
                 (result == crate::zlib_h::Z_DATA_ERROR).then(|| strm.msg.addr()),
             );
-            call.into_codec_result(snapshot)
+            dispatch.finish(snapshot)
         })
     };
     // The core transition returns the checked start of its owned output span,
