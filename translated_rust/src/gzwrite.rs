@@ -171,14 +171,22 @@ fn gz_comp(
                 // `next_in`; this request is capped by that count. The errno
                 // slot and descriptor are used only for this POSIX write.
                 let put = crate::src::gzlib::gz_comp_direct_write_request(state);
+                // Snapshot every state-derived argument before entering the
+                // raw descriptor boundary.  `write()` cannot call a zlib
+                // allocator callback, so the state transition below remains
+                // the only use of this bound gzip state after the syscall.
+                let fd = state.fd;
+                let input = state
+                    .strm
+                    .next_in
+                    .cast_const()
+                    .cast::<::core::ffi::c_void>();
                 crate::src::gzlib::gz_begin_io(state);
                 let (written, errno) = unsafe {
                     *crate::stdlib::__errno_location() = 0 as ::core::ffi::c_int;
-                    let written = crate::stdlib::write(
-                        state.fd,
-                        state.strm.next_in as *const ::core::ffi::c_void,
-                        put as crate::__stddef_size_t_h::size_t,
-                    ) as ::core::ffi::c_int;
+                    let written =
+                        crate::stdlib::write(fd, input, put as crate::__stddef_size_t_h::size_t)
+                            as ::core::ffi::c_int;
                     (written, *crate::stdlib::__errno_location())
                 };
                 if let Err(errno) = crate::src::gzlib::gz_io_result(state, written, errno) {
@@ -218,14 +226,18 @@ fn gz_comp(
                 // `x.next`, and this scope owns the descriptor/errno bridge
                 // for draining that initialized output buffer.
                 let put = crate::src::gzlib::gz_comp_output_write_request(state);
+                // As on the direct path, snapshot the descriptor and bounded
+                // byte range before the raw call.  This keeps all gzip-state
+                // observation and the subsequent progress update outside the
+                // descriptor boundary.
+                let fd = state.fd;
+                let output = state.x.next.cast_const().cast::<::core::ffi::c_void>();
                 crate::src::gzlib::gz_begin_io(state);
                 let (written, errno) = unsafe {
                     *crate::stdlib::__errno_location() = 0 as ::core::ffi::c_int;
-                    let written = crate::stdlib::write(
-                        state.fd,
-                        state.x.next as *const ::core::ffi::c_void,
-                        put as crate::__stddef_size_t_h::size_t,
-                    ) as ::core::ffi::c_int;
+                    let written =
+                        crate::stdlib::write(fd, output, put as crate::__stddef_size_t_h::size_t)
+                            as ::core::ffi::c_int;
                     (written, *crate::stdlib::__errno_location())
                 };
                 if let Err(errno) = crate::src::gzlib::gz_io_result(state, written, errno) {
