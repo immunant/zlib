@@ -1930,38 +1930,45 @@ pub unsafe fn inflate(
                                                                                 }
                                                                             }
                                                                         }
-                                                                        if (*state).mode as ::core::ffi::c_uint
+                                                                        // Code-length decoding has already consumed all
+                                                                        // input for this transition.  Keep the two
+                                                                        // compatibility records adopted while we validate
+                                                                        // the completed lens and build its bounded tables,
+                                                                        // rather than re-traversing their raw cursors for
+                                                                        // each error and mode commit.
+                                                                        let strm_ref = &mut *strm;
+                                                                        let state_ref = &mut *state;
+                                                                        if state_ref.mode as ::core::ffi::c_uint
                                                                             == crate::src::inflate::BAD as ::core::ffi::c_int as ::core::ffi::c_uint
                                                                         {
                                                                             continue '_inf_leave;
                                                                         }
-                                                                        if (*state).lens[256 as ::core::ffi::c_int as usize]
+                                                                        if state_ref.lens[256 as ::core::ffi::c_int as usize]
                                                                             as ::core::ffi::c_int == 0 as ::core::ffi::c_int
                                                                         {
-                                                                            (*strm).msg = INFLATE_ERROR_MESSAGES[10]
+                                                                            strm_ref.msg = INFLATE_ERROR_MESSAGES[10]
                                                                                 .as_ptr() as *const ::core::ffi::c_char
                                                                                 as *mut ::core::ffi::c_char;
-                                                                            (*state).mode = crate::src::inflate::BAD;
+                                                                            state_ref.mode = crate::src::inflate::BAD;
                                                                             continue '_inf_leave;
                                                                         } else {
                                                                             ret = {
-                                                                                let state = &mut *state;
-                                                                                let nlen = state.nlen as usize;
-                                                                                state.next = &raw mut state.codes as *mut crate::src::inftrees::code;
-                                                                                state.lencode = state.next as *const crate::src::inftrees::code;
-                                                                                state.lenbits = 9 as ::core::ffi::c_uint;
-                                                                                match state.lens.get(..nlen) {
+                                                                                let nlen = state_ref.nlen as usize;
+                                                                                state_ref.next = &raw mut state_ref.codes as *mut crate::src::inftrees::code;
+                                                                                state_ref.lencode = state_ref.next as *const crate::src::inftrees::code;
+                                                                                state_ref.lenbits = 9 as ::core::ffi::c_uint;
+                                                                                match state_ref.lens.get(..nlen) {
                                                                                     Some(lens) => match crate::src::inftrees::inflate_table_into(
                                                                                         crate::src::inftrees::LENS,
                                                                                         lens,
-                                                                                        &mut state.codes[..crate::src::inftrees::ENOUGH_LENS as usize],
-                                                                                        &mut state.work,
-                                                                                        state.lenbits,
+                                                                                        &mut state_ref.codes[..crate::src::inftrees::ENOUGH_LENS as usize],
+                                                                                        &mut state_ref.work,
+                                                                                        state_ref.lenbits,
                                                                                     ) {
                                                                                         Ok((used, root)) => {
                                                                                             table_used = used;
-                                                                                            state.next = state.next.wrapping_add(used);
-                                                                                            state.lenbits = root;
+                                                                                            state_ref.next = state_ref.next.wrapping_add(used);
+                                                                                            state_ref.lenbits = root;
                                                                                             0
                                                                                         }
                                                                                         Err(status) => status,
@@ -1970,17 +1977,16 @@ pub unsafe fn inflate(
                                                                                 }
                                                                             };
                                                                             if ret != 0 {
-                                                                                (*strm).msg = INFLATE_ERROR_MESSAGES[11].as_ptr()
+                                                                                strm_ref.msg = INFLATE_ERROR_MESSAGES[11].as_ptr()
                                                                                     as *const ::core::ffi::c_char as *mut ::core::ffi::c_char;
-                                                                                (*state).mode = crate::src::inflate::BAD;
+                                                                                state_ref.mode = crate::src::inflate::BAD;
                                                                                 continue '_inf_leave;
                                                                             } else {
                                                                                 ret = {
-                                                                                    let state = &mut *state;
-                                                                                    let nlen = state.nlen as usize;
-                                                                                    let ndist = state.ndist as usize;
-                                                                                    state.distcode = state.next as *const crate::src::inftrees::code;
-                                                                                    state.distbits = 6 as ::core::ffi::c_uint;
+                                                                                    let nlen = state_ref.nlen as usize;
+                                                                                    let ndist = state_ref.ndist as usize;
+                                                                                    state_ref.distcode = state_ref.next as *const crate::src::inftrees::code;
+                                                                                    state_ref.distbits = 6 as ::core::ffi::c_uint;
                                                                                     let end = match table_used.checked_add(
                                                                                         crate::src::inftrees::ENOUGH_DISTS as usize,
                                                                                     ) {
@@ -1988,19 +1994,19 @@ pub unsafe fn inflate(
                                                                                         None => 0,
                                                                                     };
                                                                                     match (
-                                                                                        state.lens.get(nlen..nlen.saturating_add(ndist)),
-                                                                                        state.codes.get_mut(table_used..end),
+                                                                                        state_ref.lens.get(nlen..nlen.saturating_add(ndist)),
+                                                                                        state_ref.codes.get_mut(table_used..end),
                                                                                     ) {
                                                                                         (Some(lens), Some(table)) => match crate::src::inftrees::inflate_table_into(
                                                                                             crate::src::inftrees::DISTS,
                                                                                             lens,
                                                                                             table,
-                                                                                            &mut state.work,
-                                                                                            state.distbits,
+                                                                                            &mut state_ref.work,
+                                                                                            state_ref.distbits,
                                                                                         ) {
                                                                                             Ok((used, root)) => {
-                                                                                                state.next = state.next.wrapping_add(used);
-                                                                                                state.distbits = root;
+                                                                                                state_ref.next = state_ref.next.wrapping_add(used);
+                                                                                                state_ref.distbits = root;
                                                                                                 0
                                                                                             }
                                                                                             Err(status) => status,
@@ -2009,12 +2015,12 @@ pub unsafe fn inflate(
                                                                                     }
                                                                                 };
                                                                                 if ret != 0 {
-                                                                                    (*strm).msg = INFLATE_ERROR_MESSAGES[12].as_ptr()
+                                                                                    strm_ref.msg = INFLATE_ERROR_MESSAGES[12].as_ptr()
                                                                                         as *const ::core::ffi::c_char as *mut ::core::ffi::c_char;
-                                                                                    (*state).mode = crate::src::inflate::BAD;
+                                                                                    state_ref.mode = crate::src::inflate::BAD;
                                                                                     continue '_inf_leave;
                                                                                 } else {
-                                                                                    (*state).mode = crate::src::inflate::LEN_;
+                                                                                    state_ref.mode = crate::src::inflate::LEN_;
                                                                                     if flush == crate::zlib_h::Z_TREES {
                                                                                         break '_inf_leave;
                                                                                     } else {
