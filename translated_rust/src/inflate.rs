@@ -1074,6 +1074,35 @@ impl InflateHeaderOutput<'_> {
     }
 }
 
+// A completed decoder invocation describes cursor movement only as bounded
+// lengths.  The stream adapter publishes those lengths to the ABI pointers
+// after the decoder has released its input and output slices; decoder policy
+// must never retain an ABI cursor shadow.
+struct InflateDecoderCursor {
+    input_used: usize,
+    input_remaining: ::core::ffi::c_uint,
+    output_used: usize,
+    output_remaining: ::core::ffi::c_uint,
+}
+
+impl InflateDecoderCursor {
+    fn from_remaining(
+        input_len: usize,
+        input_remaining: ::core::ffi::c_uint,
+        output_len: usize,
+        output_remaining: ::core::ffi::c_uint,
+    ) -> Self {
+        let input_remaining = input_remaining.min(input_len as ::core::ffi::c_uint);
+        let output_remaining = output_remaining.min(output_len as ::core::ffi::c_uint);
+        Self {
+            input_used: input_len - input_remaining as usize,
+            input_remaining,
+            output_used: output_len - output_remaining as usize,
+            output_remaining,
+        }
+    }
+}
+
 #[inline]
 fn inflate_pull_byte(
     input: &[u8],
@@ -2806,10 +2835,15 @@ pub unsafe fn inflate(
                 state.normal.mode = crate::src::inflate::LEN;
             }
         }
-        strm.next_out = strm.next_out.wrapping_add(output.len() - left as usize);
-        strm.avail_out = left as crate::stdlib::uInt;
-        strm.next_in = strm.next_in.wrapping_add(input.len() - have as usize);
-        strm.avail_in = have as crate::stdlib::uInt;
+        // Consume the bounded cursor transaction before republishing the ABI
+        // cursors.  In particular, do not derive a second progress value from
+        // `next_in` or `next_out`: the slices above are the sole authority for
+        // this call's movement.
+        let cursor = InflateDecoderCursor::from_remaining(input.len(), have, output.len(), left);
+        strm.next_out = strm.next_out.wrapping_add(cursor.output_used);
+        strm.avail_out = cursor.output_remaining;
+        strm.next_in = strm.next_in.wrapping_add(cursor.input_used);
+        strm.avail_in = cursor.input_remaining;
         state.normal.hold = hold;
         state.normal.bits = bits;
         if state.normal.wsize != 0
