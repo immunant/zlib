@@ -50,30 +50,35 @@ pub use crate::zlib_h::Z_STREAM_ERROR;
 
 unsafe extern "C" fn gz_init(mut state: crate::gzguts_h::gz_statep) -> ::core::ffi::c_int {
     let mut ret: ::core::ffi::c_int = 0;
-    let mut strm: crate::zlib_h::z_streamp = &raw mut (*state).strm;
-    (*state).in_0 = crate::stdlib::malloc(
-        ((*state).want << 1 as ::core::ffi::c_int) as crate::__stddef_size_t_h::size_t,
-    ) as *mut ::core::ffi::c_uchar;
-    if (*state).in_0.is_null() {
-        crate::src::gzlib::gz_error(
-            state as *mut crate::gzguts_h::gz_state,
-            crate::zlib_h::Z_MEM_ERROR,
-            b"out of memory\0".as_ptr() as *const ::core::ffi::c_char,
-        );
-        return -1 as ::core::ffi::c_int;
-    }
-    if (*state).direct == 0 {
-        (*state).out = crate::stdlib::malloc((*state).want as crate::__stddef_size_t_h::size_t)
-            as *mut ::core::ffi::c_uchar;
-        if (*state).out.is_null() {
-            crate::stdlib::free((*state).in_0 as *mut ::core::ffi::c_void);
+    let state_ref = &mut *state;
+    let mut strm: crate::zlib_h::z_streamp = &raw mut state_ref.strm;
+    let input_len = match (state_ref.want as usize).checked_mul(2) {
+        Some(len) => len,
+        None => {
             crate::src::gzlib::gz_error(
                 state as *mut crate::gzguts_h::gz_state,
                 crate::zlib_h::Z_MEM_ERROR,
                 b"out of memory\0".as_ptr() as *const ::core::ffi::c_char,
             );
-            return -1 as ::core::ffi::c_int;
+            return -1;
         }
+    };
+    let output_len = (state_ref.direct == 0).then_some(state_ref.want as usize);
+    let Some(mut buffers) = crate::gzguts_h::gz_buffers::new(input_len, output_len) else {
+        crate::src::gzlib::gz_error(
+            state as *mut crate::gzguts_h::gz_state,
+            crate::zlib_h::Z_MEM_ERROR,
+            b"out of memory\0".as_ptr() as *const ::core::ffi::c_char,
+        );
+        return -1;
+    };
+    state_ref.in_0 = buffers.input.as_mut_ptr();
+    state_ref.out = match buffers.output.as_mut() {
+        Some(output) => output.as_mut_ptr(),
+        None => ::core::ptr::null_mut(),
+    };
+    state_ref.buffers = Some(buffers);
+    if (*state).direct == 0 {
         (*strm).zalloc = None;
         (*strm).zfree = None;
         (*strm).opaque = ::core::ptr::null_mut::<::core::ffi::c_void>();
@@ -88,8 +93,9 @@ unsafe extern "C" fn gz_init(mut state: crate::gzguts_h::gz_statep) -> ::core::f
             ::core::mem::size_of::<crate::zlib_h::z_stream>() as ::core::ffi::c_int,
         );
         if ret != crate::zlib_h::Z_OK {
-            crate::stdlib::free((*state).out as *mut ::core::ffi::c_void);
-            crate::stdlib::free((*state).in_0 as *mut ::core::ffi::c_void);
+            state_ref.buffers = None;
+            state_ref.in_0 = ::core::ptr::null_mut();
+            state_ref.out = ::core::ptr::null_mut();
             crate::src::gzlib::gz_error(
                 state as *mut crate::gzguts_h::gz_state,
                 crate::zlib_h::Z_MEM_ERROR,

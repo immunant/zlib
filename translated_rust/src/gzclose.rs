@@ -36,9 +36,10 @@ macro_rules! gzclose_read_at_boundary {
                     crate::src::inflate::inflateEnd(
                         &raw mut (*state).strm as *mut _ as *mut crate::zlib_h::z_stream_s,
                     );
-                    crate::stdlib::free((*state).out as *mut ::core::ffi::c_void);
-                    crate::stdlib::free((*state).in_0 as *mut ::core::ffi::c_void);
                 }
+                (*state).buffers = None;
+                (*state).in_0 = ::core::ptr::null_mut();
+                (*state).out = ::core::ptr::null_mut();
                 let state_err = (*state).err;
                 (*state).msg = None;
                 (*state).err = crate::zlib_h::Z_OK;
@@ -78,10 +79,11 @@ macro_rules! gzclose_write_at_boundary {
                         crate::src::deflate::deflateEnd(
                             &raw mut (*state).strm as *mut _ as *mut crate::zlib_h::z_stream_s,
                         );
-                        crate::stdlib::free((*state).out as *mut ::core::ffi::c_void);
                     }
-                    crate::stdlib::free((*state).in_0 as *mut ::core::ffi::c_void);
                 }
+                (*state).buffers = None;
+                (*state).in_0 = ::core::ptr::null_mut();
+                (*state).out = ::core::ptr::null_mut();
                 (*state).msg = None;
                 (*state).err = crate::zlib_h::Z_OK;
                 let close_result = crate::stdlib::close((*state).fd);

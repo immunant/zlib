@@ -36,6 +36,32 @@ pub mod gzguts_h {
 
     pub const GZIP: ::core::ffi::c_int = 2;
 
+    /// Storage owned by an opaque gzip handle.  The translated pointer fields
+    /// below are temporary ABI cursors into these fixed-size allocations; the
+    /// allocations themselves are never manually freed.
+    pub struct gz_buffers {
+        pub input: Box<[u8]>,
+        pub output: Option<Box<[u8]>>,
+    }
+
+    fn gz_buffer(len: usize) -> Option<Box<[u8]>> {
+        let mut bytes = Vec::new();
+        bytes.try_reserve_exact(len).ok()?;
+        bytes.resize(len, 0);
+        Some(bytes.into_boxed_slice())
+    }
+
+    impl gz_buffers {
+        pub fn new(input_len: usize, output_len: Option<usize>) -> Option<Self> {
+            let input = gz_buffer(input_len)?;
+            let output = match output_len {
+                Some(len) => Some(gz_buffer(len)?),
+                None => None,
+            };
+            Some(Self { input, output })
+        }
+    }
+
     #[repr(C)]
 
     pub struct gz_state {
@@ -47,6 +73,9 @@ pub mod gzguts_h {
         pub path: ::std::ffi::CString,
         pub size: ::core::ffi::c_uint,
         pub want: ::core::ffi::c_uint,
+        pub buffers: Option<gz_buffers>,
+        // These are compatibility cursors into `buffers`, retained only
+        // while the translated I/O adapters still use ABI-style pointers.
         pub in_0: *mut ::core::ffi::c_uchar,
         pub out: *mut ::core::ffi::c_uchar,
         pub direct: ::core::ffi::c_int,

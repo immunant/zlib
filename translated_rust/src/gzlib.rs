@@ -17,7 +17,6 @@ pub use crate::stdlib::fcntl;
 
 pub use crate::stdlib::open;
 
-pub use crate::stdlib::__O_CLOEXEC;
 pub use crate::stdlib::F_GETFD;
 pub use crate::stdlib::F_GETFL;
 pub use crate::stdlib::F_SETFD;
@@ -34,6 +33,7 @@ pub use crate::stdlib::O_WRONLY;
 pub use crate::stdlib::SEEK_CUR;
 pub use crate::stdlib::SEEK_END;
 pub use crate::stdlib::SEEK_SET;
+pub use crate::stdlib::__O_CLOEXEC;
 
 pub use crate::stdlib::__off64_t;
 pub use crate::stdlib::__off_t;
@@ -376,6 +376,7 @@ macro_rules! gz_open_at_boundary {
                 path,
                 size: 0,
                 want: crate::gzguts_h::GZBUFSIZE as ::core::ffi::c_uint,
+                buffers: None,
                 in_0: ::core::ptr::null_mut(),
                 out: ::core::ptr::null_mut(),
                 direct: 0,
@@ -1163,22 +1164,22 @@ pub(crate) fn gz_error_update_state(
     state.msg = update.message;
 }
 
-/// Convert the legacy raw arguments only for callers that have not yet moved
-/// to the safe gzip-state core.  Export wrappers and the remaining translated
-/// I/O adapters are responsible for supplying valid pointers.
-pub unsafe extern "C" fn gz_error(
+// Transitional adapter for the translated gzip I/O routines.  New code uses
+// `gz_error_update_state`; this raw form remains until those routines have
+// been moved behind their boundary adapters.
+pub unsafe fn gz_error(
     state: crate::gzguts_h::gz_statep,
     err: ::core::ffi::c_int,
     msg: *const ::core::ffi::c_char,
 ) {
-    let state = &mut *state;
     let message = if msg.is_null() {
         None
     } else {
         Some(::std::ffi::CStr::from_ptr(msg))
     };
-    gz_error_update_state(state, err, message);
+    gz_error_update_state(&mut *state, err, message);
 }
+
 #[export_name = "gz_error"]
 
 pub unsafe extern "C" fn gz_error_ffi(
@@ -1186,7 +1187,9 @@ pub unsafe extern "C" fn gz_error_ffi(
     mut err: ::core::ffi::c_int,
     mut msg: *const ::core::ffi::c_char,
 ) {
-    gz_error(state, err, msg)
+    if !state.is_null() {
+        gz_error(state, err, msg);
+    }
 }
 pub fn gz_intmax() -> ::core::ffi::c_uint {
     crate::limits_h::INT_MAX as ::core::ffi::c_uint
