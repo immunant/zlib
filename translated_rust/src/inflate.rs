@@ -467,12 +467,7 @@ pub fn inflateReset2(
             strm.opaque,
             state.window,
         );
-        // SAFETY: `inflateStateCheck()` validated the stream's allocator and
-        // state. This window came from that allocation and is released before
-        // the state relinquishes its pointer to it.
-        unsafe {
-            Some(zfree).expect("non-null function pointer")(opaque, window as crate::stdlib::voidpf);
-        }
+        Some(zfree).expect("non-null function pointer")(opaque, window as crate::stdlib::voidpf);
         state.window = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
     }
     inflate_reset_with_window_bits(strm, state, wrap, window_bits)
@@ -597,16 +592,12 @@ pub(crate) fn inflateInit2_(
             ::core::mem::size_of::<crate::src::inflate::inflate_state>() as crate::stdlib::uInt,
         ) as *mut crate::src::inflate::inflate_state
     } else {
-        // SAFETY: the caller supplied this allocation callback as part of
-        // zlib's stream contract.
-        unsafe {
-            Some(strm.zalloc.expect("non-null function pointer"))
-                .expect("non-null function pointer")(
-                strm.opaque,
-                1 as crate::stdlib::uInt,
-                ::core::mem::size_of::<crate::src::inflate::inflate_state>() as crate::stdlib::uInt,
-            ) as *mut crate::src::inflate::inflate_state
-        }
+        Some(strm.zalloc.expect("non-null function pointer"))
+            .expect("non-null function pointer")(
+            strm.opaque,
+            1 as crate::stdlib::uInt,
+            ::core::mem::size_of::<crate::src::inflate::inflate_state>() as crate::stdlib::uInt,
+        ) as *mut crate::src::inflate::inflate_state
     };
     if state.is_null() {
         return crate::zlib_h::Z_MEM_ERROR;
@@ -625,12 +616,8 @@ pub(crate) fn inflateInit2_(
     state_ref.strm = strm;
     let ret = inflate_initialize_state(strm, state_ref, windowBits);
     if ret != crate::zlib_h::Z_OK {
-        // SAFETY: this is the still-owned allocation returned by the
-        // stream's matching allocator. No state reference spans the callback.
-        unsafe {
-            Some(strm.zfree.expect("non-null function pointer"))
-                .expect("non-null function pointer")(strm.opaque, state as crate::stdlib::voidpf);
-        }
+        Some(strm.zfree.expect("non-null function pointer"))
+            .expect("non-null function pointer")(strm.opaque, state as crate::stdlib::voidpf);
         strm.state = ::core::ptr::null_mut::<crate::src::deflate::internal_state>();
     }
     ret
@@ -876,16 +863,12 @@ pub(crate) fn updatewindow<T>(
 ) -> Result<T, ()> {
     let layout = inflate_window_layout(state.wbits);
     if state.window.is_null() && !matches!(access, InflateWindowAccess::Existing) {
-        // SAFETY: zlib's initialized allocator is invoked with the same
-        // window size and element count as the C implementation.
-        state.window = unsafe {
-            Some(stream.zalloc.expect("non-null function pointer"))
-                .expect("non-null function pointer")(
-                stream.opaque,
-                layout.alloc_items,
-                layout.alloc_size,
-            ) as *mut ::core::ffi::c_uchar
-        };
+        state.window = Some(stream.zalloc.expect("non-null function pointer"))
+            .expect("non-null function pointer")(
+            stream.opaque,
+            layout.alloc_items,
+            layout.alloc_size,
+        ) as *mut ::core::ffi::c_uchar;
         if state.window.is_null() {
             return Err(());
         }
@@ -2701,15 +2684,10 @@ pub fn inflateEnd(strm: &mut crate::zlib_h::z_stream) -> ::core::ffi::c_int {
         state.window,
         strm.state,
     );
-    // SAFETY: `inflateStateCheck()` validated the matching allocator and
-    // state. Both captured allocations belong to this stream and are not
-    // observed through Rust references while the callback is active.
-    unsafe {
-        if !window.is_null() {
-            zfree(opaque, window as crate::stdlib::voidpf);
-        }
-        zfree(opaque, state_ptr as crate::stdlib::voidpf);
+    if !window.is_null() {
+        zfree(opaque, window as crate::stdlib::voidpf);
     }
+    zfree(opaque, state_ptr as crate::stdlib::voidpf);
     inflate_end_complete(strm)
 }
 

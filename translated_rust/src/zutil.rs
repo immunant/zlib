@@ -117,7 +117,7 @@ pub(crate) fn prepare_stream_allocator(stream: &mut crate::zlib_h::z_stream) -> 
     if uses_default_allocator {
         stream.zalloc = Some(
             zcalloc
-                as unsafe extern "C" fn(
+                as extern "C" fn(
                     crate::stdlib::voidpf,
                     ::core::ffi::c_uint,
                     ::core::ffi::c_uint,
@@ -127,7 +127,7 @@ pub(crate) fn prepare_stream_allocator(stream: &mut crate::zlib_h::z_stream) -> 
     }
     if stream.zfree.is_none() {
         stream.zfree = Some(
-            zcfree as unsafe extern "C" fn(crate::stdlib::voidpf, crate::stdlib::voidpf) -> (),
+            zcfree as extern "C" fn(crate::stdlib::voidpf, crate::stdlib::voidpf) -> (),
         ) as crate::zlib_h::free_func;
     }
     uses_default_allocator

@@ -753,15 +753,11 @@ pub fn deflateInit2_(
             ::core::mem::size_of::<crate::src::deflate::deflate_state>() as crate::stdlib::uInt,
         ) as *mut crate::src::deflate::deflate_state
     } else {
-        // SAFETY: the caller supplied this allocation callback as part of
-        // zlib's stream contract.
-        unsafe {
-            Some(stream.zalloc.expect("non-null function pointer")).expect("non-null function pointer")(
-                stream.opaque,
-                1 as crate::stdlib::uInt,
-                ::core::mem::size_of::<crate::src::deflate::deflate_state>() as crate::stdlib::uInt,
-            ) as *mut crate::src::deflate::deflate_state
-        }
+        Some(stream.zalloc.expect("non-null function pointer")).expect("non-null function pointer")(
+            stream.opaque,
+            1 as crate::stdlib::uInt,
+            ::core::mem::size_of::<crate::src::deflate::deflate_state>() as crate::stdlib::uInt,
+        ) as *mut crate::src::deflate::deflate_state
     };
     if s.is_null() {
         return crate::zlib_h::Z_MEM_ERROR;
@@ -811,9 +807,6 @@ pub fn deflateInit2_(
             ::core::mem::size_of::<crate::src::deflate::Pos>() as crate::stdlib::uInt,
         ) as *mut crate::src::deflate::Posf;
     } else {
-        // SAFETY: every request below uses the caller-provided allocator;
-        // ownership transfers to `state` and failure is released by `deflateEnd`.
-        unsafe {
         state.window = Some(stream.zalloc.expect("non-null function pointer"))
             .expect("non-null function pointer")(
             stream.opaque,
@@ -833,7 +826,6 @@ pub fn deflateInit2_(
             state.hash_size,
             ::core::mem::size_of::<crate::src::deflate::Pos>() as crate::stdlib::uInt,
         ) as *mut crate::src::deflate::Posf;
-        }
     }
     state.high_water = 0 as crate::zutil_h::ulg;
     state.lit_bufsize = ((1 as ::core::ffi::c_int) << options.mem_level + 6 as ::core::ffi::c_int)
@@ -842,15 +834,11 @@ pub fn deflateInit2_(
         crate::src::zutil::zcalloc(stream.opaque, state.lit_bufsize, 4 as crate::stdlib::uInt)
             as *mut crate::zutil_h::uchf as *mut crate::stdlib::Bytef
     } else {
-        // SAFETY: this final request uses the caller-provided allocator;
-        // ownership transfers to `state` on success.
-        unsafe {
-            Some(stream.zalloc.expect("non-null function pointer")).expect("non-null function pointer")(
-                stream.opaque,
-                state.lit_bufsize,
-                4 as crate::stdlib::uInt,
-            ) as *mut crate::zutil_h::uchf as *mut crate::stdlib::Bytef
-        }
+        Some(stream.zalloc.expect("non-null function pointer")).expect("non-null function pointer")(
+            stream.opaque,
+            state.lit_bufsize,
+            4 as crate::stdlib::uInt,
+        ) as *mut crate::zutil_h::uchf as *mut crate::stdlib::Bytef
     };
     state.pending_buf_size =
         (state.lit_bufsize as crate::zutil_h::ulg).wrapping_mul(4 as crate::zutil_h::ulg);
@@ -2632,24 +2620,19 @@ pub fn deflateEnd(stream: &mut crate::zlib_h::z_stream) -> ::core::ffi::c_int {
             stream.state,
         )
     };
-    // SAFETY: `deflateStateCheck()` validated the matching allocator and all
-    // captured allocations. They are released in zlib's established order,
-    // and no stream or state reference is used while a callback is active.
-    unsafe {
-        if !pending_buf.is_null() {
-            zfree(opaque, pending_buf as crate::stdlib::voidpf);
-        }
-        if !head.is_null() {
-            zfree(opaque, head as crate::stdlib::voidpf);
-        }
-        if !prev.is_null() {
-            zfree(opaque, prev as crate::stdlib::voidpf);
-        }
-        if !window.is_null() {
-            zfree(opaque, window as crate::stdlib::voidpf);
-        }
-        zfree(opaque, state_ptr as crate::stdlib::voidpf);
+    if !pending_buf.is_null() {
+        zfree(opaque, pending_buf as crate::stdlib::voidpf);
     }
+    if !head.is_null() {
+        zfree(opaque, head as crate::stdlib::voidpf);
+    }
+    if !prev.is_null() {
+        zfree(opaque, prev as crate::stdlib::voidpf);
+    }
+    if !window.is_null() {
+        zfree(opaque, window as crate::stdlib::voidpf);
+    }
+    zfree(opaque, state_ptr as crate::stdlib::voidpf);
     // `deflateStateCheck()` returned this same bound stream.  Complete the
     // teardown through that reference rather than re-binding the raw ABI
     // pointer after the release callbacks have run.

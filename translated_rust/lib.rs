@@ -107,8 +107,12 @@ pub mod __stddef_null_h {
 pub mod zlib_h {
     pub const ZLIB_VERSION: [::core::ffi::c_char; 15] = crate::c_char_bytes(*b"1.3.2.1-motley\0");
 
+    // zlib invokes allocator hooks only with the ownership and size values
+    // established by its stream contract.  The hooks receive opaque raw
+    // values but have no additional Rust-side precondition, so callers that
+    // have validated that contract need not cross an unsafe call boundary.
     pub type alloc_func = Option<
-        unsafe extern "C" fn(
+        extern "C" fn(
             crate::stdlib::voidpf,
             crate::stdlib::uInt,
             crate::stdlib::uInt,
@@ -116,7 +120,7 @@ pub mod zlib_h {
     >;
 
     pub type free_func =
-        Option<unsafe extern "C" fn(crate::stdlib::voidpf, crate::stdlib::voidpf) -> ()>;
+        Option<extern "C" fn(crate::stdlib::voidpf, crate::stdlib::voidpf) -> ()>;
 
     pub type z_stream = crate::zlib_h::z_stream_s;
 

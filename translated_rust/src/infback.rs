@@ -1134,16 +1134,12 @@ fn inflateBackInit_(
             ::core::mem::size_of::<crate::src::inflate::inflate_state>() as crate::stdlib::uInt,
         ) as *mut crate::src::inflate::inflate_state
     } else {
-        // SAFETY: this is the caller-provided allocation contract paired
-        // with `inflateBackEnd()` for the newly initialized stream state.
-        unsafe {
-            Some(strm_ref.zalloc.expect("non-null function pointer"))
-                .expect("non-null function pointer")(
-                strm_ref.opaque,
-                1 as crate::stdlib::uInt,
-                ::core::mem::size_of::<crate::src::inflate::inflate_state>() as crate::stdlib::uInt,
-            ) as *mut crate::src::inflate::inflate_state
-        }
+        Some(strm_ref.zalloc.expect("non-null function pointer"))
+            .expect("non-null function pointer")(
+            strm_ref.opaque,
+            1 as crate::stdlib::uInt,
+            ::core::mem::size_of::<crate::src::inflate::inflate_state>() as crate::stdlib::uInt,
+        ) as *mut crate::src::inflate::inflate_state
     };
     if state.is_null() {
         return crate::zlib_h::Z_MEM_ERROR;
@@ -1843,12 +1839,7 @@ pub fn inflateBackEnd(strm: Option<&mut crate::zlib_h::z_stream>) -> ::core::ffi
     let opaque = strm.opaque;
     let state = strm.state as crate::stdlib::voidpf;
     let zfree = strm.zfree.expect("non-null function pointer");
-    // SAFETY: `inflateBackInit_` obtained `state` from this stream's `zalloc`,
-    // and this validated callback is the matching deallocator configured on
-    // the same stream. This is the final use of that allocation.
-    unsafe {
-        Some(zfree).expect("non-null function pointer")(opaque, state);
-    }
+    Some(zfree).expect("non-null function pointer")(opaque, state);
     inflate_back_end_complete(strm)
 }
 #[export_name = "inflateBackEnd"]
