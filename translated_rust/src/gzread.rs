@@ -172,6 +172,24 @@ struct GzLoadTarget<'a> {
     path: Option<&'a [u8]>,
 }
 
+// The refill transition needs only owned storage and scalar fields.  In
+// particular, the ABI stream cursor is deliberately not part of this view:
+// callers publish the buffer base as `next_in` only after this operation has
+// restored the owned input allocation and succeeded.
+struct GzAvailState<'a> {
+    err: &'a mut ::core::ffi::c_int,
+    eof: &'a mut ::core::ffi::c_int,
+    avail_in: &'a mut crate::stdlib::uInt,
+    size: usize,
+    input: &'a mut Option<Box<[u8]>>,
+    fd: &'a rustix::fd::OwnedFd,
+    again: &'a mut ::core::ffi::c_int,
+    message: &'a mut Option<Box<[u8]>>,
+    buffered: &'a mut ::core::ffi::c_uint,
+    path: Option<&'a [u8]>,
+    cursor_address: usize,
+}
+
 // Reading an owned gzip buffer does not require the ABI-shaped state.  Keep
 // the I/O loop pointer-free and return every state transition for the caller
 // to apply at its existing boundary.
@@ -269,60 +287,66 @@ fn apply_gz_load(
     }
 }
 
-unsafe fn gz_avail(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
-    if state.err != crate::zlib_h::Z_OK && state.err != crate::zlib_h::Z_BUF_ERROR {
-        return -1 as ::core::ffi::c_int;
+fn gz_avail(state: GzAvailState<'_>) -> Option<()> {
+    let GzAvailState {
+        err,
+        eof,
+        avail_in,
+        size,
+        input,
+        fd,
+        again,
+        message,
+        buffered,
+        path,
+        cursor_address,
+    } = state;
+    if *err != crate::zlib_h::Z_OK && *err != crate::zlib_h::Z_BUF_ERROR {
+        return None;
     }
-    if state.eof == 0 as ::core::ffi::c_int {
-        let avail_in = state.strm.avail_in;
-        let size = state.size as usize;
-        let Some(mut buffer) = state.in_0.take() else {
-            return -1 as ::core::ffi::c_int;
+    if *eof == 0 {
+        let pending = *avail_in;
+        let Some(mut buffer) = input.take() else {
+            return None;
         };
         errno::set_errno(errno::Errno(0));
         let ret = (|| {
             // `strm.next_in` is a cursor in `in_0` only while input is
             // pending.  A zero count intentionally accepts its null cursor.
-            let Some(mut input) = (if avail_in == 0 {
+            let Some(mut input) = (if pending == 0 {
                 GzInputCursor::empty(buffer.as_mut(), size)
             } else {
-                GzInputCursor::from_owned_buffer(
-                    buffer.as_mut(),
-                    state.strm.next_in.addr(),
-                    avail_in,
-                    size,
-                )
+                GzInputCursor::from_owned_buffer(buffer.as_mut(), cursor_address, pending, size)
             }) else {
-                return -1;
+                return None;
             };
-            let Some((load, available)) = input.fill(state.fd.as_ref().unwrap()) else {
-                return -1;
+            let Some((load, available)) = input.fill(fd) else {
+                return None;
             };
             match apply_gz_load(
                 GzLoadTarget {
-                    again: &mut state.again,
-                    eof: &mut state.eof,
-                    message: &mut state.msg,
-                    error: &mut state.err,
-                    buffered: &mut state.x.have,
-                    path: state.path.as_deref(),
+                    again,
+                    eof,
+                    message,
+                    error: err,
+                    buffered,
+                    path,
                 },
                 load,
             ) {
                 Ok(_) => {
-                    state.strm.avail_in = available;
-                    0
+                    *avail_in = available;
+                    Some(())
                 }
-                Err(_) => -1,
+                Err(_) => None,
             }
         })();
-        state.in_0 = Some(buffer);
-        if ret == -1 as ::core::ffi::c_int {
-            return -1 as ::core::ffi::c_int;
+        *input = Some(buffer);
+        if ret.is_none() {
+            return None;
         }
-        state.strm.next_in = state.in_0.as_deref_mut().unwrap().as_mut_ptr();
     }
-    return 0 as ::core::ffi::c_int;
+    Some(())
 }
 
 unsafe fn gz_look(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
@@ -378,9 +402,25 @@ unsafe fn gz_look(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
         state.direct = 0 as ::core::ffi::c_int;
         return 0 as ::core::ffi::c_int;
     }
-    if gz_avail(state) == -1 as ::core::ffi::c_int {
+    let cursor_address = state.strm.next_in.addr();
+    if gz_avail(GzAvailState {
+        err: &mut state.err,
+        eof: &mut state.eof,
+        avail_in: &mut state.strm.avail_in,
+        size: state.size as usize,
+        input: &mut state.in_0,
+        fd: state.fd.as_ref().expect("gzip state has an open file"),
+        again: &mut state.again,
+        message: &mut state.msg,
+        buffered: &mut state.x.have,
+        path: state.path.as_deref(),
+        cursor_address,
+    })
+    .is_none()
+    {
         return -1 as ::core::ffi::c_int;
     }
+    state.strm.next_in = state.in_0.as_deref_mut().unwrap().as_mut_ptr();
     if state.strm.avail_in == 0 as crate::stdlib::uInt
         || state.again != 0 && state.strm.avail_in < 4 as crate::stdlib::uInt
     {
@@ -388,8 +428,9 @@ unsafe fn gz_look(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
     }
     let avail_in = state.strm.avail_in as usize;
     let next_in = state.strm.next_in;
-    // `gz_avail()` installs `next_in` in this owned buffer, and inflate only
-    // advances that cursor. Validate it before deriving the input view.
+    // The successful refill above installs `next_in` in this owned buffer,
+    // and inflate only advances that cursor. Validate it before deriving the
+    // input view.
     let Some(input) = state.in_0.as_deref().and_then(|buffer| {
         let start = next_in.addr().checked_sub(buffer.as_ptr().addr())?;
         let end = start.checked_add(avail_in)?;
@@ -425,12 +466,29 @@ unsafe fn gz_decomp(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int
     let mut strm: crate::zlib_h::z_streamp = &raw mut state.strm;
     had = (*strm).avail_out as ::core::ffi::c_uint;
     loop {
-        if (*strm).avail_in == 0 as crate::stdlib::uInt
-            && gz_avail(state) == -1 as ::core::ffi::c_int
-        {
-            ret = state.err;
-            break;
-        } else if (*strm).avail_in == 0 as crate::stdlib::uInt {
+        if (*strm).avail_in == 0 as crate::stdlib::uInt {
+            let cursor_address = state.strm.next_in.addr();
+            if gz_avail(GzAvailState {
+                err: &mut state.err,
+                eof: &mut state.eof,
+                avail_in: &mut state.strm.avail_in,
+                size: state.size as usize,
+                input: &mut state.in_0,
+                fd: state.fd.as_ref().expect("gzip state has an open file"),
+                again: &mut state.again,
+                message: &mut state.msg,
+                buffered: &mut state.x.have,
+                path: state.path.as_deref(),
+                cursor_address,
+            })
+            .is_none()
+            {
+                ret = state.err;
+                break;
+            }
+            state.strm.next_in = state.in_0.as_deref_mut().unwrap().as_mut_ptr();
+        }
+        if (*strm).avail_in == 0 as crate::stdlib::uInt {
             if state.again == 0 {
                 crate::src::gzlib::gz_set_error(
                     &mut state.msg,
