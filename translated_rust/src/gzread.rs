@@ -51,10 +51,12 @@ struct GzLoadResult {
     status: ::core::ffi::c_int,
 }
 
-// This is the raw descriptor-read boundary.  Keep the byte count in a typed
+// This is the raw descriptor-read boundary. Its private callers either pass a
+// range in gzip's initialized buffers or an FFI caller buffer whose validity
+// was checked by their unsafe entry point. Keep the byte count in a typed
 // result instead of passing a raw out-pointer through each caller, including
 // the partial-read error case that gzip must still account for.
-unsafe fn gz_load(
+fn gz_load(
     state: &mut crate::gzguts_h::gz_state,
     mut buf: *mut ::core::ffi::c_uchar,
     mut len: ::core::ffi::c_uint,
@@ -64,38 +66,43 @@ unsafe fn gz_load(
     // Keep the byte count local while crossing the raw read boundary.  The
     // caller only observes it after the descriptor result has been classified.
     let mut loaded: ::core::ffi::c_uint = 0;
-    crate::src::gzlib::gz_begin_io(state);
-    *crate::stdlib::__errno_location() = 0;
-    loop {
-        get = crate::src::gzlib::gz_load_request(len, loaded);
-        ret = crate::stdlib::read(
-            state.fd,
-            buf.wrapping_add(loaded as usize) as *mut ::core::ffi::c_void,
-            get as crate::__stddef_size_t_h::size_t,
-        ) as ::core::ffi::c_int;
-        if ret <= 0 {
-            break;
+    // SAFETY: the callers maintain the buffer validity described above for
+    // the whole requested range. This is the only place the read boundary
+    // dereferences errno or passes that range to the descriptor API.
+    unsafe {
+        crate::src::gzlib::gz_begin_io(state);
+        *crate::stdlib::__errno_location() = 0;
+        loop {
+            get = crate::src::gzlib::gz_load_request(len, loaded);
+            ret = crate::stdlib::read(
+                state.fd,
+                buf.wrapping_add(loaded as usize) as *mut ::core::ffi::c_void,
+                get as crate::__stddef_size_t_h::size_t,
+            ) as ::core::ffi::c_int;
+            if ret <= 0 {
+                break;
+            }
+            loaded = crate::src::gzlib::gz_add_received(loaded, ret as ::core::ffi::c_uint);
+            if loaded >= len {
+                break;
+            }
         }
-        loaded = crate::src::gzlib::gz_add_received(loaded, ret as ::core::ffi::c_uint);
-        if loaded >= len {
-            break;
-        }
-    }
-    if let Err(errno) = crate::src::gzlib::gz_load_result(
-        state,
-        ret,
-        loaded,
-        *crate::stdlib::__errno_location(),
-    ) {
-        crate::src::gzlib::gz_error(
+        if let Err(errno) = crate::src::gzlib::gz_load_result(
             state,
-            crate::zlib_h::Z_ERRNO,
-            crate::stdlib::strerror(errno),
-        );
-        return GzLoadResult {
-            received: loaded,
-            status: -1,
-        };
+            ret,
+            loaded,
+            *crate::stdlib::__errno_location(),
+        ) {
+            crate::src::gzlib::gz_error(
+                state,
+                crate::zlib_h::Z_ERRNO,
+                crate::stdlib::strerror(errno),
+            );
+            return GzLoadResult {
+                received: loaded,
+                status: -1,
+            };
+        }
     }
     GzLoadResult {
         received: loaded,
@@ -104,7 +111,7 @@ unsafe fn gz_load(
 }
 
 // This helper is internal and all of its callers have already bound the
-// validated gzip state.  Keep only its I/O and input-buffer operations raw.
+// validated gzip state. Keep only its I/O and input-buffer operations raw.
 unsafe fn gz_avail(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
     let mut got: ::core::ffi::c_uint = 0;
     let plan = match crate::src::gzlib::gz_avail_plan(state) {
