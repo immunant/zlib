@@ -1039,6 +1039,12 @@ fn update_window_produced_len(copy: ::core::ffi::c_uint) -> Option<usize> {
     }
 }
 
+fn update_window_produced_slice<'a>(
+    produced: Option<&'a [crate::stdlib::Bytef]>,
+) -> &'a [crate::stdlib::Bytef] {
+    produced.unwrap_or(&[])
+}
+
 unsafe fn updatewindow(
     mut strm: crate::zlib_h::z_streamp,
     mut produced_start: *const crate::stdlib::Bytef,
@@ -1064,8 +1070,8 @@ unsafe fn updatewindow(
     );
     let window = core::slice::from_raw_parts_mut(state.window, state.wsize as usize);
     let produced = match update_window_produced_len(copy) {
-        Some(produced_len) => core::slice::from_raw_parts(produced_start, produced_len),
-        None => &[],
+        Some(produced_len) => Some(core::slice::from_raw_parts(produced_start, produced_len)),
+        None => None,
     };
     update_window_core(
         state.wbits,
@@ -1073,7 +1079,7 @@ unsafe fn updatewindow(
         &mut state.wnext,
         &mut state.whave,
         window,
-        produced,
+        update_window_produced_slice(produced),
     );
     0
 }
@@ -4283,6 +4289,18 @@ mod tests {
             update_window_produced_len(::core::ffi::c_uint::MAX),
             Some(::core::ffi::c_uint::MAX as usize)
         );
+    }
+
+    #[test]
+    fn update_window_produced_slice_uses_empty_slice_when_output_is_absent() {
+        assert_eq!(super::update_window_produced_slice(None), b"");
+    }
+
+    #[test]
+    fn update_window_produced_slice_preserves_output_reference() {
+        let produced = *b"xyz";
+
+        assert_eq!(super::update_window_produced_slice(Some(&produced)), b"xyz");
     }
 
     #[test]

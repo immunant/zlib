@@ -71,11 +71,15 @@ enum GzInitMode {
     Compressed,
 }
 
+fn gz_comp_is_direct(direct: ::core::ffi::c_int) -> bool {
+    direct != 0
+}
+
 fn gz_init_mode(direct: ::core::ffi::c_int) -> GzInitMode {
-    if direct == 0 {
-        GzInitMode::Compressed
-    } else {
+    if gz_comp_is_direct(direct) {
         GzInitMode::Direct
+    } else {
+        GzInitMode::Compressed
     }
 }
 
@@ -836,7 +840,7 @@ unsafe fn gz_comp(
     }
     let mut strm: crate::zlib_h::z_streamp = &raw mut state.strm;
     let out_pending = &mut state.out_pending;
-    if state.direct != 0 {
+    if gz_comp_is_direct(state.direct) {
         while (*strm).avail_in != 0 {
             *crate::stdlib::__errno_location() = 0 as ::core::ffi::c_int;
             state.again = 0 as ::core::ffi::c_int;
@@ -1436,7 +1440,7 @@ mod tests {
     use super::{
         gz_buffer_is_initialized, gz_comp_apply_deflate_progress, gz_comp_deflate_action,
         gz_comp_deflate_progress, gz_comp_deflate_stream_is_corrupt, gz_comp_direct_write_progress,
-        gz_comp_has_output, gz_comp_max_write_chunk, gz_comp_needs_output_write,
+        gz_comp_has_output, gz_comp_is_direct, gz_comp_max_write_chunk, gz_comp_needs_output_write,
         gz_comp_needs_reset, gz_comp_output_buffer_action, gz_comp_output_produced,
         gz_comp_output_write_chunk_len, gz_comp_output_write_progress, gz_comp_pending_after_write,
         gz_comp_reset_action, gz_comp_reset_after_flush, gz_comp_reset_value,
@@ -1678,6 +1682,15 @@ mod tests {
         assert_eq!(gz_init_mode(-1), GzInitMode::Direct);
         assert_eq!(gz_init_mode(::core::ffi::c_int::MIN), GzInitMode::Direct);
         assert_eq!(gz_init_mode(::core::ffi::c_int::MAX), GzInitMode::Direct);
+    }
+
+    #[test]
+    fn gz_comp_is_direct_treats_only_zero_as_compressed() {
+        assert!(!gz_comp_is_direct(0));
+        assert!(gz_comp_is_direct(1));
+        assert!(gz_comp_is_direct(-1));
+        assert!(gz_comp_is_direct(::core::ffi::c_int::MIN));
+        assert!(gz_comp_is_direct(::core::ffi::c_int::MAX));
     }
 
     #[test]
