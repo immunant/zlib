@@ -338,8 +338,15 @@ fn gz_decomp(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
             }
             break;
         } else {
-            // `strm` is the initialized stream held by this gzip state.
-            ret = crate::src::inflate::inflate(&mut state.strm, crate::zlib_h::Z_NO_FLUSH);
+            // Gzip owns its compressed-input buffer, so pass the checked
+            // current suffix directly to inflate instead of asking its core
+            // to reconstruct a view from the ABI cursor.
+            let input = gz_input_range(state).and_then(|range| state.in_0.get(range));
+            ret = crate::src::inflate::inflate(
+                &mut state.strm,
+                crate::zlib_h::Z_NO_FLUSH,
+                input,
+            );
             if state.strm.avail_out < had {
                 state.junk = 0 as ::core::ffi::c_int;
             }

@@ -1050,6 +1050,7 @@ impl InflateInput<'_> {
 pub fn inflate(
     strm: &mut crate::zlib_h::z_stream,
     mut flush: ::core::ffi::c_int,
+    input: Option<&[crate::stdlib::Bytef]>,
 ) -> ::core::ffi::c_int {
     unsafe {
         // The exported wrapper and internal callers provide a live stream
@@ -1057,7 +1058,9 @@ pub fn inflate(
         // until stream ownership is converted.
         if !inflate_stream_has_allocators(strm)
             || strm.next_out.is_null()
-            || strm.next_in.is_null() && strm.avail_in != 0 as crate::stdlib::uInt
+            || strm.avail_in != 0 as crate::stdlib::uInt
+                && (strm.next_in.is_null()
+                    || input.map_or(true, |input| input.len() != strm.avail_in as usize))
         {
             return crate::zlib_h::Z_STREAM_ERROR;
         }
@@ -1131,17 +1134,13 @@ pub fn inflate(
             state.mode = crate::src::inflate::TYPEDO;
         }
         let output_start = strm.next_out;
-        // `next_in` and `avail_in` were validated above.  Retain one bounded
-        // immutable view for the byte-at-a-time decoder instead of repeatedly
-        // dereferencing its moving raw cursor.
-        let input = if strm.avail_in == 0 {
-            &[]
-        } else {
-            ::core::slice::from_raw_parts(strm.next_in, strm.avail_in as usize)
-        };
+        // The FFI wrapper and safe callers establish this bounded immutable
+        // view. Retain it for the byte-at-a-time decoder instead of rebuilding
+        // a slice from the moving ABI cursor in the streaming engine.
+        let input = input.unwrap_or(&[]);
         let input = InflateInput {
             bytes: input,
-            start: strm.next_in.addr(),
+            start: input.as_ptr().addr(),
         };
         // The ABI validation above established one caller-owned output span
         // for this invocation. Keep that span borrowed for the engine so
@@ -3000,7 +2999,17 @@ pub unsafe extern "C" fn inflate_ffi(
     let Some(strm) = strm.as_mut() else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
-    inflate(strm, flush)
+    let input = if strm.avail_in == 0 {
+        None
+    } else if strm.next_in.is_null() {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    } else {
+        Some(::core::slice::from_raw_parts(
+            strm.next_in,
+            strm.avail_in as usize,
+        ))
+    };
+    inflate(strm, flush, input)
 }
 
 /// Release the window and state allocations in the order required by the C

@@ -91,7 +91,20 @@ pub fn uncompress2_z(
             };
             len = len.wrapping_sub(stream.avail_in as crate::stdlib::z_size_t);
         }
-        err = crate::src::inflate::inflate(&mut stream, crate::zlib_h::Z_NO_FLUSH);
+        let input = source.and_then(|source| {
+            let available = stream.avail_in as usize;
+            if available == 0 {
+                return Some(&source[..0]);
+            }
+            let offset = stream.next_in.addr().checked_sub(source.as_ptr().addr())?;
+            let end = offset.checked_add(available)?;
+            source.get(offset..end)
+        });
+        if stream.avail_in != 0 && input.is_none() {
+            err = crate::zlib_h::Z_STREAM_ERROR;
+            break;
+        }
+        err = crate::src::inflate::inflate(&mut stream, crate::zlib_h::Z_NO_FLUSH, input);
         if err != crate::zlib_h::Z_OK {
             break;
         }
