@@ -49,6 +49,16 @@ enum GzLoadBuffer<'a> {
     Output,
 }
 
+/// Destination selection for one fetch of readable gzip data.
+///
+/// Most fetches fill the state-owned output buffer.  Large reads can instead
+/// decompress directly into the caller's already-bounded output slice, while
+/// retaining the same state transition in `gz_fetch`.
+enum GzFetchOutput<'a> {
+    StateOutput,
+    Direct(&'a mut [u8]),
+}
+
 /// The owned output-buffer cursor used by the read side of a gzip handle.
 ///
 /// `gzFile_s::next` remains the ABI-visible cursor, but pushback only needs
@@ -499,7 +509,10 @@ unsafe fn gz_decomp(
     };
 }
 
-unsafe fn gz_fetch(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
+unsafe fn gz_fetch(
+    state: &mut crate::gzguts_h::gz_state,
+    mut output: GzFetchOutput<'_>,
+) -> ::core::ffi::c_int {
     loop {
         match state.how {
             crate::gzguts_h::LOOK => {
@@ -511,6 +524,14 @@ unsafe fn gz_fetch(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int 
                 }
             }
             crate::gzguts_h::COPY => {
+                if !matches!(&output, GzFetchOutput::StateOutput) {
+                    crate::src::gzlib::gz_error_state(
+                        state,
+                        crate::zlib_h::Z_STREAM_ERROR,
+                        Some(c"state corrupt"),
+                    );
+                    return -1 as ::core::ffi::c_int;
+                }
                 state.x.have = match gz_load_impl(state, GzLoadBuffer::Output) {
                     Ok(got) => got as ::core::ffi::c_uint,
                     Err(()) => return -1 as ::core::ffi::c_int,
@@ -519,15 +540,31 @@ unsafe fn gz_fetch(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int 
                 return 0 as ::core::ffi::c_int;
             }
             crate::gzguts_h::GZIP => {
-                // Move the output owner out for the duration of decompression so
-                // its slice can be passed independently of the gzip state.
-                let mut output = std::mem::take(&mut state.out);
+                let direct = matches!(&output, GzFetchOutput::Direct(_));
+                // Move the state-owned output away only while its slice is
+                // passed independently of the gzip state.  A direct read
+                // selects the caller's bounded output slice instead.
+                let mut state_output = None;
+                let output = match &mut output {
+                    GzFetchOutput::StateOutput => {
+                        state_output = Some(std::mem::take(&mut state.out));
+                        state_output
+                            .as_deref_mut()
+                            .expect("state output was installed")
+                    }
+                    GzFetchOutput::Direct(output) => &mut **output,
+                };
                 state.strm.avail_out = output.len() as crate::stdlib::uInt;
                 state.strm.next_out = output.as_mut_ptr();
-                let result = gz_decomp(state, &mut output);
-                state.out = output;
+                let result = gz_decomp(state, output);
+                if let Some(output) = state_output {
+                    state.out = output;
+                }
                 if result == -1 as ::core::ffi::c_int {
                     return -1 as ::core::ffi::c_int;
+                }
+                if direct {
+                    return 0 as ::core::ffi::c_int;
                 }
             }
             _ => {
@@ -600,7 +637,7 @@ unsafe fn gz_skip(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
             if state.eof != 0 && state.strm.avail_in == 0 as crate::stdlib::uInt {
                 break;
             }
-            if gz_fetch(state) == -1 as ::core::ffi::c_int {
+            if gz_fetch(state, GzFetchOutput::StateOutput) == -1 as ::core::ffi::c_int {
                 return -1 as ::core::ffi::c_int;
             }
         }
@@ -669,25 +706,37 @@ unsafe fn gz_read_impl(
                 if state.eof != 0 && state.strm.avail_in == 0 as crate::stdlib::uInt {
                     break 's_140;
                 }
-                if state.how == crate::gzguts_h::LOOK || n < state.size << 1 as ::core::ffi::c_int {
-                    if gz_fetch(state) == -1 as ::core::ffi::c_int
-                        && state.x.have == 0 as ::core::ffi::c_uint
-                    {
-                        err = -1 as ::core::ffi::c_int;
-                    }
-                    break 's_28;
+                let direct = state.how != crate::gzguts_h::LOOK
+                    && n >= state.size << 1 as ::core::ffi::c_int
+                    && state.how != crate::gzguts_h::COPY;
+                let fetch_output = if state.how == crate::gzguts_h::LOOK
+                    || n < state.size << 1 as ::core::ffi::c_int
+                {
+                    Some(GzFetchOutput::StateOutput)
                 } else if state.how == crate::gzguts_h::COPY {
                     match gz_load_impl(state, GzLoadBuffer::Slice(&mut buf[out..out + n as usize]))
                     {
                         Ok(got) => n = got as ::core::ffi::c_uint,
                         Err(()) => err = -1 as ::core::ffi::c_int,
                     }
+                    None
                 } else {
-                    state.strm.avail_out = n as crate::stdlib::uInt;
-                    state.strm.next_out = buf[out..].as_mut_ptr() as *mut crate::stdlib::Bytef;
-                    err = gz_decomp(state, &mut buf[out..out + n as usize]);
-                    n = state.x.have;
-                    state.x.have = 0 as ::core::ffi::c_uint;
+                    Some(GzFetchOutput::Direct(&mut buf[out..out + n as usize]))
+                };
+                if let Some(fetch_output) = fetch_output {
+                    let fetched = gz_fetch(state, fetch_output);
+                    if direct {
+                        err = fetched;
+                        n = state.x.have;
+                        state.x.have = 0 as ::core::ffi::c_uint;
+                    } else {
+                        if fetched == -1 as ::core::ffi::c_int
+                            && state.x.have == 0 as ::core::ffi::c_uint
+                        {
+                            err = -1 as ::core::ffi::c_int;
+                        }
+                        break 's_28;
+                    }
                 }
             }
             len -= n as usize;
@@ -1024,7 +1073,7 @@ fn gzgets_impl(state: &mut crate::gzguts_h::gz_state, buf: &mut [u8]) -> bool {
     let mut written = 0usize;
     while written + 1 < buf.len() {
         if state.x.have == 0 {
-            if unsafe { gz_fetch(state) } == -1 as ::core::ffi::c_int {
+            if unsafe { gz_fetch(state, GzFetchOutput::StateOutput) } == -1 as ::core::ffi::c_int {
                 break;
             }
             if state.x.have == 0 {
