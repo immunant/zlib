@@ -175,12 +175,6 @@ fn output_cursor_after_write(
     )
 }
 
-fn match_copy_layout(
-    match_length: ::core::ffi::c_uint,
-) -> (::core::ffi::c_uint, ::core::ffi::c_uint) {
-    (match_length / 3, match_length % 3)
-}
-
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 enum FastLitLenAction {
     Literal,
@@ -369,6 +363,40 @@ fn fast_window_copy_plan(
     }
 }
 
+fn match_copy_layout(
+    match_length: ::core::ffi::c_uint,
+) -> (::core::ffi::c_uint, ::core::ffi::c_uint) {
+    (match_length / 3, match_length % 3)
+}
+
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+struct FastMatchCopyLayout {
+    final_copy_triplets: ::core::ffi::c_uint,
+    final_trailing_bytes: ::core::ffi::c_uint,
+    window_copy_plan: Option<FastWindowCopyPlan>,
+}
+
+fn fast_match_copy_layout(
+    uses_window: bool,
+    window_size: ::core::ffi::c_uint,
+    window_next: ::core::ffi::c_uint,
+    distance_back: ::core::ffi::c_uint,
+    match_length: ::core::ffi::c_uint,
+) -> FastMatchCopyLayout {
+    let window_copy_plan = uses_window
+        .then(|| fast_window_copy_plan(window_size, window_next, distance_back, match_length));
+    let final_copy_length = window_copy_plan
+        .map(|copy_plan| copy_plan.remaining_length)
+        .unwrap_or(match_length);
+    let (final_copy_triplets, final_trailing_bytes) = match_copy_layout(final_copy_length);
+
+    FastMatchCopyLayout {
+        final_copy_triplets,
+        final_trailing_bytes,
+        window_copy_plan,
+    }
+}
+
 fn finish_fast_distance(
     base_distance: ::core::ffi::c_uint,
     hold: crate::stdlib::uLong,
@@ -535,8 +563,8 @@ pub unsafe extern "C" fn inflate_fast(
                 match c2rust_current_block_141 {
                     6072622540298447352 => {
                         from = out.wrapping_sub(dist as usize);
-                        let (copy_triplets, trailing_bytes) = match_copy_layout(len);
-                        for _ in 0..copy_triplets {
+                        let copy_layout = fast_match_copy_layout(false, 0, 0, 0, len);
+                        for _ in 0..copy_layout.final_copy_triplets {
                             let c2rust_fresh26 = from;
                             from = from.wrapping_add(1);
                             let c2rust_fresh27 = out;
@@ -559,7 +587,7 @@ pub unsafe extern "C" fn inflate_fast(
                                 output_cursor_after_write(output_produced, output_remaining);
                             *c2rust_fresh31 = *c2rust_fresh30;
                         }
-                        if trailing_bytes != 0 {
+                        if copy_layout.final_trailing_bytes != 0 {
                             let c2rust_fresh32 = from;
                             from = from.wrapping_add(1);
                             let c2rust_fresh33 = out;
@@ -567,7 +595,7 @@ pub unsafe extern "C" fn inflate_fast(
                             (output_produced, output_remaining) =
                                 output_cursor_after_write(output_produced, output_remaining);
                             *c2rust_fresh33 = *c2rust_fresh32;
-                            if trailing_bytes > 1 as ::core::ffi::c_uint {
+                            if copy_layout.final_trailing_bytes > 1 as ::core::ffi::c_uint {
                                 let c2rust_fresh34 = from;
                                 from = from.wrapping_add(1);
                                 let c2rust_fresh35 = out;
@@ -594,7 +622,9 @@ pub unsafe extern "C" fn inflate_fast(
                                 break;
                             }
                         };
-                        let copy_plan = fast_window_copy_plan(wsize, wnext, distance_back, len);
+                        let copy_layout =
+                            fast_match_copy_layout(true, wsize, wnext, distance_back, len);
+                        let copy_plan = copy_layout.window_copy_plan.unwrap();
                         from = window.wrapping_add(copy_plan.first_window_start as usize);
                         if copy_plan.first_window_length != 0 {
                             op = copy_plan.first_window_length;
@@ -637,8 +667,7 @@ pub unsafe extern "C" fn inflate_fast(
                         if copy_plan.continuation_source == FastWindowContinuationSource::Output {
                             from = out.wrapping_sub(dist as usize);
                         }
-                        let (copy_triplets, trailing_bytes) = match_copy_layout(len);
-                        for _ in 0..copy_triplets {
+                        for _ in 0..copy_layout.final_copy_triplets {
                             let c2rust_fresh16 = from;
                             from = from.wrapping_add(1);
                             let c2rust_fresh17 = out;
@@ -661,7 +690,7 @@ pub unsafe extern "C" fn inflate_fast(
                                 output_cursor_after_write(output_produced, output_remaining);
                             *c2rust_fresh21 = *c2rust_fresh20;
                         }
-                        if trailing_bytes != 0 {
+                        if copy_layout.final_trailing_bytes != 0 {
                             let c2rust_fresh22 = from;
                             from = from.wrapping_add(1);
                             let c2rust_fresh23 = out;
@@ -669,7 +698,7 @@ pub unsafe extern "C" fn inflate_fast(
                             (output_produced, output_remaining) =
                                 output_cursor_after_write(output_produced, output_remaining);
                             *c2rust_fresh23 = *c2rust_fresh22;
-                            if trailing_bytes > 1 as ::core::ffi::c_uint {
+                            if copy_layout.final_trailing_bytes > 1 as ::core::ffi::c_uint {
                                 let c2rust_fresh24 = from;
                                 from = from.wrapping_add(1);
                                 let c2rust_fresh25 = out;
@@ -722,12 +751,12 @@ mod tests {
         add_and_consume_extra_bits, append_input_byte, bit_mask, code, consume_bits,
         fast_code_entry, fast_decode_needs_prefetch, fast_decode_prefetch_byte_count,
         fast_dist_action, fast_length_extra_bits_need_input, fast_litlen_action,
-        fast_match_uses_window, fast_window_copy_plan, fast_window_distance_is_invalid,
-        finish_fast_distance, input_bytes_needed, input_remaining_after_read, low_bits,
-        match_copy_layout, output_cursor_after_write, subtable_index, table_index,
-        unread_input_state, validate_fast_window_distance, FastCodeEntry, FastDistAction,
-        FastDistance, FastDistanceSource, FastLitLenAction, FastWindowContinuationSource,
-        FastWindowCopyPlan, FastWindowDistance,
+        fast_match_copy_layout, fast_match_uses_window, fast_window_copy_plan,
+        fast_window_distance_is_invalid, finish_fast_distance, input_bytes_needed,
+        input_remaining_after_read, low_bits, output_cursor_after_write, subtable_index,
+        table_index, unread_input_state, validate_fast_window_distance, FastCodeEntry,
+        FastDistAction, FastDistance, FastDistanceSource, FastLitLenAction, FastMatchCopyLayout,
+        FastWindowContinuationSource, FastWindowCopyPlan, FastWindowDistance,
     };
 
     #[test]
@@ -1028,15 +1057,27 @@ mod tests {
     }
 
     #[test]
-    fn match_copy_layout_splits_triplets_and_trailing_bytes() {
-        assert_eq!(match_copy_layout(0), (0, 0));
-        assert_eq!(match_copy_layout(1), (0, 1));
-        assert_eq!(match_copy_layout(2), (0, 2));
-        assert_eq!(match_copy_layout(3), (1, 0));
-        assert_eq!(match_copy_layout(8), (2, 2));
+    fn fast_match_copy_layout_preserves_output_history_triplets() {
         assert_eq!(
-            match_copy_layout(::core::ffi::c_uint::MAX),
-            (1_431_655_765, 0)
+            fast_match_copy_layout(false, 0, 0, 0, 8),
+            FastMatchCopyLayout {
+                final_copy_triplets: 2,
+                final_trailing_bytes: 2,
+                window_copy_plan: None,
+            }
+        );
+    }
+
+    #[test]
+    fn fast_match_copy_layout_preserves_window_wrap_and_output_continuation() {
+        let copy_plan = fast_window_copy_plan(32, 7, 12, 13);
+        assert_eq!(
+            fast_match_copy_layout(true, 32, 7, 12, 13),
+            FastMatchCopyLayout {
+                final_copy_triplets: 0,
+                final_trailing_bytes: 1,
+                window_copy_plan: Some(copy_plan),
+            }
         );
     }
 
