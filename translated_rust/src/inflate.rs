@@ -837,6 +837,21 @@ fn inflate_match_copy(
     InflateMatchCopy::Copied(copy_len)
 }
 
+// A match can read from the inflater's retained window. Reuse the common
+// window binder here instead of reopening that state-owned allocation with a
+// raw slice in the decoder loop.
+fn inflate_match_copy_from_state_window(
+    stream: &mut crate::zlib_h::z_stream,
+    state: &mut crate::src::inflate::inflate_state,
+    output: &mut [crate::stdlib::Bytef],
+    written: usize,
+) -> InflateMatchCopy {
+    updatewindow(stream, state, InflateWindowAccess::Existing, |state, window| {
+        inflate_match_copy(state, output, written, window.as_deref())
+    })
+    .expect("existing-window access cannot allocate or fail")
+}
+
 // The inflater's window is an internal allocation.  Keep allocation, update,
 // and read-only inspection behind this existing implementation boundary so
 // ABI wrappers never need to bind that state-owned raw pointer themselves.
@@ -2561,21 +2576,8 @@ pub fn inflate(
             break;
         }
         let written = output_capacity - left as usize;
-        let copied = {
-            let state_ref = &mut *state;
-            let window = if state_ref.window.is_null() {
-                None
-            } else {
-                // SAFETY: an initialized inflater window has `wsize` bytes;
-                // this is the same allocation and extent used by the former
-                // raw-cursor match copy.
-                Some(::core::slice::from_raw_parts(
-                    state_ref.window,
-                    state_ref.wsize as usize,
-                ))
-            };
-            inflate_match_copy(state_ref, &mut output_storage, written, window)
-        };
+        let copied =
+            inflate_match_copy_from_state_window(strm, state, &mut output_storage, written);
         match copied {
             InflateMatchCopy::Copied(copied) => {
                 left = left.wrapping_sub(copied as ::core::ffi::c_uint);
