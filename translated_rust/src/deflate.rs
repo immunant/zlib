@@ -336,6 +336,10 @@ fn slide_hash_table(table: &mut [crate::src::deflate::Posf], wsize: crate::stdli
     }
 }
 
+fn clear_hash_table(table: &mut [crate::src::deflate::Posf]) {
+    table.fill(NIL as crate::src::deflate::Posf);
+}
+
 unsafe extern "C" fn slide_hash(mut s: *mut crate::src::deflate::deflate_state) {
     let wsize = (*s).w_size;
     // `head` and `prev` are allocated at these exact element counts in
@@ -775,17 +779,10 @@ pub unsafe extern "C" fn deflateSetDictionary(
     (*s).wrap = 0 as ::core::ffi::c_int;
     if dictLength >= (*s).w_size {
         if wrap == 0 as ::core::ffi::c_int {
-            *(*s)
-                .head
-                .offset((*s).hash_size.wrapping_sub(1 as crate::stdlib::uInt) as isize) =
-                NIL as crate::src::deflate::Posf;
-            crate::stdlib::memset(
-                (*s).head as *mut ::core::ffi::c_void,
-                0 as ::core::ffi::c_int,
-                ((*s).hash_size.wrapping_sub(1 as crate::stdlib::uInt)
-                    as crate::__stddef_size_t_h::size_t)
-                    .wrapping_mul(::core::mem::size_of::<crate::src::deflate::Posf>()),
-            );
+            // `head` has exactly `hash_size` elements from `deflateInit2_()`
+            // or `deflateCopy()`.
+            let head = ::core::slice::from_raw_parts_mut((*s).head, (*s).hash_size as usize);
+            clear_hash_table(head);
             (*s).slid = 0 as ::core::ffi::c_int;
             (*s).strstart = 0 as crate::stdlib::uInt;
             (*s).block_start = 0 as ::core::ffi::c_long;
@@ -933,16 +930,10 @@ pub unsafe extern "C" fn deflateResetKeep_ffi(
 unsafe extern "C" fn lm_init(mut s: *mut crate::src::deflate::deflate_state) {
     (*s).window_size = (2 as ::core::ffi::c_long as crate::zutil_h::ulg)
         .wrapping_mul((*s).w_size as crate::zutil_h::ulg);
-    *(*s)
-        .head
-        .offset((*s).hash_size.wrapping_sub(1 as crate::stdlib::uInt) as isize) =
-        NIL as crate::src::deflate::Posf;
-    crate::stdlib::memset(
-        (*s).head as *mut ::core::ffi::c_void,
-        0 as ::core::ffi::c_int,
-        ((*s).hash_size.wrapping_sub(1 as crate::stdlib::uInt) as crate::__stddef_size_t_h::size_t)
-            .wrapping_mul(::core::mem::size_of::<crate::src::deflate::Posf>()),
-    );
+    // `head` has exactly `hash_size` elements from `deflateInit2_()` or
+    // `deflateCopy()`.
+    let head = ::core::slice::from_raw_parts_mut((*s).head, (*s).hash_size as usize);
+    clear_hash_table(head);
     (*s).slid = 0 as ::core::ffi::c_int;
     (*s).max_lazy_match = configuration_table[(*s).level as usize].max_lazy as crate::stdlib::uInt;
     (*s).good_match = configuration_table[(*s).level as usize].good_length as crate::stdlib::uInt;
@@ -1162,17 +1153,10 @@ pub unsafe extern "C" fn deflateParams(
             if (*s).matches == 1 as crate::stdlib::uInt {
                 slide_hash(s);
             } else {
-                *(*s)
-                    .head
-                    .offset((*s).hash_size.wrapping_sub(1 as crate::stdlib::uInt) as isize) =
-                    NIL as crate::src::deflate::Posf;
-                crate::stdlib::memset(
-                    (*s).head as *mut ::core::ffi::c_void,
-                    0 as ::core::ffi::c_int,
-                    ((*s).hash_size.wrapping_sub(1 as crate::stdlib::uInt)
-                        as crate::__stddef_size_t_h::size_t)
-                        .wrapping_mul(::core::mem::size_of::<crate::src::deflate::Posf>()),
-                );
+                // `head` has exactly `hash_size` elements from
+                // `deflateInit2_()` or `deflateCopy()`.
+                let head = ::core::slice::from_raw_parts_mut((*s).head, (*s).hash_size as usize);
+                clear_hash_table(head);
                 (*s).slid = 0 as ::core::ffi::c_int;
             }
             (*s).matches = 0 as crate::stdlib::uInt;
@@ -2003,17 +1987,11 @@ pub unsafe extern "C" fn deflate(
                     0 as ::core::ffi::c_int,
                 );
                 if flush == crate::zlib_h::Z_FULL_FLUSH {
-                    *(*s)
-                        .head
-                        .offset((*s).hash_size.wrapping_sub(1 as crate::stdlib::uInt) as isize) =
-                        NIL as crate::src::deflate::Posf;
-                    crate::stdlib::memset(
-                        (*s).head as *mut ::core::ffi::c_void,
-                        0 as ::core::ffi::c_int,
-                        ((*s).hash_size.wrapping_sub(1 as crate::stdlib::uInt)
-                            as crate::__stddef_size_t_h::size_t)
-                            .wrapping_mul(::core::mem::size_of::<crate::src::deflate::Posf>()),
-                    );
+                    // `head` has exactly `hash_size` elements from
+                    // `deflateInit2_()` or `deflateCopy()`.
+                    let head =
+                        ::core::slice::from_raw_parts_mut((*s).head, (*s).hash_size as usize);
+                    clear_hash_table(head);
                     (*s).slid = 0 as ::core::ffi::c_int;
                     if (*s).lookahead == 0 as crate::stdlib::uInt {
                         (*s).strstart = 0 as crate::stdlib::uInt;
