@@ -140,6 +140,7 @@ fn gz_init(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
 
 fn gz_comp(
     state: &mut crate::gzguts_h::gz_state,
+    input: &[crate::stdlib::Bytef],
     mut flush: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
     let mut ret: ::core::ffi::c_int = 0;
@@ -194,7 +195,13 @@ fn gz_comp(
             }
         }
         have = state.strm.avail_out as ::core::ffi::c_uint;
-        ret = crate::src::deflate::deflate_stream(&mut state.strm, flush);
+        let output_start = state.size as usize - state.strm.avail_out as usize;
+        ret = crate::src::deflate::deflate_stream(
+            &mut state.strm,
+            input,
+            &mut state.out_buf[output_start..state.size as usize],
+            flush,
+        );
         if ret == crate::zlib_h::Z_STREAM_ERROR {
             crate::src::gzlib::gz_error_safe(
                 state,
@@ -212,6 +219,15 @@ fn gz_comp(
         state.reset = 1 as ::core::ffi::c_int;
     }
     return 0 as ::core::ffi::c_int;
+}
+
+fn gz_comp_buffered(
+    state: &mut crate::gzguts_h::gz_state,
+    flush: ::core::ffi::c_int,
+) -> ::core::ffi::c_int {
+    let input_start = state.in_end.saturating_sub(state.strm.avail_in as usize);
+    let input = state.in_buf[input_start..state.in_end].to_vec();
+    gz_comp(state, &input, flush)
 }
 
 fn gz_zero(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
@@ -257,7 +273,7 @@ fn gz_zero(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
         return 0;
     }
     if state.strm.avail_in != 0
-        && gz_comp(state, crate::zlib_h::Z_NO_FLUSH) == -1 as ::core::ffi::c_int
+        && gz_comp_buffered(state, crate::zlib_h::Z_NO_FLUSH) == -1 as ::core::ffi::c_int
     {
         return -1 as ::core::ffi::c_int;
     }
@@ -279,7 +295,7 @@ fn gz_zero(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
         state.strm.avail_in = n as crate::stdlib::uInt;
         state.strm.next_in = crate::input_cursor!(state.in_buf.as_mut_ptr());
         state.in_end = n as usize;
-        ret = gz_comp(state, crate::zlib_h::Z_NO_FLUSH);
+        ret = gz_comp_buffered(state, crate::zlib_h::Z_NO_FLUSH);
         n = n.wrapping_sub(state.strm.avail_in as ::core::ffi::c_uint);
         state.x.pos += n as crate::stdlib::off64_t;
         state.skip -= n as crate::stdlib::off64_t;
@@ -347,7 +363,7 @@ fn gz_write(state: &mut crate::gzguts_h::gz_state, mut input: &[u8]) -> crate::s
             if len == 0 as crate::stdlib::z_size_t {
                 break;
             }
-            if gz_comp(state, crate::zlib_h::Z_NO_FLUSH) == -1 as ::core::ffi::c_int {
+            if gz_comp_buffered(state, crate::zlib_h::Z_NO_FLUSH) == -1 as ::core::ffi::c_int {
                 return if state.again != 0 {
                     put.wrapping_sub(len)
                 } else {
@@ -357,7 +373,7 @@ fn gz_write(state: &mut crate::gzguts_h::gz_state, mut input: &[u8]) -> crate::s
         }
     } else {
         if state.strm.avail_in != 0
-            && gz_comp(state, crate::zlib_h::Z_NO_FLUSH) == -1 as ::core::ffi::c_int
+            && gz_comp_buffered(state, crate::zlib_h::Z_NO_FLUSH) == -1 as ::core::ffi::c_int
         {
             return 0 as crate::stdlib::z_size_t;
         }
@@ -368,7 +384,7 @@ fn gz_write(state: &mut crate::gzguts_h::gz_state, mut input: &[u8]) -> crate::s
             }
             state.strm.avail_in = n as crate::stdlib::uInt;
             state.strm.next_in = crate::input_cursor!(input.as_ptr());
-            ret = gz_comp(state, crate::zlib_h::Z_NO_FLUSH);
+            ret = gz_comp(state, &input[..n as usize], crate::zlib_h::Z_NO_FLUSH);
             n = n.wrapping_sub(state.strm.avail_in as ::core::ffi::c_uint);
             state.x.pos += n as crate::stdlib::off64_t;
             len = len.wrapping_sub(n as crate::stdlib::z_size_t);
@@ -581,7 +597,7 @@ fn gzflush(state: &mut crate::gzguts_h::gz_state, flush: ::core::ffi::c_int) -> 
     if state.skip != 0 && gz_zero(state) == -1 as ::core::ffi::c_int {
         return state.err;
     }
-    gz_comp(state, flush);
+    gz_comp_buffered(state, flush);
     state.err
 }
 #[export_name = "gzflush"]
@@ -612,16 +628,19 @@ fn gzsetparams(
     }
     if state.size != 0 {
         if state.strm.avail_in != 0
-            && gz_comp(state, crate::zlib_h::Z_BLOCK) == -1 as ::core::ffi::c_int
+            && gz_comp_buffered(state, crate::zlib_h::Z_BLOCK) == -1 as ::core::ffi::c_int
         {
             return state.err;
         }
         let Some(deflate_state) = state.strm.deflate_state() else {
             return crate::zlib_h::Z_STREAM_ERROR;
         };
+        let output_start = state.size as usize - state.strm.avail_out as usize;
         crate::src::deflate::deflateParams(
             &mut state.strm,
             &mut deflate_state.borrow_mut(),
+            &[],
+            &mut state.out_buf[output_start..state.size as usize],
             level,
             strategy,
         );
@@ -661,7 +680,7 @@ pub fn gzclose_w(state: &mut crate::gzguts_h::gz_state) -> GzCloseWrite {
     if state.skip != 0 && gz_zero(state) == -1 as ::core::ffi::c_int {
         ret = state.err;
     }
-    if gz_comp(state, crate::zlib_h::Z_FINISH) == -1 as ::core::ffi::c_int {
+    if gz_comp_buffered(state, crate::zlib_h::Z_FINISH) == -1 as ::core::ffi::c_int {
         ret = state.err;
     }
     GzCloseWrite {

@@ -24,13 +24,15 @@ pub use crate::zlib_h::Z_NO_FLUSH;
 pub use crate::zlib_h::Z_OK;
 pub use crate::zlib_h::Z_STREAM_END;
 pub use crate::zlib_h::Z_STREAM_ERROR;
-pub unsafe extern "C" fn compress2_z(
-    mut dest: *mut crate::stdlib::Bytef,
-    mut destLen: *mut crate::stdlib::z_size_t,
-    mut source: *const crate::stdlib::Bytef,
-    mut sourceLen: crate::stdlib::z_size_t,
+pub fn compress2_z(
+    dest: &mut [crate::stdlib::Bytef],
+    destLen: &mut crate::stdlib::z_size_t,
+    source: &[crate::stdlib::Bytef],
     mut level: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
+    if *destLen > dest.len() {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    }
     let mut stream: crate::zlib_h::z_stream = crate::zlib_h::z_stream {
         next_in: crate::zlib_h::InputBuffer::default(),
         avail_in: 0,
@@ -49,15 +51,9 @@ pub unsafe extern "C" fn compress2_z(
     };
     let mut err: ::core::ffi::c_int = 0;
     let max: crate::stdlib::uInt = -1 as ::core::ffi::c_int as crate::stdlib::uInt;
-    let mut left: crate::stdlib::z_size_t = 0;
-    if sourceLen > 0 as crate::stdlib::z_size_t && source.is_null()
-        || destLen.is_null()
-        || *destLen > 0 as crate::stdlib::z_size_t && dest.is_null()
-    {
-        return crate::zlib_h::Z_STREAM_ERROR;
-    }
-    left = *destLen;
+    let mut left: crate::stdlib::z_size_t = *destLen;
     *destLen = 0 as crate::stdlib::z_size_t;
+    let mut source_len = source.len() as crate::stdlib::z_size_t;
     stream.zalloc = None;
     stream.zfree = None;
     stream.opaque = crate::zlib_h::Opaque::default();
@@ -65,9 +61,9 @@ pub unsafe extern "C" fn compress2_z(
     if err != crate::zlib_h::Z_OK {
         return err;
     }
-    stream.next_out = crate::output_cursor!(dest);
+    stream.next_out = crate::output_cursor!(dest.as_mut_ptr());
     stream.avail_out = 0 as crate::stdlib::uInt;
-    stream.next_in = crate::input_cursor!(source);
+    stream.next_in = crate::input_cursor!(source.as_ptr());
     stream.avail_in = 0 as crate::stdlib::uInt;
     loop {
         if stream.avail_out == 0 as crate::stdlib::uInt {
@@ -79,16 +75,22 @@ pub unsafe extern "C" fn compress2_z(
             left = left.wrapping_sub(stream.avail_out as crate::stdlib::z_size_t);
         }
         if stream.avail_in == 0 as crate::stdlib::uInt {
-            stream.avail_in = if sourceLen > max as crate::stdlib::z_size_t {
+            stream.avail_in = if source_len > max as crate::stdlib::z_size_t {
                 max
             } else {
-                sourceLen as crate::stdlib::uInt
+                source_len as crate::stdlib::uInt
             };
-            sourceLen = sourceLen.wrapping_sub(stream.avail_in as crate::stdlib::z_size_t);
+            source_len = source_len.wrapping_sub(stream.avail_in as crate::stdlib::z_size_t);
         }
+        let input_start = stream.total_in as usize;
+        let output_start = stream.total_out as usize;
+        let input_len = stream.avail_in as usize;
+        let output_len = stream.avail_out as usize;
         err = crate::src::deflate::deflate_stream(
             &mut stream,
-            if sourceLen != 0 {
+            &source[input_start..input_start + input_len],
+            &mut dest[output_start..output_start + output_len],
+            if source_len != 0 {
                 crate::zlib_h::Z_NO_FLUSH
             } else {
                 crate::zlib_h::Z_FINISH
@@ -98,7 +100,7 @@ pub unsafe extern "C" fn compress2_z(
             break;
         }
     }
-    *destLen = stream.next_out.bytes_from(dest.addr()) as crate::stdlib::z_size_t;
+    *destLen = stream.total_out as crate::stdlib::z_size_t;
     crate::src::deflate::deflateEnd(&mut stream);
     return if err == crate::zlib_h::Z_STREAM_END {
         crate::zlib_h::Z_OK
@@ -107,7 +109,6 @@ pub unsafe extern "C" fn compress2_z(
     };
 }
 #[export_name = "compress2_z"]
-
 pub unsafe extern "C" fn compress2_z_ffi(
     mut dest: *mut crate::stdlib::Bytef,
     mut destLen: *mut crate::stdlib::z_size_t,
@@ -115,24 +116,33 @@ pub unsafe extern "C" fn compress2_z_ffi(
     mut sourceLen: crate::stdlib::z_size_t,
     mut level: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
-    compress2_z(dest, destLen, source, sourceLen, level)
+    if destLen.is_null()
+        || (sourceLen != 0 && source.is_null())
+        || (*destLen != 0 && dest.is_null())
+    {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    }
+    let dest = if *destLen == 0 {
+        &mut []
+    } else {
+        ::core::slice::from_raw_parts_mut(dest, *destLen as usize)
+    };
+    let source = if sourceLen == 0 {
+        &[]
+    } else {
+        ::core::slice::from_raw_parts(source, sourceLen as usize)
+    };
+    compress2_z(dest, &mut *destLen, source, level)
 }
-pub unsafe extern "C" fn compress2(
-    mut dest: *mut crate::stdlib::Bytef,
-    mut destLen: *mut crate::stdlib::uLongf,
-    mut source: *const crate::stdlib::Bytef,
-    mut sourceLen: crate::stdlib::uLong,
+pub fn compress2(
+    dest: &mut [crate::stdlib::Bytef],
+    destLen: &mut crate::stdlib::uLongf,
+    source: &[crate::stdlib::Bytef],
     mut level: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
     let mut ret: ::core::ffi::c_int = 0;
     let mut got: crate::stdlib::z_size_t = *destLen as crate::stdlib::z_size_t;
-    ret = compress2_z(
-        dest,
-        &raw mut got,
-        source,
-        sourceLen as crate::stdlib::z_size_t,
-        level,
-    );
+    ret = compress2_z(dest, &mut got, source, level);
     *destLen = got as crate::stdlib::uLong as crate::stdlib::uLongf;
     return ret;
 }
@@ -145,21 +155,30 @@ pub unsafe extern "C" fn compress2_ffi(
     mut sourceLen: crate::stdlib::uLong,
     mut level: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
-    compress2(dest, destLen, source, sourceLen, level)
+    if destLen.is_null()
+        || (sourceLen != 0 && source.is_null())
+        || (*destLen != 0 && dest.is_null())
+    {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    }
+    let dest = if *destLen == 0 {
+        &mut []
+    } else {
+        ::core::slice::from_raw_parts_mut(dest, *destLen as usize)
+    };
+    let source = if sourceLen == 0 {
+        &[]
+    } else {
+        ::core::slice::from_raw_parts(source, sourceLen as usize)
+    };
+    compress2(dest, &mut *destLen, source, level)
 }
-pub unsafe extern "C" fn compress_z(
-    mut dest: *mut crate::stdlib::Bytef,
-    mut destLen: *mut crate::stdlib::z_size_t,
-    mut source: *const crate::stdlib::Bytef,
-    mut sourceLen: crate::stdlib::z_size_t,
+pub fn compress_z(
+    dest: &mut [crate::stdlib::Bytef],
+    destLen: &mut crate::stdlib::z_size_t,
+    source: &[crate::stdlib::Bytef],
 ) -> ::core::ffi::c_int {
-    return compress2_z(
-        dest,
-        destLen,
-        source,
-        sourceLen,
-        crate::zlib_h::Z_DEFAULT_COMPRESSION,
-    );
+    compress2_z(dest, destLen, source, crate::zlib_h::Z_DEFAULT_COMPRESSION)
 }
 #[export_name = "compress_z"]
 
@@ -169,21 +188,30 @@ pub unsafe extern "C" fn compress_z_ffi(
     mut source: *const crate::stdlib::Bytef,
     mut sourceLen: crate::stdlib::z_size_t,
 ) -> ::core::ffi::c_int {
-    compress_z(dest, destLen, source, sourceLen)
+    if destLen.is_null()
+        || (sourceLen != 0 && source.is_null())
+        || (*destLen != 0 && dest.is_null())
+    {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    }
+    let dest = if *destLen == 0 {
+        &mut []
+    } else {
+        ::core::slice::from_raw_parts_mut(dest, *destLen as usize)
+    };
+    let source = if sourceLen == 0 {
+        &[]
+    } else {
+        ::core::slice::from_raw_parts(source, sourceLen as usize)
+    };
+    compress_z(dest, &mut *destLen, source)
 }
-pub unsafe extern "C" fn compress(
-    mut dest: *mut crate::stdlib::Bytef,
-    mut destLen: *mut crate::stdlib::uLongf,
-    mut source: *const crate::stdlib::Bytef,
-    mut sourceLen: crate::stdlib::uLong,
+pub fn compress(
+    dest: &mut [crate::stdlib::Bytef],
+    destLen: &mut crate::stdlib::uLongf,
+    source: &[crate::stdlib::Bytef],
 ) -> ::core::ffi::c_int {
-    return compress2(
-        dest,
-        destLen,
-        source,
-        sourceLen,
-        crate::zlib_h::Z_DEFAULT_COMPRESSION,
-    );
+    compress2(dest, destLen, source, crate::zlib_h::Z_DEFAULT_COMPRESSION)
 }
 #[export_name = "compress"]
 
@@ -193,7 +221,23 @@ pub unsafe extern "C" fn compress_ffi(
     mut source: *const crate::stdlib::Bytef,
     mut sourceLen: crate::stdlib::uLong,
 ) -> ::core::ffi::c_int {
-    compress(dest, destLen, source, sourceLen)
+    if destLen.is_null()
+        || (sourceLen != 0 && source.is_null())
+        || (*destLen != 0 && dest.is_null())
+    {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    }
+    let dest = if *destLen == 0 {
+        &mut []
+    } else {
+        ::core::slice::from_raw_parts_mut(dest, *destLen as usize)
+    };
+    let source = if sourceLen == 0 {
+        &[]
+    } else {
+        ::core::slice::from_raw_parts(source, sourceLen as usize)
+    };
+    compress(dest, &mut *destLen, source)
 }
 pub unsafe extern "C" fn compressBound_z(
     mut sourceLen: crate::stdlib::z_size_t,
