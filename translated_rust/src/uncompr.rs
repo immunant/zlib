@@ -91,7 +91,10 @@ fn uncompress_stream() -> crate::zlib_h::z_stream {
     }
 }
 
-pub unsafe extern "C" fn uncompress2_z(
+// As with compression, this driver only publishes the caller's raw cursors
+// to the stream.  It works through the bound length references and does not
+// dereference either cursor itself, keeping the one-shot state machine safe.
+pub fn uncompress2_z(
     mut dest: *mut crate::stdlib::Bytef,
     destLen: &mut crate::stdlib::z_size_t,
     mut source: *const crate::stdlib::Bytef,

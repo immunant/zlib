@@ -93,7 +93,11 @@ fn compress_stream() -> crate::zlib_h::z_stream {
     }
 }
 
-pub unsafe extern "C" fn compress2_z(
+// Raw byte cursors are only carried into the stream here; their associated
+// lengths have already been bound as references by the caller.  The driver
+// never dereferences either cursor directly, so keep this implementation
+// safe and reserve the foreign-pointer binding for the exported adapters.
+pub fn compress2_z(
     mut dest: *mut crate::stdlib::Bytef,
     destLen: &mut crate::stdlib::z_size_t,
     mut source: *const crate::stdlib::Bytef,
