@@ -361,17 +361,6 @@ fn clear_window_bytes(
     window[start..start + len as usize].fill(0);
 }
 
-unsafe extern "C" fn slide_hash(mut s: *mut crate::src::deflate::deflate_state) {
-    let wsize = (*s).w_size;
-    // `head` and `prev` are allocated at these exact element counts in
-    // `deflateInit2_()` and `deflateCopy()`.
-    let head = ::core::slice::from_raw_parts_mut((*s).head, (*s).hash_size as usize);
-    let prev = ::core::slice::from_raw_parts_mut((*s).prev, wsize as usize);
-    slide_hash_table(head, wsize);
-    slide_hash_table(prev, wsize);
-    (*s).slid = 1 as ::core::ffi::c_int;
-}
-
 fn read_buf_checksum(
     checksum: crate::stdlib::uLong,
     wrap: ::core::ffi::c_int,
@@ -453,7 +442,14 @@ unsafe extern "C" fn fill_window(mut s: *mut crate::src::deflate::deflate_state)
             if (*s).insert > (*s).strstart {
                 (*s).insert = (*s).strstart;
             }
-            slide_hash(s);
+            let state = &mut *s;
+            // `head` and `prev` are allocated at these exact element counts
+            // in `deflateInit2_()` and `deflateCopy()`.
+            let head = ::core::slice::from_raw_parts_mut(state.head, state.hash_size as usize);
+            let prev = ::core::slice::from_raw_parts_mut(state.prev, wsize as usize);
+            slide_hash_table(head, wsize);
+            slide_hash_table(prev, wsize);
+            state.slid = 1 as ::core::ffi::c_int;
             more = more.wrapping_add(wsize as ::core::ffi::c_uint);
         }
         if (*(*s).strm).avail_in == 0 as crate::stdlib::uInt {
@@ -956,33 +952,35 @@ pub unsafe extern "C" fn deflateResetKeep_ffi(
 ) -> ::core::ffi::c_int {
     deflateResetKeep(strm)
 }
-unsafe extern "C" fn lm_init(mut s: *mut crate::src::deflate::deflate_state) {
-    (*s).window_size = (2 as ::core::ffi::c_long as crate::zutil_h::ulg)
-        .wrapping_mul((*s).w_size as crate::zutil_h::ulg);
-    // `head` has exactly `hash_size` elements from `deflateInit2_()` or
-    // `deflateCopy()`.
-    let head = ::core::slice::from_raw_parts_mut((*s).head, (*s).hash_size as usize);
-    clear_hash_table(head);
-    (*s).slid = 0 as ::core::ffi::c_int;
-    (*s).max_lazy_match = configuration_table[(*s).level as usize].max_lazy as crate::stdlib::uInt;
-    (*s).good_match = configuration_table[(*s).level as usize].good_length as crate::stdlib::uInt;
-    (*s).nice_match = configuration_table[(*s).level as usize].nice_length as ::core::ffi::c_int;
-    (*s).max_chain_length =
-        configuration_table[(*s).level as usize].max_chain as crate::stdlib::uInt;
-    (*s).strstart = 0 as crate::stdlib::uInt;
-    (*s).block_start = 0 as ::core::ffi::c_long;
-    (*s).lookahead = 0 as crate::stdlib::uInt;
-    (*s).insert = 0 as crate::stdlib::uInt;
-    (*s).prev_length = (crate::zutil_h::MIN_MATCH - 1 as ::core::ffi::c_int) as crate::stdlib::uInt;
-    (*s).match_length = (*s).prev_length;
-    (*s).match_available = 0 as ::core::ffi::c_int;
-    (*s).ins_h = 0 as crate::stdlib::uInt;
-}
 pub unsafe extern "C" fn deflateReset(mut strm: crate::zlib_h::z_streamp) -> ::core::ffi::c_int {
     let mut ret: ::core::ffi::c_int = 0;
     ret = deflateResetKeep(strm);
     if ret == crate::zlib_h::Z_OK {
-        lm_init((*strm).state as *mut crate::src::deflate::deflate_state);
+        let state = &mut *((*strm).state as *mut crate::src::deflate::deflate_state);
+        state.window_size = (2 as ::core::ffi::c_long as crate::zutil_h::ulg)
+            .wrapping_mul(state.w_size as crate::zutil_h::ulg);
+        // `head` has exactly `hash_size` elements from `deflateInit2_()` or
+        // `deflateCopy()`.
+        let head = ::core::slice::from_raw_parts_mut(state.head, state.hash_size as usize);
+        clear_hash_table(head);
+        state.slid = 0 as ::core::ffi::c_int;
+        state.max_lazy_match =
+            configuration_table[state.level as usize].max_lazy as crate::stdlib::uInt;
+        state.good_match =
+            configuration_table[state.level as usize].good_length as crate::stdlib::uInt;
+        state.nice_match =
+            configuration_table[state.level as usize].nice_length as ::core::ffi::c_int;
+        state.max_chain_length =
+            configuration_table[state.level as usize].max_chain as crate::stdlib::uInt;
+        state.strstart = 0 as crate::stdlib::uInt;
+        state.block_start = 0 as ::core::ffi::c_long;
+        state.lookahead = 0 as crate::stdlib::uInt;
+        state.insert = 0 as crate::stdlib::uInt;
+        state.prev_length =
+            (crate::zutil_h::MIN_MATCH - 1 as ::core::ffi::c_int) as crate::stdlib::uInt;
+        state.match_length = state.prev_length;
+        state.match_available = 0 as ::core::ffi::c_int;
+        state.ins_h = 0 as crate::stdlib::uInt;
     }
     return ret;
 }
@@ -1183,7 +1181,15 @@ pub unsafe extern "C" fn deflateParams(
     if (*s).level != level {
         if (*s).level == 0 as ::core::ffi::c_int && (*s).matches != 0 as crate::stdlib::uInt {
             if (*s).matches == 1 as crate::stdlib::uInt {
-                slide_hash(s);
+                let state = &mut *s;
+                // `head` and `prev` are allocated at these exact element
+                // counts in `deflateInit2_()` and `deflateCopy()`.
+                let head =
+                    ::core::slice::from_raw_parts_mut(state.head, state.hash_size as usize);
+                let prev = ::core::slice::from_raw_parts_mut(state.prev, state.w_size as usize);
+                slide_hash_table(head, state.w_size);
+                slide_hash_table(prev, state.w_size);
+                state.slid = 1 as ::core::ffi::c_int;
             } else {
                 // `head` has exactly `hash_size` elements from
                 // `deflateInit2_()` or `deflateCopy()`.
