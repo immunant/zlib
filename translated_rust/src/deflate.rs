@@ -1019,6 +1019,104 @@ fn empty_deflate_state() -> crate::src::deflate::deflate_state {
     }
 }
 
+/// The safe portion of configuring a freshly initialized deflate state.
+///
+/// Custom and mixed allocator workspaces remain behind
+/// `deflate_reset_legacy_stream`, its single existing raw hash-table view.
+/// Fully default-allocated workspaces can reset directly through their owned
+/// hash vector. Keeping that distinction here avoids rebuilding the same raw
+/// view during initialization.
+enum DeflateInitializationOutcome {
+    ReadyForLegacyReset,
+    Complete(::core::ffi::c_int),
+}
+
+fn configure_allocated_deflate_state(
+    state: &mut crate::src::deflate::deflate_state,
+    strm: &mut crate::zlib_h::z_stream,
+    storage: &DeflateStorageLayout,
+    config: &DeflateInitConfig,
+    method: ::core::ffi::c_int,
+    mem_level: ::core::ffi::c_int,
+    strategy: ::core::ffi::c_int,
+    allocator_provenance: crate::src::zutil::AllocatorProvenance,
+) -> Result<DeflateInitializationOutcome, ::core::ffi::c_int> {
+    initialize_deflate_state_base(
+        state,
+        strm,
+        allocator_provenance,
+        config.wrap,
+        config.window_bits,
+        mem_level,
+    );
+    state.high_water = 0 as crate::zutil_h::ulg;
+    state.lit_bufsize = storage.pending_items;
+    state.pending_buf_size = storage.pending_bytes();
+    state.window_size = (2 as crate::zutil_h::ulg)
+        .wrapping_mul(state.w_size as crate::zutil_h::ulg);
+    state.sym_buf = state.lit_bufsize as usize;
+    state.sym_end = state
+        .lit_bufsize
+        .wrapping_sub(1 as crate::stdlib::uInt)
+        .wrapping_mul(3 as crate::stdlib::uInt);
+    if crate::src::zutil::allocator_pair_is_fully_default(&state.allocator_provenance) {
+        let Some(mut owned) = storage.try_owned() else {
+            return Err(crate::zlib_h::Z_MEM_ERROR);
+        };
+        if !owned.bind_state_buffers(state) {
+            return Err(crate::zlib_h::Z_MEM_ERROR);
+        }
+        state.owned_storage = Some(owned);
+    } else {
+        state.window = Some(strm.zalloc.expect("non-null function pointer"))
+            .expect("non-null function pointer")(
+            strm.opaque,
+            storage.window_items,
+            (2 as usize).wrapping_mul(::core::mem::size_of::<crate::stdlib::Byte>())
+                as crate::stdlib::uInt,
+        ) as *mut crate::stdlib::Bytef;
+        state.prev = Some(strm.zalloc.expect("non-null function pointer"))
+            .expect("non-null function pointer")(
+            strm.opaque,
+            storage.window_items,
+            ::core::mem::size_of::<crate::src::deflate::Pos>() as crate::stdlib::uInt,
+        ) as *mut crate::src::deflate::Posf;
+        state.head = Some(strm.zalloc.expect("non-null function pointer"))
+            .expect("non-null function pointer")(
+            strm.opaque,
+            storage.hash_items,
+            ::core::mem::size_of::<crate::src::deflate::Pos>() as crate::stdlib::uInt,
+        ) as *mut crate::src::deflate::Posf;
+        state.pending_buf = Some(strm.zalloc.expect("non-null function pointer"))
+            .expect("non-null function pointer")(
+            strm.opaque,
+            storage.pending_items,
+            4 as crate::stdlib::uInt,
+        ) as *mut crate::zutil_h::uchf as *mut crate::stdlib::Bytef;
+    }
+    if state.window.is_null()
+        || state.prev.is_null()
+        || state.head.is_null()
+        || state.pending_buf.is_null()
+    {
+        return Err(crate::zlib_h::Z_MEM_ERROR);
+    }
+    state.level = config.level;
+    state.strategy = strategy;
+    state.method = method as crate::stdlib::Byte;
+    if state.owned_storage.is_none() {
+        return Ok(DeflateInitializationOutcome::ReadyForLegacyReset);
+    }
+    let mut owned = state.owned_storage.take().expect("owned storage checked");
+    let result = if owned.matches_state(state) {
+        deflate_reset(strm, state, &mut owned.head)
+    } else {
+        crate::zlib_h::Z_STREAM_ERROR
+    };
+    state.owned_storage = Some(owned);
+    Ok(DeflateInitializationOutcome::Complete(result))
+}
+
 /// Allocate, initialize, and install the opaque deflate state through one
 /// named implementation boundary. The stream assumes ownership only after
 /// its ABI state field has been installed.
@@ -1041,93 +1139,34 @@ fn initialize_allocated_deflate_state(
     if state.is_null() {
         return crate::zlib_h::Z_MEM_ERROR;
     }
-    unsafe {
-        // Callback allocation returns uninitialized storage.  Convert it to
-        // a `MaybeUninit` slot first, then install the first Rust value with
-        // its safe initialization API instead of writing through an assumed
-        // initialized reference.
-        let state_slot =
-            &mut *state.cast::<::core::mem::MaybeUninit<crate::src::deflate::deflate_state>>();
-        let state = state_slot.write(empty_deflate_state());
-        strm.state = (state as *mut crate::src::deflate::deflate_state)
-            .cast::<crate::src::deflate::internal_state>();
-        initialize_deflate_state_base(
-            state,
-            strm,
-            allocator_provenance,
-            config.wrap,
-            config.window_bits,
-            mem_level,
-        );
-        state.high_water = 0 as crate::zutil_h::ulg;
-        state.lit_bufsize = storage.pending_items;
-        state.pending_buf_size = storage.pending_bytes();
-        state.window_size = (2 as crate::zutil_h::ulg)
-            .wrapping_mul(state.w_size as crate::zutil_h::ulg);
-        state.sym_buf = state.lit_bufsize as usize;
-        state.sym_end = state
-            .lit_bufsize
-            .wrapping_sub(1 as crate::stdlib::uInt)
-            .wrapping_mul(3 as crate::stdlib::uInt);
-        if crate::src::zutil::allocator_pair_is_fully_default(&state.allocator_provenance) {
-            let Some(mut owned) = storage.try_owned() else {
-                state.status = crate::src::deflate::FINISH_STATE;
-                strm.msg = crate::src::zutil::zError(-4 as ::core::ffi::c_int)
-                    .load(::core::sync::atomic::Ordering::Relaxed);
-                deflateEnd(strm);
-                return crate::zlib_h::Z_MEM_ERROR;
-            };
-            if !owned.bind_state_buffers(state) {
-                state.status = crate::src::deflate::FINISH_STATE;
-                strm.msg = crate::src::zutil::zError(-4 as ::core::ffi::c_int)
-                    .load(::core::sync::atomic::Ordering::Relaxed);
-                deflateEnd(strm);
-                return crate::zlib_h::Z_MEM_ERROR;
-            }
-            state.owned_storage = Some(owned);
-        } else {
-            state.window = Some(strm.zalloc.expect("non-null function pointer"))
-                .expect("non-null function pointer")(
-                strm.opaque,
-                storage.window_items,
-                (2 as usize).wrapping_mul(::core::mem::size_of::<crate::stdlib::Byte>())
-                    as crate::stdlib::uInt,
-            ) as *mut crate::stdlib::Bytef;
-            state.prev = Some(strm.zalloc.expect("non-null function pointer"))
-                .expect("non-null function pointer")(
-                strm.opaque,
-                storage.window_items,
-                ::core::mem::size_of::<crate::src::deflate::Pos>() as crate::stdlib::uInt,
-            ) as *mut crate::src::deflate::Posf;
-            state.head = Some(strm.zalloc.expect("non-null function pointer"))
-                .expect("non-null function pointer")(
-                strm.opaque,
-                storage.hash_items,
-                ::core::mem::size_of::<crate::src::deflate::Pos>() as crate::stdlib::uInt,
-            ) as *mut crate::src::deflate::Posf;
-            state.pending_buf = Some(strm.zalloc.expect("non-null function pointer"))
-                .expect("non-null function pointer")(
-                strm.opaque,
-                storage.pending_items,
-                4 as crate::stdlib::uInt,
-            ) as *mut crate::zutil_h::uchf as *mut crate::stdlib::Bytef;
-        }
-        if state.window.is_null()
-            || state.prev.is_null()
-            || state.head.is_null()
-            || state.pending_buf.is_null()
-        {
+    // Callback allocation returns uninitialized storage. Convert it once to
+    // the slot type, then all state setup uses an initialized Rust reference.
+    let state_slot = unsafe {
+        &mut *state.cast::<::core::mem::MaybeUninit<crate::src::deflate::deflate_state>>()
+    };
+    let state = state_slot.write(empty_deflate_state());
+    strm.state = (state as *mut crate::src::deflate::deflate_state)
+        .cast::<crate::src::deflate::internal_state>();
+    let outcome = configure_allocated_deflate_state(
+        state,
+        strm,
+        &storage,
+        &config,
+        method,
+        mem_level,
+        strategy,
+        allocator_provenance,
+    );
+    match outcome {
+        Ok(DeflateInitializationOutcome::ReadyForLegacyReset) => deflate_reset_legacy_stream(strm),
+        Ok(DeflateInitializationOutcome::Complete(result)) => result,
+        Err(error) => {
             state.status = crate::src::deflate::FINISH_STATE;
             strm.msg = crate::src::zutil::zError(-4 as ::core::ffi::c_int)
                 .load(::core::sync::atomic::Ordering::Relaxed);
             deflateEnd(strm);
-            return crate::zlib_h::Z_MEM_ERROR;
+            error
         }
-        state.level = config.level;
-        state.strategy = strategy;
-        state.method = method as crate::stdlib::Byte;
-        let head = ::core::slice::from_raw_parts_mut(state.head, state.hash_size as usize);
-        deflate_reset(strm, state, head)
     }
 }
 
