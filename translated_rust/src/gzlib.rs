@@ -61,21 +61,36 @@ pub use crate::zlib_h::Z_MEM_ERROR;
 pub use crate::zlib_h::Z_OK;
 pub use crate::zlib_h::Z_RLE;
 
-unsafe fn gz_reset(state: &mut crate::gzguts_h::gz_state) {
-    state.x.have = 0 as ::core::ffi::c_uint;
-    if state.mode == crate::gzguts_h::GZ_READ {
-        state.eof = 0 as ::core::ffi::c_int;
-        state.past = 0 as ::core::ffi::c_int;
-        state.how = crate::gzguts_h::LOOK;
-        state.junk = -1 as ::core::ffi::c_int;
+fn gz_reset(
+    have: &mut crate::stdlib::uInt,
+    mode: ::core::ffi::c_int,
+    eof: &mut ::core::ffi::c_int,
+    past: &mut ::core::ffi::c_int,
+    how: &mut ::core::ffi::c_int,
+    junk: &mut ::core::ffi::c_int,
+    reset: &mut ::core::ffi::c_int,
+    again: &mut ::core::ffi::c_int,
+    skip: &mut crate::stdlib::off64_t,
+    err: &mut ::core::ffi::c_int,
+    msg: &mut Option<std::ffi::CString>,
+    pos: &mut crate::stdlib::off64_t,
+    avail_in: &mut crate::stdlib::uInt,
+) {
+    *have = 0;
+    if mode == crate::gzguts_h::GZ_READ {
+        *eof = 0;
+        *past = 0;
+        *how = crate::gzguts_h::LOOK;
+        *junk = -1;
     } else {
-        state.reset = 0 as ::core::ffi::c_int;
+        *reset = 0;
     }
-    state.again = 0 as ::core::ffi::c_int;
-    state.skip = 0 as crate::stdlib::off64_t;
-    gz_error_state(state, crate::zlib_h::Z_OK, None);
-    state.x.pos = 0 as crate::stdlib::off64_t;
-    state.strm.avail_in = 0 as crate::stdlib::uInt;
+    *again = 0;
+    *skip = 0;
+    *err = crate::zlib_h::Z_OK;
+    *msg = None;
+    *pos = 0;
+    *avail_in = 0;
 }
 
 fn gz_open_state(
@@ -279,23 +294,21 @@ unsafe extern "C" fn gz_open(
             state.start = 0 as crate::stdlib::off64_t;
         }
     }
-    // `state` is freshly constructed, so clearing it here only needs to establish
-    // the mode-specific cursor state.  In particular, there is no prior error
-    // message for `gz_reset()` to release.
-    state.x.have = 0;
-    if state.mode == crate::gzguts_h::GZ_READ {
-        state.eof = 0;
-        state.past = 0;
-        state.how = crate::gzguts_h::LOOK;
-        state.junk = -1;
-    } else {
-        state.reset = 0;
-    }
-    state.again = 0;
-    state.skip = 0;
-    state.err = crate::zlib_h::Z_OK;
-    state.x.pos = 0;
-    state.strm.avail_in = 0;
+    gz_reset(
+        &mut state.x.have,
+        state.mode,
+        &mut state.eof,
+        &mut state.past,
+        &mut state.how,
+        &mut state.junk,
+        &mut state.reset,
+        &mut state.again,
+        &mut state.skip,
+        &mut state.err,
+        &mut state.msg,
+        &mut state.x.pos,
+        &mut state.strm.avail_in,
+    );
     Box::into_raw(Box::new(state)) as crate::zlib_h::gzFile
 }
 #[export_name = "gzopen"]
@@ -381,26 +394,38 @@ pub unsafe extern "C" fn gzbuffer_ffi(
     gzbuffer(file, size)
 }
 pub unsafe extern "C" fn gzrewind(mut file: crate::zlib_h::gzFile) -> ::core::ffi::c_int {
-    let mut state: crate::gzguts_h::gz_statep =
-        ::core::ptr::null_mut::<crate::gzguts_h::gz_state>();
     if file.is_null() {
         return -1 as ::core::ffi::c_int;
     }
-    state = file as crate::gzguts_h::gz_statep;
-    if (*state).mode != crate::gzguts_h::GZ_READ
-        || (*state).err != crate::zlib_h::Z_OK && (*state).err != crate::zlib_h::Z_BUF_ERROR
+    let state = &mut *(file as crate::gzguts_h::gz_statep);
+    if state.mode != crate::gzguts_h::GZ_READ
+        || state.err != crate::zlib_h::Z_OK && state.err != crate::zlib_h::Z_BUF_ERROR
     {
         return -1 as ::core::ffi::c_int;
     }
     if crate::stdlib::lseek64(
-        (*state).fd,
-        (*state).start as crate::stdlib::__off64_t,
+        state.fd,
+        state.start as crate::stdlib::__off64_t,
         crate::stdlib::SEEK_SET,
     ) == -1 as crate::stdlib::__off64_t
     {
         return -1 as ::core::ffi::c_int;
     }
-    gz_reset(&mut *state);
+    gz_reset(
+        &mut state.x.have,
+        state.mode,
+        &mut state.eof,
+        &mut state.past,
+        &mut state.how,
+        &mut state.junk,
+        &mut state.reset,
+        &mut state.again,
+        &mut state.skip,
+        &mut state.err,
+        &mut state.msg,
+        &mut state.x.pos,
+        &mut state.strm.avail_in,
+    );
     return 0 as ::core::ffi::c_int;
 }
 #[export_name = "gzrewind"]
