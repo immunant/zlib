@@ -344,6 +344,11 @@ fn slide_hash_state(
     }
 }
 
+fn clear_hash_state(head: &mut [crate::src::deflate::Posf], slid: &mut ::core::ffi::c_int) {
+    head.fill(NIL as crate::src::deflate::Posf);
+    *slid = 0;
+}
+
 unsafe extern "C" fn slide_hash(mut s: *mut crate::src::deflate::deflate_state) {
     if s.is_null() {
         return;
@@ -1527,18 +1532,18 @@ pub unsafe extern "C" fn deflateParams(
             if (*s).matches == 1 as crate::stdlib::uInt {
                 slide_hash(s);
             } else {
-                *(*s)
-                    .head
-                    .offset((*s).hash_size.wrapping_sub(1 as crate::stdlib::uInt) as isize) =
-                    NIL as crate::src::deflate::Posf;
-                crate::stdlib::memset(
-                    (*s).head as *mut ::core::ffi::c_void,
-                    0 as ::core::ffi::c_int,
-                    ((*s).hash_size.wrapping_sub(1 as crate::stdlib::uInt)
-                        as crate::__stddef_size_t_h::size_t)
-                        .wrapping_mul(::core::mem::size_of::<crate::src::deflate::Posf>()),
-                );
-                (*s).slid = 0 as ::core::ffi::c_int;
+                let Ok(head_len) = usize::try_from((*s).hash_size) else {
+                    return crate::zlib_h::Z_STREAM_ERROR;
+                };
+                if head_len != 0 && (*s).head.is_null() {
+                    return crate::zlib_h::Z_STREAM_ERROR;
+                }
+                let head = if head_len == 0 {
+                    &mut []
+                } else {
+                    ::core::slice::from_raw_parts_mut((*s).head, head_len)
+                };
+                clear_hash_state(head, &mut (*s).slid);
             }
             (*s).matches = 0 as crate::stdlib::uInt;
         }
