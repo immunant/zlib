@@ -2970,6 +2970,23 @@ fn release_inflate_allocations(
     strm.state = ::core::ptr::null_mut::<crate::src::deflate::internal_state>();
 }
 
+/// Tear down an already-borrowed inflate state.
+///
+/// Keep validation and allocator-paired release policy in this typed core.
+/// `inflateEnd` remains the compatibility bridge for callers that retain the
+/// opaque state only in the ABI stream handle, while a future stream owner can
+/// dispatch here without recreating that handle as a Rust reference.
+fn inflate_end(
+    strm: &mut crate::zlib_h::z_stream_s,
+    state: &mut crate::src::inflate::inflate_state,
+) -> ::core::ffi::c_int {
+    if !inflate_state_valid(strm, state) {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    }
+    release_inflate_allocations(strm, state);
+    crate::zlib_h::Z_OK
+}
+
 pub fn inflateEnd(strm: &mut crate::zlib_h::z_stream_s) -> ::core::ffi::c_int {
     if !inflate_stream_has_allocators(strm) {
         return crate::zlib_h::Z_STREAM_ERROR;
@@ -2980,11 +2997,7 @@ pub fn inflateEnd(strm: &mut crate::zlib_h::z_stream_s) -> ::core::ffi::c_int {
     else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
-    if !inflate_state_valid(strm, state) {
-        return crate::zlib_h::Z_STREAM_ERROR;
-    }
-    release_inflate_allocations(strm, state);
-    return crate::zlib_h::Z_OK;
+    inflate_end(strm, state)
 }
 #[export_name = "inflateEnd"]
 
