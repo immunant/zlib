@@ -70,6 +70,10 @@ fn gz_zero_chunk_len(
     }
 }
 
+fn gz_zero_needs_initialization(first: ::core::ffi::c_int) -> bool {
+    first != 0
+}
+
 fn gzputs_len_fits_int(len: crate::stdlib::z_size_t) -> bool {
     (len as ::core::ffi::c_int) >= 0 && len as ::core::ffi::c_uint as crate::stdlib::z_size_t == len
 }
@@ -458,7 +462,7 @@ unsafe extern "C" fn gz_zero(mut state: crate::gzguts_h::gz_statep) -> ::core::f
                 == ::core::mem::size_of::<crate::stdlib::off64_t>(),
             crate::src::gzlib::gz_intmax(),
         );
-        if first != 0 {
+        if gz_zero_needs_initialization(first) {
             crate::stdlib::memset(
                 (*state).in_0 as *mut ::core::ffi::c_void,
                 0 as ::core::ffi::c_int,
@@ -900,8 +904,8 @@ mod tests {
         gz_write_chunk_consumed_len, gz_write_chunk_len, gz_write_errno_is_retryable,
         gz_write_error_result, gz_write_needs_pending_flush, gz_write_state_is_usable,
         gz_write_uses_buffered_path, gz_zero_apply_progress, gz_zero_chunk_len,
-        gzflush_mode_is_valid, gzfwrite_len, gzputc_result, gzputs_len_fits_int, gzputs_result,
-        gzsetparams_settings_match, gzwrite_len_fits_int,
+        gz_zero_needs_initialization, gzflush_mode_is_valid, gzfwrite_len, gzputc_result,
+        gzputs_len_fits_int, gzputs_result, gzsetparams_settings_match, gzwrite_len_fits_int,
     };
 
     #[test]
@@ -923,6 +927,13 @@ mod tests {
     #[test]
     fn gz_zero_chunk_len_ignores_int_limit_on_different_widths() {
         assert_eq!(gz_zero_chunk_len(1024, 4096, false, 1023), 1024);
+    }
+
+    #[test]
+    fn gz_zero_needs_initialization_only_on_the_first_pass() {
+        assert!(gz_zero_needs_initialization(1));
+        assert!(gz_zero_needs_initialization(-1));
+        assert!(!gz_zero_needs_initialization(0));
     }
 
     #[test]

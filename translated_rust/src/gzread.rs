@@ -89,6 +89,10 @@ fn gz_load_read_len(
     }
 }
 
+fn gz_load_max_read_len() -> ::core::ffi::c_uint {
+    (1 as ::core::ffi::c_uint) << (::core::ffi::c_uint::BITS - 2)
+}
+
 fn gz_avail_can_load(err: ::core::ffi::c_int) -> bool {
     err == crate::zlib_h::Z_OK || err == crate::zlib_h::Z_BUF_ERROR
 }
@@ -276,8 +280,7 @@ unsafe extern "C" fn gz_load(
     len: ::core::ffi::c_uint,
     have: *mut ::core::ffi::c_uint,
 ) -> ::core::ffi::c_int {
-    let max = (-1 as ::core::ffi::c_int as ::core::ffi::c_uint >> 2 as ::core::ffi::c_int)
-        .wrapping_add(1 as ::core::ffi::c_uint);
+    let max = gz_load_max_read_len();
     (*state).again = 0 as ::core::ffi::c_int;
     *crate::stdlib::__errno_location() = 0 as ::core::ffi::c_int;
     *have = 0 as ::core::ffi::c_uint;
@@ -970,6 +973,21 @@ mod tests {
     #[test]
     fn gz_load_read_len_preserves_unsigned_wrapping_before_capping() {
         assert_eq!(gz_load_read_len(0, 1, 8), 8);
+    }
+
+    #[test]
+    fn gz_load_max_read_len_is_one_quarter_of_the_unsigned_range() {
+        assert_eq!(
+            gz_load_max_read_len(),
+            (1 as ::core::ffi::c_uint) << (::core::ffi::c_uint::BITS - 2)
+        );
+    }
+
+    #[test]
+    fn gz_load_max_read_len_caps_full_unsigned_requests() {
+        let max = gz_load_max_read_len();
+
+        assert_eq!(gz_load_read_len(::core::ffi::c_uint::MAX, 0, max), max);
     }
 
     #[test]

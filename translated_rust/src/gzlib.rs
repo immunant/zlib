@@ -17,7 +17,6 @@ pub use crate::stdlib::fcntl;
 
 pub use crate::stdlib::open;
 
-pub use crate::stdlib::__O_CLOEXEC;
 pub use crate::stdlib::F_GETFD;
 pub use crate::stdlib::F_GETFL;
 pub use crate::stdlib::F_SETFD;
@@ -34,6 +33,7 @@ pub use crate::stdlib::O_WRONLY;
 pub use crate::stdlib::SEEK_CUR;
 pub use crate::stdlib::SEEK_END;
 pub use crate::stdlib::SEEK_SET;
+pub use crate::stdlib::__O_CLOEXEC;
 
 pub use crate::stdlib::__off64_t;
 pub use crate::stdlib::__off_t;
@@ -473,6 +473,10 @@ fn gz_open_should_set_close_on_exec(oflag: ::core::ffi::c_int) -> bool {
     oflag & crate::stdlib::O_CLOEXEC != 0
 }
 
+fn gz_open_needs_open(fd: ::core::ffi::c_int) -> bool {
+    fd == -1 as ::core::ffi::c_int
+}
+
 fn gz_finish_open(state: &mut crate::gzguts_h::gz_state, current_offset: crate::stdlib::off64_t) {
     gz_apply_post_open_metadata(state, current_offset);
     gz_reset_state(state);
@@ -522,7 +526,7 @@ unsafe extern "C" fn gz_open(
         b"%s\0".as_ptr() as *const ::core::ffi::c_char,
         path as *const ::core::ffi::c_char,
     );
-    if fd == -1 as ::core::ffi::c_int {
+    if gz_open_needs_open(fd) {
         (*state).fd = crate::stdlib::open(
             path as *const ::core::ffi::c_char,
             plan.oflag,
@@ -1050,7 +1054,7 @@ pub unsafe extern "C" fn gz_intmax_ffi() -> ::core::ffi::c_uint {
 mod tests {
     use super::{
         gz_clear_read_flags, gz_error_clears_buffer, gz_is_read_or_write_mode,
-        gz_legacy_offset_result, gz_open_offset_plan, gz_open_recorded_offset,
+        gz_legacy_offset_result, gz_open_needs_open, gz_open_offset_plan, gz_open_recorded_offset,
         gz_open_should_set_close_on_exec, gz_open_should_set_nonblocking, gz_parse_open_mode,
         gz_post_open_metadata, gz_prepare_open, gz_reset_core, gzbuffer_normalized_want,
         gzclearerr_core, gzerror_core, gzoffset64_adjust_for_buffered_read,
@@ -1621,6 +1625,14 @@ mod tests {
         ));
         assert!(!gz_open_should_set_close_on_exec(crate::stdlib::O_NONBLOCK));
         assert!(!gz_open_should_set_close_on_exec(0));
+    }
+
+    #[test]
+    fn gz_open_needs_open_only_for_the_missing_descriptor_sentinel() {
+        assert!(gz_open_needs_open(-1));
+        assert!(!gz_open_needs_open(-2));
+        assert!(!gz_open_needs_open(0));
+        assert!(!gz_open_needs_open(17));
     }
 
     #[test]
