@@ -158,30 +158,11 @@ macro_rules! uncompress2_z_at_boundary {
                     err = crate::zlib_h::Z_STREAM_ERROR;
                     break;
                 }
-                let gzip_header = match (*state).head {
-                    Some(head) => Some(&mut *head.as_ptr()),
-                    None => None,
-                };
-                let Some(buffers) =
-                    crate::src::inflate::inflate_buffers_at_boundary!(&mut stream, &mut *state,)
-                else {
-                    err = crate::zlib_h::Z_STREAM_ERROR;
-                    break;
-                };
-                err = match crate::src::inflate::inflate(
+                err = crate::src::inflate::inflate_call_at_boundary!(
                     &mut stream,
                     &mut *state,
-                    gzip_header,
-                    buffers,
                     crate::zlib_h::Z_NO_FLUSH,
-                ) {
-                    Ok(pending) => crate::src::inflate::inflate_finish_at_boundary!(
-                        &mut stream,
-                        &mut *state,
-                        pending,
-                    ),
-                    Err(status) => status,
-                };
+                );
                 if err != crate::zlib_h::Z_OK {
                     break;
                 }

@@ -519,30 +519,11 @@ macro_rules! gz_decomp_at_boundary {
                 ret = if inflate_state.is_null() {
                     crate::zlib_h::Z_STREAM_ERROR
                 } else {
-                    let gzip_header = match (*inflate_state).head {
-                        Some(head) => Some(&mut *head.as_ptr()),
-                        None => None,
-                    };
-                    match crate::src::inflate::inflate_buffers_at_boundary!(
+                    crate::src::inflate::inflate_call_at_boundary!(
                         &mut state.strm,
                         &mut *inflate_state,
-                    ) {
-                        Some(buffers) => match crate::src::inflate::inflate(
-                            &mut state.strm,
-                            &mut *inflate_state,
-                            gzip_header,
-                            buffers,
-                            crate::zlib_h::Z_NO_FLUSH,
-                        ) {
-                            Ok(pending) => crate::src::inflate::inflate_finish_at_boundary!(
-                                &mut state.strm,
-                                &mut *inflate_state,
-                                pending,
-                            ),
-                            Err(status) => status,
-                        },
-                        None => crate::zlib_h::Z_STREAM_ERROR,
-                    }
+                        crate::zlib_h::Z_NO_FLUSH,
+                    )
                 };
                 let Some(next_input_index) = gz_input_advance(
                     state.input_index,
