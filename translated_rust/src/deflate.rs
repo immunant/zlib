@@ -224,10 +224,7 @@ impl DeflateOwnedStorage {
     /// vectors are retained by `self` and are never resized after this handoff,
     /// keeping the established handles stable for the resumable legacy
     /// strategy engine.
-    fn bind_state_buffers(
-        &mut self,
-        state: &mut crate::src::deflate::deflate_state,
-    ) -> bool {
+    fn bind_state_buffers(&mut self, state: &mut crate::src::deflate::deflate_state) -> bool {
         if !self.matches_state(state) {
             return false;
         }
@@ -256,10 +253,7 @@ impl DeflateOwnedStorage {
     /// `deflateCopy` preserves.  This deliberately follows the legacy copy
     /// layout instead of cloning whole capacities: a later owned-storage
     /// facade can use it without recreating allocator-derived raw slices.
-    fn try_copy_for_state(
-        &self,
-        state: &crate::src::deflate::deflate_state,
-    ) -> Option<Self> {
+    fn try_copy_for_state(&self, state: &crate::src::deflate::deflate_state) -> Option<Self> {
         if !self.matches_state(state) {
             return None;
         }
@@ -336,11 +330,8 @@ impl DeflateCopyLayout {
             return None;
         }
 
-        let pending_offset = pending_buffer_offset(
-            state.pending_out,
-            state.pending_buf_size,
-            state.pending,
-        )?;
+        let pending_offset =
+            pending_buffer_offset(state.pending_out, state.pending_buf_size, state.pending)?;
         let pending_bytes = usize::try_from(state.pending).ok()?;
         let sym_offset = state.sym_buf;
         let sym_bytes = usize::try_from(state.sym_next).ok()?;
@@ -366,10 +357,7 @@ impl DeflateStorageLayout {
     /// parameters.  Keeping this independent of raw state storage means the
     /// allocator boundary can consume one checked, pointer-free plan today,
     /// and an owned workspace can use the same plan later.
-    fn from_init(
-        window_bits: ::core::ffi::c_int,
-        mem_level: ::core::ffi::c_int,
-    ) -> Option<Self> {
+    fn from_init(window_bits: ::core::ffi::c_int, mem_level: ::core::ffi::c_int) -> Option<Self> {
         let window_bits = u32::try_from(window_bits).ok()?;
         let hash_bits = u32::try_from(mem_level.checked_add(7)?).ok()?;
         let pending_bits = u32::try_from(mem_level.checked_add(6)?).ok()?;
@@ -650,6 +638,18 @@ fn clear_full_flush_hash(
         state.insert = 0 as crate::stdlib::uInt;
     }
     true
+}
+
+/// Clear the full-flush hash table through the default allocator's owned
+/// storage.  The owner is temporarily removed so the state can still be
+/// passed to the established safe reset helper without aliasing it.
+fn clear_owned_full_flush_hash(state: &mut crate::src::deflate::deflate_state) -> bool {
+    let Some(mut owned) = state.owned_storage.take() else {
+        return false;
+    };
+    let result = owned.matches_state(state) && clear_full_flush_hash(state, &mut owned.head);
+    state.owned_storage = Some(owned);
+    result
 }
 
 fn read_buf(
@@ -1052,8 +1052,8 @@ fn configure_allocated_deflate_state(
     state.high_water = 0 as crate::zutil_h::ulg;
     state.lit_bufsize = storage.pending_items;
     state.pending_buf_size = storage.pending_bytes();
-    state.window_size = (2 as crate::zutil_h::ulg)
-        .wrapping_mul(state.w_size as crate::zutil_h::ulg);
+    state.window_size =
+        (2 as crate::zutil_h::ulg).wrapping_mul(state.w_size as crate::zutil_h::ulg);
     state.sym_buf = state.lit_bufsize as usize;
     state.sym_end = state
         .lit_bufsize
@@ -1131,11 +1131,12 @@ fn initialize_allocated_deflate_state(
     let Some(storage) = DeflateStorageLayout::from_init(config.window_bits, mem_level) else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
-    let state = Some(strm.zalloc.expect("non-null function pointer")).expect("non-null function pointer")(
-            strm.opaque,
-            1 as crate::stdlib::uInt,
-            ::core::mem::size_of::<crate::src::deflate::deflate_state>() as crate::stdlib::uInt,
-        ) as *mut crate::src::deflate::deflate_state;
+    let state = Some(strm.zalloc.expect("non-null function pointer"))
+        .expect("non-null function pointer")(
+        strm.opaque,
+        1 as crate::stdlib::uInt,
+        ::core::mem::size_of::<crate::src::deflate::deflate_state>() as crate::stdlib::uInt,
+    ) as *mut crate::src::deflate::deflate_state;
     if state.is_null() {
         return crate::zlib_h::Z_MEM_ERROR;
     }
@@ -2692,7 +2693,6 @@ struct DeflateWorkspace<'a> {
     head: Option<&'a mut [crate::src::deflate::Posf]>,
     prev: Option<&'a mut [crate::src::deflate::Posf]>,
     input: &'a [crate::stdlib::Bytef],
-    pending_buf: &'a mut [crate::stdlib::Bytef],
     output: &'a mut [crate::stdlib::Bytef],
 }
 
@@ -2709,14 +2709,13 @@ impl<'a> DeflateWorkspace<'a> {
             window,
             prev,
             head,
-            pending_buf,
+            pending_buf: _,
         } = storage;
         Self {
             window,
             head: Some(head),
             prev: Some(prev),
             input,
-            pending_buf,
             output,
         }
     }
@@ -2729,6 +2728,7 @@ fn deflate_update(
     state: &mut crate::src::deflate::deflate_state,
     strm: &mut crate::zlib_h::z_stream,
     workspace: &mut DeflateWorkspace<'_>,
+    pending_buf: &mut [crate::stdlib::Bytef],
     flush: ::core::ffi::c_int,
 ) -> Option<block_state> {
     if state.level == 0 {
@@ -2737,7 +2737,7 @@ fn deflate_update(
             strm,
             &mut *workspace.window,
             workspace.input,
-            &mut *workspace.pending_buf,
+            pending_buf,
             &mut *workspace.output,
             flush,
         ));
@@ -2755,7 +2755,7 @@ fn deflate_update(
             head,
             prev,
             workspace.input,
-            &mut *workspace.pending_buf,
+            pending_buf,
             &mut *workspace.output,
             flush,
         ));
@@ -2773,7 +2773,7 @@ fn deflate_update(
             head,
             prev,
             workspace.input,
-            &mut *workspace.pending_buf,
+            pending_buf,
             &mut *workspace.output,
             flush,
         ));
@@ -2784,7 +2784,7 @@ fn deflate_update(
             strm,
             &mut *workspace.window,
             workspace.input,
-            &mut *workspace.pending_buf,
+            pending_buf,
             &mut *workspace.output,
             flush,
         )),
@@ -2801,7 +2801,7 @@ fn deflate_update(
                 head,
                 prev,
                 workspace.input,
-                &mut *workspace.pending_buf,
+                pending_buf,
                 &mut *workspace.output,
                 flush,
             ))
@@ -2819,7 +2819,7 @@ fn deflate_update(
                 head,
                 prev,
                 workspace.input,
-                &mut *workspace.pending_buf,
+                pending_buf,
                 &mut *workspace.output,
                 flush,
             ))
@@ -3184,51 +3184,77 @@ pub fn deflate(
         || state.lookahead != 0 as crate::stdlib::uInt
         || flush != crate::zlib_h::Z_NO_FLUSH && state.status != crate::src::deflate::FINISH_STATE
     {
-        // This is the last raw stream/storage bridge. The named safe update
-        // below owns level and strategy selection.
-        let (bstate, mut head) = unsafe {
-            if state.window.is_null() || state.pending_buf.is_null() {
-                return crate::zlib_h::Z_STREAM_ERROR;
-            }
-            let window =
-                ::core::slice::from_raw_parts_mut(state.window, state.window_size as usize);
-            let mut head = if state.head.is_null() {
-                None
-            } else {
-                Some(::core::slice::from_raw_parts_mut(
-                    state.head,
-                    state.hash_size as usize,
-                ))
-            };
-            let prev = if state.prev.is_null() {
-                None
-            } else {
-                Some(::core::slice::from_raw_parts_mut(
-                    state.prev,
-                    state.w_size as usize,
-                ))
-            };
-            let input = if strm.avail_in == 0 {
-                &[]
-            } else {
-                ::core::slice::from_raw_parts(strm.next_in, strm.avail_in as usize)
-            };
+        // The caller input remains an ABI borrow, but the default allocator's
+        // window and hash chains are owned vectors. Form the input span once,
+        // then let that branch dispatch through the vectors directly instead
+        // of recreating raw slices for all three work areas.
+        let input = if strm.avail_in == 0 {
+            &[]
+        } else {
+            unsafe { ::core::slice::from_raw_parts(strm.next_in, strm.avail_in as usize) }
+        };
+        let using_owned_workspace = state.owned_storage.is_some();
+        // This is the last raw stream/storage bridge for custom and mixed
+        // allocator workspaces. The named safe update below owns level and
+        // strategy selection for both allocation modes.
+        let (bstate, mut head) = if using_owned_workspace {
             let Some(output) = output_tail(strm, &mut output_buffer) else {
                 return crate::zlib_h::Z_STREAM_ERROR;
             };
-            let mut workspace = DeflateWorkspace {
-                window,
-                head: head.as_deref_mut(),
-                prev,
-                input,
-                pending_buf: &mut pending_buffer,
-                output,
-            };
-            let Some(bstate) = deflate_update(state, strm, &mut workspace, flush) else {
+            let Some(mut owned) = state.owned_storage.take() else {
                 return crate::zlib_h::Z_STREAM_ERROR;
             };
-            drop(workspace);
-            (bstate, head)
+            let result = if let Some(mut workspace) = owned.workspace(state, input, output) {
+                deflate_update(state, strm, &mut workspace, &mut pending_buffer, flush)
+            } else {
+                None
+            };
+            state.owned_storage = Some(owned);
+            let Some(bstate) = result else {
+                return crate::zlib_h::Z_STREAM_ERROR;
+            };
+            (bstate, None)
+        } else {
+            unsafe {
+                if state.window.is_null() || state.pending_buf.is_null() {
+                    return crate::zlib_h::Z_STREAM_ERROR;
+                }
+                let window =
+                    ::core::slice::from_raw_parts_mut(state.window, state.window_size as usize);
+                let mut head = if state.head.is_null() {
+                    None
+                } else {
+                    Some(::core::slice::from_raw_parts_mut(
+                        state.head,
+                        state.hash_size as usize,
+                    ))
+                };
+                let prev = if state.prev.is_null() {
+                    None
+                } else {
+                    Some(::core::slice::from_raw_parts_mut(
+                        state.prev,
+                        state.w_size as usize,
+                    ))
+                };
+                let Some(output) = output_tail(strm, &mut output_buffer) else {
+                    return crate::zlib_h::Z_STREAM_ERROR;
+                };
+                let mut workspace = DeflateWorkspace {
+                    window,
+                    head: head.as_deref_mut(),
+                    prev,
+                    input,
+                    output,
+                };
+                let Some(bstate) =
+                    deflate_update(state, strm, &mut workspace, &mut pending_buffer, flush)
+                else {
+                    return crate::zlib_h::Z_STREAM_ERROR;
+                };
+                drop(workspace);
+                (bstate, head)
+            }
         };
         if bstate as ::core::ffi::c_uint
             == finish_started as ::core::ffi::c_int as ::core::ffi::c_uint
@@ -3259,10 +3285,15 @@ pub fn deflate(
                     0 as ::core::ffi::c_int,
                 );
                 if flush == crate::zlib_h::Z_FULL_FLUSH {
-                    let Some(head) = head.as_deref_mut() else {
-                        return crate::zlib_h::Z_STREAM_ERROR;
+                    let cleared = if using_owned_workspace {
+                        clear_owned_full_flush_hash(state)
+                    } else {
+                        let Some(head) = head.as_deref_mut() else {
+                            return crate::zlib_h::Z_STREAM_ERROR;
+                        };
+                        clear_full_flush_hash(state, head)
                     };
-                    if !clear_full_flush_hash(state, head) {
+                    if !cleared {
                         return crate::zlib_h::Z_STREAM_ERROR;
                     }
                 }
@@ -3382,9 +3413,7 @@ fn pending_buffer_range(
 ) -> Option<usize> {
     let pending_buf_len = usize::try_from(pending_buf_len).ok()?;
     let len = usize::try_from(len).ok()?;
-    start
-        .checked_add(len)
-        .filter(|&end| end <= pending_buf_len)
+    start.checked_add(len).filter(|&end| end <= pending_buf_len)
 }
 
 pub fn deflateCopy(
@@ -3428,11 +3457,11 @@ pub fn deflateCopy(
     };
     crate::zlib_h::copy_z_stream(dest_stream, source_stream);
     ds = Some(dest_stream.zalloc.expect("non-null function pointer"))
-            .expect("non-null function pointer")(
-            dest_stream.opaque,
-            1 as crate::stdlib::uInt,
-            ::core::mem::size_of::<crate::src::deflate::deflate_state>() as crate::stdlib::uInt,
-        ) as *mut crate::src::deflate::deflate_state;
+        .expect("non-null function pointer")(
+        dest_stream.opaque,
+        1 as crate::stdlib::uInt,
+        ::core::mem::size_of::<crate::src::deflate::deflate_state>() as crate::stdlib::uInt,
+    ) as *mut crate::src::deflate::deflate_state;
     if ds.is_null() {
         return crate::zlib_h::Z_MEM_ERROR;
     }
@@ -3441,9 +3470,8 @@ pub fn deflateCopy(
     // assign (assignment would try to drop an uninitialized header snapshot).
     // Convert the callback allocation once to an uninitialized slot, then
     // establish the first Rust value with `MaybeUninit::write`.
-    let ds_slot = unsafe {
-        &mut *ds.cast::<::core::mem::MaybeUninit<crate::src::deflate::deflate_state>>()
-    };
+    let ds_slot =
+        unsafe { &mut *ds.cast::<::core::mem::MaybeUninit<crate::src::deflate::deflate_state>>() };
     let dest_state = ds_slot.write(source_state.clone());
     // Do not retain the derived clone's workspace. The default-pair branch
     // installs the range-preserving copy prepared above; custom and mixed
@@ -3467,30 +3495,30 @@ pub fn deflateCopy(
     }
     let storage = DeflateStorageLayout::from_state(dest_state);
     dest_state.window = Some(dest_stream.zalloc.expect("non-null function pointer"))
-            .expect("non-null function pointer")(
-            dest_stream.opaque,
-            storage.window_items,
-            (2 as usize).wrapping_mul(::core::mem::size_of::<crate::stdlib::Byte>())
-                as crate::stdlib::uInt,
-        ) as *mut crate::stdlib::Bytef;
+        .expect("non-null function pointer")(
+        dest_stream.opaque,
+        storage.window_items,
+        (2 as usize).wrapping_mul(::core::mem::size_of::<crate::stdlib::Byte>())
+            as crate::stdlib::uInt,
+    ) as *mut crate::stdlib::Bytef;
     dest_state.prev = Some(dest_stream.zalloc.expect("non-null function pointer"))
-            .expect("non-null function pointer")(
-            dest_stream.opaque,
-            storage.window_items,
-            ::core::mem::size_of::<crate::src::deflate::Pos>() as crate::stdlib::uInt,
-        ) as *mut crate::src::deflate::Posf;
+        .expect("non-null function pointer")(
+        dest_stream.opaque,
+        storage.window_items,
+        ::core::mem::size_of::<crate::src::deflate::Pos>() as crate::stdlib::uInt,
+    ) as *mut crate::src::deflate::Posf;
     dest_state.head = Some(dest_stream.zalloc.expect("non-null function pointer"))
-            .expect("non-null function pointer")(
-            dest_stream.opaque,
-            storage.hash_items,
-            ::core::mem::size_of::<crate::src::deflate::Pos>() as crate::stdlib::uInt,
-        ) as *mut crate::src::deflate::Posf;
+        .expect("non-null function pointer")(
+        dest_stream.opaque,
+        storage.hash_items,
+        ::core::mem::size_of::<crate::src::deflate::Pos>() as crate::stdlib::uInt,
+    ) as *mut crate::src::deflate::Posf;
     dest_state.pending_buf = Some(dest_stream.zalloc.expect("non-null function pointer"))
-            .expect("non-null function pointer")(
-            dest_stream.opaque,
-            storage.pending_items,
-            4 as crate::stdlib::uInt,
-        ) as *mut crate::zutil_h::uchf as *mut crate::stdlib::Bytef;
+        .expect("non-null function pointer")(
+        dest_stream.opaque,
+        storage.pending_items,
+        4 as crate::stdlib::uInt,
+    ) as *mut crate::zutil_h::uchf as *mut crate::stdlib::Bytef;
     if dest_state.window.is_null()
         || dest_state.prev.is_null()
         || dest_state.head.is_null()
@@ -3536,8 +3564,9 @@ pub fn deflateCopy(
     unsafe {
         crate::stdlib::memcpy(
             dest_state.pending_buf.wrapping_add(dest_state.sym_buf) as *mut ::core::ffi::c_void,
-            source_state.pending_buf.wrapping_add(copy_layout.sym_offset)
-                as *const ::core::ffi::c_void,
+            source_state
+                .pending_buf
+                .wrapping_add(copy_layout.sym_offset) as *const ::core::ffi::c_void,
             copy_layout.sym_bytes as crate::__stddef_size_t_h::size_t,
         )
     };
