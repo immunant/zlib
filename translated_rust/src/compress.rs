@@ -89,8 +89,6 @@ macro_rules! compress2_z_at_boundary {
             crate::stdlib::MAX_WBITS,
             crate::zutil_h::DEF_MEM_LEVEL,
             crate::zlib_h::Z_DEFAULT_STRATEGY,
-            crate::zlib_h::ZLIB_VERSION.as_ptr(),
-            ::core::mem::size_of::<crate::zlib_h::z_stream>() as ::core::ffi::c_int,
         );
         if err != crate::zlib_h::Z_OK {
             return err;

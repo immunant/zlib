@@ -946,6 +946,9 @@ pub unsafe extern "C" fn deflateInit__ffi(
     mut version: *const ::core::ffi::c_char,
     mut stream_size: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
+    if version.is_null() || !deflate_init_version_matches(*version, stream_size) {
+        return crate::zlib_h::Z_VERSION_ERROR;
+    }
     deflateInit2_(
         strm,
         level,
@@ -953,10 +956,22 @@ pub unsafe extern "C" fn deflateInit__ffi(
         crate::stdlib::MAX_WBITS,
         crate::zutil_h::DEF_MEM_LEVEL,
         crate::zlib_h::Z_DEFAULT_STRATEGY,
-        version,
-        stream_size,
     )
 }
+
+/// Validate the scalar portion of zlib's init ABI at the export boundary.
+/// Internal callers use the implementation directly and therefore never need
+/// to manufacture a C version pointer or stream-size argument.
+fn deflate_init_version_matches(
+    version_first: ::core::ffi::c_char,
+    stream_size: ::core::ffi::c_int,
+) -> bool {
+    version_first == crate::zlib_h::ZLIB_VERSION[0]
+        && usize::try_from(stream_size)
+            .ok()
+            .is_some_and(|size| size == ::core::mem::size_of::<crate::zlib_h::z_stream>())
+}
+
 pub fn deflateInit2_(
     mut strm: crate::zlib_h::z_streamp,
     mut level: ::core::ffi::c_int,
@@ -964,8 +979,6 @@ pub fn deflateInit2_(
     mut windowBits: ::core::ffi::c_int,
     mut memLevel: ::core::ffi::c_int,
     mut strategy: ::core::ffi::c_int,
-    mut version: *const ::core::ffi::c_char,
-    mut stream_size: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
     // Allocation callbacks and the C-compatible stream/state records remain
     // an ABI boundary.  Keep their adoption confined here so callers use the
@@ -974,14 +987,6 @@ pub fn deflateInit2_(
         let mut s: *mut crate::src::deflate::deflate_state =
             ::core::ptr::null_mut::<crate::src::deflate::deflate_state>();
         let mut wrap: ::core::ffi::c_int = 1 as ::core::ffi::c_int;
-        const MY_VERSION: [::core::ffi::c_char; 15] = crate::zlib_h::ZLIB_VERSION;
-        if version.is_null()
-            || *version as ::core::ffi::c_int
-                != MY_VERSION[0 as ::core::ffi::c_int as usize] as ::core::ffi::c_int
-            || stream_size as usize != ::core::mem::size_of::<crate::zlib_h::z_stream>()
-        {
-            return crate::zlib_h::Z_VERSION_ERROR;
-        }
         if strm.is_null() {
             return crate::zlib_h::Z_STREAM_ERROR;
         }
@@ -1152,16 +1157,10 @@ pub unsafe extern "C" fn deflateInit2__ffi(
     mut version: *const ::core::ffi::c_char,
     mut stream_size: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
-    deflateInit2_(
-        strm,
-        level,
-        method,
-        windowBits,
-        memLevel,
-        strategy,
-        version,
-        stream_size,
-    )
+    if version.is_null() || !deflate_init_version_matches(*version, stream_size) {
+        return crate::zlib_h::Z_VERSION_ERROR;
+    }
+    deflateInit2_(strm, level, method, windowBits, memLevel, strategy)
 }
 pub(crate) fn deflate_state_values_are_valid(
     has_zalloc: bool,

@@ -85,8 +85,6 @@ macro_rules! gz_init_at_boundary {
                     15 as ::core::ffi::c_int + 16 as ::core::ffi::c_int,
                     8 as ::core::ffi::c_int,
                     state_ref.strategy,
-                    crate::zlib_h::ZLIB_VERSION.as_ptr(),
-                    ::core::mem::size_of::<crate::zlib_h::z_stream>() as ::core::ffi::c_int,
                 ) != crate::zlib_h::Z_OK
                 {
                     state_ref.buffers = None;
