@@ -600,55 +600,68 @@ pub unsafe extern "C" fn gzfread_ffi(
 ) -> crate::stdlib::z_size_t {
     gzfread(buf, size, nitems, file)
 }
-pub unsafe extern "C" fn gzgetc(mut file: crate::zlib_h::gzFile) -> ::core::ffi::c_int {
-    let mut buf: [::core::ffi::c_uchar; 1] = [0; 1];
-    let mut state: crate::gzguts_h::gz_statep =
-        ::core::ptr::null_mut::<crate::gzguts_h::gz_state>();
-    if file.is_null() {
+fn gzgetc_impl(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
+    if state.mode != crate::gzguts_h::GZ_READ {
         return -1 as ::core::ffi::c_int;
     }
-    state = file as crate::gzguts_h::gz_statep;
-    if (*state).mode != crate::gzguts_h::GZ_READ {
-        return -1 as ::core::ffi::c_int;
-    }
-    if (*state).err != crate::zlib_h::Z_OK
-        && (*state).err != crate::zlib_h::Z_BUF_ERROR
-        && (*state).again == 0
+    if state.err != crate::zlib_h::Z_OK
+        && state.err != crate::zlib_h::Z_BUF_ERROR
+        && state.again == 0
     {
         return -1 as ::core::ffi::c_int;
     }
-    let state = &mut *state;
     crate::src::gzlib::gz_error_state(state, crate::zlib_h::Z_OK, None);
-    if (*state).x.have != 0 {
-        (*state).x.have = (*state).x.have.wrapping_sub(1);
-        (*state).x.pos += 1;
-        let c2rust_fresh2 = (*state).x.next;
-        (*state).x.next = (*state).x.next.offset(1);
-        return *c2rust_fresh2 as ::core::ffi::c_int;
+    if state.x.have != 0 {
+        let have = state.x.have as usize;
+        let Some(start) = state.x.next.addr().checked_sub(state.out.as_ptr().addr()) else {
+            crate::src::gzlib::gz_error_state(
+                state,
+                crate::zlib_h::Z_STREAM_ERROR,
+                Some(c"state corrupt"),
+            );
+            return -1 as ::core::ffi::c_int;
+        };
+        if start >= state.out.len() || have > state.out.len() - start {
+            crate::src::gzlib::gz_error_state(
+                state,
+                crate::zlib_h::Z_STREAM_ERROR,
+                Some(c"state corrupt"),
+            );
+            return -1 as ::core::ffi::c_int;
+        }
+        let byte = state.out[start];
+        state.x.have -= 1;
+        state.x.pos += 1;
+        state.x.next = state.out.as_mut_ptr().wrapping_add(start + 1);
+        return byte as ::core::ffi::c_int;
     }
-    return if gz_read(
-        state as *mut _,
-        &raw mut buf as *mut ::core::ffi::c_uchar as crate::stdlib::voidp,
-        1 as crate::stdlib::z_size_t,
-    ) < 1 as crate::stdlib::z_size_t
-    {
+    let mut buf = [0u8; 1];
+    if unsafe { gz_read_impl(state, &mut buf) } < 1 as crate::stdlib::z_size_t {
         -1 as ::core::ffi::c_int
     } else {
-        buf[0 as usize] as ::core::ffi::c_int
-    };
+        buf[0] as ::core::ffi::c_int
+    }
 }
+
+pub unsafe fn gzgetc(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
+    gzgetc_impl(state)
+}
+
 #[export_name = "gzgetc"]
 
 pub unsafe extern "C" fn gzgetc_ffi(mut file: crate::zlib_h::gzFile) -> ::core::ffi::c_int {
-    gzgetc(file)
-}
-pub unsafe extern "C" fn gzgetc_(mut file: crate::zlib_h::gzFile) -> ::core::ffi::c_int {
-    return gzgetc(file);
+    if file.is_null() {
+        return -1 as ::core::ffi::c_int;
+    }
+    gzgetc_impl(&mut *(file as crate::gzguts_h::gz_statep))
 }
 #[export_name = "gzgetc_"]
 
 pub unsafe extern "C" fn gzgetc__ffi(mut file: crate::zlib_h::gzFile) -> ::core::ffi::c_int {
-    gzgetc_(file)
+    if file.is_null() {
+        return -1 as ::core::ffi::c_int;
+    }
+    gzgetc_impl(&mut *(file as crate::gzguts_h::gz_statep))
 }
 unsafe fn gzungetc(
     c: ::core::ffi::c_int,
