@@ -5233,62 +5233,124 @@ unsafe fn deflate_rle(
     return block_done;
 }
 
-unsafe fn deflate_huff(
+fn deflate_huff(
     mut s: *mut crate::src::deflate::deflate_state,
     mut flush: ::core::ffi::c_int,
 ) -> block_state {
-    let mut bflush: ::core::ffi::c_int = 0;
-    loop {
-        let needs_input = {
+    // The Huffman-only loop still owns transitional raw state, window, and
+    // pending-buffer lends. Keep that boundary explicit so dispatch callers
+    // do not inherit an unsafe-function requirement.
+    unsafe {
+        let mut bflush: ::core::ffi::c_int = 0;
+        loop {
+            let needs_input = {
+                let state = &mut *s;
+                state.lookahead == 0 as crate::stdlib::uInt
+            };
+            if needs_input {
+                fill_window(s);
+                let state = &mut *s;
+                if state.lookahead == 0 as crate::stdlib::uInt {
+                    if flush == crate::zlib_h::Z_NO_FLUSH {
+                        return need_more;
+                    }
+                    break;
+                }
+            }
             let state = &mut *s;
-            state.lookahead == 0 as crate::stdlib::uInt
-        };
-        if needs_input {
-            fill_window(s);
-            let state = &mut *s;
-            if state.lookahead == 0 as crate::stdlib::uInt {
-                if flush == crate::zlib_h::Z_NO_FLUSH {
+            let literal = {
+                let Ok(window_len) = usize::try_from(state.window_size) else {
+                    return need_more;
+                };
+                if window_len != 0 && state.window.is_null() {
                     return need_more;
                 }
-                break;
+                let window = if window_len == 0 {
+                    &[]
+                } else {
+                    ::core::slice::from_raw_parts(state.window, window_len)
+                };
+                let Some(literal) = huff_literal_plan_state(&*state, window) else {
+                    return need_more;
+                };
+                literal
+            };
+            {
+                let Ok(symbol_len) = usize::try_from(state.sym_end) else {
+                    return need_more;
+                };
+                if symbol_len != 0 && state.sym_buf.is_null() {
+                    return need_more;
+                }
+                let symbols = if symbol_len == 0 {
+                    &mut []
+                } else {
+                    ::core::slice::from_raw_parts_mut(state.sym_buf, symbol_len)
+                };
+                let Some(flush_now) = huff_tally_literal_state(state, symbols, literal) else {
+                    return need_more;
+                };
+                bflush = flush_now as ::core::ffi::c_int;
+            }
+            if bflush != 0 {
+                let (block_start, strstart, window) = {
+                    let state = &mut *s;
+                    (state.block_start, state.strstart, state.window)
+                };
+                crate::src::trees::_tr_flush_block(
+                    s as *mut crate::src::deflate::internal_state,
+                    if block_start >= 0 as ::core::ffi::c_long {
+                        window.wrapping_add(block_start as ::core::ffi::c_uint as usize)
+                            as *mut crate::stdlib::charf
+                    } else {
+                        ::core::ptr::null_mut::<crate::stdlib::charf>()
+                    },
+                    block_flush_len_state(strstart, block_start),
+                    0 as ::core::ffi::c_int,
+                );
+                let avail_out = {
+                    let state = &mut *s;
+                    state.block_start = strstart as ::core::ffi::c_long;
+                    let strm = state.strm;
+                    flush_pending(strm)
+                };
+                if let Some(result) = deflate_post_flush_result(avail_out, false) {
+                    return result;
+                }
             }
         }
-        let state = &mut *s;
-        let literal = {
-            let Ok(window_len) = usize::try_from(state.window_size) else {
-                return need_more;
-            };
-            if window_len != 0 && state.window.is_null() {
-                return need_more;
-            }
-            let window = if window_len == 0 {
-                &[]
-            } else {
-                ::core::slice::from_raw_parts(state.window, window_len)
-            };
-            let Some(literal) = huff_literal_plan_state(&*state, window) else {
-                return need_more;
-            };
-            literal
+        let tail_action = {
+            let state = &mut *s;
+            deflate_tail_action_state(state, flush)
         };
-        {
-            let Ok(symbol_len) = usize::try_from(state.sym_end) else {
-                return need_more;
+        if matches!(tail_action, DeflateTailAction::Finish) {
+            let (block_start, strstart, window) = {
+                let state = &mut *s;
+                (state.block_start, state.strstart, state.window)
             };
-            if symbol_len != 0 && state.sym_buf.is_null() {
-                return need_more;
+            crate::src::trees::_tr_flush_block(
+                s as *mut crate::src::deflate::internal_state,
+                if block_start >= 0 as ::core::ffi::c_long {
+                    window.wrapping_add(block_start as ::core::ffi::c_uint as usize)
+                        as *mut crate::stdlib::charf
+                } else {
+                    ::core::ptr::null_mut::<crate::stdlib::charf>()
+                },
+                block_flush_len_state(strstart, block_start),
+                1 as ::core::ffi::c_int,
+            );
+            let avail_out = {
+                let state = &mut *s;
+                state.block_start = strstart as ::core::ffi::c_long;
+                let strm = state.strm;
+                flush_pending(strm)
+            };
+            if let Some(result) = deflate_post_flush_result(avail_out, true) {
+                return result;
             }
-            let symbols = if symbol_len == 0 {
-                &mut []
-            } else {
-                ::core::slice::from_raw_parts_mut(state.sym_buf, symbol_len)
-            };
-            let Some(flush_now) = huff_tally_literal_state(state, symbols, literal) else {
-                return need_more;
-            };
-            bflush = flush_now as ::core::ffi::c_int;
+            return finish_done;
         }
-        if bflush != 0 {
+        if matches!(tail_action, DeflateTailAction::FlushSymbols) {
             let (block_start, strstart, window) = {
                 let state = &mut *s;
                 (state.block_start, state.strstart, state.window)
@@ -5314,63 +5376,6 @@ unsafe fn deflate_huff(
                 return result;
             }
         }
+        return block_done;
     }
-    let tail_action = {
-        let state = &mut *s;
-        deflate_tail_action_state(state, flush)
-    };
-    if matches!(tail_action, DeflateTailAction::Finish) {
-        let (block_start, strstart, window) = {
-            let state = &mut *s;
-            (state.block_start, state.strstart, state.window)
-        };
-        crate::src::trees::_tr_flush_block(
-            s as *mut crate::src::deflate::internal_state,
-            if block_start >= 0 as ::core::ffi::c_long {
-                window.wrapping_add(block_start as ::core::ffi::c_uint as usize)
-                    as *mut crate::stdlib::charf
-            } else {
-                ::core::ptr::null_mut::<crate::stdlib::charf>()
-            },
-            block_flush_len_state(strstart, block_start),
-            1 as ::core::ffi::c_int,
-        );
-        let avail_out = {
-            let state = &mut *s;
-            state.block_start = strstart as ::core::ffi::c_long;
-            let strm = state.strm;
-            flush_pending(strm)
-        };
-        if let Some(result) = deflate_post_flush_result(avail_out, true) {
-            return result;
-        }
-        return finish_done;
-    }
-    if matches!(tail_action, DeflateTailAction::FlushSymbols) {
-        let (block_start, strstart, window) = {
-            let state = &mut *s;
-            (state.block_start, state.strstart, state.window)
-        };
-        crate::src::trees::_tr_flush_block(
-            s as *mut crate::src::deflate::internal_state,
-            if block_start >= 0 as ::core::ffi::c_long {
-                window.wrapping_add(block_start as ::core::ffi::c_uint as usize)
-                    as *mut crate::stdlib::charf
-            } else {
-                ::core::ptr::null_mut::<crate::stdlib::charf>()
-            },
-            block_flush_len_state(strstart, block_start),
-            0 as ::core::ffi::c_int,
-        );
-        let avail_out = {
-            let state = &mut *s;
-            state.block_start = strstart as ::core::ffi::c_long;
-            let strm = state.strm;
-            flush_pending(strm)
-        };
-        if let Some(result) = deflate_post_flush_result(avail_out, false) {
-            return result;
-        }
-    }
-    return block_done;
 }
