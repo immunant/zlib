@@ -607,9 +607,21 @@ pub unsafe extern "C" fn gzseek64_ffi(
         if offset < 0 as crate::stdlib::off64_t {
             return -1 as ::core::ffi::c_int as crate::stdlib::off64_t;
         }
-        if gzrewind_ffi(file) == -1 as ::core::ffi::c_int {
+        if crate::stdlib::lseek64(
+            state_ref.fd,
+            state_ref.start as crate::stdlib::__off64_t,
+            crate::stdlib::SEEK_SET,
+        ) == -1 as ::core::ffi::c_int as crate::stdlib::__off64_t
+        {
             return -1 as ::core::ffi::c_int as crate::stdlib::off64_t;
         }
+        gz_reset_before_error(state_ref);
+        gz_error(
+            state,
+            crate::zlib_h::Z_OK,
+            ::core::ptr::null::<::core::ffi::c_char>(),
+        );
+        gz_reset_after_error(state_ref);
     }
     let state_ref = &mut *(file as crate::gzguts_h::gz_statep);
     if state_ref.mode == crate::gzguts_h::GZ_READ {

@@ -708,6 +708,41 @@ fn gzclose_r_final_status(
     }
 }
 
+macro_rules! gzgetc_body {
+    ($file:expr) => {{
+        let mut buf: [::core::ffi::c_uchar; 1] = [0; 1];
+        let mut state: crate::gzguts_h::gz_statep =
+            ::core::ptr::null_mut::<crate::gzguts_h::gz_state>();
+        if $file.is_null() {
+            return -1 as ::core::ffi::c_int;
+        }
+        state = $file as crate::gzguts_h::gz_statep;
+        if !gz_read_state_ready(&*state) {
+            return -1 as ::core::ffi::c_int;
+        }
+        crate::src::gzlib::gz_error(
+            state as *mut crate::gzguts_h::gz_state,
+            crate::zlib_h::Z_OK,
+            ::core::ptr::null::<::core::ffi::c_char>(),
+        );
+        if (*state).x.have != 0 {
+            let c = *(*state).x.next;
+            gz_note_buffered_read(&mut *state, 1 as ::core::ffi::c_uint);
+            return c as ::core::ffi::c_int;
+        }
+        if gz_read(
+            &mut *state,
+            &raw mut buf as *mut ::core::ffi::c_uchar as crate::stdlib::voidp,
+            1 as crate::stdlib::z_size_t,
+        ) < 1 as crate::stdlib::z_size_t
+        {
+            -1 as ::core::ffi::c_int
+        } else {
+            buf[0 as ::core::ffi::c_int as usize] as ::core::ffi::c_int
+        }
+    }};
+}
+
 #[export_name = "gzread"]
 
 pub unsafe extern "C" fn gzread_ffi(
@@ -796,41 +831,12 @@ pub unsafe extern "C" fn gzfread_ffi(
 }
 #[export_name = "gzgetc"]
 pub unsafe extern "C" fn gzgetc_ffi(mut file: crate::zlib_h::gzFile) -> ::core::ffi::c_int {
-    let mut buf: [::core::ffi::c_uchar; 1] = [0; 1];
-    let mut state: crate::gzguts_h::gz_statep =
-        ::core::ptr::null_mut::<crate::gzguts_h::gz_state>();
-    if file.is_null() {
-        return -1 as ::core::ffi::c_int;
-    }
-    state = file as crate::gzguts_h::gz_statep;
-    if !gz_read_state_ready(&*state) {
-        return -1 as ::core::ffi::c_int;
-    }
-    crate::src::gzlib::gz_error(
-        state as *mut crate::gzguts_h::gz_state,
-        crate::zlib_h::Z_OK,
-        ::core::ptr::null::<::core::ffi::c_char>(),
-    );
-    if (*state).x.have != 0 {
-        let c = *(*state).x.next;
-        gz_note_buffered_read(&mut *state, 1 as ::core::ffi::c_uint);
-        return c as ::core::ffi::c_int;
-    }
-    return if gz_read(
-        &mut *state,
-        &raw mut buf as *mut ::core::ffi::c_uchar as crate::stdlib::voidp,
-        1 as crate::stdlib::z_size_t,
-    ) < 1 as crate::stdlib::z_size_t
-    {
-        -1 as ::core::ffi::c_int
-    } else {
-        buf[0 as ::core::ffi::c_int as usize] as ::core::ffi::c_int
-    };
+    gzgetc_body!(file)
 }
 #[export_name = "gzgetc_"]
 
 pub unsafe extern "C" fn gzgetc__ffi(mut file: crate::zlib_h::gzFile) -> ::core::ffi::c_int {
-    gzgetc_ffi(file)
+    gzgetc_body!(file)
 }
 #[export_name = "gzungetc"]
 pub unsafe extern "C" fn gzungetc_ffi(
