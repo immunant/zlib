@@ -794,13 +794,10 @@ fn gzgetc_impl(
 macro_rules! gzgetc_body {
     ($file:expr) => {{
         let mut buf: [::core::ffi::c_uchar; 1] = [0; 1];
-        let mut state: crate::gzguts_h::gz_statep =
-            ::core::ptr::null_mut::<crate::gzguts_h::gz_state>();
         if $file.is_null() {
             return -1 as ::core::ffi::c_int;
         }
-        state = $file as crate::gzguts_h::gz_statep;
-        let state = &mut *state;
+        let state = &mut *($file as crate::gzguts_h::gz_statep);
         if !gz_read_state_ready(state) {
             return -1 as ::core::ffi::c_int;
         }
@@ -903,13 +900,10 @@ pub unsafe extern "C" fn gzungetc_ffi(
     mut c: ::core::ffi::c_int,
     mut file: crate::zlib_h::gzFile,
 ) -> ::core::ffi::c_int {
-    let mut state: crate::gzguts_h::gz_statep =
-        ::core::ptr::null_mut::<crate::gzguts_h::gz_state>();
     if file.is_null() {
         return -1 as ::core::ffi::c_int;
     }
-    state = file as crate::gzguts_h::gz_statep;
-    let state = &mut *state;
+    let state = &mut *(file as crate::gzguts_h::gz_statep);
     if state.mode != crate::gzguts_h::GZ_READ {
         return -1 as ::core::ffi::c_int;
     }

@@ -3584,7 +3584,8 @@ pub unsafe extern "C" fn _tr_flush_block_ffi(
     mut last: ::core::ffi::c_int,
 ) {
     let state = &mut *s;
-    let data_type = &mut (*state.strm).data_type;
+    let strm_ref = &mut *state.strm;
+    let data_type = &mut strm_ref.data_type;
     let pending_buf =
         ::core::slice::from_raw_parts_mut(state.pending_buf, state.pending_buf_size as usize);
     let stored = if buf.is_null() {

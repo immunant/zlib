@@ -1632,16 +1632,17 @@ pub unsafe extern "C" fn deflateBound_z_ffi(
     if deflate_state_check_raw!(strm) != 0 {
         return deflate_bound_z_impl(sourceLen, None, None);
     }
-    let s = &*((*strm).state as *mut crate::src::deflate::deflate_state);
+    let strm_ref = &*strm;
+    let state_ref = &*(strm_ref.state as *mut crate::src::deflate::deflate_state);
     let state = DeflateBoundState {
-        wrap: s.wrap,
-        strstart: s.strstart,
-        w_bits: s.w_bits,
-        hash_bits: s.hash_bits,
-        level: s.level,
+        wrap: state_ref.wrap,
+        strstart: state_ref.strstart,
+        w_bits: state_ref.w_bits,
+        hash_bits: state_ref.hash_bits,
+        level: state_ref.level,
     };
-    let gzip_header = if deflate_bound_uses_gzip_header(state.wrap) && !s.gzhead.is_null() {
-        let head = &*s.gzhead;
+    let gzip_header = if deflate_bound_uses_gzip_header(state.wrap) && !state_ref.gzhead.is_null() {
+        let head = &*state_ref.gzhead;
         let extra_len = if head.extra.is_null() {
             None
         } else {

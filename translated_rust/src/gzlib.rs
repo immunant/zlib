@@ -400,7 +400,8 @@ pub unsafe extern "C" fn gzbuffer_ffi(
     if file.is_null() {
         return -1 as ::core::ffi::c_int;
     }
-    gzbuffer(&mut *(file as crate::gzguts_h::gz_statep), size)
+    let state = &mut *(file as crate::gzguts_h::gz_statep);
+    gzbuffer(state, size)
 }
 pub fn gz_clamped_uint(
     value: crate::stdlib::uInt,
@@ -978,7 +979,8 @@ pub unsafe extern "C" fn gz_error_ffi(
     mut err: ::core::ffi::c_int,
     mut msg: *const ::core::ffi::c_char,
 ) {
-    gz_error(&mut *state, err, msg)
+    let state = &mut *state;
+    gz_error(state, err, msg)
 }
 pub fn gz_intmax() -> ::core::ffi::c_uint {
     return crate::limits_h::INT_MAX as ::core::ffi::c_uint;
