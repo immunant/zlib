@@ -82,28 +82,63 @@ fn gz_load(
 }
 
 unsafe fn gz_avail(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
-    let mut got: ::core::ffi::c_uint = 0;
     if state.err != crate::zlib_h::Z_OK && state.err != crate::zlib_h::Z_BUF_ERROR {
         return -1 as ::core::ffi::c_int;
     }
     if state.eof == 0 as ::core::ffi::c_int {
-        if state.strm.avail_in != 0 {
-            let mut p: *mut ::core::ffi::c_uchar = state.in_0;
-            let mut q: *const ::core::ffi::c_uchar = state.strm.next_in;
-            if q != p as *const ::core::ffi::c_uchar {
-                let mut n: ::core::ffi::c_uint = state.strm.avail_in as ::core::ffi::c_uint;
-                loop {
-                    let c2rust_fresh0 = q;
-                    q = q.offset(1);
-                    let c2rust_fresh1 = p;
-                    p = p.offset(1);
-                    *c2rust_fresh1 = *c2rust_fresh0;
-                    n = n.wrapping_sub(1);
-                    if n == 0 {
-                        break;
-                    }
-                }
+        if state.in_0.is_null() {
+            crate::src::gzlib::gz_static_error(
+                state,
+                crate::zlib_h::Z_STREAM_ERROR,
+                b"internal read buffer corrupt\0",
+            );
+            return -1 as ::core::ffi::c_int;
+        }
+        let available = state.strm.avail_in as usize;
+        if available > state.size as usize {
+            crate::src::gzlib::gz_static_error(
+                state,
+                crate::zlib_h::Z_STREAM_ERROR,
+                b"internal read buffer corrupt\0",
+            );
+            return -1 as ::core::ffi::c_int;
+        }
+        let input = ::core::slice::from_raw_parts_mut(state.in_0, state.size as usize);
+        if available != 0 {
+            if state.strm.next_in.is_null() {
+                crate::src::gzlib::gz_static_error(
+                    state,
+                    crate::zlib_h::Z_STREAM_ERROR,
+                    b"internal read buffer corrupt\0",
+                );
+                return -1 as ::core::ffi::c_int;
             }
+            let offset = state.strm.next_in.offset_from(input.as_ptr());
+            let Ok(offset) = usize::try_from(offset) else {
+                crate::src::gzlib::gz_static_error(
+                    state,
+                    crate::zlib_h::Z_STREAM_ERROR,
+                    b"internal read buffer corrupt\0",
+                );
+                return -1 as ::core::ffi::c_int;
+            };
+            let Some(end) = offset.checked_add(available) else {
+                crate::src::gzlib::gz_static_error(
+                    state,
+                    crate::zlib_h::Z_STREAM_ERROR,
+                    b"internal read buffer corrupt\0",
+                );
+                return -1 as ::core::ffi::c_int;
+            };
+            if end > input.len() {
+                crate::src::gzlib::gz_static_error(
+                    state,
+                    crate::zlib_h::Z_STREAM_ERROR,
+                    b"internal read buffer corrupt\0",
+                );
+                return -1 as ::core::ffi::c_int;
+            }
+            input.copy_within(offset..end, 0);
         }
         let fd = if state.fd < 0 {
             gz_load_error(state, rustix::io::Errno::BADF);
@@ -111,8 +146,6 @@ unsafe fn gz_avail(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int 
         } else {
             BorrowedFd::borrow_raw(state.fd)
         };
-        let available = state.strm.avail_in as usize;
-        let input = ::core::slice::from_raw_parts_mut(state.in_0, state.size as usize);
         let Some(input) = input.get_mut(available..) else {
             crate::src::gzlib::gz_static_error(
                 state,
@@ -125,8 +158,7 @@ unsafe fn gz_avail(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int 
             Ok(read) => read,
             Err(_) => return -1 as ::core::ffi::c_int,
         };
-        got = read as ::core::ffi::c_uint;
-        state.strm.avail_in = state.strm.avail_in.wrapping_add(got);
+        state.strm.avail_in = state.strm.avail_in.wrapping_add(read as ::core::ffi::c_uint);
         state.strm.next_in = state.in_0 as *mut crate::stdlib::Bytef;
     }
     return 0 as ::core::ffi::c_int;
