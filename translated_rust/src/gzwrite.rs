@@ -273,6 +273,56 @@ fn gz_zero_commit_direct(state: &mut crate::gzguts_h::gz_state, consumed: ::core
     state.skip = state.skip.wrapping_sub(consumed as crate::stdlib::off64_t);
 }
 
+/// Write a pending sparse gap for a transparent stream.  This branch never
+/// enters the compressor: it receives only the owned zero buffer, descriptor,
+/// and scalar state, leaving opaque gzip-state traversal at its boundary.
+enum GzZeroDirect {
+    Complete(usize),
+    IoError {
+        consumed: usize,
+        code: ::core::ffi::c_int,
+    },
+    Invalid,
+}
+
+fn gz_zero_direct(
+    file: &mut ::std::fs::File,
+    input: &mut [u8],
+    size: ::core::ffi::c_uint,
+    mut skip: crate::stdlib::off64_t,
+) -> GzZeroDirect {
+    let mut first = true;
+    let mut consumed = 0usize;
+    loop {
+        let mut n = gz_zero_chunk_plan(size, skip);
+        if first {
+            let Some(bytes) = input.get_mut(..n as usize) else {
+                return GzZeroDirect::Invalid;
+            };
+            bytes.fill(0);
+            first = false;
+        }
+        let Some(bytes) = input.get(..n as usize) else {
+            return GzZeroDirect::Invalid;
+        };
+        let written = match gz_direct_write_file(file, bytes) {
+            Ok(written) => written,
+            Err((written, code)) => {
+                return GzZeroDirect::IoError {
+                    consumed: consumed.wrapping_add(written),
+                    code,
+                };
+            }
+        };
+        n = written as ::core::ffi::c_uint;
+        consumed = consumed.wrapping_add(n as usize);
+        skip = skip.wrapping_sub(n as crate::stdlib::off64_t);
+        if skip == 0 {
+            return GzZeroDirect::Complete(consumed);
+        }
+    }
+}
+
 /// Determine how much input fits after the existing buffered compressor
 /// input.  The wrapping subtraction deliberately preserves zlib's behavior
 /// for a malformed internal cursor while keeping the size conversion local.
@@ -535,7 +585,6 @@ fn gzputc_buffered_insert(
 }
 
 pub(crate) unsafe fn gz_zero(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
-    let mut first: ::core::ffi::c_int = 0;
     let mut ret: ::core::ffi::c_int = 0;
     let mut n: ::core::ffi::c_uint = 0;
     if state.strm.avail_in != 0
@@ -543,10 +592,35 @@ pub(crate) unsafe fn gz_zero(state: &mut crate::gzguts_h::gz_state) -> ::core::f
     {
         return -1 as ::core::ffi::c_int;
     }
-    first = 1 as ::core::ffi::c_int;
+    if state.direct != 0 {
+        let result = {
+            let (Some(file), Some(buffers)) = (state.file.as_mut(), state.buffers.as_mut()) else {
+                return -1;
+            };
+            gz_zero_direct(file, &mut buffers.input, state.size, state.skip)
+        };
+        return match result {
+            GzZeroDirect::Complete(consumed) => {
+                state.again = 0;
+                state.x.pos = state.x.pos.wrapping_add(consumed as crate::stdlib::off64_t);
+                state.skip = state.skip.wrapping_sub(consumed as crate::stdlib::off64_t);
+                0
+            }
+            GzZeroDirect::IoError { consumed, code } => {
+                state.again = (code == crate::stdlib::EAGAIN || code == crate::stdlib::EWOULDBLOCK)
+                    as ::core::ffi::c_int;
+                state.x.pos = state.x.pos.wrapping_add(consumed as crate::stdlib::off64_t);
+                state.skip = state.skip.wrapping_sub(consumed as crate::stdlib::off64_t);
+                crate::src::gzlib::gz_error_io(state, code);
+                -1
+            }
+            GzZeroDirect::Invalid => -1,
+        };
+    }
+    let mut first = true;
     loop {
         n = gz_zero_chunk_plan(state.size, state.skip);
-        if first != 0 {
+        if first {
             // The compressor still receives the old compatibility cursor,
             // but the sparse gap is initialized through its owned allocation
             // rather than libc `memset`.
@@ -557,32 +631,7 @@ pub(crate) unsafe fn gz_zero(state: &mut crate::gzguts_h::gz_state) -> ::core::f
                 return -1 as ::core::ffi::c_int;
             };
             bytes.fill(0);
-            first = 0 as ::core::ffi::c_int;
-        }
-        if state.direct != 0 {
-            let result = {
-                let (Some(file), Some(buffers)) = (state.file.as_mut(), state.buffers.as_ref())
-                else {
-                    return -1;
-                };
-                let Some(bytes) = buffers.input.get(..n as usize) else {
-                    return -1;
-                };
-                gz_direct_write_file(file, bytes)
-            };
-            let written = match gz_direct_write_commit(state, result) {
-                Ok(written) => written,
-                Err(written) => {
-                    gz_zero_commit_direct(state, written as ::core::ffi::c_uint);
-                    return -1;
-                }
-            };
-            n = written as ::core::ffi::c_uint;
-            gz_zero_commit_direct(state, n);
-            if state.skip == 0 {
-                break;
-            }
-            continue;
+            first = false;
         }
         state.strm.avail_in = n as crate::stdlib::uInt;
         let Some(input) = state.buffers.as_mut().map(|buffers| buffers.input.as_mut()) else {
