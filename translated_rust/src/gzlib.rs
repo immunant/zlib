@@ -113,12 +113,56 @@ impl<'a> GzBufferedCursor<'a> {
         &self.buffer[self.start..self.start + self.have]
     }
 
+    // Borrow a checked prefix of the unread buffer and return the index that
+    // follows it.  Read-side callers can use this rather than rebuilding a
+    // range from the ABI cursor for every buffered copy.
+    pub(crate) fn consume(&self, len: usize) -> Option<(&'a [u8], usize)> {
+        let bytes = self.unread().get(..len)?;
+        Some((bytes, self.start.checked_add(len)?))
+    }
+
     // Return one buffered byte together with the next checked buffer index.
     // Keeping cursor advancement as an index lets read-side policy consume
     // buffered output without retaining the ABI cursor pointer.
     pub(crate) fn consume_one(&self) -> Option<(u8, usize)> {
         let byte = *self.unread().first()?;
         Some((byte, self.start.checked_add(1)?))
+    }
+
+    // Prepend a byte to the owned output buffer.  For a nonempty cursor,
+    // validate the entire advertised unread range before shifting or writing;
+    // the caller only has to project the resulting checked index back to the
+    // ABI cursor.
+    pub(crate) fn prepend(
+        buffer: &mut [u8],
+        cursor_address: usize,
+        have: u32,
+        byte: u8,
+    ) -> Option<(usize, u32)> {
+        if have == 0 {
+            let next = buffer.len().checked_sub(1)?;
+            buffer[next] = byte;
+            return Some((next, 1));
+        }
+
+        let start = {
+            let cursor = GzBufferedCursor::from_owned_buffer(&*buffer, cursor_address, have)?;
+            cursor.start
+        };
+        let have_usize = have as usize;
+        if have_usize >= buffer.len() {
+            return None;
+        }
+        let next = if start == 0 {
+            let shifted = buffer.len().checked_sub(have_usize)?;
+            buffer.copy_within(0..have_usize, shifted);
+            shifted
+        } else {
+            start
+        };
+        let next = next.checked_sub(1)?;
+        buffer[next] = byte;
+        Some((next, have.checked_add(1)?))
     }
 }
 

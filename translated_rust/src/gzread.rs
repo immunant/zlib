@@ -67,28 +67,6 @@ fn copy_through_newline(input: &[u8], output: &mut [u8]) -> (usize, bool) {
     (copied, copied != input.len())
 }
 
-fn pushback_empty(buffer: &mut [u8], byte: u8) -> Option<usize> {
-    let next = buffer.len().checked_sub(1)?;
-    buffer[next] = byte;
-    Some(next)
-}
-
-fn pushback_buffer(buffer: &mut [u8], next: usize, have: usize, byte: u8) -> Option<usize> {
-    if next > buffer.len() || have >= buffer.len() {
-        return None;
-    }
-    let next = if next == 0 {
-        let shifted = buffer.len().checked_sub(have)?;
-        buffer.copy_within(0..have, shifted);
-        shifted
-    } else {
-        next
-    };
-    let next = next.checked_sub(1)?;
-    buffer[next] = byte;
-    Some(next)
-}
-
 enum GzLoad {
     Loaded {
         have: ::core::ffi::c_uint,
@@ -596,11 +574,13 @@ unsafe fn gz_read(
                 // `x.have` is nonzero here. Rebuild the buffered input with
                 // a checked range so a corrupt cursor cannot extend a raw
                 // slice beyond that allocation.
-                let cursor = state.x.next;
-                let Some(input) = state.out.as_deref().and_then(|buffer| {
-                    let start = cursor.addr().checked_sub(buffer.as_ptr().addr())?;
-                    let end = start.checked_add(n as usize)?;
-                    buffer.get(start..end)
+                let Some((input, next)) = state.out.as_deref().and_then(|buffer| {
+                    crate::src::gzlib::GzBufferedCursor::from_owned_buffer(
+                        buffer,
+                        state.x.next.addr(),
+                        state.x.have,
+                    )
+                    .and_then(|cursor| cursor.consume(n as usize))
                 }) else {
                     return got;
                 };
@@ -609,7 +589,10 @@ unsafe fn gz_read(
                     return got;
                 };
                 copy_buffered_input(input, destination);
-                state.x.next = state.x.next.wrapping_add(n as usize);
+                let Some(buffer) = state.out.as_deref() else {
+                    return got;
+                };
+                state.x.next = buffer.as_ptr().wrapping_add(next).cast_mut();
                 state.x.have = state.x.have.wrapping_sub(n);
                 if state.err != crate::zlib_h::Z_OK {
                     err = -1 as ::core::ffi::c_int;
@@ -867,22 +850,7 @@ unsafe fn gzungetc(
     if c < 0 as ::core::ffi::c_int {
         return -1 as ::core::ffi::c_int;
     }
-    if state.x.have == 0 as ::core::ffi::c_uint {
-        let size = state.size as usize;
-        let Some(capacity) = size.checked_mul(2) else {
-            return -1 as ::core::ffi::c_int;
-        };
-        let buffer = &mut state.out.as_deref_mut().unwrap()[..capacity];
-        let Some(next) = pushback_empty(buffer, c as ::core::ffi::c_uchar) else {
-            return -1 as ::core::ffi::c_int;
-        };
-        state.x.have = 1 as ::core::ffi::c_uint;
-        state.x.next = buffer.as_mut_ptr().wrapping_add(next);
-        state.x.pos -= 1;
-        state.past = 0 as ::core::ffi::c_int;
-        return c;
-    }
-    if state.x.have == state.size << 1 as ::core::ffi::c_int {
+    if state.x.have != 0 && state.x.have == state.size << 1 as ::core::ffi::c_int {
         crate::src::gzlib::gz_set_error(
             &mut state.msg,
             &mut state.err,
@@ -899,24 +867,16 @@ unsafe fn gzungetc(
         return -1 as ::core::ffi::c_int;
     };
     let buffer = &mut state.out.as_deref_mut().unwrap()[..capacity];
-    let out = buffer.as_mut_ptr();
-    let cursor = state.x.next;
-    if cursor.is_null() {
-        return -1 as ::core::ffi::c_int;
-    }
-    let Some(next) = cursor.addr().checked_sub(out.addr()) else {
-        return -1 as ::core::ffi::c_int;
-    };
-    let Some(next) = pushback_buffer(
+    let Some((next, have)) = crate::src::gzlib::GzBufferedCursor::prepend(
         buffer,
-        next,
-        state.x.have as usize,
+        state.x.next.addr(),
+        state.x.have,
         c as ::core::ffi::c_uchar,
     ) else {
         return -1 as ::core::ffi::c_int;
     };
-    state.x.have = state.x.have.wrapping_add(1);
-    state.x.next = out.wrapping_add(next);
+    state.x.have = have;
+    state.x.next = buffer.as_mut_ptr().wrapping_add(next);
     state.x.pos -= 1;
     state.past = 0 as ::core::ffi::c_int;
     return c;
