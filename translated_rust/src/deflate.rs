@@ -4500,30 +4500,45 @@ fn deflate_fast(
                 }
             }
             hash_head = NIL as crate::src::deflate::IPos;
-            let has_min_match = {
-                let state = &mut *s;
-                state.lookahead >= crate::zutil_h::MIN_MATCH as crate::stdlib::uInt
+            // Both parser transitions need the same callback-owned window
+            // and pending allocation. Lend each once per no-refill
+            // transition; only the match path additionally needs hash views.
+            let state = &mut *s;
+            let has_min_match =
+                state.lookahead >= crate::zutil_h::MIN_MATCH as crate::stdlib::uInt;
+            let (Ok(window_len), Ok(pending_len)) = (
+                usize::try_from(state.window_size),
+                usize::try_from(state.pending_buf_size),
+            ) else {
+                return need_more;
+            };
+            if (window_len != 0 && state.window.is_null())
+                || (pending_len != 0 && state.pending_buf.is_null())
+            {
+                return need_more;
+            }
+            let window = if window_len == 0 {
+                &[]
+            } else {
+                ::core::slice::from_raw_parts(state.window, window_len)
+            };
+            let pending_and_symbols = if pending_len == 0 {
+                &mut []
+            } else {
+                ::core::slice::from_raw_parts_mut(state.pending_buf, pending_len)
             };
             if has_min_match {
-                let state = &mut *s;
-                let (Ok(window_len), Ok(head_len), Ok(prev_len)) = (
-                    usize::try_from(state.window_size),
+                let (Ok(head_len), Ok(prev_len)) = (
                     usize::try_from(state.hash_size),
                     usize::try_from(state.w_size),
                 ) else {
                     return need_more;
                 };
-                if (window_len != 0 && state.window.is_null())
-                    || (head_len != 0 && state.head.is_null())
+                if (head_len != 0 && state.head.is_null())
                     || (prev_len != 0 && state.prev.is_null())
                 {
                     return need_more;
                 }
-                let window = if window_len == 0 {
-                    &[]
-                } else {
-                    ::core::slice::from_raw_parts(state.window, window_len)
-                };
                 let head = if head_len == 0 {
                     &mut []
                 } else {
@@ -4534,21 +4549,10 @@ fn deflate_fast(
                 } else {
                     ::core::slice::from_raw_parts_mut(state.prev, prev_len)
                 };
-                let Ok(pending_len) = usize::try_from(state.pending_buf_size) else {
-                    return need_more;
-                };
-                if pending_len != 0 && state.pending_buf.is_null() {
-                    return need_more;
-                }
                 // `sym_buf` is the literal-buffer offset within the pending
                 // allocation. Keep this existing no-refill window/hash lend
                 // alive through a checked tree flush, rather than rebuilding
                 // either the symbol cursor or stored-block cursor below.
-                let pending_and_symbols = if pending_len == 0 {
-                    &mut []
-                } else {
-                    ::core::slice::from_raw_parts_mut(state.pending_buf, pending_len)
-                };
                 let Some(previous) = insert_string_state(
                     window,
                     head,
@@ -4659,28 +4663,6 @@ fn deflate_fast(
                     bflush = 0;
                 }
             } else {
-                let state = &mut *s;
-                let Ok(window_len) = usize::try_from(state.window_size) else {
-                    return need_more;
-                };
-                let Ok(pending_len) = usize::try_from(state.pending_buf_size) else {
-                    return need_more;
-                };
-                if (window_len != 0 && state.window.is_null())
-                    || (pending_len != 0 && state.pending_buf.is_null())
-                {
-                    return need_more;
-                }
-                let window = if window_len == 0 {
-                    &[]
-                } else {
-                    ::core::slice::from_raw_parts(state.window, window_len)
-                };
-                let pending_and_symbols = if pending_len == 0 {
-                    &mut []
-                } else {
-                    ::core::slice::from_raw_parts_mut(state.pending_buf, pending_len)
-                };
                 let Ok(symbol_start) = usize::try_from(state.lit_bufsize) else {
                     return need_more;
                 };
@@ -4711,7 +4693,11 @@ fn deflate_fast(
                 }
             }
         }
-        {
+        // The fast parser's final and symbol-only tails use the same checked
+        // pending/window layout as its regular block flushes.  Finish all
+        // tree work while those lends are live, then release them before
+        // `flush_pending()` reaches the ABI-owned output cursor.
+        let tail_last = {
             let state = &mut *s;
             state.insert = if state.strstart
                 < (crate::zutil_h::MIN_MATCH - 1 as ::core::ffi::c_int) as crate::stdlib::uInt
@@ -4720,62 +4706,53 @@ fn deflate_fast(
             } else {
                 (crate::zutil_h::MIN_MATCH - 1 as ::core::ffi::c_int) as crate::stdlib::uInt
             };
-        }
-        if flush == crate::zlib_h::Z_FINISH {
-            let (block_start, window, strstart) = {
-                let state = &mut *s;
-                (state.block_start, state.window, state.strstart)
-            };
-            crate::src::trees::_tr_flush_block(
-                s,
-                if block_start >= 0 as ::core::ffi::c_long {
-                    window.wrapping_add(block_start as ::core::ffi::c_uint as usize)
-                        as *mut crate::stdlib::charf
+            let needs_flush = flush == crate::zlib_h::Z_FINISH || state.sym_next != 0;
+            if !needs_flush {
+                None
+            } else {
+                let (Ok(window_len), Ok(pending_len)) = (
+                    usize::try_from(state.window_size),
+                    usize::try_from(state.pending_buf_size),
+                ) else {
+                    return need_more;
+                };
+                if (window_len != 0 && state.window.is_null())
+                    || (pending_len != 0 && state.pending_buf.is_null())
+                {
+                    return need_more;
+                }
+                let window = if window_len == 0 {
+                    &[]
                 } else {
-                    ::core::ptr::null_mut::<crate::stdlib::charf>()
-                },
-                block_flush_len_state(strstart, block_start),
-                1 as ::core::ffi::c_int,
-            );
+                    ::core::slice::from_raw_parts(state.window, window_len)
+                };
+                let pending_and_symbols = if pending_len == 0 {
+                    &mut []
+                } else {
+                    ::core::slice::from_raw_parts_mut(state.pending_buf, pending_len)
+                };
+                let last = flush == crate::zlib_h::Z_FINISH;
+                flush_tree_window_block_state(
+                    state,
+                    pending_and_symbols,
+                    window,
+                    last as ::core::ffi::c_int,
+                );
+                Some(last)
+            }
+        };
+        if let Some(last) = tail_last {
             let avail_out = {
                 let state = &mut *s;
                 state.block_start = state.strstart as ::core::ffi::c_long;
                 let strm = state.strm;
                 flush_pending(strm)
             };
-            if let Some(result) = deflate_post_flush_result(avail_out, true) {
+            if let Some(result) = deflate_post_flush_result(avail_out, last) {
                 return result;
             }
-            return finish_done;
-        }
-        let has_symbols = {
-            let state = &mut *s;
-            state.sym_next != 0
-        };
-        if has_symbols {
-            let (block_start, window, strstart) = {
-                let state = &mut *s;
-                (state.block_start, state.window, state.strstart)
-            };
-            crate::src::trees::_tr_flush_block(
-                s,
-                if block_start >= 0 as ::core::ffi::c_long {
-                    window.wrapping_add(block_start as ::core::ffi::c_uint as usize)
-                        as *mut crate::stdlib::charf
-                } else {
-                    ::core::ptr::null_mut::<crate::stdlib::charf>()
-                },
-                block_flush_len_state(strstart, block_start),
-                0 as ::core::ffi::c_int,
-            );
-            let avail_out = {
-                let state = &mut *s;
-                state.block_start = state.strstart as ::core::ffi::c_long;
-                let strm = state.strm;
-                flush_pending(strm)
-            };
-            if let Some(result) = deflate_post_flush_result(avail_out, false) {
-                return result;
+            if last {
+                return finish_done;
             }
         }
         return block_done;
