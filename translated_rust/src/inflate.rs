@@ -184,30 +184,67 @@ pub struct inflate_state {
     pub was: ::core::ffi::c_uint,
 }
 
-static DEFAULT_INFLATE_STATES: OnceLock<Mutex<HashMap<usize, Box<inflate_state>>>> =
-    OnceLock::new();
-
-fn default_inflate_states() -> &'static Mutex<HashMap<usize, Box<inflate_state>>> {
-    DEFAULT_INFLATE_STATES.get_or_init(|| Mutex::new(HashMap::new()))
+/// Own the Rust state separately from the opaque allocation obtained through
+/// a caller-provided ABI allocator.  The latter is just a token: it must be
+/// returned to the same allocator, but it must never be treated as initialized
+/// Rust storage.
+enum InflateStateOwner {
+    Default(Box<inflate_state>),
+    Callback {
+        state: Box<inflate_state>,
+        allocation_address: usize,
+    },
 }
 
-pub(crate) fn retain_default_inflate_state(state: Box<inflate_state>) -> bool {
-    let address = core::ptr::from_ref(state.as_ref()).addr();
-    let mut states = default_inflate_states()
+static INFLATE_STATE_OWNERS: OnceLock<Mutex<HashMap<usize, InflateStateOwner>>> = OnceLock::new();
+
+fn inflate_state_owners() -> &'static Mutex<HashMap<usize, InflateStateOwner>> {
+    INFLATE_STATE_OWNERS.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn retain_inflate_state_owner(address: usize, owner: InflateStateOwner) -> bool {
+    let mut states = inflate_state_owners()
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
     if states.try_reserve(1).is_err() {
         return false;
     }
-    states.insert(address, state);
+    states.insert(address, owner);
     true
 }
 
-pub(crate) fn release_default_inflate_state(address: usize) {
-    default_inflate_states()
+pub(crate) fn retain_default_inflate_state(state: Box<inflate_state>) -> bool {
+    let address = core::ptr::from_ref(state.as_ref()).addr();
+    retain_inflate_state_owner(address, InflateStateOwner::Default(state))
+}
+
+/// Drop the Rust state owner and return the callback allocation token, when
+/// there is one, for the ABI boundary to return to `zfree`.
+fn release_inflate_state_owner(address: usize) -> Option<usize> {
+    let owner = inflate_state_owners()
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner())
-        .remove(&address);
+        .remove(&address)?;
+    match owner {
+        InflateStateOwner::Default(state) => {
+            drop(state);
+            None
+        }
+        InflateStateOwner::Callback {
+            state,
+            allocation_address,
+        } => {
+            drop(state);
+            Some(allocation_address)
+        }
+    }
+}
+
+/// Release a state known to have used the default Rust allocator.  The
+/// inflate-back path shares that ownership registry but has no ABI allocation
+/// token to return.
+pub(crate) fn release_default_inflate_state(address: usize) {
+    debug_assert!(release_inflate_state_owner(address).is_none());
 }
 
 pub(crate) fn new_inflate_state() -> inflate_state {
@@ -609,38 +646,63 @@ unsafe fn inflate_allocate_state(
         opaque,
         1,
         ::core::mem::size_of::<crate::src::inflate::inflate_state>() as crate::stdlib::uInt,
-    )
-    .cast::<crate::src::inflate::inflate_state>();
+    );
     if allocation.is_null() {
         return crate::zlib_h::Z_MEM_ERROR;
     }
-    // The callback storage has no Rust type until this write completes.
-    // Create the typed reference only afterwards, so Option and Vec fields
-    // never observe uninitialized bytes.
-    allocation.write(initialized);
+    // Callback storage is opaque ABI-owned memory, not Rust storage.  Keep
+    // the initialized state in a Box and retain the allocation address only
+    // so `inflateEnd` can return it through the paired callback.
+    let mut state = Some(Box::new(initialized));
+    let state_pointer = core::ptr::from_mut(state.as_deref_mut().expect("new state"));
     if source_stream.is_none() {
-        strm.state = allocation.cast::<crate::src::deflate::internal_state>();
+        strm.state = state_pointer.cast::<crate::src::deflate::internal_state>();
     }
-    let state = &mut *allocation;
     let ret = match installation {
-        InflateStateInstallation::Initialize(window_bits) => {
-            inflate_reset2_impl(strm, &mut InflateState(state), window_bits)
-        }
+        InflateStateInstallation::Initialize(window_bits) => inflate_reset2_impl(
+            strm,
+            &mut InflateState(state.as_deref_mut().expect("new state")),
+            window_bits,
+        ),
         InflateStateInstallation::Copy { .. } => crate::zlib_h::Z_OK,
     };
-    if ret != crate::zlib_h::Z_OK {
-        inflate_release_owned_state(state);
-        zfree.expect("callback pair is validated")(opaque, allocation.cast());
+    let retained = if ret == crate::zlib_h::Z_OK {
+        let mut owners = inflate_state_owners()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if owners.try_reserve(1).is_err() {
+            false
+        } else {
+            owners.insert(
+                state_pointer.addr(),
+                InflateStateOwner::Callback {
+                    state: state.take().expect("new state"),
+                    allocation_address: allocation.addr(),
+                },
+            );
+            true
+        }
+    } else {
+        false
+    };
+    if !retained {
+        inflate_release_owned_state(state.as_deref_mut().expect("unretained state"));
+        zfree.expect("callback pair is validated")(opaque, allocation);
         if source_stream.is_none() {
             strm.state = ::core::ptr::null_mut::<crate::src::deflate::internal_state>();
         }
+        return if ret == crate::zlib_h::Z_OK {
+            crate::zlib_h::Z_MEM_ERROR
+        } else {
+            ret
+        };
     } else {
         if let Some(source) = source_stream {
             *strm = *source;
-            strm.state = allocation.cast();
+            strm.state = state_pointer.cast();
         }
         if let Some(source) = copied_header {
-            copy_inflate_header_registration(source, allocation.addr());
+            copy_inflate_header_registration(source, state_pointer.addr());
         }
     }
     ret
@@ -2985,13 +3047,16 @@ pub unsafe extern "C" fn inflateEnd_ffi(mut strm: crate::zlib_h::z_streamp) -> :
         inflate_stream_has_state_allocation(strm),
     );
     if end != crate::zlib_h::Z_STREAM_ERROR {
-        // The safe implementation released the Rust owners and validated the
-        // allocator pair.  Return precisely the allocation from which the
-        // checked state reference was made to its ABI allocator.
-        if let Some(zfree) = strm.zfree {
-            zfree(strm.opaque, core::ptr::from_mut(state).cast());
-        } else {
-            release_default_inflate_state(core::ptr::from_mut(state).addr());
+        // The state pointer always identifies a Rust owner.  A custom
+        // allocator additionally has an opaque token recorded alongside that
+        // owner; only that token is returned to the paired callback.
+        let allocation = release_inflate_state_owner(core::ptr::from_mut(state).addr());
+        if let Some(allocation) = allocation {
+            let allocation =
+                core::ptr::with_exposed_provenance_mut::<core::ffi::c_void>(allocation);
+            if let Some(zfree) = strm.zfree {
+                zfree(strm.opaque, allocation);
+            }
         }
         clear_inflate_state(strm);
     }
