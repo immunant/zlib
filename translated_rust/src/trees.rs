@@ -3616,6 +3616,14 @@ fn bi_reverse(mut code: ::core::ffi::c_uint, mut len: ::core::ffi::c_int) -> ::c
     return res >> 1 as ::core::ffi::c_int;
 }
 
+fn dist_code_index(dist: ::core::ffi::c_uint) -> usize {
+    if dist < 256 as ::core::ffi::c_uint {
+        dist as usize
+    } else {
+        256usize + (dist >> 7 as ::core::ffi::c_int) as usize
+    }
+}
+
 fn bi_flush_core(
     bi_buf: &mut crate::zutil_h::ush,
     bi_valid: &mut ::core::ffi::c_int,
@@ -4785,13 +4793,7 @@ unsafe extern "C" fn compress_block(
                     }
                 }
                 dist = dist.wrapping_sub(1);
-                code = (if dist < 256 as ::core::ffi::c_uint {
-                    crate::src::trees::_dist_code[dist as usize] as ::core::ffi::c_int
-                } else {
-                    crate::src::trees::_dist_code[(256 as ::core::ffi::c_uint)
-                        .wrapping_add(dist >> 7 as ::core::ffi::c_int)
-                        as usize] as ::core::ffi::c_int
-                }) as ::core::ffi::c_uint;
+                code = crate::src::trees::_dist_code[dist_code_index(dist)] as ::core::ffi::c_uint;
                 let mut len_2: ::core::ffi::c_int =
                     (*dtree.offset(code as isize)).dl.len as ::core::ffi::c_int;
                 if (*s).bi_valid > crate::src::deflate::Buf_size - len_2 {
@@ -5086,21 +5088,9 @@ pub unsafe extern "C" fn _tr_tally(
             .fc
             .freq
             .wrapping_add(1);
-        (*s).dyn_dtree[(if dist < 256 as ::core::ffi::c_uint {
-            crate::src::trees::_dist_code[dist as usize] as ::core::ffi::c_int
-        } else {
-            crate::src::trees::_dist_code[(256 as ::core::ffi::c_uint)
-                .wrapping_add(dist >> 7 as ::core::ffi::c_int)
-                as usize] as ::core::ffi::c_int
-        }) as usize]
+        (*s).dyn_dtree[crate::src::trees::_dist_code[dist_code_index(dist)] as usize]
             .fc
-            .freq = (*s).dyn_dtree[(if dist < 256 as ::core::ffi::c_uint {
-            crate::src::trees::_dist_code[dist as usize] as ::core::ffi::c_int
-        } else {
-            crate::src::trees::_dist_code[(256 as ::core::ffi::c_uint)
-                .wrapping_add(dist >> 7 as ::core::ffi::c_int)
-                as usize] as ::core::ffi::c_int
-        }) as usize]
+            .freq = (*s).dyn_dtree[crate::src::trees::_dist_code[dist_code_index(dist)] as usize]
             .fc
             .freq
             .wrapping_add(1);
@@ -5119,7 +5109,7 @@ pub unsafe extern "C" fn _tr_tally_ffi(
 
 #[cfg(test)]
 mod tests {
-    use super::{bi_flush_core, bi_reverse, bi_windup_core, bl_order, MAX_BITS};
+    use super::{bi_flush_core, bi_reverse, bi_windup_core, bl_order, dist_code_index, MAX_BITS};
 
     #[test]
     fn bit_length_code_order_matches_deflate_spec() {
@@ -5138,6 +5128,16 @@ mod tests {
                 assert_eq!(bi_reverse(code, len), expected, "code={code}, len={len}");
             }
         }
+    }
+
+    #[test]
+    fn distance_code_index_matches_deflate_lookup_rule() {
+        assert_eq!(dist_code_index(0), 0);
+        assert_eq!(dist_code_index(255), 255);
+        assert_eq!(dist_code_index(256), 258);
+        assert_eq!(dist_code_index(383), 258);
+        assert_eq!(dist_code_index(384), 259);
+        assert_eq!(dist_code_index(32_767), 511);
     }
 
     #[test]

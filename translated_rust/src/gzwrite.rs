@@ -101,6 +101,14 @@ fn gz_write_error_result(
     }
 }
 
+fn gz_write_chunk_len(remaining: crate::stdlib::z_size_t) -> ::core::ffi::c_uint {
+    if ::core::ffi::c_uint::MAX as crate::stdlib::z_size_t > remaining {
+        remaining as ::core::ffi::c_uint
+    } else {
+        ::core::ffi::c_uint::MAX
+    }
+}
+
 unsafe extern "C" fn gz_init(mut state: crate::gzguts_h::gz_statep) -> ::core::ffi::c_int {
     let state = &mut *state;
     state.in_0 = crate::stdlib::malloc(
@@ -374,10 +382,7 @@ unsafe extern "C" fn gz_write(
         }
         (*state).strm.next_in = buf as *mut crate::stdlib::Bytef;
         loop {
-            let mut n: ::core::ffi::c_uint = -1 as ::core::ffi::c_int as ::core::ffi::c_uint;
-            if n as crate::stdlib::z_size_t > len {
-                n = len as ::core::ffi::c_uint;
-            }
+            let mut n = gz_write_chunk_len(len);
             (*state).strm.avail_in = n as crate::stdlib::uInt;
             ret = gz_comp(state, crate::zlib_h::Z_NO_FLUSH);
             n = n.wrapping_sub((*state).strm.avail_in as ::core::ffi::c_uint);
@@ -722,8 +727,8 @@ pub unsafe extern "C" fn gzclose_w_ffi(mut file: crate::zlib_h::gzFile) -> ::cor
 #[cfg(test)]
 mod tests {
     use super::{
-        gz_write_error_result, gz_zero_chunk_len, gzflush_mode_is_valid, gzfwrite_len,
-        gzputs_len_fits_int, gzwrite_len_fits_int,
+        gz_write_chunk_len, gz_write_error_result, gz_zero_chunk_len, gzflush_mode_is_valid,
+        gzfwrite_len, gzputs_len_fits_int, gzwrite_len_fits_int,
     };
 
     #[test]
@@ -812,5 +817,25 @@ mod tests {
     #[test]
     fn gz_write_error_result_discards_partial_count_when_not_retryable() {
         assert_eq!(gz_write_error_result(0, 10, 4), 0);
+    }
+
+    #[test]
+    fn gz_write_chunk_len_caps_input_at_c_uint_max() {
+        assert_eq!(gz_write_chunk_len(0), 0);
+        assert_eq!(gz_write_chunk_len(123), 123);
+        assert_eq!(
+            gz_write_chunk_len(::core::ffi::c_uint::MAX as crate::stdlib::z_size_t),
+            ::core::ffi::c_uint::MAX
+        );
+    }
+
+    #[test]
+    fn gz_write_chunk_len_handles_sizes_above_c_uint_max() {
+        if crate::stdlib::z_size_t::MAX > ::core::ffi::c_uint::MAX as crate::stdlib::z_size_t {
+            assert_eq!(
+                gz_write_chunk_len((::core::ffi::c_uint::MAX as crate::stdlib::z_size_t) + 1),
+                ::core::ffi::c_uint::MAX
+            );
+        }
     }
 }

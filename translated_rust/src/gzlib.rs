@@ -73,6 +73,20 @@ fn gz_clear_read_flags(eof: &mut ::core::ffi::c_int, past: &mut ::core::ffi::c_i
     *past = 0;
 }
 
+fn gzclearerr_core(
+    mode: ::core::ffi::c_int,
+    eof: &mut ::core::ffi::c_int,
+    past: &mut ::core::ffi::c_int,
+) -> bool {
+    if !gz_is_read_or_write_mode(mode) {
+        return false;
+    }
+    if mode == crate::gzguts_h::GZ_READ {
+        gz_clear_read_flags(eof, past);
+    }
+    true
+}
+
 fn gz_reset_fields(state: &mut crate::gzguts_h::gz_state) {
     state.x.have = 0;
     if state.mode == crate::gzguts_h::GZ_READ {
@@ -808,11 +822,8 @@ pub unsafe extern "C" fn gzclearerr(mut file: crate::zlib_h::gzFile) {
         return;
     }
     state = file as crate::gzguts_h::gz_statep;
-    if !gz_is_read_or_write_mode((*state).mode) {
+    if !gzclearerr_core((*state).mode, &mut (*state).eof, &mut (*state).past) {
         return;
-    }
-    if (*state).mode == crate::gzguts_h::GZ_READ {
-        gz_clear_read_flags(&mut (*state).eof, &mut (*state).past);
     }
     gz_error(
         state,
@@ -888,7 +899,7 @@ pub unsafe extern "C" fn gz_intmax_ffi() -> ::core::ffi::c_uint {
 mod tests {
     use super::{
         gz_clear_read_flags, gz_is_read_or_write_mode, gz_parse_open_mode, gz_post_open_metadata,
-        gz_prepare_open, gzerror_core, gzoffset64_adjust_for_buffered_read,
+        gz_prepare_open, gzclearerr_core, gzerror_core, gzoffset64_adjust_for_buffered_read,
         gzrewind_request_is_valid, gzseek_adjust_offset, gzseek_can_fast_forward,
         gzseek_read_buffer_consumed, gzseek_request_is_valid, gztell64_core, GzErrorMessage,
     };
@@ -899,6 +910,33 @@ mod tests {
         let mut past = 1;
         gz_clear_read_flags(&mut eof, &mut past);
         assert_eq!((eof, past), (0, 0));
+    }
+
+    #[test]
+    fn gzclearerr_core_clears_read_flags_for_active_read_mode_only() {
+        let mut eof = 1;
+        let mut past = 1;
+        assert!(gzclearerr_core(
+            crate::gzguts_h::GZ_READ,
+            &mut eof,
+            &mut past
+        ));
+        assert_eq!((eof, past), (0, 0));
+
+        eof = 1;
+        past = 1;
+        assert!(gzclearerr_core(
+            crate::gzguts_h::GZ_WRITE,
+            &mut eof,
+            &mut past
+        ));
+        assert_eq!((eof, past), (1, 1));
+
+        assert!(!gzclearerr_core(
+            crate::gzguts_h::GZ_NONE,
+            &mut eof,
+            &mut past
+        ));
     }
 
     #[test]

@@ -48,6 +48,11 @@ pub use crate::zlib_h::gz_headerp;
 pub use crate::zlib_h::z_stream;
 pub use crate::zlib_h::z_stream_s;
 pub use crate::zlib_h::z_streamp;
+
+fn bit_mask(bit_count: ::core::ffi::c_uint) -> ::core::ffi::c_uint {
+    ((1 as ::core::ffi::c_uint) << bit_count).wrapping_sub(1 as ::core::ffi::c_uint)
+}
+
 pub unsafe extern "C" fn inflate_fast(
     mut strm: crate::zlib_h::z_streamp,
     mut start: ::core::ffi::c_uint,
@@ -91,9 +96,8 @@ pub unsafe extern "C" fn inflate_fast(
     bits = (*state).bits;
     lcode = (*state).lencode;
     dcode = (*state).distcode;
-    lmask = ((1 as ::core::ffi::c_uint) << (*state).lenbits).wrapping_sub(1 as ::core::ffi::c_uint);
-    dmask =
-        ((1 as ::core::ffi::c_uint) << (*state).distbits).wrapping_sub(1 as ::core::ffi::c_uint);
+    lmask = bit_mask((*state).lenbits);
+    dmask = bit_mask((*state).distbits);
     let mut c2rust_current_block_141: u64;
     's_94: loop {
         if bits < 15 as ::core::ffi::c_uint {
@@ -128,11 +132,7 @@ pub unsafe extern "C" fn inflate_fast(
                         hold = hold.wrapping_add((*c2rust_fresh3 as ::core::ffi::c_ulong) << bits);
                         bits = bits.wrapping_add(8 as ::core::ffi::c_uint);
                     }
-                    len = len.wrapping_add(
-                        hold as ::core::ffi::c_uint
-                            & ((1 as ::core::ffi::c_uint) << op)
-                                .wrapping_sub(1 as ::core::ffi::c_uint),
-                    );
+                    len = len.wrapping_add(hold as ::core::ffi::c_uint & bit_mask(op));
                     hold >>= op;
                     bits = bits.wrapping_sub(op);
                 }
@@ -152,12 +152,7 @@ pub unsafe extern "C" fn inflate_fast(
             } else if op & 64 as ::core::ffi::c_uint == 0 as ::core::ffi::c_uint {
                 here = lcode
                     .offset((*here).val as ::core::ffi::c_int as isize)
-                    .offset(
-                        (hold
-                            & ((1 as ::core::ffi::c_uint) << op)
-                                .wrapping_sub(1 as ::core::ffi::c_uint)
-                                as ::core::ffi::c_ulong) as isize,
-                    );
+                    .offset((hold & bit_mask(op) as ::core::ffi::c_ulong) as isize);
             } else if op & 32 as ::core::ffi::c_uint != 0 {
                 c2rust_current_block_141 = 13505557363059842426;
                 break;
@@ -190,11 +185,7 @@ pub unsafe extern "C" fn inflate_fast(
                                 bits = bits.wrapping_add(8 as ::core::ffi::c_uint);
                             }
                         }
-                        dist = dist.wrapping_add(
-                            hold as ::core::ffi::c_uint
-                                & ((1 as ::core::ffi::c_uint) << op)
-                                    .wrapping_sub(1 as ::core::ffi::c_uint),
-                        );
+                        dist = dist.wrapping_add(hold as ::core::ffi::c_uint & bit_mask(op));
                         hold >>= op;
                         bits = bits.wrapping_sub(op);
                         op = out.offset_from(beg) as ::core::ffi::c_long as ::core::ffi::c_uint;
@@ -208,13 +199,7 @@ pub unsafe extern "C" fn inflate_fast(
                     } else if op & 64 as ::core::ffi::c_uint == 0 as ::core::ffi::c_uint {
                         here = dcode
                             .offset((*here).val as ::core::ffi::c_int as isize)
-                            .offset(
-                                (hold
-                                    & ((1 as ::core::ffi::c_uint) << op)
-                                        .wrapping_sub(1 as ::core::ffi::c_uint)
-                                        as ::core::ffi::c_ulong)
-                                    as isize,
-                            );
+                            .offset((hold & bit_mask(op) as ::core::ffi::c_ulong) as isize);
                     } else {
                         (*strm).msg = b"invalid distance code\0".as_ptr()
                             as *const ::core::ffi::c_char
@@ -398,8 +383,7 @@ pub unsafe extern "C" fn inflate_fast(
     len = bits >> 3 as ::core::ffi::c_int;
     in_0 = in_0.offset(-(len as isize));
     bits = bits.wrapping_sub(len << 3 as ::core::ffi::c_int);
-    hold &= ((1 as ::core::ffi::c_uint) << bits).wrapping_sub(1 as ::core::ffi::c_uint)
-        as ::core::ffi::c_ulong;
+    hold &= bit_mask(bits) as ::core::ffi::c_ulong;
     (*strm).next_in = in_0 as *mut crate::stdlib::Bytef;
     (*strm).next_out = out as *mut crate::stdlib::Bytef;
     (*strm).avail_in = (if in_0 < last {
@@ -422,4 +406,17 @@ pub unsafe extern "C" fn inflate_fast_ffi(
     mut start: ::core::ffi::c_uint,
 ) {
     inflate_fast(strm, start)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::bit_mask;
+
+    #[test]
+    fn bit_mask_selects_requested_low_bits() {
+        assert_eq!(bit_mask(0), 0);
+        assert_eq!(bit_mask(1), 1);
+        assert_eq!(bit_mask(5), 0b1_1111);
+        assert_eq!(bit_mask(15), 0x7fff);
+    }
 }
