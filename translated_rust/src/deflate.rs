@@ -2551,31 +2551,6 @@ fn deflate_prime_bits(
     crate::zlib_h::Z_OK
 }
 
-// The export wrapper owns the nullable ABI-stream conversion.  The operation
-// itself keeps the opaque-state and callback-backed pending-buffer projection
-// together, then hands only a bounded slice and scalar state to the bit core.
-pub unsafe fn deflatePrime(
-    strm: &mut crate::zlib_h::z_stream_s,
-    mut bits: ::core::ffi::c_int,
-    mut value: ::core::ffi::c_int,
-) -> ::core::ffi::c_int {
-    let Some((_strm, state, storage)) =
-        deflate_stream_and_state(strm, DeflateStorageProjection::Pending)
-    else {
-        return crate::zlib_h::Z_STREAM_ERROR;
-    };
-    let pending_buf = storage.pending.expect("initialized pending buffer");
-    deflate_prime_bits(
-        pending_buf,
-        &mut state.pending,
-        &mut state.bi_buf,
-        &mut state.bi_valid,
-        state.pending_out,
-        state.lit_bufsize,
-        bits,
-        value,
-    )
-}
 #[export_name = "deflatePrime"]
 
 pub unsafe extern "C" fn deflatePrime_ffi(
@@ -2586,7 +2561,7 @@ pub unsafe extern "C" fn deflatePrime_ffi(
     let Some(strm) = strm.as_mut() else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
-    deflatePrime(strm, bits, value)
+    deflateTune(strm, DeflateScalarAction::Prime { bits, value })
 }
 
 // Level changes have a small amount of hash-table cleanup policy, but none
@@ -2847,6 +2822,10 @@ fn deflate_tune_values(
 // optional scalar output borrow, so it cannot retain the ABI stream or any
 // callback-backed storage.
 enum DeflateScalarAction<'a> {
+    Prime {
+        bits: ::core::ffi::c_int,
+        value: ::core::ffi::c_int,
+    },
     Pending {
         pending: Option<&'a mut ::core::ffi::c_uint>,
         bits: Option<&'a mut ::core::ffi::c_int>,
@@ -2870,11 +2849,29 @@ unsafe fn deflateTune(
     strm: &mut crate::zlib_h::z_stream_s,
     action: DeflateScalarAction<'_>,
 ) -> ::core::ffi::c_int {
-    let Some((_strm, s, _storage)) = deflate_stream_and_state(strm, DeflateStorageProjection::None)
-    else {
+    let projection = match action {
+        DeflateScalarAction::Prime { .. } => DeflateStorageProjection::Pending,
+        DeflateScalarAction::Pending { .. }
+        | DeflateScalarAction::Used { .. }
+        | DeflateScalarAction::Tune { .. } => DeflateStorageProjection::None,
+    };
+    let Some((_strm, s, storage)) = deflate_stream_and_state(strm, projection) else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
     match action {
+        DeflateScalarAction::Prime { bits, value } => {
+            let pending_buf = storage.pending.expect("initialized pending buffer");
+            deflate_prime_bits(
+                pending_buf,
+                &mut s.pending,
+                &mut s.bi_buf,
+                &mut s.bi_valid,
+                s.pending_out,
+                s.lit_bufsize,
+                bits,
+                value,
+            )
+        }
         DeflateScalarAction::Pending { pending, bits } => {
             let (pending_value, bits_value, status) = deflate_pending_impl(s.pending, s.bi_valid);
             if let Some(bits) = bits {
