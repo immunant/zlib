@@ -450,6 +450,46 @@ struct GzDecompDecision {
     action: GzDecompAction,
 }
 
+#[derive(Debug, PartialEq, Eq)]
+enum GzDecompInputAction {
+    InputError,
+    UnexpectedEof,
+    Inflate,
+}
+
+fn gz_decomp_input_action(load_failed: bool, avail_in: crate::stdlib::uInt) -> GzDecompInputAction {
+    if load_failed {
+        GzDecompInputAction::InputError
+    } else if avail_in == 0 {
+        GzDecompInputAction::UnexpectedEof
+    } else {
+        GzDecompInputAction::Inflate
+    }
+}
+
+fn gz_decomp_output_len(
+    had: ::core::ffi::c_uint,
+    avail_out: crate::stdlib::uInt,
+) -> ::core::ffi::c_uint {
+    (had as crate::stdlib::uInt).wrapping_sub(avail_out) as ::core::ffi::c_uint
+}
+
+enum GzDecompResult {
+    RestartLook,
+    Error,
+    Ok,
+}
+
+fn gz_decomp_result(ret: ::core::ffi::c_int) -> GzDecompResult {
+    if ret == crate::zlib_h::Z_STREAM_END {
+        GzDecompResult::RestartLook
+    } else if ret != crate::zlib_h::Z_OK {
+        GzDecompResult::Error
+    } else {
+        GzDecompResult::Ok
+    }
+}
+
 fn gz_decomp_decision(
     ret: ::core::ffi::c_int,
     produced_output: bool,
@@ -481,90 +521,94 @@ unsafe extern "C" fn gz_decomp(mut state: crate::gzguts_h::gz_statep) -> ::core:
     let mut strm: crate::zlib_h::z_streamp = &raw mut (*state).strm;
     had = (*strm).avail_out as ::core::ffi::c_uint;
     loop {
-        if (*strm).avail_in == 0 as crate::stdlib::uInt
-            && gz_avail(state) == -1 as ::core::ffi::c_int
-        {
-            ret = (*state).err;
-            break;
-        } else if (*strm).avail_in == 0 as crate::stdlib::uInt {
-            if (*state).again == 0 {
+        let load_failed = if (*strm).avail_in == 0 as crate::stdlib::uInt {
+            gz_avail(state) == -1 as ::core::ffi::c_int
+        } else {
+            false
+        };
+        match gz_decomp_input_action(load_failed, (*strm).avail_in) {
+            GzDecompInputAction::InputError => {
+                ret = (*state).err;
+                break;
+            }
+            GzDecompInputAction::UnexpectedEof => {
+                if (*state).again == 0 {
+                    crate::src::gzlib::gz_error(
+                        state as *mut crate::gzguts_h::gz_state,
+                        crate::zlib_h::Z_BUF_ERROR,
+                        b"unexpected end of file\0".as_ptr() as *const ::core::ffi::c_char,
+                    );
+                }
+                break;
+            }
+            GzDecompInputAction::Inflate => {}
+        }
+        ret = crate::src::inflate::inflate(
+            strm as *mut crate::zlib_h::z_stream_s,
+            crate::zlib_h::Z_NO_FLUSH,
+        );
+        let decision = gz_decomp_decision(
+            ret,
+            (*strm).avail_out < had,
+            (*state).junk,
+            (*strm).avail_out,
+        );
+        if decision.clear_junk {
+            (*state).junk = 0 as ::core::ffi::c_int;
+        }
+        match decision.action {
+            GzDecompAction::InternalError => {
                 crate::src::gzlib::gz_error(
                     state as *mut crate::gzguts_h::gz_state,
-                    crate::zlib_h::Z_BUF_ERROR,
-                    b"unexpected end of file\0".as_ptr() as *const ::core::ffi::c_char,
+                    crate::zlib_h::Z_STREAM_ERROR,
+                    b"internal error: inflate stream corrupt\0".as_ptr()
+                        as *const ::core::ffi::c_char,
                 );
+                break;
             }
-            break;
-        } else {
-            ret = crate::src::inflate::inflate(
-                strm as *mut crate::zlib_h::z_stream_s,
-                crate::zlib_h::Z_NO_FLUSH,
-            );
-            let decision = gz_decomp_decision(
-                ret,
-                (*strm).avail_out < had,
-                (*state).junk,
-                (*strm).avail_out,
-            );
-            if decision.clear_junk {
-                (*state).junk = 0 as ::core::ffi::c_int;
+            GzDecompAction::MemoryError => {
+                crate::src::gzlib::gz_error(
+                    state as *mut crate::gzguts_h::gz_state,
+                    crate::zlib_h::Z_MEM_ERROR,
+                    b"out of memory\0".as_ptr() as *const ::core::ffi::c_char,
+                );
+                break;
             }
-            match decision.action {
-                GzDecompAction::InternalError => {
-                    crate::src::gzlib::gz_error(
-                        state as *mut crate::gzguts_h::gz_state,
-                        crate::zlib_h::Z_STREAM_ERROR,
-                        b"internal error: inflate stream corrupt\0".as_ptr()
-                            as *const ::core::ffi::c_char,
-                    );
-                    break;
-                }
-                GzDecompAction::MemoryError => {
-                    crate::src::gzlib::gz_error(
-                        state as *mut crate::gzguts_h::gz_state,
-                        crate::zlib_h::Z_MEM_ERROR,
-                        b"out of memory\0".as_ptr() as *const ::core::ffi::c_char,
-                    );
-                    break;
-                }
-                GzDecompAction::TrailingJunk => {
-                    (*strm).avail_in = 0 as crate::stdlib::uInt;
-                    (*state).eof = 1 as ::core::ffi::c_int;
-                    (*state).how = crate::gzguts_h::LOOK;
-                    ret = crate::zlib_h::Z_OK;
-                    break;
-                }
-                GzDecompAction::DataError => {
-                    crate::src::gzlib::gz_error(
-                        state as *mut crate::gzguts_h::gz_state,
-                        crate::zlib_h::Z_DATA_ERROR,
-                        if (*strm).msg.is_null() {
-                            b"compressed data error\0".as_ptr() as *const ::core::ffi::c_char
-                        } else {
-                            (*strm).msg as *const ::core::ffi::c_char
-                        },
-                    );
-                    break;
-                }
-                GzDecompAction::Stop => break,
-                GzDecompAction::Continue => {}
+            GzDecompAction::TrailingJunk => {
+                (*strm).avail_in = 0 as crate::stdlib::uInt;
+                (*state).eof = 1 as ::core::ffi::c_int;
+                (*state).how = crate::gzguts_h::LOOK;
+                ret = crate::zlib_h::Z_OK;
+                break;
             }
+            GzDecompAction::DataError => {
+                crate::src::gzlib::gz_error(
+                    state as *mut crate::gzguts_h::gz_state,
+                    crate::zlib_h::Z_DATA_ERROR,
+                    if (*strm).msg.is_null() {
+                        b"compressed data error\0".as_ptr() as *const ::core::ffi::c_char
+                    } else {
+                        (*strm).msg as *const ::core::ffi::c_char
+                    },
+                );
+                break;
+            }
+            GzDecompAction::Stop => break,
+            GzDecompAction::Continue => {}
         }
     }
-    (*state).x.have =
-        (had as crate::stdlib::uInt).wrapping_sub((*strm).avail_out) as ::core::ffi::c_uint;
+    (*state).x.have = gz_decomp_output_len(had, (*strm).avail_out);
     (*state).x.next =
         (*strm).next_out.offset(-((*state).x.have as isize)) as *mut ::core::ffi::c_uchar;
-    if ret == crate::zlib_h::Z_STREAM_END {
-        (*state).junk = 0 as ::core::ffi::c_int;
-        (*state).how = crate::gzguts_h::LOOK;
-        return 0 as ::core::ffi::c_int;
+    match gz_decomp_result(ret) {
+        GzDecompResult::RestartLook => {
+            (*state).junk = 0 as ::core::ffi::c_int;
+            (*state).how = crate::gzguts_h::LOOK;
+            0 as ::core::ffi::c_int
+        }
+        GzDecompResult::Error => -1 as ::core::ffi::c_int,
+        GzDecompResult::Ok => 0 as ::core::ffi::c_int,
     }
-    return if ret != crate::zlib_h::Z_OK {
-        -1 as ::core::ffi::c_int
-    } else {
-        0 as ::core::ffi::c_int
-    };
 }
 
 unsafe extern "C" fn gz_fetch(mut state: crate::gzguts_h::gz_statep) -> ::core::ffi::c_int {
@@ -722,6 +766,48 @@ unsafe extern "C" fn gz_skip(mut state: crate::gzguts_h::gz_statep) -> ::core::f
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn gz_decomp_input_action_prioritizes_load_failure() {
+        assert_eq!(
+            gz_decomp_input_action(true, 1),
+            GzDecompInputAction::InputError
+        );
+    }
+
+    #[test]
+    fn gz_decomp_input_action_distinguishes_eof_from_input_to_inflate() {
+        assert_eq!(
+            gz_decomp_input_action(false, 0),
+            GzDecompInputAction::UnexpectedEof
+        );
+        assert_eq!(
+            gz_decomp_input_action(false, 1),
+            GzDecompInputAction::Inflate
+        );
+    }
+
+    #[test]
+    fn gz_decomp_output_len_tracks_produced_bytes_with_wrapping() {
+        assert_eq!(gz_decomp_output_len(10, 4), 6);
+        assert_eq!(gz_decomp_output_len(0, 1), ::core::ffi::c_uint::MAX);
+    }
+
+    #[test]
+    fn gz_decomp_result_restores_look_only_at_stream_end() {
+        assert!(matches!(
+            gz_decomp_result(crate::zlib_h::Z_STREAM_END),
+            GzDecompResult::RestartLook
+        ));
+        assert!(matches!(
+            gz_decomp_result(crate::zlib_h::Z_DATA_ERROR),
+            GzDecompResult::Error
+        ));
+        assert!(matches!(
+            gz_decomp_result(crate::zlib_h::Z_OK),
+            GzDecompResult::Ok
+        ));
+    }
 
     #[test]
     fn gz_decomp_decision_maps_stream_and_dictionary_errors_to_internal_error() {

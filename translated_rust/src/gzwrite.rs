@@ -204,6 +204,24 @@ fn gz_comp_write_chunk_len(available: usize, max: ::core::ffi::c_uint) -> ::core
     }
 }
 
+fn gz_comp_remaining_direct_input(
+    avail_in: crate::stdlib::uInt,
+    written: ::core::ffi::c_int,
+) -> crate::stdlib::uInt {
+    avail_in.wrapping_sub(written as crate::stdlib::uInt)
+}
+
+fn gz_write_buffered_progress(
+    pos: crate::stdlib::off64_t,
+    remaining: crate::stdlib::z_size_t,
+    copy: ::core::ffi::c_uint,
+) -> (crate::stdlib::off64_t, crate::stdlib::z_size_t) {
+    (
+        pos + copy as crate::stdlib::off64_t,
+        remaining.wrapping_sub(copy as crate::stdlib::z_size_t),
+    )
+}
+
 unsafe extern "C" fn gz_init(mut state: crate::gzguts_h::gz_statep) -> ::core::ffi::c_int {
     let state = &mut *state;
     state.in_0 = crate::stdlib::malloc(
@@ -294,7 +312,7 @@ unsafe extern "C" fn gz_comp(
                 );
                 return -1 as ::core::ffi::c_int;
             }
-            (*strm).avail_in = (*strm).avail_in.wrapping_sub(writ as ::core::ffi::c_uint);
+            (*strm).avail_in = gz_comp_remaining_direct_input((*strm).avail_in, writ);
             (*strm).next_in = (*strm).next_in.offset(writ as isize);
         }
         return 0 as ::core::ffi::c_int;
@@ -443,10 +461,11 @@ unsafe extern "C" fn gz_write(
                 copy as crate::__stddef_size_t_h::size_t,
             );
             (*state).strm.avail_in = (*state).strm.avail_in.wrapping_add(copy);
-            (*state).x.pos += copy as crate::stdlib::off64_t;
+            let (next_pos, next_len) = gz_write_buffered_progress((*state).x.pos, len, copy);
+            (*state).x.pos = next_pos;
             buf =
                 (buf as *const ::core::ffi::c_char).offset(copy as isize) as crate::stdlib::voidpc;
-            len = len.wrapping_sub(copy as crate::stdlib::z_size_t);
+            len = next_len;
             if len == 0 as crate::stdlib::z_size_t {
                 break;
             }
@@ -806,8 +825,9 @@ pub unsafe extern "C" fn gzclose_w_ffi(mut file: crate::zlib_h::gzFile) -> ::cor
 #[cfg(test)]
 mod tests {
     use super::{
-        gz_buffered_have, gz_comp_needs_output_write, gz_comp_needs_reset, gz_comp_write_chunk_len,
-        gz_write_apply_direct_progress, gz_write_buffered_copy_len, gz_write_chunk_consumed_len,
+        gz_buffered_have, gz_comp_needs_output_write, gz_comp_needs_reset,
+        gz_comp_remaining_direct_input, gz_comp_write_chunk_len, gz_write_apply_direct_progress,
+        gz_write_buffered_copy_len, gz_write_buffered_progress, gz_write_chunk_consumed_len,
         gz_write_chunk_len, gz_write_errno_is_retryable, gz_write_error_result,
         gz_write_uses_buffered_path, gz_zero_apply_progress, gz_zero_chunk_len,
         gzflush_mode_is_valid, gzfwrite_len, gzputs_len_fits_int, gzputs_result,
@@ -941,6 +961,19 @@ mod tests {
     }
 
     #[test]
+    fn gz_comp_remaining_direct_input_subtracts_written_bytes() {
+        assert_eq!(gz_comp_remaining_direct_input(1024, 24), 1000);
+    }
+
+    #[test]
+    fn gz_comp_remaining_direct_input_preserves_wrapping_accounting() {
+        assert_eq!(
+            gz_comp_remaining_direct_input(0, 1),
+            crate::stdlib::uInt::MAX
+        );
+    }
+
+    #[test]
     fn gzwrite_len_fits_int_accepts_c_int_range() {
         assert!(gzwrite_len_fits_int(0));
         assert!(gzwrite_len_fits_int(1));
@@ -1013,6 +1046,19 @@ mod tests {
     #[test]
     fn gz_write_buffered_copy_len_preserves_wrapping_accounting() {
         assert_eq!(gz_write_buffered_copy_len(0, 1, 5), 5);
+    }
+
+    #[test]
+    fn gz_write_buffered_progress_updates_position_and_remaining_input() {
+        assert_eq!(gz_write_buffered_progress(10, 100, 60), (70, 40));
+    }
+
+    #[test]
+    fn gz_write_buffered_progress_preserves_wrapping_remaining_input() {
+        assert_eq!(
+            gz_write_buffered_progress(0, 0, 1),
+            (1, crate::stdlib::z_size_t::MAX)
+        );
     }
 
     #[test]

@@ -243,6 +243,13 @@ fn gzseek_can_fast_forward(
         && position + offset >= 0 as crate::stdlib::off64_t
 }
 
+fn gzseek_fast_forward_lseek_offset(
+    offset: crate::stdlib::off64_t,
+    buffered_input: crate::stdlib::uInt,
+) -> crate::stdlib::off64_t {
+    offset - buffered_input as crate::stdlib::off64_t
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 struct GzSeekOffsetPlan {
     offset: crate::stdlib::off64_t,
@@ -706,7 +713,7 @@ pub unsafe extern "C" fn gzseek64(
     if gzseek_can_fast_forward((*state).mode, (*state).how, (*state).x.pos, offset) {
         ret = crate::stdlib::lseek64(
             (*state).fd,
-            offset as crate::stdlib::__off64_t - (*state).x.have as crate::stdlib::__off64_t,
+            gzseek_fast_forward_lseek_offset(offset, (*state).x.have) as crate::stdlib::__off64_t,
             crate::stdlib::SEEK_CUR,
         ) as crate::stdlib::off64_t;
         if ret == -1 as ::core::ffi::c_int as crate::stdlib::off64_t {
@@ -1027,10 +1034,11 @@ mod tests {
         gz_post_open_metadata, gz_prepare_open, gz_reset_core, gzbuffer_normalized_want,
         gzclearerr_core, gzerror_core, gzoffset64_adjust_for_buffered_read,
         gzrewind_request_is_valid, gzseek_adjust_offset, gzseek_can_fast_forward,
-        gzseek_error_allows_positioning, gzseek_fast_forward_reset,
-        gzseek_plan_read_buffer_consumption, gzseek_plan_remaining_offset,
-        gzseek_read_buffer_consumed, gzseek_request_is_valid, gztell64_core, GzErrorMessage,
-        GzOpenOffsetPlan, GzResetFields, GzSeekOffsetPlan, GzSeekReadBufferPlan,
+        gzseek_error_allows_positioning, gzseek_fast_forward_lseek_offset,
+        gzseek_fast_forward_reset, gzseek_plan_read_buffer_consumption,
+        gzseek_plan_remaining_offset, gzseek_read_buffer_consumed, gzseek_request_is_valid,
+        gztell64_core, GzErrorMessage, GzOpenOffsetPlan, GzResetFields, GzSeekOffsetPlan,
+        GzSeekReadBufferPlan,
     };
 
     #[test]
@@ -1431,6 +1439,13 @@ mod tests {
             12,
             -13
         ));
+    }
+
+    #[test]
+    fn gzseek_fast_forward_lseek_offset_accounts_for_buffered_input() {
+        assert_eq!(gzseek_fast_forward_lseek_offset(19, 7), 12);
+        assert_eq!(gzseek_fast_forward_lseek_offset(-3, 7), -10);
+        assert_eq!(gzseek_fast_forward_lseek_offset(0, 0), 0);
     }
 
     #[test]
