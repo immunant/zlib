@@ -1875,10 +1875,12 @@ fn inflate_publish_cursors(
 
 pub fn inflate(
     strm_ref: &mut crate::zlib_h::z_stream,
+    state_ref: &mut crate::src::inflate::inflate_state,
     mut flush: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
-    // Rust callers pass the validated stream reference directly; the one
-    // state-pointer adoption remains confined to this codec boundary.
+    // Rust callers pass both already-adopted compatibility records directly.
+    // The raw state pointer remains at the ABI/caller boundary, leaving this
+    // dispatcher to operate on ordinary Rust references and slice views.
     // The decoder advances these checked offsets while the compatibility
     // cursors themselves stay fixed.  Slice views own all interior movement.
     let mut next: usize = 0;
@@ -1924,20 +1926,13 @@ pub fn inflate(
         1 as ::core::ffi::c_ushort,
         15 as ::core::ffi::c_ushort,
     ];
-    // This transitional compatibility boundary owns the legacy decoder's
-    // raw stream/state adoption and cursor work.  Keeping it explicit means
+    // This transitional compatibility boundary owns legacy cursor work. The
+    // ABI/caller boundary already adopted the stream and decoder state, so
     // Rust callers of the dispatcher do not inherit an unsafe-function
     // contract while the safe owned/slice core is still being extracted.
     unsafe {
-        // Keep the pointer checks here, then hand the scalar relationship to the
-        // safe validator shared by the smaller inflate boundaries.
-        let state_ref = {
-            let state = strm_ref.state as *mut crate::src::inflate::inflate_state;
-            if state.is_null() {
-                return crate::zlib_h::Z_STREAM_ERROR;
-            }
-            &mut *state
-        };
+        // Keep the scalar compatibility checks here, shared with the smaller
+        // inflate boundaries. The state reference was adopted by the caller.
         let Some(entry_mode) = inflate_entry_mode(
             strm_ref.zalloc.is_some(),
             strm_ref.zfree.is_some(),
@@ -3991,7 +3986,11 @@ pub unsafe extern "C" fn inflate_ffi(
     let Some(strm_ref) = strm.as_mut() else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
-    inflate(strm_ref, flush)
+    let state = strm_ref.state as *mut crate::src::inflate::inflate_state;
+    let Some(state_ref) = state.as_mut() else {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    };
+    inflate(strm_ref, state_ref, flush)
 }
 // This expands only in export-attributed ABI functions (including the
 // boundary macros used by gzip and one-shot decompression).  Destruction

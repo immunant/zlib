@@ -515,7 +515,16 @@ macro_rules! gz_decomp_at_boundary {
                         break;
                     }
                 };
-                ret = crate::src::inflate::inflate(&mut state.strm, crate::zlib_h::Z_NO_FLUSH);
+                let inflate_state = state.strm.state as *mut crate::src::inflate::inflate_state;
+                ret = if inflate_state.is_null() {
+                    crate::zlib_h::Z_STREAM_ERROR
+                } else {
+                    crate::src::inflate::inflate(
+                        &mut state.strm,
+                        &mut *inflate_state,
+                        crate::zlib_h::Z_NO_FLUSH,
+                    )
+                };
                 let Some(next_input_index) = gz_input_advance(
                     state.input_index,
                     input_before,
