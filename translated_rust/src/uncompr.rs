@@ -105,13 +105,17 @@ pub fn uncompress2_z(
     let max: crate::stdlib::uInt = -1 as ::core::ffi::c_int as crate::stdlib::uInt;
     let mut len: crate::stdlib::z_size_t = 0;
     let mut left: crate::stdlib::z_size_t = 0;
+    // zlib requires a non-null output cursor even when no output space is
+    // available. Keep a real byte sentinel alive for that zero-length case
+    // instead of manufacturing a byte pointer from an unrelated stream field.
+    let mut empty_output = [0 as crate::stdlib::Bytef; 1];
     if !uncompress_buffers_valid(source.is_null(), *sourceLen, dest.is_null(), *destLen) {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
     len = *sourceLen;
     left = *destLen;
     if left == 0 as crate::stdlib::z_size_t && dest.is_null() {
-        dest = &raw mut stream.reserved as *mut crate::stdlib::Bytef;
+        dest = empty_output.as_mut_ptr();
     }
     stream.next_in = source as *mut crate::stdlib::Bytef;
     stream.avail_in = 0 as crate::stdlib::uInt;
