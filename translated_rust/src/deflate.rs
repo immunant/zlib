@@ -2697,26 +2697,25 @@ pub unsafe fn deflate_params_from_stream(
         if err == crate::zlib_h::Z_STREAM_ERROR {
             return err;
         }
-        let flush_left_input = {
-            let Some((stream, state, _storage, _)) =
-                deflate_stream_and_state(strm, DeflateStorageProjection::None, None)
-            else {
-                return crate::zlib_h::Z_STREAM_ERROR;
-            };
-            stream.avail_in != 0
-                || state.strstart as ::core::ffi::c_long - state.block_start
-                    + state.lookahead as ::core::ffi::c_long
-                    != 0
-        };
-        if flush_left_input {
-            return crate::zlib_h::Z_BUF_ERROR;
-        }
     }
-    let Some((_stream, state, storage, _)) =
+    // After a requested block flush, combine its completion check with the
+    // existing dictionary-table projection below.  The dispatcher has
+    // returned, so this is the next (and only) stream/state association;
+    // retaining it through the parameter update avoids reprojecting the same
+    // callback-owned state solely to inspect its scalar cursors.
+    let Some((stream, state, storage, _)) =
         deflate_stream_and_state(strm, DeflateStorageProjection::Dictionary, None)
     else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
+    if needs_flush
+        && (stream.avail_in != 0
+            || state.strstart as ::core::ffi::c_long - state.block_start
+                + state.lookahead as ::core::ffi::c_long
+                != 0)
+    {
+        return crate::zlib_h::Z_BUF_ERROR;
+    }
     let needs_table_cleanup = state.level != level && state.level == 0 && state.matches != 0;
     let tables = if needs_table_cleanup {
         // `head` and (for the single-match case) `prev` are the bounded
