@@ -415,13 +415,9 @@ unsafe fn gz_write(
     return put;
 }
 unsafe fn gzwrite(
-    mut state: Option<::core::ptr::NonNull<crate::gzguts_h::gz_state>>,
+    state: &mut crate::gzguts_h::gz_state,
     input: &[u8],
 ) -> ::core::ffi::c_int {
-    let Some(mut state) = state else {
-        return 0 as ::core::ffi::c_int;
-    };
-    let state = state.as_mut();
     let policy = GzWritePolicy {
         mode: state.mode,
         err: state.err,
@@ -458,21 +454,17 @@ pub unsafe extern "C" fn gzwrite_ffi(
     } else {
         ::core::slice::from_raw_parts(buf.cast::<u8>(), len as usize)
     };
-    gzwrite(
-        ::core::ptr::NonNull::new(file as crate::gzguts_h::gz_statep),
-        input,
-    )
+    let Some(state) = (file as crate::gzguts_h::gz_statep).as_mut() else {
+        return 0 as ::core::ffi::c_int;
+    };
+    gzwrite(state, input)
 }
 unsafe fn gzfwrite(
-    mut state: Option<::core::ptr::NonNull<crate::gzguts_h::gz_state>>,
+    state: &mut crate::gzguts_h::gz_state,
     input: &[u8],
     mut size: crate::stdlib::z_size_t,
     mut nitems: crate::stdlib::z_size_t,
 ) -> crate::stdlib::z_size_t {
-    let Some(mut state) = state else {
-        return 0 as crate::stdlib::z_size_t;
-    };
-    let state = state.as_mut();
     let policy = GzWritePolicy {
         mode: state.mode,
         err: state.err,
@@ -513,12 +505,10 @@ pub unsafe extern "C" fn gzfwrite_ffi(
         Some(0) | None => &[],
         Some(len) => ::core::slice::from_raw_parts(buf.cast::<u8>(), len),
     };
-    gzfwrite(
-        ::core::ptr::NonNull::new(file as crate::gzguts_h::gz_statep),
-        input,
-        size,
-        nitems,
-    )
+    let Some(state) = (file as crate::gzguts_h::gz_statep).as_mut() else {
+        return 0 as crate::stdlib::z_size_t;
+    };
+    gzfwrite(state, input, size, nitems)
 }
 unsafe fn gzputc(
     mut state: Option<::core::ptr::NonNull<crate::gzguts_h::gz_state>>,
