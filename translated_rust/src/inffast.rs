@@ -98,6 +98,50 @@ fn unread_bit_state(
     )
 }
 
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+enum FastLitLenAction {
+    Literal,
+    Length { extra_bits: ::core::ffi::c_uint },
+    Subtable,
+    End,
+    Invalid,
+}
+
+fn fast_litlen_action(op: ::core::ffi::c_uint) -> FastLitLenAction {
+    if op == 0 {
+        FastLitLenAction::Literal
+    } else if op & 16 != 0 {
+        FastLitLenAction::Length {
+            extra_bits: op & 15,
+        }
+    } else if op & 64 == 0 {
+        FastLitLenAction::Subtable
+    } else if op & 32 != 0 {
+        FastLitLenAction::End
+    } else {
+        FastLitLenAction::Invalid
+    }
+}
+
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+enum FastDistAction {
+    Distance { extra_bits: ::core::ffi::c_uint },
+    Subtable,
+    Invalid,
+}
+
+fn fast_dist_action(op: ::core::ffi::c_uint) -> FastDistAction {
+    if op & 16 != 0 {
+        FastDistAction::Distance {
+            extra_bits: op & 15,
+        }
+    } else if op & 64 == 0 {
+        FastDistAction::Subtable
+    } else {
+        FastDistAction::Invalid
+    }
+}
+
 pub unsafe extern "C" fn inflate_fast(
     mut strm: crate::zlib_h::z_streamp,
     mut start: ::core::ffi::c_uint,
@@ -158,43 +202,48 @@ pub unsafe extern "C" fn inflate_fast(
             op = (*here).bits as ::core::ffi::c_uint;
             (hold, bits) = consume_bits(hold, bits, op);
             op = (*here).op as ::core::ffi::c_uint;
-            if op == 0 as ::core::ffi::c_uint {
-                let c2rust_fresh2 = out;
-                out = out.offset(1);
-                *c2rust_fresh2 = (*here).val as ::core::ffi::c_uchar;
-                c2rust_current_block_141 = 5689001924483802034;
-                break;
-            } else if op & 16 as ::core::ffi::c_uint != 0 {
-                len = (*here).val as ::core::ffi::c_uint;
-                op &= 15 as ::core::ffi::c_uint;
-                if op != 0 {
-                    if bits < op {
-                        let c2rust_fresh3 = in_0;
-                        in_0 = in_0.offset(1);
-                        (hold, bits) = append_input_byte(hold, bits, *c2rust_fresh3);
+            match fast_litlen_action(op) {
+                FastLitLenAction::Literal => {
+                    let c2rust_fresh2 = out;
+                    out = out.offset(1);
+                    *c2rust_fresh2 = (*here).val as ::core::ffi::c_uchar;
+                    c2rust_current_block_141 = 5689001924483802034;
+                    break;
+                }
+                FastLitLenAction::Length { extra_bits } => {
+                    len = (*here).val as ::core::ffi::c_uint;
+                    if extra_bits != 0 {
+                        if bits < extra_bits {
+                            let c2rust_fresh3 = in_0;
+                            in_0 = in_0.offset(1);
+                            (hold, bits) = append_input_byte(hold, bits, *c2rust_fresh3);
+                        }
+                        len = len.wrapping_add(low_bits(hold, extra_bits));
+                        (hold, bits) = consume_bits(hold, bits, extra_bits);
                     }
-                    len = len.wrapping_add(low_bits(hold, op));
-                    (hold, bits) = consume_bits(hold, bits, op);
+                    if bits < 15 as ::core::ffi::c_uint {
+                        let c2rust_fresh4 = in_0;
+                        in_0 = in_0.offset(1);
+                        (hold, bits) = append_input_byte(hold, bits, *c2rust_fresh4);
+                        let c2rust_fresh5 = in_0;
+                        in_0 = in_0.offset(1);
+                        (hold, bits) = append_input_byte(hold, bits, *c2rust_fresh5);
+                    }
+                    here = dcode.offset((hold & dmask as ::core::ffi::c_ulong) as isize);
+                    c2rust_current_block_141 = 3217834059723038609;
+                    break;
                 }
-                if bits < 15 as ::core::ffi::c_uint {
-                    let c2rust_fresh4 = in_0;
-                    in_0 = in_0.offset(1);
-                    (hold, bits) = append_input_byte(hold, bits, *c2rust_fresh4);
-                    let c2rust_fresh5 = in_0;
-                    in_0 = in_0.offset(1);
-                    (hold, bits) = append_input_byte(hold, bits, *c2rust_fresh5);
+                FastLitLenAction::Subtable => {
+                    here = lcode.offset(subtable_offset(*here, hold));
                 }
-                here = dcode.offset((hold & dmask as ::core::ffi::c_ulong) as isize);
-                c2rust_current_block_141 = 3217834059723038609;
-                break;
-            } else if op & 64 as ::core::ffi::c_uint == 0 as ::core::ffi::c_uint {
-                here = lcode.offset(subtable_offset(*here, hold));
-            } else if op & 32 as ::core::ffi::c_uint != 0 {
-                c2rust_current_block_141 = 13505557363059842426;
-                break;
-            } else {
-                c2rust_current_block_141 = 9180031981464905198;
-                break;
+                FastLitLenAction::End => {
+                    c2rust_current_block_141 = 13505557363059842426;
+                    break;
+                }
+                FastLitLenAction::Invalid => {
+                    c2rust_current_block_141 = 9180031981464905198;
+                    break;
+                }
             }
         }
         match c2rust_current_block_141 {
@@ -203,37 +252,41 @@ pub unsafe extern "C" fn inflate_fast(
                     op = (*here).bits as ::core::ffi::c_uint;
                     (hold, bits) = consume_bits(hold, bits, op);
                     op = (*here).op as ::core::ffi::c_uint;
-                    if op & 16 as ::core::ffi::c_uint != 0 {
-                        dist = (*here).val as ::core::ffi::c_uint;
-                        op &= 15 as ::core::ffi::c_uint;
-                        if bits < op {
-                            let c2rust_fresh6 = in_0;
-                            in_0 = in_0.offset(1);
-                            (hold, bits) = append_input_byte(hold, bits, *c2rust_fresh6);
-                            if bits < op {
-                                let c2rust_fresh7 = in_0;
+                    match fast_dist_action(op) {
+                        FastDistAction::Distance { extra_bits } => {
+                            dist = (*here).val as ::core::ffi::c_uint;
+                            if bits < extra_bits {
+                                let c2rust_fresh6 = in_0;
                                 in_0 = in_0.offset(1);
-                                (hold, bits) = append_input_byte(hold, bits, *c2rust_fresh7);
+                                (hold, bits) = append_input_byte(hold, bits, *c2rust_fresh6);
+                                if bits < extra_bits {
+                                    let c2rust_fresh7 = in_0;
+                                    in_0 = in_0.offset(1);
+                                    (hold, bits) = append_input_byte(hold, bits, *c2rust_fresh7);
+                                }
+                            }
+                            dist = dist.wrapping_add(low_bits(hold, extra_bits));
+                            (hold, bits) = consume_bits(hold, bits, extra_bits);
+                            op = out.offset_from(beg) as ::core::ffi::c_long
+                                as ::core::ffi::c_uint;
+                            if dist > op {
+                                c2rust_current_block_141 = 5235537862154438448;
+                                break;
+                            } else {
+                                c2rust_current_block_141 = 6072622540298447352;
+                                break;
                             }
                         }
-                        dist = dist.wrapping_add(low_bits(hold, op));
-                        (hold, bits) = consume_bits(hold, bits, op);
-                        op = out.offset_from(beg) as ::core::ffi::c_long as ::core::ffi::c_uint;
-                        if dist > op {
-                            c2rust_current_block_141 = 5235537862154438448;
-                            break;
-                        } else {
-                            c2rust_current_block_141 = 6072622540298447352;
-                            break;
+                        FastDistAction::Subtable => {
+                            here = dcode.offset(subtable_offset(*here, hold));
                         }
-                    } else if op & 64 as ::core::ffi::c_uint == 0 as ::core::ffi::c_uint {
-                        here = dcode.offset(subtable_offset(*here, hold));
-                    } else {
-                        (*strm).msg = b"invalid distance code\0".as_ptr()
-                            as *const ::core::ffi::c_char
-                            as *mut ::core::ffi::c_char;
-                        (*state).mode = crate::src::inflate::BAD;
-                        break 's_94;
+                        FastDistAction::Invalid => {
+                            (*strm).msg = b"invalid distance code\0".as_ptr()
+                                as *const ::core::ffi::c_char
+                                as *mut ::core::ffi::c_char;
+                            (*state).mode = crate::src::inflate::BAD;
+                            break 's_94;
+                        }
                     }
                 }
                 match c2rust_current_block_141 {
@@ -437,8 +490,8 @@ pub unsafe extern "C" fn inflate_fast_ffi(
 #[cfg(test)]
 mod tests {
     use super::{
-        append_input_byte, bit_mask, code, consume_bits, low_bits, subtable_offset,
-        unread_bit_state,
+        append_input_byte, bit_mask, code, consume_bits, fast_dist_action, fast_litlen_action,
+        low_bits, subtable_offset, unread_bit_state, FastDistAction, FastLitLenAction,
     };
 
     #[test]
@@ -487,6 +540,46 @@ mod tests {
             val: 96,
         };
         assert_eq!(subtable_offset(entry, 0b1_1011), 123);
+    }
+
+    #[test]
+    fn litlen_opcode_actions_preserve_deflate_dispatch_precedence() {
+        assert_eq!(fast_litlen_action(0), FastLitLenAction::Literal);
+        assert_eq!(
+            fast_litlen_action(31),
+            FastLitLenAction::Length { extra_bits: 15 }
+        );
+        assert_eq!(fast_litlen_action(1), FastLitLenAction::Subtable);
+        assert_eq!(fast_litlen_action(32), FastLitLenAction::Subtable);
+        assert_eq!(fast_litlen_action(96), FastLitLenAction::End);
+        assert_eq!(fast_litlen_action(64), FastLitLenAction::Invalid);
+        assert_eq!(
+            fast_litlen_action(80),
+            FastLitLenAction::Length { extra_bits: 0 }
+        );
+        assert_eq!(
+            fast_litlen_action(112),
+            FastLitLenAction::Length { extra_bits: 0 }
+        );
+    }
+
+    #[test]
+    fn distance_opcode_actions_preserve_base_and_invalid_precedence() {
+        assert_eq!(
+            fast_dist_action(16),
+            FastDistAction::Distance { extra_bits: 0 }
+        );
+        assert_eq!(
+            fast_dist_action(31),
+            FastDistAction::Distance { extra_bits: 15 }
+        );
+        assert_eq!(fast_dist_action(1), FastDistAction::Subtable);
+        assert_eq!(fast_dist_action(32), FastDistAction::Subtable);
+        assert_eq!(fast_dist_action(64), FastDistAction::Invalid);
+        assert_eq!(
+            fast_dist_action(80),
+            FastDistAction::Distance { extra_bits: 0 }
+        );
     }
 
     #[test]
