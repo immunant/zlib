@@ -383,35 +383,9 @@ fn parse_gz_open_mode(mode: &[u8]) -> Option<GzOpenMode> {
     Some(parsed)
 }
 
-unsafe fn gz_reset(state: &mut crate::gzguts_h::gz_state) {
-    let mut reset = GzResetState {
-        mode: state.mode,
-        have: state.x.have,
-        eof: state.eof,
-        past: state.past,
-        how: state.how,
-        junk: state.junk,
-        reset: state.reset,
-        again: state.again,
-        skip: state.skip,
-        err: state.err,
-        msg: state.msg.take(),
-        pos: state.x.pos,
-        avail_in: state.strm.avail_in,
-    };
+fn gz_reset(mut reset: GzResetState) -> GzResetState {
     reset.apply_reset();
-    state.x.have = reset.have;
-    state.eof = reset.eof;
-    state.past = reset.past;
-    state.how = reset.how;
-    state.junk = reset.junk;
-    state.reset = reset.reset;
-    state.again = reset.again;
-    state.skip = reset.skip;
-    state.err = reset.err;
-    state.msg = reset.msg;
-    state.x.pos = reset.pos;
-    state.strm.avail_in = reset.avail_in;
+    reset
 }
 
 unsafe extern "C" fn gz_open(
@@ -571,8 +545,35 @@ unsafe extern "C" fn gz_open(
             .map(|position| position as crate::stdlib::off64_t)
             .unwrap_or(0 as crate::stdlib::off64_t);
     }
+    let state_ref = state_owner.first_mut().unwrap();
+    let reset = gz_reset(GzResetState {
+        mode: state_ref.mode,
+        have: state_ref.x.have,
+        eof: state_ref.eof,
+        past: state_ref.past,
+        how: state_ref.how,
+        junk: state_ref.junk,
+        reset: state_ref.reset,
+        again: state_ref.again,
+        skip: state_ref.skip,
+        err: state_ref.err,
+        msg: state_ref.msg.take(),
+        pos: state_ref.x.pos,
+        avail_in: state_ref.strm.avail_in,
+    });
+    state_ref.x.have = reset.have;
+    state_ref.eof = reset.eof;
+    state_ref.past = reset.past;
+    state_ref.how = reset.how;
+    state_ref.junk = reset.junk;
+    state_ref.reset = reset.reset;
+    state_ref.again = reset.again;
+    state_ref.skip = reset.skip;
+    state_ref.err = reset.err;
+    state_ref.msg = reset.msg;
+    state_ref.x.pos = reset.pos;
+    state_ref.strm.avail_in = reset.avail_in;
     let state = state_owner.as_mut_ptr();
-    gz_reset(state_owner.first_mut().unwrap());
     ::core::mem::forget(state_owner);
     return state as crate::zlib_h::gzFile;
 }
@@ -695,7 +696,33 @@ unsafe fn gzrewind(
     {
         return -1 as ::core::ffi::c_int;
     }
-    gz_reset(state);
+    let reset = gz_reset(GzResetState {
+        mode: state.mode,
+        have: state.x.have,
+        eof: state.eof,
+        past: state.past,
+        how: state.how,
+        junk: state.junk,
+        reset: state.reset,
+        again: state.again,
+        skip: state.skip,
+        err: state.err,
+        msg: state.msg.take(),
+        pos: state.x.pos,
+        avail_in: state.strm.avail_in,
+    });
+    state.x.have = reset.have;
+    state.eof = reset.eof;
+    state.past = reset.past;
+    state.how = reset.how;
+    state.junk = reset.junk;
+    state.reset = reset.reset;
+    state.again = reset.again;
+    state.skip = reset.skip;
+    state.err = reset.err;
+    state.msg = reset.msg;
+    state.x.pos = reset.pos;
+    state.strm.avail_in = reset.avail_in;
     return 0 as ::core::ffi::c_int;
 }
 #[export_name = "gzrewind"]
