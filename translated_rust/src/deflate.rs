@@ -910,31 +910,49 @@ pub unsafe extern "C" fn deflateGetDictionary(
     mut dictionary: *mut crate::stdlib::Bytef,
     mut dictLength: *mut crate::stdlib::uInt,
 ) -> ::core::ffi::c_int {
-    let mut s: *mut crate::src::deflate::deflate_state =
-        ::core::ptr::null_mut::<crate::src::deflate::deflate_state>();
-    let mut len: crate::stdlib::uInt = 0;
     if deflateStateCheck(strm) != 0 {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    s = (*strm).state as *mut crate::src::deflate::deflate_state;
-    len = (*s).strstart.wrapping_add((*s).lookahead);
-    if len > (*s).w_size {
-        len = (*s).w_size;
+    let state = &*((*strm).state as *mut crate::src::deflate::deflate_state);
+    let mut len = state.strstart.wrapping_add(state.lookahead);
+    if len > state.w_size {
+        len = state.w_size;
     }
-    if !dictionary.is_null() && len != 0 {
-        crate::stdlib::memcpy(
-            dictionary as *mut ::core::ffi::c_void,
-            (*s).window
-                .offset((*s).strstart as isize)
-                .offset((*s).lookahead as isize)
-                .offset(-(len as isize)) as *const ::core::ffi::c_void,
-            len as crate::__stddef_size_t_h::size_t,
-        );
+    let dictionary = if dictionary.is_null() || len == 0 {
+        None
+    } else {
+        Some(::core::slice::from_raw_parts_mut(dictionary, len as usize))
+    };
+    let window = if len == 0 {
+        None
+    } else {
+        Some(::core::slice::from_raw_parts(
+            state.window.offset(state.strstart.wrapping_add(state.lookahead) as isize)
+                .offset(-(len as isize)),
+            len as usize,
+        ))
+    };
+    let dict_length = if dictLength.is_null() {
+        None
+    } else {
+        Some(&mut *dictLength)
+    };
+    deflate_get_dictionary(window, dictionary, dict_length, len)
+}
+
+fn deflate_get_dictionary(
+    window: Option<&[crate::stdlib::Bytef]>,
+    dictionary: Option<&mut [crate::stdlib::Bytef]>,
+    dict_length: Option<&mut crate::stdlib::uInt>,
+    len: crate::stdlib::uInt,
+) -> ::core::ffi::c_int {
+    if let (Some(window), Some(dictionary)) = (window, dictionary) {
+        dictionary.copy_from_slice(window);
     }
-    if !dictLength.is_null() {
-        *dictLength = len;
+    if let Some(dict_length) = dict_length {
+        *dict_length = len;
     }
-    return crate::zlib_h::Z_OK;
+    crate::zlib_h::Z_OK
 }
 #[export_name = "deflateGetDictionary"]
 
@@ -1061,17 +1079,36 @@ pub unsafe extern "C" fn deflatePending(
     if deflateStateCheck(strm) != 0 {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    if !bits.is_null() {
-        *bits = (*(*strm).state).bi_valid;
+    let state = &*((*strm).state as *mut crate::src::deflate::deflate_state);
+    let pending = if pending.is_null() {
+        None
+    } else {
+        Some(&mut *pending)
+    };
+    let bits = if bits.is_null() {
+        None
+    } else {
+        Some(&mut *bits)
+    };
+    deflate_pending(state, pending, bits)
+}
+
+fn deflate_pending(
+    state: &crate::src::deflate::deflate_state,
+    pending: Option<&mut ::core::ffi::c_uint>,
+    bits: Option<&mut ::core::ffi::c_int>,
+) -> ::core::ffi::c_int {
+    if let Some(bits) = bits {
+        *bits = state.bi_valid;
     }
-    if !pending.is_null() {
-        *pending = (*(*strm).state).pending as ::core::ffi::c_uint;
-        if *pending as crate::zutil_h::ulg != (*(*strm).state).pending {
+    if let Some(pending) = pending {
+        *pending = state.pending as ::core::ffi::c_uint;
+        if *pending as crate::zutil_h::ulg != state.pending {
             *pending = -1 as ::core::ffi::c_int as ::core::ffi::c_uint;
             return crate::zlib_h::Z_BUF_ERROR;
         }
     }
-    return crate::zlib_h::Z_OK;
+    crate::zlib_h::Z_OK
 }
 #[export_name = "deflatePending"]
 
@@ -1089,10 +1126,23 @@ pub unsafe extern "C" fn deflateUsed(
     if deflateStateCheck(strm) != 0 {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    if !bits.is_null() {
-        *bits = (*(*strm).state).bi_used;
+    let state = &*((*strm).state as *mut crate::src::deflate::deflate_state);
+    let bits = if bits.is_null() {
+        None
+    } else {
+        Some(&mut *bits)
+    };
+    deflate_used(state, bits)
+}
+
+fn deflate_used(
+    state: &crate::src::deflate::deflate_state,
+    bits: Option<&mut ::core::ffi::c_int>,
+) -> ::core::ffi::c_int {
+    if let Some(bits) = bits {
+        *bits = state.bi_used;
     }
-    return crate::zlib_h::Z_OK;
+    crate::zlib_h::Z_OK
 }
 #[export_name = "deflateUsed"]
 
