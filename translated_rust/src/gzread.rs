@@ -648,7 +648,16 @@ pub unsafe extern "C" fn gzgetc(mut file: crate::zlib_h::gzFile) -> ::core::ffi:
         ::core::ptr::null::<::core::ffi::c_char>(),
     );
     if state.x.have != 0 {
-        let byte = ::core::slice::from_raw_parts(state.x.next, state.x.have as usize)[0];
+        // `x.next` is an ABI cursor into the owned output buffer here.  Do
+        // not construct a raw slice from its advertised `have` length: a
+        // corrupt cursor must not extend the view past that allocation.
+        let cursor = state.x.next;
+        let Some(byte) = state.out.as_deref().and_then(|buffer| {
+            let offset = cursor.addr().checked_sub(buffer.as_ptr().addr())?;
+            buffer.get(offset).copied()
+        }) else {
+            return -1 as ::core::ffi::c_int;
+        };
         state.x.have = state.x.have.wrapping_sub(1);
         state.x.pos += 1;
         state.x.next = state.x.next.wrapping_add(1);
