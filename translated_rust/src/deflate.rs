@@ -141,7 +141,7 @@ pub use crate::src::crc32::crc32_ffi;
 pub use crate::src::crc32::crc32_z_ffi;
 pub use crate::src::trees::_dist_code;
 pub use crate::src::trees::_length_code;
-pub use crate::src::trees::_tr_align;
+pub use crate::src::trees::_tr_align_ffi;
 pub use crate::src::trees::_tr_flush_bits_ffi;
 pub use crate::src::trees::_tr_flush_block;
 pub use crate::src::trees::_tr_init_ffi;
@@ -1881,7 +1881,7 @@ pub unsafe extern "C" fn deflate(
         if bstate as ::core::ffi::c_uint == block_done as ::core::ffi::c_int as ::core::ffi::c_uint
         {
             if flush == crate::zlib_h::Z_PARTIAL_FLUSH {
-                crate::src::trees::_tr_align(s as *mut crate::src::deflate::internal_state);
+                crate::src::trees::_tr_align_ffi(s as *mut crate::src::deflate::internal_state);
             } else if flush != crate::zlib_h::Z_BLOCK {
                 crate::src::trees::_tr_stored_block(
                     s as *mut crate::src::deflate::internal_state,

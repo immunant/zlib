@@ -3291,7 +3291,9 @@ pub unsafe extern "C" fn _tr_stored_block_ffi(
 pub unsafe extern "C" fn _tr_flush_bits_ffi(mut s: *mut crate::src::deflate::deflate_state) {
     bi_flush(s);
 }
-pub unsafe extern "C" fn _tr_align(mut s: *mut crate::src::deflate::deflate_state) {
+#[export_name = "_tr_align"]
+
+pub unsafe extern "C" fn _tr_align_ffi(mut s: *mut crate::src::deflate::deflate_state) {
     let mut len: ::core::ffi::c_int = 3 as ::core::ffi::c_int;
     if (*s).bi_valid > crate::src::deflate::Buf_size - len {
         let mut val: ::core::ffi::c_int = (1 as ::core::ffi::c_int) << 1 as ::core::ffi::c_int;
@@ -3344,11 +3346,6 @@ pub unsafe extern "C" fn _tr_align(mut s: *mut crate::src::deflate::deflate_stat
         (*s).bi_valid += len_0;
     }
     bi_flush(s);
-}
-#[export_name = "_tr_align"]
-
-pub unsafe extern "C" fn _tr_align_ffi(mut s: *mut crate::src::deflate::deflate_state) {
-    _tr_align(s)
 }
 unsafe extern "C" fn compress_block(
     mut s: *mut crate::src::deflate::deflate_state,
