@@ -78,21 +78,28 @@ fn normalize_uncompress_status(
     }
 }
 
-fn has_invalid_uncompress_buffers(
-    dest_is_null: bool,
-    dest_len: crate::stdlib::z_size_t,
-    source_is_null: bool,
-    source_len: crate::stdlib::z_size_t,
-) -> bool {
-    source_len > 0 && source_is_null || dest_len > 0 && dest_is_null
-}
-
 fn has_missing_uncompress_lengths(dest_len_is_null: bool, source_len_is_null: bool) -> bool {
     dest_len_is_null || source_len_is_null
 }
 
-fn needs_dummy_uncompress_output(dest_is_null: bool, dest_len: crate::stdlib::z_size_t) -> bool {
-    dest_len == 0 && dest_is_null
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+struct UncompressBufferLengths {
+    dest: crate::stdlib::z_size_t,
+    source: crate::stdlib::z_size_t,
+}
+
+impl UncompressBufferLengths {
+    fn new(dest: crate::stdlib::z_size_t, source: crate::stdlib::z_size_t) -> Self {
+        Self { dest, source }
+    }
+
+    fn has_invalid_pointers(self, dest_is_null: bool, source_is_null: bool) -> bool {
+        self.source > 0 && source_is_null || self.dest > 0 && dest_is_null
+    }
+
+    fn needs_dummy_output(self, dest_is_null: bool) -> bool {
+        self.dest == 0 && dest_is_null
+    }
 }
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
@@ -153,9 +160,8 @@ pub unsafe extern "C" fn uncompress2_z_ffi(
     if has_missing_uncompress_lengths(destLen.is_null(), sourceLen.is_null()) {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    let source_len = *sourceLen;
-    let dest_len = *destLen;
-    if has_invalid_uncompress_buffers(dest.is_null(), dest_len, source.is_null(), source_len) {
+    let lengths = UncompressBufferLengths::new(*destLen, *sourceLen);
+    if lengths.has_invalid_pointers(dest.is_null(), source.is_null()) {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
 
@@ -176,7 +182,7 @@ pub unsafe extern "C" fn uncompress2_z_ffi(
         reserved: 0,
     };
     let mut dummy = 0 as crate::stdlib::Bytef;
-    if needs_dummy_uncompress_output(dest.is_null(), dest_len) {
+    if lengths.needs_dummy_output(dest.is_null()) {
         dest = &raw mut dummy;
     }
 
@@ -192,8 +198,8 @@ pub unsafe extern "C" fn uncompress2_z_ffi(
         return err;
     }
 
-    let mut input_progress = ChunkedProgress::new(source_len);
-    let mut output_progress = ChunkedProgress::new(dest_len);
+    let mut input_progress = ChunkedProgress::new(lengths.source);
+    let mut output_progress = ChunkedProgress::new(lengths.dest);
     let err = loop {
         output_progress.replenish(&mut stream.avail_out);
         input_progress.replenish(&mut stream.avail_in);
@@ -263,25 +269,24 @@ pub unsafe extern "C" fn uncompress_ffi(
 #[cfg(test)]
 mod tests {
     use super::{
-        has_invalid_uncompress_buffers, has_missing_uncompress_lengths,
-        needs_dummy_uncompress_output, normalize_uncompress_status, replenish_scalar,
-        uncompress_outcome, ChunkedProgress, LegacyUncompressLengths,
+        has_missing_uncompress_lengths, normalize_uncompress_status, replenish_scalar,
+        uncompress_outcome, ChunkedProgress, LegacyUncompressLengths, UncompressBufferLengths,
     };
 
     #[test]
     fn buffer_validation_allows_null_pointers_for_empty_buffers() {
-        assert!(!has_invalid_uncompress_buffers(true, 0, true, 0));
+        assert!(!UncompressBufferLengths::new(0, 0).has_invalid_pointers(true, true));
     }
 
     #[test]
     fn buffer_validation_rejects_null_pointer_for_nonempty_buffer() {
-        assert!(has_invalid_uncompress_buffers(true, 1, false, 0));
-        assert!(has_invalid_uncompress_buffers(false, 0, true, 1));
+        assert!(UncompressBufferLengths::new(1, 0).has_invalid_pointers(true, false));
+        assert!(UncompressBufferLengths::new(0, 1).has_invalid_pointers(false, true));
     }
 
     #[test]
     fn buffer_validation_accepts_present_nonempty_buffers() {
-        assert!(!has_invalid_uncompress_buffers(false, 1, false, 1));
+        assert!(!UncompressBufferLengths::new(1, 1).has_invalid_pointers(false, false));
     }
 
     #[test]
@@ -293,9 +298,9 @@ mod tests {
 
     #[test]
     fn dummy_output_is_used_only_for_a_null_empty_destination() {
-        assert!(needs_dummy_uncompress_output(true, 0));
-        assert!(!needs_dummy_uncompress_output(false, 0));
-        assert!(!needs_dummy_uncompress_output(true, 1));
+        assert!(UncompressBufferLengths::new(0, 0).needs_dummy_output(true));
+        assert!(!UncompressBufferLengths::new(0, 0).needs_dummy_output(false));
+        assert!(!UncompressBufferLengths::new(1, 0).needs_dummy_output(true));
     }
 
     #[test]

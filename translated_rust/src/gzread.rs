@@ -289,7 +289,14 @@ fn gz_read_needs_fetch(
     chunk_len: ::core::ffi::c_uint,
     size: ::core::ffi::c_uint,
 ) -> bool {
-    how == crate::gzguts_h::LOOK || chunk_len < gz_output_buffer_len(size)
+    how == crate::gzguts_h::LOOK || !gz_read_has_full_output_chunk(chunk_len, size)
+}
+
+fn gz_read_has_full_output_chunk(
+    chunk_len: ::core::ffi::c_uint,
+    size: ::core::ffi::c_uint,
+) -> bool {
+    chunk_len >= gz_output_buffer_len(size)
 }
 
 fn gz_read_stops_at_eof(eof: ::core::ffi::c_int, avail_in: crate::stdlib::uInt) -> bool {
@@ -1750,6 +1757,20 @@ mod tests {
     fn gz_read_needs_fetch_for_small_chunks_only() {
         assert!(gz_read_needs_fetch(crate::gzguts_h::COPY, 15, 8));
         assert!(!gz_read_needs_fetch(crate::gzguts_h::COPY, 16, 8));
+    }
+
+    #[test]
+    fn gz_read_has_full_output_chunk_uses_the_wrapping_output_threshold() {
+        assert!(!gz_read_has_full_output_chunk(15, 8));
+        assert!(gz_read_has_full_output_chunk(16, 8));
+        assert!(!gz_read_has_full_output_chunk(
+            ::core::ffi::c_uint::MAX - 2,
+            ::core::ffi::c_uint::MAX,
+        ));
+        assert!(gz_read_has_full_output_chunk(
+            ::core::ffi::c_uint::MAX - 1,
+            ::core::ffi::c_uint::MAX,
+        ));
     }
 
     #[test]

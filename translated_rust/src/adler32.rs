@@ -85,15 +85,20 @@ pub fn adler32(adler: uLong, buf: &[Bytef]) -> uLong {
     adler32_z(adler, buf)
 }
 
-fn adler32_ffi_input(adler: uLong, input: Option<&[Bytef]>) -> uLong {
-    input.map_or(ADLER32_INITIAL, |input| adler32_z(adler, input))
-}
-
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum FfiInputKind {
     Null,
     Empty,
     NonEmpty,
+}
+
+impl FfiInputKind {
+    fn checksum(self, adler: uLong, input: &[Bytef]) -> uLong {
+        match self {
+            Self::Null => ADLER32_INITIAL,
+            Self::Empty | Self::NonEmpty => adler32_z(adler, input),
+        }
+    }
 }
 
 fn classify_ffi_input(buf_is_null: bool, len: usize) -> FfiInputKind {
@@ -140,25 +145,25 @@ pub fn adler32_combine64(adler1: uLong, adler2: uLong, len2: off64_t) -> uLong {
 
 #[export_name = "adler32_z"]
 pub unsafe extern "C" fn adler32_z_ffi(adler: uLong, buf: *const Bytef, len: z_size_t) -> uLong {
-    let input: Option<&[Bytef]> = match classify_ffi_input(buf.is_null(), len) {
-        FfiInputKind::Null => None,
-        FfiInputKind::Empty => Some(&[]),
-        FfiInputKind::NonEmpty => Some(unsafe { core::slice::from_raw_parts(buf, len) }),
+    let input_kind = classify_ffi_input(buf.is_null(), len);
+    let input = match input_kind {
+        FfiInputKind::Null | FfiInputKind::Empty => &[],
+        FfiInputKind::NonEmpty => unsafe { core::slice::from_raw_parts(buf, len) },
     };
 
-    adler32_ffi_input(adler, input)
+    input_kind.checksum(adler, input)
 }
 
 #[export_name = "adler32"]
 pub unsafe extern "C" fn adler32_ffi(adler: uLong, buf: *const Bytef, len: uInt) -> uLong {
     let len = len as usize;
-    let input: Option<&[Bytef]> = match classify_ffi_input(buf.is_null(), len) {
-        FfiInputKind::Null => None,
-        FfiInputKind::Empty => Some(&[]),
-        FfiInputKind::NonEmpty => Some(unsafe { core::slice::from_raw_parts(buf, len) }),
+    let input_kind = classify_ffi_input(buf.is_null(), len);
+    let input = match input_kind {
+        FfiInputKind::Null | FfiInputKind::Empty => &[],
+        FfiInputKind::NonEmpty => unsafe { core::slice::from_raw_parts(buf, len) },
     };
 
-    adler32_ffi_input(adler, input)
+    input_kind.checksum(adler, input)
 }
 
 #[export_name = "adler32_combine"]
@@ -212,12 +217,19 @@ mod tests {
     }
 
     #[test]
-    fn ffi_input_preserves_null_and_slice_results() {
+    fn ffi_input_kind_preserves_null_and_slice_results() {
         let seed = 0x1234_5678;
         let input = b"input";
 
-        assert_eq!(adler32_ffi_input(seed, None), ADLER32_INITIAL);
-        assert_eq!(adler32_ffi_input(seed, Some(input)), adler32_z(seed, input));
+        assert_eq!(FfiInputKind::Null.checksum(seed, &[]), ADLER32_INITIAL);
+        assert_eq!(
+            FfiInputKind::Empty.checksum(seed, &[]),
+            adler32_z(seed, &[])
+        );
+        assert_eq!(
+            FfiInputKind::NonEmpty.checksum(seed, input),
+            adler32_z(seed, input)
+        );
     }
 
     #[test]
