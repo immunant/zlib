@@ -340,11 +340,12 @@ pub(crate) fn inflate_fast_from_views(
     completion.result
 }
 
-// The ABI projection is deliberately separate from `inflate_fast()`: every
-// decoder invocation below owns only bounded slices and a pointer-free state
-// snapshot.  The shared state projection validates the opaque association and
-// ties the state borrow to this stream borrow before any cursor is exposed.
-pub(crate) unsafe fn inflate_fast_from_abi_boundary(
+// The ABI projection is deliberately separate from the pointer-free fast
+// dispatch: every decoder invocation below owns only bounded slices and a
+// pointer-free state snapshot.  The shared state projection validates the
+// opaque association and ties the state borrow to this stream borrow before
+// any cursor is exposed.
+pub(crate) unsafe fn inflate_fast_from_stream(
     stream: &mut crate::zlib_h::z_stream_s,
     start: ::core::ffi::c_uint,
 ) {
@@ -388,7 +389,7 @@ pub(crate) unsafe fn inflate_fast_from_abi_boundary(
     let Some(request) = request else {
         return;
     };
-    let completion = inflate_fast(request);
+    let completion = inflate_fast_from_abi_boundary(request);
     strm.next_in = strm.next_in.wrapping_add(completion.result.input_used);
     strm.avail_in = completion
         .input_len
@@ -419,11 +420,19 @@ pub(crate) unsafe fn inflate_fast_from_abi_boundary(
     }
 }
 
-// This is the pointer-free fast-decoder dispatch used by the ABI adapter and
-// by future owners.  Keeping it separate prevents a raw stream projection
-// from becoming part of the fast path's API.
-pub(crate) fn inflate_fast(request: InflateFastRequest<'_, '_, '_>) -> InflateFastCompletion {
+// This is the pointer-free ABI facade used after a stream projection has
+// formed bounded input/output views.  Keeping the dispatch separate means
+// cursor construction and publication cannot leak into decoder callers.
+pub(crate) fn inflate_fast_from_abi_boundary(
+    request: InflateFastRequest<'_, '_, '_>,
+) -> InflateFastCompletion {
     request.run()
+}
+
+// The normal inflate owner also dispatches directly through the same
+// pointer-free request/completion seam.
+pub(crate) fn inflate_fast(request: InflateFastRequest<'_, '_, '_>) -> InflateFastCompletion {
+    inflate_fast_from_abi_boundary(request)
 }
 
 #[export_name = "inflate_fast"]
@@ -434,5 +443,5 @@ pub unsafe extern "C" fn inflate_fast_ffi(
     let Some(stream) = strm.as_mut() else {
         return;
     };
-    inflate_fast_from_abi_boundary(stream, start)
+    inflate_fast_from_stream(stream, start)
 }
