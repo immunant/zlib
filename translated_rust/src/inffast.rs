@@ -148,6 +148,33 @@ fn unread_input_state(
     )
 }
 
+/// The scalar portion of the fast-path commit after backing up bytes still
+/// held in the bit buffer.  Keeping this independent of stream pointers is a
+/// small but important boundary: the eventual slice-based fast decoder can
+/// use the same commit without reconstructing raw input cursors.
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+struct FastPathCommit {
+    hold: ::core::ffi::c_ulong,
+    bits: ::core::ffi::c_uint,
+    unread_bytes: ::core::ffi::c_uint,
+    input_remaining: crate::stdlib::uInt,
+}
+
+fn fast_path_commit(
+    hold: ::core::ffi::c_ulong,
+    bits: ::core::ffi::c_uint,
+    input_remaining: crate::stdlib::uInt,
+) -> FastPathCommit {
+    let (hold, bits, unread_bytes, input_remaining) =
+        unread_input_state(hold, bits, input_remaining);
+    FastPathCommit {
+        hold,
+        bits,
+        unread_bytes,
+        input_remaining,
+    }
+}
+
 fn input_remaining_after_read(input_remaining: crate::stdlib::uInt) -> crate::stdlib::uInt {
     input_remaining.wrapping_sub(1)
 }
@@ -827,14 +854,14 @@ pub unsafe extern "C" fn inflate_fast(
             as *const ::core::ffi::c_char as *mut ::core::ffi::c_char;
         state.mode = crate::src::inflate::BAD;
     }
-    (hold, bits, len, input_remaining) = unread_input_state(hold, bits, input_remaining);
-    in_0 = in_0.wrapping_sub(len as usize);
+    let commit = fast_path_commit(hold, bits, input_remaining);
+    in_0 = in_0.wrapping_sub(commit.unread_bytes as usize);
     (*strm).next_in = in_0 as *mut crate::stdlib::Bytef;
     (*strm).next_out = out as *mut crate::stdlib::Bytef;
-    (*strm).avail_in = input_remaining;
+    (*strm).avail_in = commit.input_remaining;
     (*strm).avail_out = output_remaining;
-    state.hold = hold;
-    state.bits = bits;
+    state.hold = commit.hold;
+    state.bits = commit.bits;
 }
 #[export_name = "inflate_fast"]
 
@@ -859,7 +886,7 @@ mod tests {
         trailing_match_copy_needs_second_byte, unread_input_state, validate_fast_window_distance,
         FastCodeEntry, FastDecodeError, FastDecodeFailure, FastDistAction, FastDistance,
         FastDistanceSource, FastLitLenAction, FastMatchCopyLayout, FastWindowContinuationSource,
-        FastWindowCopyPlan, FastWindowDistance,
+        FastWindowCopyPlan, FastWindowDistance, fast_path_commit,
     };
 
     #[test]
@@ -1139,6 +1166,19 @@ mod tests {
     #[test]
     fn unread_input_state_rewinds_full_bytes_and_restores_input() {
         assert_eq!(unread_input_state(0xdead_beef, 21, 4), (0x0f, 5, 2, 6));
+    }
+
+    #[test]
+    fn fast_path_commit_preserves_unread_input_and_bit_state() {
+        assert_eq!(
+            fast_path_commit(0xdead_beef, 21, 4),
+            super::FastPathCommit {
+                hold: 0x0f,
+                bits: 5,
+                unread_bytes: 2,
+                input_remaining: 6,
+            }
+        );
     }
 
     #[test]
