@@ -2685,6 +2685,14 @@ struct DeflateCopyPlan {
     layout: DeflateCopyLayout,
 }
 
+// A copied state can be prepared without looking at either callback-owned
+// allocation.  Keep that decision separate from the boundary adapter so the
+// eventual owner-backed state can enter the same copy path directly.
+struct DeflateCopyPreparation {
+    payload: DeflateCopyPayload,
+    plan: DeflateCopyPlan,
+}
+
 // The tree bookkeeping is independent of the callback-owned state and buffer
 // allocations.  Keep its deep-copy operation in a pointer-free value so the
 // copy path can eventually hand only the allocation handles to the boundary
@@ -2779,6 +2787,20 @@ impl DeflateCopyPayload {
             self.sym_next as usize,
         )
     }
+}
+
+fn prepare_deflate_copy(payload: DeflateCopyPayload) -> Option<DeflateCopyPreparation> {
+    if !deflate_state_status_is_valid(payload.status) {
+        return None;
+    }
+    let plan = payload.copy_plan();
+    if !plan.layout.fits_storage(&plan.storage)
+        || usize::try_from(payload.window_size).ok() != plan.storage.window.byte_len()
+        || usize::try_from(payload.pending_buf_size).ok() != plan.storage.pending.byte_len()
+    {
+        return None;
+    }
+    Some(DeflateCopyPreparation { payload, plan })
 }
 
 fn copy_tree_desc(desc: &crate::src::deflate::tree_desc_s) -> crate::src::deflate::tree_desc_s {
@@ -3695,9 +3717,6 @@ pub unsafe extern "C" fn deflateCopy(
         return crate::zlib_h::Z_STREAM_ERROR;
     }
     let ss = &*source_state;
-    if !deflate_state_status_is_valid(ss.status) {
-        return crate::zlib_h::Z_STREAM_ERROR;
-    }
     let dest = &mut *dest;
     let payload = DeflateCopyPayload {
         data_type: source.data_type,
@@ -3760,21 +3779,16 @@ pub unsafe extern "C" fn deflateCopy(
         high_water: ss.high_water,
         slid: ss.slid,
     };
-    let DeflateCopyPlan {
-        storage,
-        layout: copy_layout,
-    } = payload.copy_plan();
-    // The source state owns callback-allocated buffers, so do not construct
-    // any raw view until its scalar capacity records agree with the copy
-    // plan.  Normal initialized states always satisfy these equalities;
-    // rejecting a malformed opaque state prevents an oversized metadata
-    // value from widening a raw view below.
-    if !copy_layout.fits_storage(&storage)
-        || usize::try_from(payload.window_size).ok() != storage.window.byte_len()
-        || usize::try_from(payload.pending_buf_size).ok() != storage.pending.byte_len()
-    {
+    let Some(DeflateCopyPreparation {
+        payload,
+        plan: DeflateCopyPlan {
+            storage,
+            layout: copy_layout,
+        },
+    }) = prepare_deflate_copy(payload)
+    else {
         return crate::zlib_h::Z_STREAM_ERROR;
-    }
+    };
 
     // Do not byte-copy the ABI stream: that made this boundary depend on the
     // layout of a caller-visible owner and obscured which fields are retained
