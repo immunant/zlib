@@ -1473,6 +1473,56 @@ struct InflateDecoderStream {
     message: Option<InflateMessage>,
 }
 
+// The ABI adapter owns cursor and registered-header projection, but scalar
+// stream completion has no pointer provenance.  Keep that part in a small
+// value snapshot so reset and decode share one import/commit shape before the
+// remaining stream/state facade absorbs the scoped cursor views.
+#[derive(Clone, Copy)]
+struct InflateStreamScalars {
+    total_in: crate::stdlib::uLong,
+    total_out: crate::stdlib::uLong,
+    adler: crate::stdlib::uLong,
+    data_type: ::core::ffi::c_int,
+    message: Option<InflateMessage>,
+}
+
+impl InflateStreamScalars {
+    fn from_abi(
+        total_in: crate::stdlib::uLong,
+        total_out: crate::stdlib::uLong,
+        adler: crate::stdlib::uLong,
+        data_type: ::core::ffi::c_int,
+    ) -> Self {
+        Self {
+            total_in,
+            total_out,
+            adler,
+            data_type,
+            message: None,
+        }
+    }
+
+    fn into_decoder(self) -> InflateDecoderStream {
+        InflateDecoderStream {
+            total_in: self.total_in,
+            total_out: self.total_out,
+            adler: self.adler,
+            data_type: self.data_type,
+            message: self.message,
+        }
+    }
+
+    fn from_decoder(stream: &InflateDecoderStream) -> Self {
+        Self {
+            total_in: stream.total_in,
+            total_out: stream.total_out,
+            adler: stream.adler,
+            data_type: stream.data_type,
+            message: stream.message,
+        }
+    }
+}
+
 struct InflateDecoderResult {
     status: ::core::ffi::c_int,
     cursor: InflateDecoderCursor,
@@ -3385,13 +3435,13 @@ pub(crate) unsafe fn inflate_from_stream(
         // inflate requests. Refresh and publish the scalar snapshot here,
         // keeping header-registration release at the sole association
         // boundary rather than recreating a reset-specific unsafe adapter.
-        state.decoder.stream = InflateDecoderStream {
-            total_in: strm.total_in,
-            total_out: strm.total_out,
-            adler: strm.adler,
-            data_type: strm.data_type,
-            message: None,
-        };
+        state.decoder.stream = InflateStreamScalars::from_abi(
+            strm.total_in,
+            strm.total_out,
+            strm.adler,
+            strm.data_type,
+        )
+        .into_decoder();
         let completion = match inflate_reset_from_stream(
             InflateResetOwner::new(&mut state.decoder.normal, &mut state.decoder.stream),
             kind,
@@ -3399,11 +3449,12 @@ pub(crate) unsafe fn inflate_from_stream(
             Ok(completion) => completion,
             Err(status) => return InflateStreamResult::Status(status),
         };
-        strm.total_out = state.decoder.stream.total_out;
-        strm.total_in = state.decoder.stream.total_in;
+        let scalars = InflateStreamScalars::from_decoder(&state.decoder.stream);
+        strm.total_out = scalars.total_out;
+        strm.total_in = scalars.total_in;
         strm.msg = ::core::ptr::null_mut();
-        strm.data_type = state.decoder.stream.data_type;
-        strm.adler = state.decoder.stream.adler;
+        strm.data_type = scalars.data_type;
+        strm.adler = scalars.adler;
         if completion.clear_header_registration {
             state.head = None;
         }
@@ -3548,13 +3599,9 @@ pub(crate) unsafe fn inflate_from_stream(
     // Keep stream scalars inside the same pointer-free decoder owner as the
     // resumable normal state.  The ABI adapter refreshes it only while the
     // cursor/header projections are live, then publishes this completion.
-    state.decoder.stream = InflateDecoderStream {
-        total_in: strm.total_in,
-        total_out: strm.total_out,
-        adler: strm.adler,
-        data_type: strm.data_type,
-        message: None,
-    };
+    state.decoder.stream =
+        InflateStreamScalars::from_abi(strm.total_in, strm.total_out, strm.adler, strm.data_type)
+            .into_decoder();
     let result = InflateStreamOwner {
         normal: &mut state.decoder.normal,
         input,
@@ -3568,11 +3615,12 @@ pub(crate) unsafe fn inflate_from_stream(
     strm.avail_out = result.cursor.output_remaining;
     strm.next_in = strm.next_in.wrapping_add(result.cursor.input_used);
     strm.avail_in = result.cursor.input_remaining;
-    strm.total_in = state.decoder.stream.total_in;
-    strm.total_out = state.decoder.stream.total_out;
-    strm.adler = state.decoder.stream.adler;
-    strm.data_type = state.decoder.stream.data_type;
-    if let Some(message) = state.decoder.stream.message {
+    let scalars = InflateStreamScalars::from_decoder(&state.decoder.stream);
+    strm.total_in = scalars.total_in;
+    strm.total_out = scalars.total_out;
+    strm.adler = scalars.adler;
+    strm.data_type = scalars.data_type;
+    if let Some(message) = scalars.message {
         strm.msg = match message {
             InflateMessage::Error(index) => {
                 INFLATE_ERROR_MESSAGES[index].as_ptr().cast_mut().cast()
