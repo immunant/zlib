@@ -604,6 +604,18 @@ pub unsafe extern "C" fn gztell(mut file: crate::zlib_h::gzFile) -> crate::stdli
 pub unsafe extern "C" fn gztell_ffi(mut file: crate::zlib_h::gzFile) -> crate::stdlib::off_t {
     gztell(file)
 }
+fn gzoffset64_adjust_for_buffered_read(
+    offset: crate::stdlib::off64_t,
+    mode: ::core::ffi::c_int,
+    avail_in: crate::stdlib::uInt,
+) -> crate::stdlib::off64_t {
+    if mode == crate::gzguts_h::GZ_READ {
+        offset - avail_in as crate::stdlib::off64_t
+    } else {
+        offset
+    }
+}
+
 pub unsafe extern "C" fn gzoffset64(mut file: crate::zlib_h::gzFile) -> crate::stdlib::off64_t {
     let mut offset: crate::stdlib::off64_t = 0;
     let mut state: crate::gzguts_h::gz_statep =
@@ -623,10 +635,7 @@ pub unsafe extern "C" fn gzoffset64(mut file: crate::zlib_h::gzFile) -> crate::s
     if offset == -1 as ::core::ffi::c_int as crate::stdlib::off64_t {
         return -1 as ::core::ffi::c_int as crate::stdlib::off64_t;
     }
-    if (*state).mode == crate::gzguts_h::GZ_READ {
-        offset -= (*state).strm.avail_in as crate::stdlib::off64_t;
-    }
-    return offset;
+    gzoffset64_adjust_for_buffered_read(offset, (*state).mode, (*state).strm.avail_in)
 }
 #[export_name = "gzoffset64"]
 
@@ -803,8 +812,8 @@ pub unsafe extern "C" fn gz_intmax_ffi() -> ::core::ffi::c_uint {
 #[cfg(test)]
 mod tests {
     use super::{
-        gz_clear_read_flags, gz_parse_open_mode, gz_prepare_open, gzerror_core, gztell64_core,
-        GzErrorMessage,
+        gz_clear_read_flags, gz_parse_open_mode, gz_prepare_open, gzerror_core,
+        gzoffset64_adjust_for_buffered_read, gztell64_core, GzErrorMessage,
     };
 
     #[test]
@@ -848,6 +857,22 @@ mod tests {
     #[test]
     fn gztell64_core_ignores_skip_after_eof() {
         assert_eq!(gztell64_core(42, 1, 7), 42);
+    }
+
+    #[test]
+    fn gzoffset64_adjusts_for_unconsumed_read_input() {
+        assert_eq!(
+            gzoffset64_adjust_for_buffered_read(42, crate::gzguts_h::GZ_READ, 7),
+            35
+        );
+    }
+
+    #[test]
+    fn gzoffset64_preserves_offset_outside_read_mode() {
+        assert_eq!(
+            gzoffset64_adjust_for_buffered_read(42, crate::gzguts_h::GZ_WRITE, 7),
+            42
+        );
     }
 
     #[test]

@@ -72,6 +72,14 @@ fn inflate_back_window_bits_are_valid(window_bits: ::core::ffi::c_int) -> bool {
     window_bits >= 8 as ::core::ffi::c_int && window_bits <= 15 as ::core::ffi::c_int
 }
 
+fn inflate_back_init_metadata_is_valid(
+    version_first_byte: ::core::ffi::c_int,
+    stream_size: ::core::ffi::c_int,
+) -> bool {
+    version_first_byte == crate::zlib_h::ZLIB_VERSION[0 as usize] as ::core::ffi::c_int
+        && stream_size == ::core::mem::size_of::<crate::zlib_h::z_stream>() as ::core::ffi::c_int
+}
+
 pub unsafe extern "C" fn inflateBackInit_(
     mut strm: crate::zlib_h::z_streamp,
     mut windowBits: ::core::ffi::c_int,
@@ -82,9 +90,10 @@ pub unsafe extern "C" fn inflateBackInit_(
     let mut state: *mut crate::src::inflate::inflate_state =
         ::core::ptr::null_mut::<crate::src::inflate::inflate_state>();
     if version.is_null()
-        || *version.offset(0 as ::core::ffi::c_int as isize) as ::core::ffi::c_int
-            != crate::zlib_h::ZLIB_VERSION[0 as ::core::ffi::c_int as usize] as ::core::ffi::c_int
-        || stream_size != ::core::mem::size_of::<crate::zlib_h::z_stream>() as ::core::ffi::c_int
+        || !inflate_back_init_metadata_is_valid(
+            *version.offset(0 as ::core::ffi::c_int as isize) as ::core::ffi::c_int,
+            stream_size,
+        )
     {
         return crate::zlib_h::Z_VERSION_ERROR;
     }
@@ -1042,7 +1051,7 @@ pub unsafe extern "C" fn inflateBackEnd_ffi(
 
 #[cfg(test)]
 mod tests {
-    use super::inflate_back_window_bits_are_valid;
+    use super::{inflate_back_init_metadata_is_valid, inflate_back_window_bits_are_valid};
 
     #[test]
     fn inflate_back_window_bits_validation_accepts_only_supported_range() {
@@ -1051,5 +1060,24 @@ mod tests {
         }
         assert!(!inflate_back_window_bits_are_valid(7));
         assert!(!inflate_back_window_bits_are_valid(16));
+    }
+
+    #[test]
+    fn inflate_back_init_metadata_validation_requires_matching_version_and_size() {
+        let version_first_byte = crate::zlib_h::ZLIB_VERSION[0 as usize] as ::core::ffi::c_int;
+        let stream_size = ::core::mem::size_of::<crate::zlib_h::z_stream>() as ::core::ffi::c_int;
+
+        assert!(inflate_back_init_metadata_is_valid(
+            version_first_byte,
+            stream_size,
+        ));
+        assert!(!inflate_back_init_metadata_is_valid(
+            version_first_byte.wrapping_add(1),
+            stream_size,
+        ));
+        assert!(!inflate_back_init_metadata_is_valid(
+            version_first_byte,
+            stream_size.wrapping_sub(1),
+        ));
     }
 }

@@ -159,6 +159,44 @@ fn inflate_state_metadata_is_valid(stream_matches: bool, mode: inflate_mode) -> 
     stream_matches && inflate_mode_is_valid(mode)
 }
 
+#[derive(Debug, PartialEq, Eq)]
+enum InflatePrimeUpdate {
+    Keep,
+    Clear,
+    Set {
+        hold: crate::stdlib::uLong,
+        bits: ::core::ffi::c_uint,
+    },
+    StreamError,
+}
+
+fn inflate_prime_update(
+    hold: crate::stdlib::uLong,
+    current_bits: ::core::ffi::c_uint,
+    requested_bits: ::core::ffi::c_int,
+    value: ::core::ffi::c_int,
+) -> InflatePrimeUpdate {
+    if requested_bits == 0 {
+        return InflatePrimeUpdate::Keep;
+    }
+    if requested_bits < 0 {
+        return InflatePrimeUpdate::Clear;
+    }
+
+    let requested_bits = requested_bits as ::core::ffi::c_uint;
+    let new_bits = current_bits.wrapping_add(requested_bits);
+    if requested_bits > 16 || new_bits > 32 {
+        return InflatePrimeUpdate::StreamError;
+    }
+
+    let value_mask = (1_i64 << requested_bits) - 1;
+    let masked_value = (value as i64 & value_mask) as crate::stdlib::uLong;
+    InflatePrimeUpdate::Set {
+        hold: hold.wrapping_add(masked_value << current_bits),
+        bits: new_bits,
+    }
+}
+
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 struct WindowUpdate {
     replace: bool,
@@ -475,31 +513,21 @@ pub unsafe extern "C" fn inflatePrime(
     if inflateStateCheck(strm) != 0 {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    if bits == 0 as ::core::ffi::c_int {
-        return crate::zlib_h::Z_OK;
-    }
     state = (*strm).state as *mut crate::src::inflate::inflate_state;
-    if bits < 0 as ::core::ffi::c_int {
-        (*state).hold = 0 as ::core::ffi::c_ulong;
-        (*state).bits = 0 as ::core::ffi::c_uint;
-        return crate::zlib_h::Z_OK;
+    match inflate_prime_update((*state).hold, (*state).bits, bits, value) {
+        InflatePrimeUpdate::Keep => crate::zlib_h::Z_OK,
+        InflatePrimeUpdate::Clear => {
+            (*state).hold = 0;
+            (*state).bits = 0;
+            crate::zlib_h::Z_OK
+        }
+        InflatePrimeUpdate::Set { hold, bits } => {
+            (*state).hold = hold;
+            (*state).bits = bits;
+            crate::zlib_h::Z_OK
+        }
+        InflatePrimeUpdate::StreamError => crate::zlib_h::Z_STREAM_ERROR,
     }
-    if bits > 16 as ::core::ffi::c_int
-        || ((*state).bits as crate::stdlib::uInt).wrapping_add(bits as crate::stdlib::uInt)
-            > 32 as ::core::ffi::c_uint
-    {
-        return crate::zlib_h::Z_STREAM_ERROR;
-    }
-    value = (value as ::core::ffi::c_long
-        & ((1 as ::core::ffi::c_long) << bits) - 1 as ::core::ffi::c_long)
-        as ::core::ffi::c_int;
-    (*state).hold = (*state)
-        .hold
-        .wrapping_add((value as ::core::ffi::c_ulong) << (*state).bits);
-    (*state).bits = (*state)
-        .bits
-        .wrapping_add(bits as crate::stdlib::uInt as ::core::ffi::c_uint);
-    return crate::zlib_h::Z_OK;
 }
 #[export_name = "inflatePrime"]
 
@@ -2577,10 +2605,46 @@ pub unsafe extern "C" fn inflateCodesUsed_ffi(
 #[cfg(test)]
 mod tests {
     use super::{
-        apply_window_update, inflate_mode_is_valid, inflate_state_metadata_is_valid,
-        inflate_sync_search_core, initial_window_metadata, syncsearch_safe, window_update_plan,
-        InflateSyncSearch, BAD, HEAD, SYNC,
+        apply_window_update, inflate_mode_is_valid, inflate_prime_update,
+        inflate_state_metadata_is_valid, inflate_sync_search_core, initial_window_metadata,
+        syncsearch_safe, window_update_plan, InflatePrimeUpdate, InflateSyncSearch, BAD, HEAD,
+        SYNC,
     };
+
+    #[test]
+    fn inflate_prime_update_preserves_reset_and_zero_bit_requests() {
+        assert_eq!(
+            inflate_prime_update(0x1234, 12, 0, 99),
+            InflatePrimeUpdate::Keep
+        );
+        assert_eq!(
+            inflate_prime_update(0x1234, 12, -1, 99),
+            InflatePrimeUpdate::Clear
+        );
+    }
+
+    #[test]
+    fn inflate_prime_update_masks_value_and_appends_bits() {
+        assert_eq!(
+            inflate_prime_update(0b101, 3, 4, 0b1_1110),
+            InflatePrimeUpdate::Set {
+                hold: 0b111_0101,
+                bits: 7,
+            }
+        );
+    }
+
+    #[test]
+    fn inflate_prime_update_rejects_oversized_requests() {
+        assert_eq!(
+            inflate_prime_update(0, 16, 17, 0),
+            InflatePrimeUpdate::StreamError
+        );
+        assert_eq!(
+            inflate_prime_update(0, 20, 16, 0),
+            InflatePrimeUpdate::StreamError
+        );
+    }
 
     #[test]
     fn syncsearch_preserves_partial_marker_across_chunks() {
