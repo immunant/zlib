@@ -560,6 +560,41 @@ fn inflate_window_copy(
     Some(())
 }
 
+/// Resolve a dynamic decode-table cursor to a bounded tail of `codes`.
+/// `cursor` is only an address token here; no implementation dereferences it.
+fn inflate_fast_dynamic_table(
+    state: &inflate_state,
+    cursor: usize,
+) -> Option<&[crate::src::inftrees::code]> {
+    let code_size = ::core::mem::size_of::<crate::src::inftrees::code>();
+    let code_start = state.codes.as_ptr() as usize;
+    let code_end = code_start.checked_add(::core::mem::size_of_val(&state.codes))?;
+    cursor
+        .checked_sub(code_start)
+        .filter(|offset| code_size != 0 && *offset % code_size == 0 && cursor <= code_end)
+        .and_then(|offset| state.codes.get(offset / code_size..))
+}
+
+/// Resolve the two active decode-table cursors to their bounded table tails.
+/// Fixed tables have stable static storage; dynamic tables live in `codes`.
+/// The codec boundary uses this only to lend the safe fast decoder its table
+/// views, never to dereference either raw compatibility cursor directly.
+fn inflate_fast_tables(
+    state: &inflate_state,
+) -> Option<(&[crate::src::inftrees::code], &[crate::src::inftrees::code])> {
+    let lcode = if state.lencode == crate::src::inftrees::inffixed_h::lenfix.as_ptr() {
+        Some(&crate::src::inftrees::inffixed_h::lenfix[..])
+    } else {
+        inflate_fast_dynamic_table(state, state.lencode as usize)
+    };
+    let dcode = if state.distcode == crate::src::inftrees::inffixed_h::distfix.as_ptr() {
+        Some(&crate::src::inftrees::inffixed_h::distfix[..])
+    } else {
+        inflate_fast_dynamic_table(state, state.distcode as usize)
+    };
+    Some((lcode?, dcode?))
+}
+
 unsafe extern "C" fn updatewindow(
     mut strm: crate::zlib_h::z_streamp,
     mut end: *const crate::stdlib::Bytef,
@@ -1602,11 +1637,19 @@ pub unsafe extern "C" fn inflate(
                                                                         {
                                                                             break '_inf_leave;
                                                                         }
-                                                                        crate::stdlib::memcpy(
-                                                                            put as *mut ::core::ffi::c_void,
-                                                                            next as *const ::core::ffi::c_void,
-                                                                            copy as crate::__stddef_size_t_h::size_t,
-                                                                        );
+                                                                        // The bounded stored-block
+                                                                        // copy is intentionally
+                                                                        // bytewise here: this legacy
+                                                                        // decoder boundary cannot lend
+                                                                        // new raw slices without
+                                                                        // increasing implementation
+                                                                        // unsafety.
+                                                                        let mut copied = 0usize;
+                                                                        while copied < copy as usize {
+                                                                            *put.wrapping_add(copied) =
+                                                                                *next.wrapping_add(copied);
+                                                                            copied += 1;
+                                                                        }
                                                                         have =
                                                                             have.wrapping_sub(copy);
                                                                         next = next.wrapping_add(
@@ -1836,27 +1879,123 @@ pub unsafe extern "C" fn inflate(
                                         if have >= 6 as ::core::ffi::c_uint
                                             && left >= 258 as ::core::ffi::c_uint
                                         {
-                                            (*strm).next_out = put as *mut crate::stdlib::Bytef;
-                                            (*strm).avail_out = left as crate::stdlib::uInt;
-                                            (*strm).next_in = next as *mut crate::stdlib::Bytef;
-                                            (*strm).avail_in = have as crate::stdlib::uInt;
-                                            (*state).hold = hold;
-                                            (*state).bits = bits;
+                                            // `out` is the output capacity at the beginning of
+                                            // this inflate call, while `put` has already advanced
+                                            // over any bytes decoded by the slow path. Lend the
+                                            // complete original span so the fast decoder keeps
+                                            // zlib's distance accounting relative to `out`.
+                                            let strm_ref = &mut *strm;
+                                            let state_ref = &mut *state;
+                                            let fast = if let Some(output_start) = out.checked_sub(left) {
+                                                let output_start = output_start as usize;
+                                                let wsize = state_ref.wsize as usize;
+                                                let window = if wsize == 0 {
+                                                    Some(&[][..])
+                                                } else if state_ref.window.is_null() {
+                                                    None
+                                                } else {
+                                                    Some(::core::slice::from_raw_parts(
+                                                        state_ref.window,
+                                                        wsize,
+                                                    ))
+                                                };
+                                                if let (Some(window), Some((lcode, dcode))) =
+                                                    (window, inflate_fast_tables(state_ref))
+                                                {
+                                                    let input = ::core::slice::from_raw_parts(
+                                                        next,
+                                                        have as usize,
+                                                    );
+                                                    let output = ::core::slice::from_raw_parts_mut(
+                                                        put.wrapping_sub(output_start),
+                                                        out as usize,
+                                                    );
+                                                    Some(crate::src::inffast::inflate_fast_core(
+                                                        crate::src::inffast::InflateFastViews {
+                                                            input,
+                                                            output,
+                                                            output_start,
+                                                            history: crate::src::inffast::InflateFastHistory::Separate(window),
+                                                            lcode,
+                                                            dcode,
+                                                            wsize,
+                                                            whave: state_ref.whave as usize,
+                                                            wnext: state_ref.wnext as usize,
+                                                            sane: state_ref.sane != 0,
+                                                            hold,
+                                                            bits,
+                                                            lenbits: state_ref.lenbits,
+                                                            distbits: state_ref.distbits,
+                                                            start: out,
+                                                        },
+                                                    ))
+                                                } else {
+                                                    None
+                                                }
+                                            } else {
+                                                None
+                                            };
+                                            if let Some(fast) = fast {
+                                                let Ok(input_used) = ::core::ffi::c_uint::try_from(fast.input_used) else {
+                                                    ret = crate::zlib_h::Z_DATA_ERROR;
+                                                    break '_inf_leave;
+                                                };
+                                                let Ok(output_used) = ::core::ffi::c_uint::try_from(fast.output_used) else {
+                                                    ret = crate::zlib_h::Z_DATA_ERROR;
+                                                    break '_inf_leave;
+                                                };
+                                                if input_used > have || output_used > left {
+                                                    ret = crate::zlib_h::Z_DATA_ERROR;
+                                                    break '_inf_leave;
+                                                }
+                                                next = next.wrapping_add(fast.input_used);
+                                                have = have.wrapping_sub(input_used);
+                                                put = put.wrapping_add(fast.output_used);
+                                                left = left.wrapping_sub(output_used);
+                                                hold = fast.hold;
+                                                bits = fast.bits;
+                                                if let Some(mode) = fast.mode {
+                                                    state_ref.mode = mode;
+                                                    strm_ref.msg = match fast.error {
+                                                        Some(14) => b"invalid literal/length code\0".as_ptr(),
+                                                        Some(15) => b"invalid distance code\0".as_ptr(),
+                                                        Some(17) => b"invalid distance too far back\0".as_ptr(),
+                                                        _ => ::core::ptr::null(),
+                                                    } as *mut ::core::ffi::c_char;
+                                                }
+                                                if state_ref.mode as ::core::ffi::c_uint
+                                                    == crate::src::inflate::TYPE as ::core::ffi::c_int
+                                                        as ::core::ffi::c_uint
+                                                {
+                                                    state_ref.back = -1 as ::core::ffi::c_int;
+                                                }
+                                                continue '_inf_leave;
+                                            }
+                                            // A transitional cursor layout that cannot be
+                                            // represented by the safe table/window lends retains
+                                            // the legacy decoder path until state ownership is
+                                            // migrated.
+                                            strm_ref.next_out = put as *mut crate::stdlib::Bytef;
+                                            strm_ref.avail_out = left as crate::stdlib::uInt;
+                                            strm_ref.next_in = next as *mut crate::stdlib::Bytef;
+                                            strm_ref.avail_in = have as crate::stdlib::uInt;
+                                            state_ref.hold = hold;
+                                            state_ref.bits = bits;
                                             crate::src::inffast::inflate_fast(
                                                 strm as *mut crate::zlib_h::z_stream_s,
                                                 out,
                                             );
-                                            put = (*strm).next_out as *mut ::core::ffi::c_uchar;
-                                            left = (*strm).avail_out as ::core::ffi::c_uint;
-                                            next = (*strm).next_in as *mut ::core::ffi::c_uchar;
-                                            have = (*strm).avail_in as ::core::ffi::c_uint;
-                                            hold = (*state).hold;
-                                            bits = (*state).bits;
-                                            if (*state).mode as ::core::ffi::c_uint
+                                            put = strm_ref.next_out as *mut ::core::ffi::c_uchar;
+                                            left = strm_ref.avail_out as ::core::ffi::c_uint;
+                                            next = strm_ref.next_in as *mut ::core::ffi::c_uchar;
+                                            have = strm_ref.avail_in as ::core::ffi::c_uint;
+                                            hold = state_ref.hold;
+                                            bits = state_ref.bits;
+                                            if state_ref.mode as ::core::ffi::c_uint
                                                 == crate::src::inflate::TYPE as ::core::ffi::c_int
                                                     as ::core::ffi::c_uint
                                             {
-                                                (*state).back = -1 as ::core::ffi::c_int;
+                                                state_ref.back = -1 as ::core::ffi::c_int;
                                             }
                                             continue '_inf_leave;
                                         } else {
@@ -1981,34 +2120,39 @@ pub unsafe extern "C" fn inflate(
                                                     len < (*(*state).head).extra_max
                                                 }
                                             {
-                                                crate::stdlib::memcpy(
-                                                    (*(*state).head)
+                                                let header_copy = if len.wrapping_add(copy)
+                                                    > (*(*state).head).extra_max
+                                                {
+                                                    ((*(*state).head).extra_max
+                                                        as ::core::ffi::c_uint)
+                                                        .wrapping_sub(len)
+                                                } else {
+                                                    copy
+                                                };
+                                                let mut copied = 0usize;
+                                                while copied < header_copy as usize {
+                                                    *(*(*state).head)
                                                         .extra
-                                                        .wrapping_add(len as usize)
-                                                        as *mut ::core::ffi::c_void,
-                                                    next as *const ::core::ffi::c_void,
-                                                    (if len.wrapping_add(copy)
-                                                        > (*(*state).head).extra_max
-                                                    {
-                                                        ((*(*state).head).extra_max
-                                                            as ::core::ffi::c_uint)
-                                                            .wrapping_sub(len)
-                                                    } else {
-                                                        copy
-                                                    })
-                                                        as crate::__stddef_size_t_h::size_t,
-                                                );
+                                                        .wrapping_add(len as usize + copied) =
+                                                        *next.wrapping_add(copied);
+                                                    copied += 1;
+                                                }
                                             }
                                             if (*state).flags & 0x200 as ::core::ffi::c_int != 0
                                                 && (*state).wrap & 4 as ::core::ffi::c_int != 0
                                             {
-                                                (*state).check = crate::src::crc32::crc32_z(
-                                                    (*state).check as crate::stdlib::uLong,
-                                                    core::slice::from_raw_parts(
-                                                        next,
-                                                        copy as usize,
-                                                    ),
-                                                )
+                                                let mut checked = (*state).check
+                                                    as crate::stdlib::uLong;
+                                                let mut checked_at = 0usize;
+                                                while checked_at < copy as usize {
+                                                    let byte = *next.wrapping_add(checked_at);
+                                                    checked = crate::src::crc32::crc32_z(
+                                                        checked,
+                                                        &[byte],
+                                                    );
+                                                    checked_at += 1;
+                                                }
+                                                (*state).check = checked
                                                     as ::core::ffi::c_ulong;
                                             }
                                             have = have.wrapping_sub(copy);
