@@ -456,22 +456,6 @@ enum DeflateCallbackSlot {
     Storage(DeflateStorageSlot),
 }
 
-// Keep one callback request as a self-contained, pointer-free value.  The
-// allocation boundary still invokes zalloc and publishes its returned handle,
-// but init, copy, and teardown can share this exact schedule without
-// rebuilding its geometry from ABI state or retaining a borrow of the layout.
-#[derive(Clone, Copy)]
-struct DeflateStorageRequest {
-    slot: DeflateStorageSlot,
-    allocation: DeflateAllocation,
-}
-
-#[derive(Clone, Copy)]
-struct DeflateCallbackRequest {
-    slot: DeflateCallbackSlot,
-    allocation: DeflateAllocation,
-}
-
 // Callback-owned storage has two representations at the ABI boundary: the
 // provenance-carrying handles in `internal_state`, and this pointer-free
 // ownership ledger. The ledger decides which handles a stream may release,
@@ -534,14 +518,17 @@ impl DeflateCallbackStorageOwner {
     }
 
     fn take_release_plan(&mut self, status: ::core::ffi::c_int) -> DeflateReleasePlan {
-        let plan = DeflateReleasePlan {
-            status,
-            pending: self.pending,
-            head: self.head,
-            prev: self.prev,
-            window: self.window,
-            state: self.state,
-        };
+        let slots = DeflateAllocationPlan::release_slots().map(|slot| {
+            let allocated = match slot {
+                DeflateCallbackSlot::State => self.state,
+                DeflateCallbackSlot::Storage(DeflateStorageSlot::Window) => self.window,
+                DeflateCallbackSlot::Storage(DeflateStorageSlot::Prev) => self.prev,
+                DeflateCallbackSlot::Storage(DeflateStorageSlot::Head) => self.head,
+                DeflateCallbackSlot::Storage(DeflateStorageSlot::Pending) => self.pending,
+            };
+            allocated.then_some(slot)
+        });
+        let plan = DeflateReleasePlan { status, slots };
         self.pending = false;
         self.head = false;
         self.prev = false;
@@ -916,41 +903,17 @@ pub(crate) unsafe fn deflate_tree_bit_output_from_state(
 }
 
 // This complete decision is pointer-free. The one callback boundary pairs
-// each marked slot with its original handle in pending/head/prev/window/state
-// order, preserving zlib's observable callback lifecycle.
+// each marked slot with its original handle in the reverse of the allocation
+// schedule, preserving zlib's observable callback lifecycle.
 #[derive(Clone, Copy)]
 struct DeflateReleasePlan {
     status: ::core::ffi::c_int,
-    pending: bool,
-    head: bool,
-    prev: bool,
-    window: bool,
-    state: bool,
-}
-
-// The callback handles themselves remain at the ABI lifecycle boundary, but
-// their release sequence is ordinary pointer-free policy.  Keeping this
-// order in the plan prevents a future owner from deriving it ad hoc while
-// preserving zlib's observable pending/head/prev/window/state callback
-// order.
-#[derive(Clone, Copy)]
-enum DeflateReleaseSlot {
-    Pending,
-    Head,
-    Prev,
-    Window,
-    State,
+    slots: [Option<DeflateCallbackSlot>; 5],
 }
 
 impl DeflateReleasePlan {
-    fn ordered_slots(&self) -> [Option<DeflateReleaseSlot>; 5] {
-        [
-            self.pending.then_some(DeflateReleaseSlot::Pending),
-            self.head.then_some(DeflateReleaseSlot::Head),
-            self.prev.then_some(DeflateReleaseSlot::Prev),
-            self.window.then_some(DeflateReleaseSlot::Window),
-            self.state.then_some(DeflateReleaseSlot::State),
-        ]
+    fn ordered_slots(&self) -> [Option<DeflateCallbackSlot>; 5] {
+        self.slots
     }
 
     fn result(&self) -> ::core::ffi::c_int {
@@ -1305,54 +1268,36 @@ impl DeflateStorageLayout {
             },
         }
     }
-
-    fn callback_requests(&self) -> [DeflateStorageRequest; 4] {
-        [
-            DeflateStorageRequest {
-                slot: DeflateStorageSlot::Window,
-                allocation: self.window,
-            },
-            DeflateStorageRequest {
-                slot: DeflateStorageSlot::Prev,
-                allocation: self.prev,
-            },
-            DeflateStorageRequest {
-                slot: DeflateStorageSlot::Head,
-                allocation: self.head,
-            },
-            DeflateStorageRequest {
-                slot: DeflateStorageSlot::Pending,
-                allocation: self.pending,
-            },
-        ]
-    }
 }
 
 impl DeflateAllocationPlan {
-    fn callback_requests(&self) -> [DeflateCallbackRequest; 5] {
-        let storage = self.storage.callback_requests();
+    // The callback transaction has one slot schedule.  Allocation walks it
+    // forwards and release walks the same slots backwards; neither operation
+    // needs to reconstruct storage ordering from the ABI-shaped state.
+    fn allocation_for(&self, slot: DeflateCallbackSlot) -> DeflateAllocation {
+        match slot {
+            DeflateCallbackSlot::State => self.state,
+            DeflateCallbackSlot::Storage(DeflateStorageSlot::Window) => self.storage.window,
+            DeflateCallbackSlot::Storage(DeflateStorageSlot::Prev) => self.storage.prev,
+            DeflateCallbackSlot::Storage(DeflateStorageSlot::Head) => self.storage.head,
+            DeflateCallbackSlot::Storage(DeflateStorageSlot::Pending) => self.storage.pending,
+        }
+    }
+
+    fn allocation_slots() -> [DeflateCallbackSlot; 5] {
         [
-            DeflateCallbackRequest {
-                slot: DeflateCallbackSlot::State,
-                allocation: self.state,
-            },
-            DeflateCallbackRequest {
-                slot: DeflateCallbackSlot::Storage(storage[0].slot),
-                allocation: storage[0].allocation,
-            },
-            DeflateCallbackRequest {
-                slot: DeflateCallbackSlot::Storage(storage[1].slot),
-                allocation: storage[1].allocation,
-            },
-            DeflateCallbackRequest {
-                slot: DeflateCallbackSlot::Storage(storage[2].slot),
-                allocation: storage[2].allocation,
-            },
-            DeflateCallbackRequest {
-                slot: DeflateCallbackSlot::Storage(storage[3].slot),
-                allocation: storage[3].allocation,
-            },
+            DeflateCallbackSlot::State,
+            DeflateCallbackSlot::Storage(DeflateStorageSlot::Window),
+            DeflateCallbackSlot::Storage(DeflateStorageSlot::Prev),
+            DeflateCallbackSlot::Storage(DeflateStorageSlot::Head),
+            DeflateCallbackSlot::Storage(DeflateStorageSlot::Pending),
         ]
+    }
+
+    fn release_slots() -> [DeflateCallbackSlot; 5] {
+        let mut slots = Self::allocation_slots();
+        slots.reverse();
+        slots
     }
 }
 
@@ -1382,17 +1327,17 @@ mod callback_owner {
         let mut build = Some(build);
         let mut state: Option<::core::ptr::NonNull<crate::src::deflate::deflate_state>> = None;
         let mut complete = true;
-        for request in plan.callback_requests() {
+        for slot in DeflateAllocationPlan::allocation_slots() {
             let callback = stream.zalloc;
             let opaque = stream.opaque;
             let allocation = callback.and_then(|callback| {
                 ::core::ptr::NonNull::new(callback(
                     opaque,
-                    request.allocation.items,
-                    request.allocation.size,
+                    plan.allocation_for(slot).items,
+                    plan.allocation_for(slot).size,
                 ))
             });
-            match request.slot {
+            match slot {
                 DeflateCallbackSlot::State => {
                     let Some(allocation) = allocation else {
                         return None;
@@ -1409,17 +1354,32 @@ mod callback_owner {
                     state = Some(state_handle);
                 }
                 DeflateCallbackSlot::Storage(slot) => {
-                    complete &= allocation.is_some();
                     let state = state
                         .expect("storage requests follow published state")
                         .as_mut();
-                    match slot {
-                        DeflateStorageSlot::Window => state.window = allocation.map(|value| value.cast()),
-                        DeflateStorageSlot::Prev => state.prev = allocation.map(|value| value.cast()),
-                        DeflateStorageSlot::Head => state.head = allocation.map(|value| value.cast()),
-                        DeflateStorageSlot::Pending => state.pending_buf = allocation.map(|value| value.cast()),
+                    // Match and publish this callback result before issuing
+                    // the next request.  zlib intentionally still issues the
+                    // remaining buffer requests after a failure, then frees
+                    // the successful subset as one aggregate transaction.
+                    match allocation {
+                        Some(allocation) => {
+                            match slot {
+                                DeflateStorageSlot::Window => {
+                                    state.window = Some(allocation.cast())
+                                }
+                                DeflateStorageSlot::Prev => state.prev = Some(allocation.cast()),
+                                DeflateStorageSlot::Head => state.head = Some(allocation.cast()),
+                                DeflateStorageSlot::Pending => {
+                                    state.pending_buf = Some(allocation.cast())
+                                }
+                            }
+                            state.callback_storage.record_storage(slot, true);
+                        }
+                        None => {
+                            complete = false;
+                            state.callback_storage.record_storage(slot, false);
+                        }
                     }
-                    state.callback_storage.record_storage(slot, allocation.is_some());
                 }
             }
         }
@@ -1552,11 +1512,19 @@ mod callback_owner {
         let release_plan = state.callback_storage.take_release_plan(state.status);
         let allocations = release_plan.ordered_slots().map(|slot| {
             slot.and_then(|slot| match slot {
-                DeflateReleaseSlot::Pending => state.pending_buf.map(|value| value.cast()),
-                DeflateReleaseSlot::Head => state.head.map(|value| value.cast()),
-                DeflateReleaseSlot::Prev => state.prev.map(|value| value.cast()),
-                DeflateReleaseSlot::Window => state.window.map(|value| value.cast()),
-                DeflateReleaseSlot::State => Some(state_handle.cast()),
+                DeflateCallbackSlot::Storage(DeflateStorageSlot::Pending) => {
+                    state.pending_buf.map(|value| value.cast())
+                }
+                DeflateCallbackSlot::Storage(DeflateStorageSlot::Head) => {
+                    state.head.map(|value| value.cast())
+                }
+                DeflateCallbackSlot::Storage(DeflateStorageSlot::Prev) => {
+                    state.prev.map(|value| value.cast())
+                }
+                DeflateCallbackSlot::Storage(DeflateStorageSlot::Window) => {
+                    state.window.map(|value| value.cast())
+                }
+                DeflateCallbackSlot::State => Some(state_handle.cast()),
             })
         });
         for allocation in allocations.into_iter().flatten() {
