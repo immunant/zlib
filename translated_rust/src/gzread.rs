@@ -878,11 +878,10 @@ pub unsafe extern "C" fn gzread_ffi(
             return -1 as ::core::ffi::c_int;
         }
         if state.again != 0 {
-            crate::src::gzlib::gz_error(
-                state,
-                crate::zlib_h::Z_ERRNO,
-                crate::stdlib::strerror(*crate::stdlib::__errno_location()),
-            );
+            let code = ::std::io::Error::last_os_error()
+                .raw_os_error()
+                .unwrap_or(0);
+            crate::src::gzlib::gz_error_io(state, code);
             return -1 as ::core::ffi::c_int;
         }
     }
