@@ -187,6 +187,17 @@ pub(crate) struct GzCodecCall<'a> {
     output_available: crate::stdlib::uInt,
 }
 
+// This is the complete pointer-free request made to gzip's embedded inflate
+// codec.  It intentionally does not retain the accounting cursor: the gzip
+// state machine owns that cursor in `GzCodecCall` and uses it to validate the
+// scalar result after dispatch.  A future embedded-codec owner can consume
+// this request directly without borrowing an ABI `z_stream`.
+pub(crate) struct GzEmbeddedInflateCall<'a> {
+    input: &'a [u8],
+    input_available: crate::stdlib::uInt,
+    output_available: crate::stdlib::uInt,
+}
+
 pub(crate) struct GzCodecOutputView<'a> {
     bytes: &'a mut [u8],
 }
@@ -453,6 +464,28 @@ impl<'a> GzCodecCall<'a> {
 
     pub(crate) fn input_cursor(&self) -> &GzCodecInput {
         &self.input_cursor
+    }
+
+    pub(crate) fn output_available(&self) -> crate::stdlib::uInt {
+        self.output_available
+    }
+
+    pub(crate) fn embedded_inflate_call(&self) -> GzEmbeddedInflateCall<'a> {
+        GzEmbeddedInflateCall {
+            input: self.input,
+            input_available: self.input_cursor.available(),
+            output_available: self.output_available,
+        }
+    }
+}
+
+impl<'a> GzEmbeddedInflateCall<'a> {
+    pub(crate) fn input(&self) -> &'a [u8] {
+        self.input
+    }
+
+    pub(crate) fn input_available(&self) -> crate::stdlib::uInt {
+        self.input_available
     }
 
     pub(crate) fn output_available(&self) -> crate::stdlib::uInt {

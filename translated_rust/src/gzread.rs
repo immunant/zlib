@@ -856,9 +856,14 @@ unsafe fn gz_decomp(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int
             path: state.path.as_deref(),
         };
         gz_decomp_loop(decomp, &mut loop_state, |call| {
-            strm.next_in = call.input().as_ptr().cast_mut();
-            strm.avail_in = call.input_cursor().available();
-            strm.avail_out = call.output_available();
+            // The ABI stream projection consumes only this bounded codec
+            // request.  Cursor accounting remains with `call`, so a future
+            // owned embedded codec can replace this projection without
+            // changing the gzip decompression state machine.
+            let embedded = call.embedded_inflate_call();
+            strm.next_in = embedded.input().as_ptr().cast_mut();
+            strm.avail_in = embedded.input_available();
+            strm.avail_out = embedded.output_available();
             let result = crate::src::inflate::inflate(
                 strm as *mut crate::zlib_h::z_stream_s,
                 crate::zlib_h::Z_NO_FLUSH,
