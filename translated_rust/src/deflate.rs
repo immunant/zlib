@@ -3534,26 +3534,46 @@ fn deflate_fast(
     stream: &mut crate::zlib_h::z_stream,
     flush: ::core::ffi::c_int,
 ) -> block_state {
-    // SAFETY: `sym_buf` is the configured symbol overlay within the validated
-    // deflater's pending allocation. `flush_pending()` binds that allocation
-    // and the caller output cursor for the bounded strategy dispatch below.
-    let symbols = unsafe {
-        let symbols = ::core::slice::from_raw_parts_mut(
-            state.sym_buf,
-            state.lit_bufsize.wrapping_mul(3) as usize,
-        );
-        symbols
-    };
     flush_pending(state, stream, true, |state, stream, pending, output| {
+        let mut buffers = DeflatePendingSymbols::new(state, pending);
         deflate_fast_bound(
             state,
             stream,
-            pending,
-            symbols,
+            &mut buffers,
             output.unwrap_or(&mut []),
             flush,
         )
     })
+}
+
+// The symbol records occupy the tail of the pending allocation. Keeping one
+// mutable slice for that allocation avoids forming overlapping mutable views:
+// tallying borrows the tail briefly, and block emission snapshots the records
+// before it borrows the complete pending buffer for output.
+struct DeflatePendingSymbols<'a> {
+    pending: &'a mut [crate::zutil_h::uch],
+    symbols_start: usize,
+}
+
+impl<'a> DeflatePendingSymbols<'a> {
+    fn new(
+        state: &crate::src::deflate::deflate_state,
+        pending: &'a mut [crate::zutil_h::uch],
+    ) -> Self {
+        Self {
+            pending,
+            symbols_start: state.lit_bufsize as usize,
+        }
+    }
+
+    fn tally(
+        &mut self,
+        state: &mut crate::src::deflate::deflate_state,
+        dist: ::core::ffi::c_uint,
+        lc: ::core::ffi::c_uint,
+    ) -> ::core::ffi::c_int {
+        crate::src::trees::tally_bound(state, &mut self.pending[self.symbols_start..], dist, lc)
+    }
 }
 
 // Strategy selection and compression operate only on the views already bound
@@ -3562,8 +3582,7 @@ fn deflate_fast(
 fn deflate_fast_bound(
     state: &mut crate::src::deflate::deflate_state,
     stream: &mut crate::zlib_h::z_stream,
-    pending: &mut [crate::zutil_h::uch],
-    symbols: &mut [crate::zutil_h::uchf],
+    buffers: &mut DeflatePendingSymbols<'_>,
     output: &mut [crate::stdlib::Bytef],
     flush: ::core::ffi::c_int,
 ) -> block_state {
@@ -3574,19 +3593,19 @@ fn deflate_fast_bound(
         |state, stream, window, head, prev, input| {
             if state.strategy == crate::zlib_h::Z_HUFFMAN_ONLY {
                 deflate_huff_impl(
-                    state, stream, window, head, prev, pending, symbols, input, output, flush,
+                    state, stream, window, head, prev, buffers, input, output, flush,
                 )
             } else if state.strategy == crate::zlib_h::Z_RLE {
                 deflate_rle_impl(
-                    state, stream, window, head, prev, pending, symbols, input, output, flush,
+                    state, stream, window, head, prev, buffers, input, output, flush,
                 )
             } else if state.level <= 3 {
                 deflate_fast_impl(
-                    state, stream, window, head, prev, pending, symbols, input, output, flush,
+                    state, stream, window, head, prev, buffers, input, output, flush,
                 )
             } else {
                 deflate_slow_impl(
-                    state, stream, window, head, prev, pending, symbols, input, output, flush,
+                    state, stream, window, head, prev, buffers, input, output, flush,
                 )
             }
         },
@@ -3602,8 +3621,7 @@ fn deflate_fast_impl(
     window: &mut [crate::stdlib::Bytef],
     head: &mut [crate::src::deflate::Posf],
     prev: &mut [crate::src::deflate::Posf],
-    pending: &mut [crate::zutil_h::uch],
-    symbols: &mut [crate::zutil_h::uchf],
+    buffers: &mut DeflatePendingSymbols<'_>,
     input: &[crate::stdlib::Bytef],
     output: &mut [crate::stdlib::Bytef],
     flush: ::core::ffi::c_int,
@@ -3636,9 +3654,8 @@ fn deflate_fast_impl(
         }
         let bflush;
         if state.match_length >= crate::zutil_h::MIN_MATCH as crate::stdlib::uInt {
-            bflush = crate::src::trees::tally_bound(
+            bflush = buffers.tally(
                 state,
-                symbols,
                 state.strstart.wrapping_sub(state.match_start),
                 state
                     .match_length
@@ -3665,7 +3682,7 @@ fn deflate_fast_impl(
             }
         } else {
             let cc = literal_byte(window, state.strstart);
-            bflush = crate::src::trees::tally_bound(state, symbols, 0, cc as ::core::ffi::c_uint);
+            bflush = buffers.tally(state, 0, cc as ::core::ffi::c_uint);
             state.lookahead = state.lookahead.wrapping_sub(1);
             state.strstart = state.strstart.wrapping_add(1);
         }
@@ -3674,8 +3691,7 @@ fn deflate_fast_impl(
                 state,
                 stream,
                 window,
-                pending,
-                symbols,
+                buffers,
                 output,
                 &mut output_used,
                 0,
@@ -3697,8 +3713,7 @@ fn deflate_fast_impl(
             state,
             stream,
             window,
-            pending,
-            symbols,
+            buffers,
             output,
             &mut output_used,
             1,
@@ -3713,8 +3728,7 @@ fn deflate_fast_impl(
             state,
             stream,
             window,
-            pending,
-            symbols,
+            buffers,
             output,
             &mut output_used,
             0,
@@ -3745,8 +3759,7 @@ fn deflate_slow_impl(
     window: &mut [crate::stdlib::Bytef],
     head: &mut [crate::src::deflate::Posf],
     prev: &mut [crate::src::deflate::Posf],
-    pending: &mut [crate::zutil_h::uch],
-    symbols: &mut [crate::zutil_h::uchf],
+    buffers: &mut DeflatePendingSymbols<'_>,
     input: &[crate::stdlib::Bytef],
     output: &mut [crate::stdlib::Bytef],
     flush: ::core::ffi::c_int,
@@ -3803,9 +3816,8 @@ fn deflate_slow_impl(
                 .strstart
                 .wrapping_add(state.lookahead)
                 .wrapping_sub(crate::zutil_h::MIN_MATCH as crate::stdlib::uInt);
-            let bflush = crate::src::trees::tally_bound(
+            let bflush = buffers.tally(
                 state,
-                symbols,
                 (state.strstart as crate::src::deflate::IPos)
                     .wrapping_sub(1 as crate::src::deflate::IPos)
                     .wrapping_sub(state.prev_match),
@@ -3836,8 +3848,7 @@ fn deflate_slow_impl(
                     state,
                     stream,
                     window,
-                    pending,
-                    symbols,
+                    buffers,
                     output,
                     &mut output_used,
                     0,
@@ -3852,14 +3863,13 @@ fn deflate_slow_impl(
                 state.strstart.wrapping_sub(1 as crate::stdlib::uInt),
             );
             let bflush =
-                crate::src::trees::tally_bound(state, symbols, 0, cc as ::core::ffi::c_uint);
+                buffers.tally(state, 0, cc as ::core::ffi::c_uint);
             if bflush != 0 {
                 flush_symbol_block(
                     state,
                     stream,
                     window,
-                    pending,
-                    symbols,
+                    buffers,
                     output,
                     &mut output_used,
                     0,
@@ -3881,7 +3891,7 @@ fn deflate_slow_impl(
             window,
             state.strstart.wrapping_sub(1 as crate::stdlib::uInt),
         );
-        crate::src::trees::tally_bound(state, symbols, 0, cc_0 as ::core::ffi::c_uint);
+        buffers.tally(state, 0, cc_0 as ::core::ffi::c_uint);
         state.match_available = 0 as ::core::ffi::c_int;
     }
     state.insert = if state.strstart
@@ -3896,8 +3906,7 @@ fn deflate_slow_impl(
             state,
             stream,
             window,
-            pending,
-            symbols,
+            buffers,
             output,
             &mut output_used,
             1,
@@ -3912,8 +3921,7 @@ fn deflate_slow_impl(
             state,
             stream,
             window,
-            pending,
-            symbols,
+            buffers,
             output,
             &mut output_used,
             0,
@@ -3962,8 +3970,7 @@ fn deflate_rle_impl(
     window: &mut [crate::stdlib::Bytef],
     head: &mut [crate::src::deflate::Posf],
     prev: &mut [crate::src::deflate::Posf],
-    pending: &mut [crate::zutil_h::uch],
-    symbols: &mut [crate::zutil_h::uchf],
+    buffers: &mut DeflatePendingSymbols<'_>,
     input: &[crate::stdlib::Bytef],
     output: &mut [crate::stdlib::Bytef],
     flush: ::core::ffi::c_int,
@@ -3990,9 +3997,8 @@ fn deflate_rle_impl(
             state.match_length = rle_match_length(window, state.strstart, state.lookahead);
         }
         if state.match_length >= crate::zutil_h::MIN_MATCH as crate::stdlib::uInt {
-            bflush = crate::src::trees::tally_bound(
+            bflush = buffers.tally(
                 state,
-                symbols,
                 1,
                 state
                     .match_length
@@ -4003,7 +4009,7 @@ fn deflate_rle_impl(
             state.match_length = 0 as crate::stdlib::uInt;
         } else {
             let cc = literal_byte(window, state.strstart);
-            bflush = crate::src::trees::tally_bound(state, symbols, 0, cc as ::core::ffi::c_uint);
+            bflush = buffers.tally(state, 0, cc as ::core::ffi::c_uint);
             state.lookahead = state.lookahead.wrapping_sub(1);
             state.strstart = state.strstart.wrapping_add(1);
         }
@@ -4012,8 +4018,7 @@ fn deflate_rle_impl(
                 state,
                 stream,
                 window,
-                pending,
-                symbols,
+                buffers,
                 output,
                 &mut output_used,
                 0,
@@ -4029,8 +4034,7 @@ fn deflate_rle_impl(
             state,
             stream,
             window,
-            pending,
-            symbols,
+            buffers,
             output,
             &mut output_used,
             1,
@@ -4045,8 +4049,7 @@ fn deflate_rle_impl(
             state,
             stream,
             window,
-            pending,
-            symbols,
+            buffers,
             output,
             &mut output_used,
             0,
@@ -4072,8 +4075,7 @@ fn flush_symbol_block(
     state: &mut crate::src::deflate::deflate_state,
     stream: &mut crate::zlib_h::z_stream,
     window: &[crate::stdlib::Bytef],
-    pending: &mut [crate::zutil_h::uch],
-    symbols: &[crate::zutil_h::uchf],
+    buffers: &mut DeflatePendingSymbols<'_>,
     output: &mut [crate::stdlib::Bytef],
     output_used: &mut usize,
     last: ::core::ffi::c_int,
@@ -4085,17 +4087,20 @@ fn flush_symbol_block(
     // bounded source view used by the safe emitter.
     let source = block_start_bytes(window, state.block_start)
         .and_then(|bytes| bytes.get(..stored_len as usize));
+    // Block emission overwrites the pending allocation. Snapshot the symbol
+    // records first so the emitter can borrow that allocation exclusively.
+    let symbols = buffers.pending[buffers.symbols_start..buffers.symbols_start + state.sym_next as usize].to_vec();
     crate::src::trees::tr_flush_block_bound(
         state,
         stream,
-        pending,
+        buffers.pending,
         source,
-        &symbols[..state.sym_next as usize],
+        &symbols,
         stored_len,
         last,
     );
     state.block_start = state.strstart as ::core::ffi::c_long;
-    flush_pending_output(state, stream, pending, output, output_used);
+    flush_pending_output(state, stream, buffers.pending, output, output_used);
 }
 
 fn deflate_huff_impl(
@@ -4104,8 +4109,7 @@ fn deflate_huff_impl(
     window: &mut [crate::stdlib::Bytef],
     head: &mut [crate::src::deflate::Posf],
     prev: &mut [crate::src::deflate::Posf],
-    pending: &mut [crate::zutil_h::uch],
-    symbols: &mut [crate::zutil_h::uchf],
+    buffers: &mut DeflatePendingSymbols<'_>,
     input: &[crate::stdlib::Bytef],
     output: &mut [crate::stdlib::Bytef],
     flush: ::core::ffi::c_int,
@@ -4125,7 +4129,7 @@ fn deflate_huff_impl(
         }
         state.match_length = 0 as crate::stdlib::uInt;
         let cc = literal_byte(window, state.strstart);
-        bflush = crate::src::trees::tally_bound(state, symbols, 0, cc as ::core::ffi::c_uint);
+        bflush = buffers.tally(state, 0, cc as ::core::ffi::c_uint);
         state.lookahead = state.lookahead.wrapping_sub(1);
         state.strstart = state.strstart.wrapping_add(1);
         if bflush != 0 {
@@ -4133,8 +4137,7 @@ fn deflate_huff_impl(
                 state,
                 stream,
                 window,
-                pending,
-                symbols,
+                buffers,
                 output,
                 &mut output_used,
                 0,
@@ -4150,8 +4153,7 @@ fn deflate_huff_impl(
             state,
             stream,
             window,
-            pending,
-            symbols,
+            buffers,
             output,
             &mut output_used,
             1,
@@ -4166,8 +4168,7 @@ fn deflate_huff_impl(
             state,
             stream,
             window,
-            pending,
-            symbols,
+            buffers,
             output,
             &mut output_used,
             0,
