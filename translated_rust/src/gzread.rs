@@ -711,7 +711,7 @@ fn gz_decomp_loop(
 }
 
 unsafe fn gz_look(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
-    if state.size == 0 as ::core::ffi::c_uint {
+    if state.buffers.size == 0 as ::core::ffi::c_uint {
         let Some(buffers) = GzReadBuffers::allocate(state.want) else {
             crate::src::gzlib::GzErrorState {
                 message: &mut state.msg,
@@ -723,9 +723,9 @@ unsafe fn gz_look(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
             .set(crate::zlib_h::Z_MEM_ERROR, Some(b"out of memory"));
             return -1 as ::core::ffi::c_int;
         };
-        state.in_0 = Some(buffers.input);
-        state.out = Some(buffers.output);
-        state.size = buffers.size;
+        state.buffers.input = Some(buffers.input);
+        state.buffers.output = Some(buffers.output);
+        state.buffers.size = buffers.size;
         state.strm.zalloc = None;
         state.strm.zfree = None;
         state.strm.opaque = ::core::ptr::null_mut::<::core::ffi::c_void>();
@@ -738,9 +738,9 @@ unsafe fn gz_look(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
             ::core::mem::size_of::<crate::zlib_h::z_stream>() as ::core::ffi::c_int,
         ) != crate::zlib_h::Z_OK
         {
-            state.out = None;
-            state.in_0 = None;
-            state.size = 0 as ::core::ffi::c_uint;
+            state.buffers.output = None;
+            state.buffers.input = None;
+            state.buffers.size = 0 as ::core::ffi::c_uint;
             crate::src::gzlib::GzErrorState {
                 message: &mut state.msg,
                 error: &mut state.err,
@@ -770,7 +770,7 @@ unsafe fn gz_look(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
         crate::src::inflate::inflateReset(&raw mut state.strm as *mut crate::zlib_h::z_stream_s);
         return 0;
     }
-    let Some(mut input_cursor) = state.in_0.as_deref().and_then(|buffer| {
+    let Some(mut input_cursor) = state.buffers.input.as_deref().and_then(|buffer| {
         GzCodecInput::from_owned_buffer(buffer, state.strm.next_in.addr(), state.strm.avail_in)
     }) else {
         return -1 as ::core::ffi::c_int;
@@ -779,8 +779,8 @@ unsafe fn gz_look(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
         err: &mut state.err,
         eof: &mut state.eof,
         input_cursor: &mut input_cursor,
-        size: state.size as usize,
-        input: &mut state.in_0,
+        size: state.buffers.size as usize,
+        input: &mut state.buffers.input,
         fd: state.fd.as_ref().expect("gzip state has an open file"),
         again: &mut state.again,
         message: &mut state.msg,
@@ -791,13 +791,14 @@ unsafe fn gz_look(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
     {
         return -1 as ::core::ffi::c_int;
     }
-    state.strm.next_in = state.in_0.as_deref_mut().unwrap().as_mut_ptr();
+    state.strm.next_in = state.buffers.input.as_deref_mut().unwrap().as_mut_ptr();
     state.strm.avail_in = input_cursor.available();
     // The successful refill above leaves a checked owner cursor.  Retain that
     // index through copy detection instead of rebuilding a view from the ABI
     // stream pointer that is published only for the subsequent codec call.
     let Some(input) = state
-        .in_0
+        .buffers
+        .input
         .as_deref()
         .and_then(|buffer| input_cursor.bytes(buffer))
     else {
@@ -809,7 +810,7 @@ unsafe fn gz_look(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
         how: &mut state.how,
         again: state.again,
         input,
-        output: state.out.as_deref_mut(),
+        output: state.buffers.output.as_deref_mut(),
     });
     match action {
         Ok(GzLookAction::ResetGzip) => {
@@ -820,7 +821,7 @@ unsafe fn gz_look(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
         }
         Ok(GzLookAction::NeedInput) => 0,
         Ok(GzLookAction::Copy { have }) => {
-            let Some(output) = state.out.as_deref_mut() else {
+            let Some(output) = state.buffers.output.as_deref_mut() else {
                 return -1;
             };
             state.x.next = output.as_mut_ptr();
@@ -833,16 +834,16 @@ unsafe fn gz_look(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
 }
 
 unsafe fn gz_decomp(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
-    let output_len = (state.size << 1 as ::core::ffi::c_int) as usize;
+    let output_len = (state.buffers.size << 1 as ::core::ffi::c_int) as usize;
     // Publish the ABI codec cursor only after a pointer-free view proves that
     // its complete advertised output range lies in the owned gzip buffer.
-    let Some(next_out) = state.out.as_deref_mut().and_then(|buffer| {
+    let Some(next_out) = state.buffers.output.as_deref_mut().and_then(|buffer| {
         crate::src::gzlib::GzCodecOutputView::prefix(buffer, output_len)
             .map(|mut output| output.bytes_mut().as_mut_ptr())
     }) else {
         return -1 as ::core::ffi::c_int;
     };
-    let Some(input) = state.in_0.as_deref().and_then(|buffer| {
+    let Some(input) = state.buffers.input.as_deref().and_then(|buffer| {
         GzCodecInput::from_owned_buffer(buffer, state.strm.next_in.addr(), state.strm.avail_in)
     }) else {
         return -1 as ::core::ffi::c_int;
@@ -866,8 +867,8 @@ unsafe fn gz_decomp(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int
         let mut loop_state = GzDecompLoopState {
             err: &mut state.err,
             eof: &mut state.eof,
-            size: state.size as usize,
-            input: &mut state.in_0,
+            size: state.buffers.size as usize,
+            input: &mut state.buffers.input,
             fd: state.fd.as_ref().expect("gzip state has an open file"),
             again: &mut state.again,
             message: &mut state.msg,
@@ -916,7 +917,7 @@ unsafe fn gz_decomp(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int
     };
     state.x.have = finish.written as ::core::ffi::c_uint;
     state.x.next = output_start;
-    let Some(buffer) = state.in_0.as_deref_mut() else {
+    let Some(buffer) = state.buffers.input.as_deref_mut() else {
         return -1 as ::core::ffi::c_int;
     };
     state.strm.next_in = buffer.as_mut_ptr().wrapping_add(finish.input.cursor());
@@ -939,7 +940,7 @@ unsafe fn gz_fetch(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int 
                 }
                 GzFetchAction::Copy => {
                     let (ret, have) = match gz_copy_load(GzCopyLoadState {
-                        output: &mut state.out,
+                        output: &mut state.buffers.output,
                         fd: state.fd.as_ref().unwrap(),
                         target: GzLoadTarget {
                             again: &mut state.again,
@@ -957,7 +958,7 @@ unsafe fn gz_fetch(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int 
                     if ret == -1 as ::core::ffi::c_int {
                         return Err(());
                     }
-                    state.x.next = state.out.as_deref_mut().unwrap().as_mut_ptr();
+                    state.x.next = state.buffers.output.as_deref_mut().unwrap().as_mut_ptr();
                 }
                 GzFetchAction::Gzip => {
                     if gz_decomp(state) == -1 as ::core::ffi::c_int {
@@ -997,7 +998,7 @@ unsafe fn gz_skip(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
         let cursor = if state.x.have == 0 {
             0
         } else {
-            let Some(cursor) = state.out.as_deref().and_then(|buffer| {
+            let Some(cursor) = state.buffers.output.as_deref().and_then(|buffer| {
                 crate::src::gzlib::GzBufferedCursor::from_owned_buffer(
                     buffer,
                     state.x.next.addr(),
@@ -1011,7 +1012,7 @@ unsafe fn gz_skip(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
             cursor
         };
         let mut skip = GzSkipState {
-            buffer: state.out.as_deref(),
+            buffer: state.buffers.output.as_deref(),
             cursor,
             have: state.x.have,
             pos: state.x.pos,
@@ -1027,7 +1028,7 @@ unsafe fn gz_skip(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
             }
             Ok(step @ (GzSkipStep::Advanced | GzSkipStep::Done)) => {
                 if skip.have != 0 {
-                    let Some(buffer) = state.out.as_deref() else {
+                    let Some(buffer) = state.buffers.output.as_deref() else {
                         return -1 as ::core::ffi::c_int;
                     };
                     state.x.next = buffer.as_ptr().wrapping_add(skip.cursor).cast_mut();
@@ -1075,7 +1076,7 @@ unsafe fn gz_read(
                 // `x.have` is nonzero here. Rebuild the buffered input with
                 // a checked range so a corrupt cursor cannot extend a raw
                 // slice beyond that allocation.
-                let Some((input, next)) = state.out.as_deref().and_then(|buffer| {
+                let Some((input, next)) = state.buffers.output.as_deref().and_then(|buffer| {
                     crate::src::gzlib::GzBufferedCursor::from_owned_buffer(
                         buffer,
                         state.x.next.addr(),
@@ -1090,7 +1091,7 @@ unsafe fn gz_read(
                     return got;
                 };
                 copy_buffered_input(input, destination);
-                let Some(buffer) = state.out.as_deref() else {
+                let Some(buffer) = state.buffers.output.as_deref() else {
                     return got;
                 };
                 state.x.next = buffer.as_ptr().wrapping_add(next).cast_mut();
@@ -1102,7 +1103,9 @@ unsafe fn gz_read(
                 if state.eof != 0 && state.strm.avail_in == 0 as crate::stdlib::uInt {
                     break 's_140;
                 }
-                if state.how == crate::gzguts_h::LOOK || n < state.size << 1 as ::core::ffi::c_int {
+                if state.how == crate::gzguts_h::LOOK
+                    || n < state.buffers.size << 1 as ::core::ffi::c_int
+                {
                     if gz_fetch(state) == -1 as ::core::ffi::c_int
                         && state.x.have == 0 as ::core::ffi::c_uint
                     {
@@ -1284,7 +1287,7 @@ unsafe fn gzgetc(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
         // Convert the ABI cursor once at this boundary.  The cursor view
         // checks the complete advertised unread range before the safe read
         // policy consumes its first byte.
-        let Some((byte, next)) = state.out.as_deref().and_then(|buffer| {
+        let Some((byte, next)) = state.buffers.output.as_deref().and_then(|buffer| {
             crate::src::gzlib::GzBufferedCursor::from_owned_buffer(
                 buffer,
                 state.x.next.addr(),
@@ -1294,7 +1297,7 @@ unsafe fn gzgetc(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
         }) else {
             return -1 as ::core::ffi::c_int;
         };
-        let Some(buffer) = state.out.as_deref() else {
+        let Some(buffer) = state.buffers.output.as_deref() else {
             return -1 as ::core::ffi::c_int;
         };
         state.x.have = state.x.have.wrapping_sub(1);
@@ -1352,7 +1355,7 @@ unsafe fn gzungetc(
     if c < 0 as ::core::ffi::c_int {
         return -1 as ::core::ffi::c_int;
     }
-    if state.x.have != 0 && state.x.have == state.size << 1 as ::core::ffi::c_int {
+    if state.x.have != 0 && state.x.have == state.buffers.size << 1 as ::core::ffi::c_int {
         crate::src::gzlib::gz_set_error(
             &mut state.msg,
             &mut state.err,
@@ -1364,11 +1367,11 @@ unsafe fn gzungetc(
         );
         return -1 as ::core::ffi::c_int;
     }
-    let size = state.size as usize;
+    let size = state.buffers.size as usize;
     let Some(capacity) = size.checked_mul(2) else {
         return -1 as ::core::ffi::c_int;
     };
-    let buffer = &mut state.out.as_deref_mut().unwrap()[..capacity];
+    let buffer = &mut state.buffers.output.as_deref_mut().unwrap()[..capacity];
     let Some((next, have)) = crate::src::gzlib::GzBufferedCursor::prepend(
         buffer,
         state.x.next.addr(),
@@ -1445,7 +1448,7 @@ unsafe fn gzgets(
                 // unread range before borrowing its requested prefix, so a
                 // corrupt cursor or `x.have` cannot extend a raw slice past
                 // the allocation's remaining capacity.
-                let Some((input, _)) = state.out.as_deref().and_then(|buffer| {
+                let Some((input, _)) = state.buffers.output.as_deref().and_then(|buffer| {
                     crate::src::gzlib::GzBufferedCursor::from_owned_buffer(
                         buffer,
                         state.x.next.addr(),
@@ -1518,12 +1521,12 @@ pub unsafe fn gzclose_r(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c
     if state.mode != crate::gzguts_h::GZ_READ {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    if state.size != 0 {
+    if state.buffers.size != 0 {
         crate::src::inflate::inflateEnd(
             &raw mut state.strm as *mut _ as *mut crate::zlib_h::z_stream_s,
         );
-        state.out = None;
-        state.in_0 = None;
+        state.buffers.output = None;
+        state.buffers.input = None;
     }
     err = if state.err == crate::zlib_h::Z_BUF_ERROR {
         crate::zlib_h::Z_BUF_ERROR

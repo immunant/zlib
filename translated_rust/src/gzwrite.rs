@@ -197,8 +197,8 @@ unsafe fn gz_init(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
         .set(crate::zlib_h::Z_MEM_ERROR, Some(b"out of memory"));
         return -1 as ::core::ffi::c_int;
     };
-    state.in_0 = Some(buffers.input);
-    state.out = buffers.output;
+    state.buffers.input = Some(buffers.input);
+    state.buffers.output = buffers.output;
     if state.direct == 0 {
         state.strm.zalloc = None;
         state.strm.zfree = None;
@@ -214,8 +214,8 @@ unsafe fn gz_init(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
             ::core::mem::size_of::<crate::zlib_h::z_stream>() as ::core::ffi::c_int,
         );
         if ret != crate::zlib_h::Z_OK {
-            state.out = None;
-            state.in_0 = None;
+            state.buffers.output = None;
+            state.buffers.input = None;
             crate::src::gzlib::GzErrorState {
                 message: &mut state.msg,
                 error: &mut state.err,
@@ -228,10 +228,10 @@ unsafe fn gz_init(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
         }
         state.strm.next_in = ::core::ptr::null_mut::<crate::stdlib::Bytef>();
     }
-    state.size = buffers.size;
+    state.buffers.size = buffers.size;
     if state.direct == 0 {
-        state.strm.avail_out = state.size as crate::stdlib::uInt;
-        state.strm.next_out = state.out.as_deref_mut().unwrap().as_mut_ptr();
+        state.strm.avail_out = state.buffers.size as crate::stdlib::uInt;
+        state.strm.next_out = state.buffers.output.as_deref_mut().unwrap().as_mut_ptr();
         state.x.next = state.strm.next_out as *mut ::core::ffi::c_uchar;
     }
     return 0 as ::core::ffi::c_int;
@@ -248,7 +248,8 @@ unsafe fn gz_comp(
     let mut max: ::core::ffi::c_uint = (-1 as ::core::ffi::c_int as ::core::ffi::c_uint
         >> 2 as ::core::ffi::c_int)
         .wrapping_add(1 as ::core::ffi::c_uint);
-    if state.size == 0 as ::core::ffi::c_uint && gz_init(state) == -1 as ::core::ffi::c_int {
+    if state.buffers.size == 0 as ::core::ffi::c_uint && gz_init(state) == -1 as ::core::ffi::c_int
+    {
         return -1 as ::core::ffi::c_int;
     }
     if state.direct != 0 {
@@ -260,7 +261,7 @@ unsafe fn gz_comp(
                 state.strm.avail_in as ::core::ffi::c_uint
             };
             let write = {
-                let Some(buffer) = state.in_0.as_deref() else {
+                let Some(buffer) = state.buffers.input.as_deref() else {
                     return -1;
                 };
                 let Some(buffered) = crate::src::gzlib::GzBufferedCursor::from_owned_buffer(
@@ -317,7 +318,7 @@ unsafe fn gz_comp(
             while state.strm.next_out > state.x.next {
                 state.again = 0 as ::core::ffi::c_int;
                 let write = {
-                    let Some(buffer) = state.out.as_deref() else {
+                    let Some(buffer) = state.buffers.output.as_deref() else {
                         return -1;
                     };
                     let Some(buffered_len) =
@@ -366,8 +367,8 @@ unsafe fn gz_comp(
                 }
             }
             if state.strm.avail_out == 0 as crate::stdlib::uInt {
-                state.strm.avail_out = state.size as crate::stdlib::uInt;
-                state.strm.next_out = state.out.as_deref_mut().unwrap().as_mut_ptr();
+                state.strm.avail_out = state.buffers.size as crate::stdlib::uInt;
+                state.strm.next_out = state.buffers.output.as_deref_mut().unwrap().as_mut_ptr();
                 state.x.next = state.strm.next_out;
             }
         }
@@ -411,10 +412,11 @@ unsafe fn gz_zero(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
     }
     first = 1 as ::core::ffi::c_int;
     loop {
-        let step = GzZeroStep::new(state.size, state.skip);
+        let step = GzZeroStep::new(state.buffers.size, state.skip);
         if first != 0 {
             if state
-                .in_0
+                .buffers
+                .input
                 .as_deref_mut()
                 .and_then(|input| step.zero_input(input))
                 .is_none()
@@ -424,7 +426,7 @@ unsafe fn gz_zero(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
             first = 0 as ::core::ffi::c_int;
         }
         state.strm.avail_in = step.input_len;
-        state.strm.next_in = state.in_0.as_deref_mut().unwrap().as_mut_ptr();
+        state.strm.next_in = state.buffers.input.as_deref_mut().unwrap().as_mut_ptr();
         ret = gz_comp(state, crate::zlib_h::Z_NO_FLUSH);
         let progress = step.finish(state.strm.avail_in, state.x.pos, state.skip);
         state.x.pos = progress.position;
@@ -449,17 +451,19 @@ unsafe fn gz_write(
     if len == 0 as crate::stdlib::z_size_t {
         return 0 as crate::stdlib::z_size_t;
     }
-    if state.size == 0 as ::core::ffi::c_uint && gz_init(state) == -1 as ::core::ffi::c_int {
+    if state.buffers.size == 0 as ::core::ffi::c_uint && gz_init(state) == -1 as ::core::ffi::c_int
+    {
         return 0 as crate::stdlib::z_size_t;
     }
     if state.skip != 0 && gz_zero(state) == -1 as ::core::ffi::c_int {
         return 0 as crate::stdlib::z_size_t;
     }
-    if len < state.size as crate::stdlib::z_size_t {
+    if len < state.buffers.size as crate::stdlib::z_size_t {
         loop {
             let (copy, have) = {
                 let strm = &mut state.strm;
-                let buffer = &mut state.in_0.as_deref_mut().unwrap()[..state.size as usize];
+                let buffer =
+                    &mut state.buffers.input.as_deref_mut().unwrap()[..state.buffers.size as usize];
                 if strm.avail_in == 0 as crate::stdlib::uInt {
                     strm.next_in = buffer.as_mut_ptr();
                 }
@@ -694,11 +698,11 @@ unsafe fn gzputc(
     if state.skip != 0 && gz_zero(state) == -1 as ::core::ffi::c_int {
         return -1 as ::core::ffi::c_int;
     }
-    if state.size != 0 {
-        let size = state.size as usize;
+    if state.buffers.size != 0 {
+        let size = state.buffers.size as usize;
         let (copy, available) = {
             let strm = &mut state.strm;
-            let Some(buffer) = state.in_0.as_deref_mut() else {
+            let Some(buffer) = state.buffers.input.as_deref_mut() else {
                 return -1 as ::core::ffi::c_int;
             };
             let Some(buffer) = buffer.get_mut(..size) else {
@@ -867,7 +871,7 @@ unsafe fn gzsetparams(
     if state.skip != 0 && gz_zero(state) == -1 as ::core::ffi::c_int {
         return state.err;
     }
-    if state.size != 0 {
+    if state.buffers.size != 0 {
         if state.strm.avail_in != 0
             && gz_comp(state, crate::zlib_h::Z_BLOCK) == -1 as ::core::ffi::c_int
         {
@@ -906,14 +910,14 @@ pub unsafe fn gzclose_w(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c
     if gz_comp(state, crate::zlib_h::Z_FINISH) == -1 as ::core::ffi::c_int {
         ret = state.err;
     }
-    if state.size != 0 {
+    if state.buffers.size != 0 {
         if state.direct == 0 {
             crate::src::deflate::deflateEnd(
                 &raw mut state.strm as *mut _ as *mut crate::zlib_h::z_stream_s,
             );
-            state.out = None;
+            state.buffers.output = None;
         }
-        state.in_0 = None;
+        state.buffers.input = None;
     }
     crate::src::gzlib::gz_clear_error(&mut state.msg, &mut state.err);
     state.path = None;

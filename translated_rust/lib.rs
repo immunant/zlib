@@ -36,8 +36,16 @@ pub mod gzguts_h {
 
     pub const GZIP: ::core::ffi::c_int = 2;
 
-    #[repr(C)]
+    // The opaque handle owns its two working buffers as one resource.  Their
+    // cursors are still published through `x` and `strm` at the ABI boundary,
+    // but core code can now move the allocation/cursor facade as one unit.
+    pub struct GzBuffers {
+        pub size: ::core::ffi::c_uint,
+        pub input: Option<Box<[u8]>>,
+        pub output: Option<Box<[u8]>>,
+    }
 
+    #[repr(C)]
     pub struct gz_state {
         pub x: crate::zlib_h::gzFile_s,
         pub mode: ::core::ffi::c_int,
@@ -48,12 +56,11 @@ pub mod gzguts_h {
         // `gz_state` is opaque at the C boundary.  Keep the path owned by the
         // handle rather than retaining a separately allocated C pointer.
         pub path: Option<Box<[u8]>>,
-        pub size: ::core::ffi::c_uint,
         pub want: ::core::ffi::c_uint,
-        // These buffers are opaque-handle resources.  Keep them owned so the
-        // cursors exposed through `x` and `strm` cannot outlive their storage.
-        pub in_0: Option<Box<[u8]>>,
-        pub out: Option<Box<[u8]>>,
+        // These buffers are opaque-handle resources.  Keep them owned as one
+        // state component so the cursors exposed through `x` and `strm`
+        // cannot outlive their storage.
+        pub buffers: GzBuffers,
         pub direct: ::core::ffi::c_int,
         pub junk: ::core::ffi::c_int,
         pub how: ::core::ffi::c_int,

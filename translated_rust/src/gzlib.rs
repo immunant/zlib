@@ -1280,10 +1280,12 @@ unsafe fn gz_open(path: &[u8], fd: ::core::ffi::c_int, mode: &[u8]) -> crate::zl
         mode: initial.reset.mode,
         fd: Some(initial.fd),
         path: Some(initial.path),
-        size: initial.size,
         want: initial.want,
-        in_0: None,
-        out: None,
+        buffers: crate::gzguts_h::GzBuffers {
+            size: initial.size,
+            input: None,
+            output: None,
+        },
         direct: initial.direct,
         junk: initial.reset.junk,
         how: initial.reset.how,
@@ -1390,7 +1392,7 @@ pub unsafe extern "C" fn gzbuffer_ffi(
     let Some(state) = (file as crate::gzguts_h::gz_statep).as_mut() else {
         return -1 as ::core::ffi::c_int;
     };
-    gzbuffer(state.mode, state.size, &mut state.want, size)
+    gzbuffer(state.mode, state.buffers.size, &mut state.want, size)
 }
 fn gzrewind(state: GzRewindState<'_>) -> ::core::ffi::c_int {
     if state.mode != crate::gzguts_h::GZ_READ
@@ -1595,7 +1597,7 @@ pub unsafe extern "C" fn gzseek64_ffi(
     let buffered = if state.x.have == 0 {
         None
     } else {
-        let Some(buffer) = state.out.as_deref() else {
+        let Some(buffer) = state.buffers.output.as_deref() else {
             return -1 as crate::stdlib::off64_t;
         };
         let Some(buffered) =
@@ -1657,7 +1659,7 @@ pub unsafe extern "C" fn gzseek_ffi(
     let buffered = if state.x.have == 0 {
         None
     } else {
-        let Some(buffer) = state.out.as_deref() else {
+        let Some(buffer) = state.buffers.output.as_deref() else {
             return -1 as crate::stdlib::off_t;
         };
         let Some(buffered) =
