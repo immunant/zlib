@@ -1462,16 +1462,12 @@ pub unsafe extern "C" fn gzungetc_ffi(
     gzungetc(c, state)
 }
 unsafe fn gzgets(
-    mut state: Option<::core::ptr::NonNull<crate::gzguts_h::gz_state>>,
+    state: &mut crate::gzguts_h::gz_state,
     output: &mut [u8],
 ) -> *mut ::core::ffi::c_char {
     if output.is_empty() {
         return ::core::ptr::null_mut::<::core::ffi::c_char>();
     }
-    let Some(mut state) = state else {
-        return ::core::ptr::null_mut::<::core::ffi::c_char>();
-    };
-    let state = state.as_mut();
     let policy = GzReadPolicy {
         mode: state.mode,
         err: state.err,
@@ -1607,11 +1603,14 @@ pub unsafe extern "C" fn gzgets_ffi(
     if file.is_null() || buf.is_null() || len < 1 as ::core::ffi::c_int {
         return ::core::ptr::null_mut::<::core::ffi::c_char>();
     }
+    // The opaque handle is checked and borrowed at the ABI boundary.  The
+    // implementation receives only that validated state plus the bounded
+    // caller output, so its read/LOOK transitions remain out of this wrapper.
+    let Some(state) = (file as crate::gzguts_h::gz_statep).as_mut() else {
+        return ::core::ptr::null_mut::<::core::ffi::c_char>();
+    };
     let output = ::core::slice::from_raw_parts_mut(buf.cast::<u8>(), len as usize);
-    gzgets(
-        ::core::ptr::NonNull::new(file as crate::gzguts_h::gz_statep),
-        output,
-    )
+    gzgets(state, output)
 }
 unsafe fn gzdirect(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
     if matches!(
