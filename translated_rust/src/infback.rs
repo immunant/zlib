@@ -521,34 +521,13 @@ pub unsafe extern "C" fn inflateBack_ffi(
                             continue;
                         } else {
                             let state_ref = &mut *state;
-                            let codes_base = state_ref.codes.as_mut_ptr();
-                            state_ref.next = codes_base;
-                            state_ref.lencode = codes_base as *const crate::src::inftrees::code;
-                            match crate::src::inflate::inflate_build_dynamic_tables(
-                                &state_ref.lens,
-                                state_ref.nlen,
-                                state_ref.ndist,
-                                &mut state_ref.codes,
-                                &mut state_ref.work,
-                            ) {
-                                crate::src::inflate::InflateDynamicTables::Built {
-                                    lens_used,
-                                    total_used,
-                                    lenbits,
-                                    distbits,
-                                } => {
-                                    state_ref.lenbits = lenbits;
-                                    state_ref.next = codes_base.wrapping_add(lens_used);
-                                    state_ref.distcode =
-                                        state_ref.next as *const crate::src::inftrees::code;
-                                    state_ref.distbits = distbits;
-                                    state_ref.next = codes_base.wrapping_add(total_used);
+                            match crate::src::inflate::inflate_setup_dynamic_tables(state_ref) {
+                                crate::src::inflate::InflateDynamicTables::Built { .. } => {
                                     state_ref.mode = crate::src::inflate::LEN;
                                 }
                                 crate::src::inflate::InflateDynamicTables::InvalidLiteralLengths {
-                                    lenbits,
+                                    ..
                                 } => {
-                                    state_ref.lenbits = lenbits;
                                     (*strm).msg = b"invalid literal/lengths set\0".as_ptr()
                                         as *const ::core::ffi::c_char
                                         as *mut ::core::ffi::c_char;
@@ -556,15 +535,8 @@ pub unsafe extern "C" fn inflateBack_ffi(
                                     continue;
                                 }
                                 crate::src::inflate::InflateDynamicTables::InvalidDistances {
-                                    lens_used,
-                                    lenbits,
-                                    distbits,
+                                    ..
                                 } => {
-                                    state_ref.lenbits = lenbits;
-                                    state_ref.next = codes_base.wrapping_add(lens_used);
-                                    state_ref.distcode =
-                                        state_ref.next as *const crate::src::inftrees::code;
-                                    state_ref.distbits = distbits;
                                     (*strm).msg = b"invalid distances set\0".as_ptr()
                                         as *const ::core::ffi::c_char
                                         as *mut ::core::ffi::c_char;

@@ -2436,11 +2436,10 @@ pub unsafe extern "C" fn deflateCopy_ffi(
     return crate::zlib_h::Z_OK;
 }
 fn longest_match(
-    s: *mut crate::src::deflate::deflate_state,
+    s: &mut crate::src::deflate::deflate_state,
     mut cur_match: crate::src::deflate::IPos,
 ) -> crate::stdlib::uInt {
     unsafe {
-        let s = &mut *s;
         let mut chain_length: ::core::ffi::c_uint = s.max_chain_length as ::core::ffi::c_uint;
         let mut scan: *mut crate::stdlib::Bytef = s.window.wrapping_offset(s.strstart as isize);
         let mut match_0: *mut crate::stdlib::Bytef =
@@ -2963,7 +2962,7 @@ fn deflate_fast(
                         .w_size
                         .wrapping_sub(crate::src::deflate::MIN_LOOKAHEAD as crate::stdlib::uInt)
             {
-                state.match_length = longest_match(s, hash_head);
+                state.match_length = longest_match(state, hash_head);
             }
             if state.match_length >= crate::zutil_h::MIN_MATCH as crate::stdlib::uInt {
                 let len: crate::zutil_h::uch =
@@ -3167,7 +3166,7 @@ fn deflate_slow(
                         .w_size
                         .wrapping_sub(crate::src::deflate::MIN_LOOKAHEAD as crate::stdlib::uInt)
             {
-                state.match_length = longest_match(s, hash_head);
+                state.match_length = longest_match(state, hash_head);
                 if state.match_length <= 5 as crate::stdlib::uInt
                     && (state.strategy == crate::zlib_h::Z_FILTERED
                         || state.match_length == crate::zutil_h::MIN_MATCH as crate::stdlib::uInt
