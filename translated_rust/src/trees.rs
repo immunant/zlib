@@ -4626,20 +4626,28 @@ pub unsafe extern "C" fn _tr_flush_bits_ffi(mut s: *mut crate::src::deflate::def
     );
     tr_flush_bits(state, pending)
 }
+// Aligning a block only changes the bit buffer and the already-owned pending
+// output. Keep those writes safe once the raw adapter has bound the buffer.
+pub fn tr_align(
+    state: &mut crate::src::deflate::deflate_state,
+    pending: &mut [crate::zutil_h::uch],
+    end_code: crate::zutil_h::ush,
+    end_len: ::core::ffi::c_int,
+) {
+    bi_send_bits(state, pending, 2, 3);
+    bi_send_bits(state, pending, end_code, end_len);
+    bi_flush_state(state, pending);
+}
+
 pub unsafe extern "C" fn _tr_align(mut s: *mut crate::src::deflate::deflate_state) {
-    // This ABI-facing implementation binds its initialized state and pending
-    // allocation once. The alignment bit writes themselves are ordinary
-    // slice-and-reference operations below.
     let state = &mut *s;
     let pending = ::core::slice::from_raw_parts_mut(
         state.pending_buf,
         state.pending_buf_size as usize,
     );
-    bi_send_bits(state, pending, 2, 3);
     let end_code = static_ltree[256].fc.code;
     let end_len = static_ltree[256].dl.len as ::core::ffi::c_int;
-    bi_send_bits(state, pending, end_code, end_len);
-    bi_flush_state(state, pending);
+    tr_align(state, pending, end_code, end_len);
 }
 #[export_name = "_tr_align"]
 
