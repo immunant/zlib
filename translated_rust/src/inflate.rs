@@ -673,7 +673,7 @@ fn initialize_inflate_state_base(
 /// The arbitrary callback allocation remains the one local unsafe boundary.
 /// Initialization and reset policy receive only a typed state reference, so
 /// they cannot form an initialized reference before the value exists.
-fn with_callback_inflate_state_slot<R>(
+pub(crate) fn with_callback_inflate_state_slot<R>(
     strm: &mut crate::zlib_h::z_stream,
     value: crate::src::inflate::inflate_state,
     initialize: impl FnOnce(
