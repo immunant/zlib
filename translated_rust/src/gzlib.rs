@@ -176,29 +176,33 @@ pub(crate) fn gz_set_copy_input(
     state: &mut crate::gzguts_h::gz_state,
     copied: ::core::ffi::c_uint,
 ) {
+    state.x.next = state.out;
     state.x.have = copied;
     state.strm.avail_in = 0;
     state.how = crate::gzguts_h::COPY;
 }
 
-// Once gzip input is available, the look adapter only has three choices:
-// wait for a complete signature, inspect it, or retain the short non-gzip
-// input as a transparent copy.  Keep those state decisions out of the raw
-// input-buffer access in gz_look.
-pub(crate) enum GzLookInputPlan {
+// Once gzip input is available, the look adapter either waits for a complete
+// signature, starts a gzip member, or retains the input as a transparent
+// copy.  Signature access remains at the raw input-buffer adapter; all
+// classification and state choices stay here.
+pub(crate) enum GzLookPlan {
     NeedMore,
-    InspectHeader,
-    Copy(::core::ffi::c_uint),
+    Gzip,
+    Copy,
 }
 
-pub(crate) fn gz_look_input_plan(state: &crate::gzguts_h::gz_state) -> GzLookInputPlan {
+pub(crate) fn gz_look_plan(
+    state: &crate::gzguts_h::gz_state,
+    header: Option<[::core::ffi::c_uchar; 4]>,
+) -> GzLookPlan {
     let available = state.strm.avail_in as ::core::ffi::c_uint;
     if available == 0 || (state.again != 0 && available < 4) {
-        GzLookInputPlan::NeedMore
-    } else if available > 3 {
-        GzLookInputPlan::InspectHeader
+        GzLookPlan::NeedMore
+    } else if header.is_some_and(gz_is_gzip_header) {
+        GzLookPlan::Gzip
     } else {
-        GzLookInputPlan::Copy(available)
+        GzLookPlan::Copy
     }
 }
 
