@@ -3111,6 +3111,16 @@ unsafe extern "C" fn deflate_stored(
         state.window.expect("initialized window").as_ptr(),
         state.window_size as usize,
     );
+    // Both stored-block emissions below use the same declared pending
+    // allocation. Keep it as a bounded view for the whole stored-mode call
+    // instead of routing either emission back through the raw state API.
+    let pending_buf = ::core::slice::from_raw_parts_mut(
+        state
+            .pending_buf
+            .expect("initialized pending buffer")
+            .as_ptr(),
+        state.pending_buf_size as usize,
+    );
     let mut min_block: ::core::ffi::c_uint = (if state
         .pending_buf_size
         .wrapping_sub(5 as crate::zutil_h::ulg)
@@ -3161,18 +3171,15 @@ unsafe extern "C" fn deflate_stored(
         } else {
             0 as ::core::ffi::c_int
         };
-        crate::src::trees::_tr_stored_block(
-            s as *mut crate::src::deflate::internal_state,
-            ::core::ptr::null_mut::<crate::stdlib::charf>(),
+        crate::src::trees::stored_block_bytes(
+            pending_buf,
+            &mut state.pending,
+            &mut state.bi_buf,
+            &mut state.bi_valid,
+            &mut state.bi_used,
+            &[],
             0 as crate::zutil_h::ulg,
             last,
-        );
-        let pending_buf = ::core::slice::from_raw_parts_mut(
-            state
-                .pending_buf
-                .expect("initialized pending buffer")
-                .as_ptr(),
-            state.pending_buf_size as usize,
         );
         set_stored_block_length(pending_buf, state.pending, len);
         flush_pending(state.strm.as_ptr());
@@ -3297,13 +3304,6 @@ unsafe extern "C" fn deflate_stored(
         stream.avail_in = stream.avail_in.wrapping_sub(have);
         let input = ::core::slice::from_raw_parts(stream.next_in, have as usize);
         let next_in = input.as_ptr_range().end.cast_mut();
-        // `window` is allocated with exactly `window_size` bytes in
-        // `deflateInit2_()` and `deflateCopy()`, and `have` is capped by the
-        // remaining capacity from `strstart` above.
-        let window = ::core::slice::from_raw_parts_mut(
-            state.window.expect("initialized window").as_ptr(),
-            state.window_size as usize,
-        );
         let output = &mut window[start..start + have as usize];
         stream.adler = read_buf_bytes(input, output, stream.adler, wrap);
         stream.next_in = next_in;
@@ -3356,10 +3356,15 @@ unsafe extern "C" fn deflate_stored(
         } else {
             0 as ::core::ffi::c_int
         };
-        crate::src::trees::_tr_stored_block(
-            s as *mut crate::src::deflate::internal_state,
-            (state.window.expect("initialized window").as_ptr() as *mut crate::stdlib::charf)
-                .wrapping_add(state.block_start as usize),
+        let start = state.block_start as usize;
+        let input = &window[start..start + len as usize];
+        crate::src::trees::stored_block_bytes(
+            pending_buf,
+            &mut state.pending,
+            &mut state.bi_buf,
+            &mut state.bi_valid,
+            &mut state.bi_used,
+            input,
             len as crate::zutil_h::ulg,
             last,
         );

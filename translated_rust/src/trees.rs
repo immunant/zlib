@@ -3196,7 +3196,10 @@ fn send_all_trees(
         bi_valid,
     );
 }
-fn stored_block_bytes(
+// Emit a stored block through already-bounded pending and input views.  State
+// owners construct those views at their projection boundary, which keeps
+// stored-mode callers from having to republish allocation cursors.
+pub(crate) fn stored_block_bytes(
     pending_buf: &mut [crate::stdlib::Bytef],
     pending: &mut crate::zutil_h::ulg,
     bi_buf: &mut crate::zutil_h::ush,
