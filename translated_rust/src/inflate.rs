@@ -1220,28 +1220,19 @@ pub fn inflate(
     input: Option<&[crate::stdlib::Bytef]>,
     output: Option<&mut [crate::stdlib::Bytef]>,
 ) -> ::core::ffi::c_int {
-    unsafe {
-        // The exported wrapper and internal callers provide a live stream
-        // reference. Keep the translated raw-state implementation below local
-        // until stream ownership is converted.
-        if !inflate_stream_has_allocators(strm)
-            || strm.next_out.is_null()
-            || strm.avail_in != 0 as crate::stdlib::uInt
-                && (strm.next_in.is_null()
-                    || input.map_or(true, |input| input.len() != strm.avail_in as usize))
-            || output.as_ref().map_or(true, |output| {
-                output.len() != strm.avail_out as usize
-                    || (strm.avail_out != 0 && output.as_ptr() != strm.next_out)
-            })
-        {
-            return crate::zlib_h::Z_STREAM_ERROR;
-        }
-        // Check the allocator pair before following `state`, then retain the
-        // validated pointer for the translated engine below.
-        let Some(state_ref) = (strm.state as *mut crate::src::inflate::inflate_state).as_mut()
-        else {
-            return crate::zlib_h::Z_STREAM_ERROR;
-        };
+    if !inflate_stream_has_allocators(strm)
+        || strm.next_out.is_null()
+        || strm.avail_in != 0 as crate::stdlib::uInt
+            && (strm.next_in.is_null()
+                || input.map_or(true, |input| input.len() != strm.avail_in as usize))
+        || output.as_ref().map_or(true, |output| {
+            output.len() != strm.avail_out as usize
+                || (strm.avail_out != 0 && output.as_ptr() != strm.next_out)
+        })
+    {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    }
+    with_inflate_stream_state(strm, |strm, state_ref| unsafe {
         if !inflate_state_valid(strm, state_ref) {
             return crate::zlib_h::Z_STREAM_ERROR;
         }
@@ -3187,7 +3178,8 @@ pub fn inflate(
             ret = crate::zlib_h::Z_BUF_ERROR;
         }
         return ret;
-    }
+    })
+    .unwrap_or(crate::zlib_h::Z_STREAM_ERROR)
 }
 #[export_name = "inflate"]
 
