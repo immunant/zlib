@@ -109,7 +109,10 @@ pub struct inflate_state {
     pub dmax: ::core::ffi::c_uint,
     pub check: ::core::ffi::c_ulong,
     pub total: ::core::ffi::c_ulong,
-    pub head: crate::zlib_h::gz_headerp,
+    // A registered caller header remains an ABI-boundary handle.  Keep
+    // nullability in the state explicitly so decoder code need not carry a
+    // nullable raw pointer between header fields.
+    pub head: Option<::core::ptr::NonNull<crate::zlib_h::gz_header_s>>,
     pub wbits: ::core::ffi::c_uint,
     pub wsize: ::core::ffi::c_uint,
     pub whave: ::core::ffi::c_uint,
@@ -232,7 +235,7 @@ pub unsafe extern "C" fn inflateResetKeep(
     (*state).havedict = 0 as ::core::ffi::c_int;
     (*state).flags = -1 as ::core::ffi::c_int;
     (*state).dmax = 32768 as ::core::ffi::c_uint;
-    (*state).head = ::core::ptr::null_mut::<crate::zlib_h::gz_header>();
+    (*state).head = None;
     (*state).hold = 0 as ::core::ffi::c_ulong;
     (*state).bits = 0 as ::core::ffi::c_uint;
     (*state).next = 0;
@@ -672,8 +675,8 @@ pub unsafe extern "C" fn inflate(
                                                                                                             (*state).mode = crate::src::inflate::FLAGS;
                                                                                                             continue '_inf_leave;
                                                                                                         } else {
-                                                                                                            if !(*state).head.is_null() {
-                                                                                                                (*(*state).head).done = -1 as ::core::ffi::c_int;
+                                            if let Some(head) = (*state).head {
+                                                                                                                (*head.as_ptr()).done = -1 as ::core::ffi::c_int;
                                                                                                             }
                                                                                                             if (*state).wrap & 1 as ::core::ffi::c_int == 0
                                                                                                                 || (((hold as ::core::ffi::c_uint
@@ -766,8 +769,8 @@ pub unsafe extern "C" fn inflate(
                                                                                                         (*state).mode = crate::src::inflate::BAD;
                                                                                                         continue '_inf_leave;
                                                                                                     } else {
-                                                                                                        if !(*state).head.is_null() {
-                                                                                                            (*(*state).head).text = (hold >> 8 as ::core::ffi::c_int
+                                                                                                        if let Some(head) = (*state).head {
+                                                                                                            (*head.as_ptr()).text = (hold >> 8 as ::core::ffi::c_int
                                                                                                                 & 1 as ::core::ffi::c_ulong) as ::core::ffi::c_int;
                                                                                                         }
                                                                                                         if (*state).flags & 0x200 as ::core::ffi::c_int != 0
@@ -1211,13 +1214,10 @@ pub unsafe extern "C" fn inflate(
                                                                                         );
                                                                                     bits = bits.wrapping_add(8 as ::core::ffi::c_uint);
                                                                                 }
-                                                                                if !(*state)
+                                                                                if let Some(head) = (*state)
                                                                                     .head
-                                                                                    .is_null()
                                                                                 {
-                                                                                    (*(*state)
-                                                                                        .head)
-                                                                                        .time = hold
+                                                                                    (*head.as_ptr()).time = hold
                                                                                         as crate::stdlib::uLong;
                                                                                 }
                                                                                 if (*state).flags & 0x200 as ::core::ffi::c_int != 0
@@ -1570,12 +1570,12 @@ pub unsafe extern "C" fn inflate(
                                                                         8 as ::core::ffi::c_uint,
                                                                     );
                                                                 }
-                                                                if !(*state).head.is_null() {
-                                                                    (*(*state).head).xflags = (hold
+                                                                if let Some(head) = (*state).head {
+                                                                    (*head.as_ptr()).xflags = (hold
                                                                         & 0xff
                                                                             as ::core::ffi::c_ulong)
                                                                         as ::core::ffi::c_int;
-                                                                    (*(*state).head).os = (hold
+                                                                    (*head.as_ptr()).os = (hold
                                                                         >> 8 as ::core::ffi::c_int)
                                                                         as ::core::ffi::c_int;
                                                                 }
@@ -1723,8 +1723,8 @@ pub unsafe extern "C" fn inflate(
                                                             .wrapping_add(8 as ::core::ffi::c_uint);
                                                     }
                                                     (*state).length = hold as ::core::ffi::c_uint;
-                                                    if !(*state).head.is_null() {
-                                                        (*(*state).head).extra_len = hold
+                                                    if let Some(head) = (*state).head {
+                                                        (*head.as_ptr()).extra_len = hold
                                                             as ::core::ffi::c_uint
                                                             as crate::stdlib::uInt;
                                                     }
@@ -1746,8 +1746,8 @@ pub unsafe extern "C" fn inflate(
                                                     }
                                                     hold = 0 as ::core::ffi::c_ulong;
                                                     bits = 0 as ::core::ffi::c_uint;
-                                                } else if !(*state).head.is_null() {
-                                                    (*(*state).head).extra = ::core::ptr::null_mut::<
+                                                } else if let Some(head) = (*state).head {
+                                                    (*head.as_ptr()).extra = ::core::ptr::null_mut::<
                                                         crate::stdlib::Bytef,
                                                     >(
                                                     );
@@ -1897,31 +1897,31 @@ pub unsafe extern "C" fn inflate(
                                             copy = have;
                                         }
                                         if copy != 0 {
-                                            if !(*state).head.is_null()
-                                                && !(*(*state).head).extra.is_null()
-                                                && {
-                                                    len = ((*(*state).head).extra_len
-                                                        as ::core::ffi::c_uint)
-                                                        .wrapping_sub((*state).length);
-                                                    len < (*(*state).head).extra_max
-                                                }
-                                            {
+                                            if let Some(head) = (*state).head {
+                                                if !(*head.as_ptr()).extra.is_null()
+                                                    && {
+                                                        len = ((*head.as_ptr()).extra_len as ::core::ffi::c_uint)
+                                                            .wrapping_sub((*state).length);
+                                                        len < (*head.as_ptr()).extra_max
+                                                    }
+                                                {
                                                 // The caller input and the separately registered
                                                 // header-extra buffer have the original C memcpy
                                                 // non-overlap contract.
                                                 ::core::ptr::copy_nonoverlapping(
                                                     next,
-                                                    (*(*state).head).extra.add(len as usize),
+                                                    (*head.as_ptr()).extra.add(len as usize),
                                                     (if len.wrapping_add(copy)
-                                                        > (*(*state).head).extra_max
+                                                        > (*head.as_ptr()).extra_max
                                                     {
-                                                        ((*(*state).head).extra_max
+                                                        ((*head.as_ptr()).extra_max
                                                             as ::core::ffi::c_uint)
                                                             .wrapping_sub(len)
                                                     } else {
                                                         copy
                                                     }) as usize,
                                                 );
+                                                }
                                             }
                                             if (*state).flags & 0x200 as ::core::ffi::c_int != 0
                                                 && (*state).wrap & 4 as ::core::ffi::c_int != 0
@@ -1982,14 +1982,15 @@ pub unsafe extern "C" fn inflate(
                                     copy = copy.wrapping_add(1);
                                     len =
                                         *next.offset(c2rust_fresh5 as isize) as ::core::ffi::c_uint;
-                                    if !(*state).head.is_null()
-                                        && !(*(*state).head).name.is_null()
-                                        && (*state).length < (*(*state).head).name_max
-                                    {
+                                    if let Some(head) = (*state).head {
+                                        if !(*head.as_ptr()).name.is_null()
+                                            && (*state).length < (*head.as_ptr()).name_max
+                                        {
                                         let c2rust_fresh6 = (*state).length;
                                         (*state).length = (*state).length.wrapping_add(1);
-                                        *(*(*state).head).name.offset(c2rust_fresh6 as isize) =
+                                        *(*head.as_ptr()).name.offset(c2rust_fresh6 as isize) =
                                             len as crate::stdlib::Bytef;
+                                        }
                                     }
                                     if !(len != 0 && copy < have) {
                                         break;
@@ -2009,8 +2010,8 @@ pub unsafe extern "C" fn inflate(
                                 if len != 0 {
                                     break '_inf_leave;
                                 }
-                            } else if !(*state).head.is_null() {
-                                (*(*state).head).name =
+                            } else if let Some(head) = (*state).head {
+                                (*head.as_ptr()).name =
                                     ::core::ptr::null_mut::<crate::stdlib::Bytef>();
                             }
                             (*state).length = 0 as ::core::ffi::c_uint;
@@ -2100,14 +2101,15 @@ pub unsafe extern "C" fn inflate(
                             let c2rust_fresh7 = copy;
                             copy = copy.wrapping_add(1);
                             len = *next.offset(c2rust_fresh7 as isize) as ::core::ffi::c_uint;
-                            if !(*state).head.is_null()
-                                && !(*(*state).head).comment.is_null()
-                                && (*state).length < (*(*state).head).comm_max
-                            {
+                            if let Some(head) = (*state).head {
+                                if !(*head.as_ptr()).comment.is_null()
+                                    && (*state).length < (*head.as_ptr()).comm_max
+                                {
                                 let c2rust_fresh8 = (*state).length;
                                 (*state).length = (*state).length.wrapping_add(1);
-                                *(*(*state).head).comment.offset(c2rust_fresh8 as isize) =
+                                *(*head.as_ptr()).comment.offset(c2rust_fresh8 as isize) =
                                     len as crate::stdlib::Bytef;
+                                }
                             }
                             if !(len != 0 && copy < have) {
                                 break;
@@ -2126,8 +2128,8 @@ pub unsafe extern "C" fn inflate(
                         if len != 0 {
                             break '_inf_leave;
                         }
-                    } else if !(*state).head.is_null() {
-                        (*(*state).head).comment = ::core::ptr::null_mut::<crate::stdlib::Bytef>();
+                    } else if let Some(head) = (*state).head {
+                        (*head.as_ptr()).comment = ::core::ptr::null_mut::<crate::stdlib::Bytef>();
                     }
                     (*state).mode = crate::src::inflate::HCRC;
                     break 'c_2327;
@@ -2180,10 +2182,10 @@ pub unsafe extern "C" fn inflate(
                     bits = 0 as ::core::ffi::c_uint;
                 }
             }
-            if !(*state).head.is_null() {
-                (*(*state).head).hcrc =
+            if let Some(head) = (*state).head {
+                (*head.as_ptr()).hcrc =
                     (*state).flags >> 9 as ::core::ffi::c_int & 1 as ::core::ffi::c_int;
-                (*(*state).head).done = 1 as ::core::ffi::c_int;
+                (*head.as_ptr()).done = 1 as ::core::ffi::c_int;
             }
             (*state).check = crate::src::crc32::crc32_z(0 as crate::stdlib::uLong, None)
                 as ::core::ffi::c_ulong;
@@ -2462,7 +2464,7 @@ pub unsafe extern "C" fn inflateGetHeader(
     if (*state).wrap & 2 as ::core::ffi::c_int == 0 as ::core::ffi::c_int {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    (*state).head = head;
+    (*state).head = ::core::ptr::NonNull::new(head);
     (*head).done = 0 as ::core::ffi::c_int;
     return crate::zlib_h::Z_OK;
 }
