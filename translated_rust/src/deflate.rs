@@ -915,7 +915,7 @@ pub unsafe extern "C" fn deflateSetDictionary(
         if wrap == 0 as ::core::ffi::c_int {
             *(*s)
                 .head
-                .offset((*s).hash_size.wrapping_sub(1 as crate::stdlib::uInt) as isize) =
+                .wrapping_add((*s).hash_size.wrapping_sub(1 as crate::stdlib::uInt) as usize) =
                 NIL as crate::src::deflate::Posf;
             crate::stdlib::memset(
                 (*s).head as *mut ::core::ffi::c_void,
@@ -945,9 +945,9 @@ pub unsafe extern "C" fn deflateSetDictionary(
         );
         loop {
             (*s).ins_h = ((*s).ins_h << (*s).hash_shift
-                ^ *(*s).window.offset(
+                ^ *(*s).window.wrapping_add(
                     str.wrapping_add(3 as crate::stdlib::uInt)
-                        .wrapping_sub(1 as crate::stdlib::uInt) as isize,
+                        .wrapping_sub(1 as crate::stdlib::uInt) as usize,
                 ) as crate::stdlib::uInt)
                 & (*s).hash_mask;
             *(*s).prev.wrapping_add((str & (*s).w_mask) as usize) =
@@ -1286,7 +1286,7 @@ pub unsafe extern "C" fn deflateParams(
             } else {
                 *(*s)
                     .head
-                    .offset((*s).hash_size.wrapping_sub(1 as crate::stdlib::uInt) as isize) =
+                    .wrapping_add((*s).hash_size.wrapping_sub(1 as crate::stdlib::uInt) as usize) =
                     NIL as crate::src::deflate::Posf;
                 crate::stdlib::memset(
                     (*s).head as *mut ::core::ffi::c_void,
@@ -2216,10 +2216,9 @@ pub unsafe extern "C" fn deflate(
                     0 as ::core::ffi::c_int,
                 );
                 if flush == crate::zlib_h::Z_FULL_FLUSH {
-                    *(*s)
-                        .head
-                        .offset((*s).hash_size.wrapping_sub(1 as crate::stdlib::uInt) as isize) =
-                        NIL as crate::src::deflate::Posf;
+                    *(*s).head.wrapping_add(
+                        (*s).hash_size.wrapping_sub(1 as crate::stdlib::uInt) as usize,
+                    ) = NIL as crate::src::deflate::Posf;
                     crate::stdlib::memset(
                         (*s).head as *mut ::core::ffi::c_void,
                         0 as ::core::ffi::c_int,

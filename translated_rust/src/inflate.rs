@@ -2348,7 +2348,9 @@ pub unsafe extern "C" fn inflateGetDictionary_ffi(
 
     inflate_get_dictionary_result(whave, wnext, window, dictionary, dict_length.as_mut())
 }
-pub unsafe extern "C" fn inflateSetDictionary(
+#[export_name = "inflateSetDictionary"]
+
+pub unsafe extern "C" fn inflateSetDictionary_ffi(
     mut strm: crate::zlib_h::z_streamp,
     mut dictionary: *const crate::stdlib::Bytef,
     mut dictLength: crate::stdlib::uInt,
@@ -2397,15 +2399,6 @@ fn inflate_dictionary_is_allowed(
     wrap == 0 || mode == crate::src::inflate::DICT
 }
 
-#[export_name = "inflateSetDictionary"]
-
-pub unsafe extern "C" fn inflateSetDictionary_ffi(
-    mut strm: crate::zlib_h::z_streamp,
-    mut dictionary: *const crate::stdlib::Bytef,
-    mut dictLength: crate::stdlib::uInt,
-) -> ::core::ffi::c_int {
-    inflateSetDictionary(strm, dictionary, dictLength)
-}
 fn inflate_header_wrap_allows_capture(wrap: ::core::ffi::c_int) -> bool {
     wrap & 2 as ::core::ffi::c_int != 0
 }
