@@ -1210,7 +1210,7 @@ fn inflate_entry_mode(
     })
 }
 
-pub unsafe fn inflate(
+pub fn inflate(
     mut strm: crate::zlib_h::z_streamp,
     mut flush: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
@@ -1264,72 +1264,76 @@ pub unsafe fn inflate(
         1 as ::core::ffi::c_ushort,
         15 as ::core::ffi::c_ushort,
     ];
-    if strm.is_null() {
-        return crate::zlib_h::Z_STREAM_ERROR;
-    }
-    // This is the legacy decoder's one stream/state adoption.  Keep the
-    // pointer checks here, then hand the scalar relationship to the safe
-    // validator shared by the smaller inflate boundaries.
-    let strm_ref = &mut *strm;
-    let state_ref = {
-        let state = strm_ref.state as *mut crate::src::inflate::inflate_state;
-        if state.is_null() {
+    // This transitional compatibility boundary owns the legacy decoder's
+    // raw stream/state adoption and cursor work.  Keeping it explicit means
+    // Rust callers of the dispatcher do not inherit an unsafe-function
+    // contract while the safe owned/slice core is still being extracted.
+    unsafe {
+        if strm.is_null() {
             return crate::zlib_h::Z_STREAM_ERROR;
         }
-        &mut *state
-    };
-    let Some(entry_mode) = inflate_entry_mode(
-        strm_ref.zalloc.is_some(),
-        strm_ref.zfree.is_some(),
-        state_ref.strm == strm,
-        state_ref.mode,
-        !strm_ref.next_out.is_null(),
-        !strm_ref.next_in.is_null() || strm_ref.avail_in == 0 as crate::stdlib::uInt,
-    ) else {
-        return crate::zlib_h::Z_STREAM_ERROR;
-    };
-    state = state_ref as *mut crate::src::inflate::inflate_state;
-    state_ref.mode = entry_mode;
-    put = strm_ref.next_out as *mut ::core::ffi::c_uchar;
-    left = strm_ref.avail_out as ::core::ffi::c_uint;
-    next = strm_ref.next_in as *mut ::core::ffi::c_uchar;
-    have = strm_ref.avail_in as ::core::ffi::c_uint;
-    hold = state_ref.hold;
-    bits = state_ref.bits;
-    in_0 = have;
-    out = left;
-    ret = crate::zlib_h::Z_OK;
-    '_inf_leave: loop {
-        'c_2425: {
-            'c_2327: {
-                'c_2422: {
-                    'c_2325: {
-                        's_2462: {
-                            'c_2322: {
-                                'c_2410: {
-                                    'c_2319: {
-                                        'c_2398: {
-                                            'c_2397: {
-                                                'c_2317: {
-                                                    'c_2340: {
-                                                        'c_2443: {
-                                                            'c_2339: {
-                                                                's_519: {
-                                                                    'c_2356: {
-                                                                        's_1689: {
-                                                                            'c_2355: {
-                                                                                's_425: {
-                                                                                    'c_2336: {
-                                                                                        's_1582: {
-                                                                                            // Snapshot the dispatcher mode through a
-                                                                                            // short-lived state borrow.  Individual
-                                                                                            // transitions continue to adopt the state
-                                                                                            // only for their own commits.
-                                                                                            let mode = {
+        // Keep the pointer checks here, then hand the scalar relationship to the
+        // safe validator shared by the smaller inflate boundaries.
+        let strm_ref = &mut *strm;
+        let state_ref = {
+            let state = strm_ref.state as *mut crate::src::inflate::inflate_state;
+            if state.is_null() {
+                return crate::zlib_h::Z_STREAM_ERROR;
+            }
+            &mut *state
+        };
+        let Some(entry_mode) = inflate_entry_mode(
+            strm_ref.zalloc.is_some(),
+            strm_ref.zfree.is_some(),
+            state_ref.strm == strm,
+            state_ref.mode,
+            !strm_ref.next_out.is_null(),
+            !strm_ref.next_in.is_null() || strm_ref.avail_in == 0 as crate::stdlib::uInt,
+        ) else {
+            return crate::zlib_h::Z_STREAM_ERROR;
+        };
+        state = state_ref as *mut crate::src::inflate::inflate_state;
+        state_ref.mode = entry_mode;
+        put = strm_ref.next_out as *mut ::core::ffi::c_uchar;
+        left = strm_ref.avail_out as ::core::ffi::c_uint;
+        next = strm_ref.next_in as *mut ::core::ffi::c_uchar;
+        have = strm_ref.avail_in as ::core::ffi::c_uint;
+        hold = state_ref.hold;
+        bits = state_ref.bits;
+        in_0 = have;
+        out = left;
+        ret = crate::zlib_h::Z_OK;
+        '_inf_leave: loop {
+            'c_2425: {
+                'c_2327: {
+                    'c_2422: {
+                        'c_2325: {
+                            's_2462: {
+                                'c_2322: {
+                                    'c_2410: {
+                                        'c_2319: {
+                                            'c_2398: {
+                                                'c_2397: {
+                                                    'c_2317: {
+                                                        'c_2340: {
+                                                            'c_2443: {
+                                                                'c_2339: {
+                                                                    's_519: {
+                                                                        'c_2356: {
+                                                                            's_1689: {
+                                                                                'c_2355: {
+                                                                                    's_425: {
+                                                                                        'c_2336: {
+                                                                                            's_1582: {
+                                                                                                // Snapshot the dispatcher mode through a
+                                                                                                // short-lived state borrow.  Individual
+                                                                                                // transitions continue to adopt the state
+                                                                                                // only for their own commits.
+                                                                                                let mode = {
                                                                                                 let state_ref = &*state;
                                                                                                 state_ref.mode
                                                                                             };
-                                                                                            match mode as ::core::ffi::c_uint {
+                                                                                                match mode as ::core::ffi::c_uint {
                                                                                                 16180 => {
                                                                                                     // The decoder entry already validated both
                                                                                                     // compatibility records.  Keep the header
@@ -1780,14 +1784,14 @@ pub unsafe fn inflate(
                                                                                                 16210 => return crate::zlib_h::Z_MEM_ERROR,
                                                                                                 16211 | _ => return crate::zlib_h::Z_STREAM_ERROR,
                                                                                             }
-                                                                                            // This gzip-length and code-length-table
-                                                                                            // transition only updates decoder scalars
-                                                                                            // after consuming its local cursor. Adopt
-                                                                                            // the compatibility records once rather
-                                                                                            // than repeatedly traversing raw state.
-                                                                                            let strm_ref = &mut *strm;
-                                                                                            let state_ref = &mut *state;
-                                                                                            if state_ref.wrap != 0 && state_ref.flags != 0 {
+                                                                                                // This gzip-length and code-length-table
+                                                                                                // transition only updates decoder scalars
+                                                                                                // after consuming its local cursor. Adopt
+                                                                                                // the compatibility records once rather
+                                                                                                // than repeatedly traversing raw state.
+                                                                                                let strm_ref = &mut *strm;
+                                                                                                let state_ref = &mut *state;
+                                                                                                if state_ref.wrap != 0 && state_ref.flags != 0 {
                                                                                                 while bits < 32 as ::core::ffi::c_int as ::core::ffi::c_uint
                                                                                                 {
                                                                                                     if have == 0 as ::core::ffi::c_uint {
@@ -1815,10 +1819,10 @@ pub unsafe fn inflate(
                                                                                                     bits = 0 as ::core::ffi::c_uint;
                                                                                                 }
                                                                                             }
-                                                                                            state_ref.mode = crate::src::inflate::DONE;
-                                                                                            break 'c_2443;
-                                                                                        }
-                                                                                        while state_ref.have < state_ref.ncode {
+                                                                                                state_ref.mode = crate::src::inflate::DONE;
+                                                                                                break 'c_2443;
+                                                                                            }
+                                                                                            while state_ref.have < state_ref.ncode {
                                                                                             while bits < 3 as ::core::ffi::c_int as ::core::ffi::c_uint
                                                                                             {
                                                                                                 if have == 0 as ::core::ffi::c_uint {
@@ -1846,18 +1850,18 @@ pub unsafe fn inflate(
                                                                                                     3 as ::core::ffi::c_int as ::core::ffi::c_uint,
                                                                                                 );
                                                                                         }
-                                                                                        while state_ref.have < 19 as ::core::ffi::c_uint {
+                                                                                            while state_ref.have < 19 as ::core::ffi::c_uint {
                                                                                             let c2rust_fresh16 = state_ref.have;
                                                                                             state_ref.have = state_ref.have.wrapping_add(1);
                                                                                             state_ref.lens[order[c2rust_fresh16 as usize] as usize] = 0
                                                                                                 as ::core::ffi::c_ushort;
                                                                                         }
-                                                                                        ret = {
-                                                                                            state_ref.next = &raw mut state_ref.codes as *mut crate::src::inftrees::code;
-                                                                                            state_ref.distcode = state_ref.next as *const crate::src::inftrees::code;
-                                                                                            state_ref.lencode = state_ref.distcode;
-                                                                                            state_ref.lenbits = 7 as ::core::ffi::c_uint;
-                                                                                            match crate::src::inftrees::inflate_table_into(
+                                                                                            ret = {
+                                                                                                state_ref.next = &raw mut state_ref.codes as *mut crate::src::inftrees::code;
+                                                                                                state_ref.distcode = state_ref.next as *const crate::src::inftrees::code;
+                                                                                                state_ref.lencode = state_ref.distcode;
+                                                                                                state_ref.lenbits = 7 as ::core::ffi::c_uint;
+                                                                                                match crate::src::inftrees::inflate_table_into(
                                                                                                 crate::src::inftrees::CODES,
                                                                                                 &state_ref.lens[..19],
                                                                                                 &mut state_ref.codes[..crate::src::inftrees::ENOUGH as usize],
@@ -1871,28 +1875,29 @@ pub unsafe fn inflate(
                                                                                                 }
                                                                                                 Err(status) => status,
                                                                                             }
-                                                                                        };
-                                                                                        if ret != 0
-                                                                                        {
-                                                                                            strm_ref.msg = INFLATE_ERROR_MESSAGES[8].as_ptr()
+                                                                                            };
+                                                                                            if ret
+                                                                                                != 0
+                                                                                            {
+                                                                                                strm_ref.msg = INFLATE_ERROR_MESSAGES[8].as_ptr()
                                                                                                 as *const ::core::ffi::c_char as *mut ::core::ffi::c_char;
-                                                                                            state_ref.mode = crate::src::inflate::BAD;
-                                                                                            continue '_inf_leave;
-                                                                                        } else {
-                                                                                            state_ref.have = 0 as ::core::ffi::c_uint;
-                                                                                            state_ref.mode = crate::src::inflate::CODELENS;
-                                                                                            break 's_1689;
+                                                                                                state_ref.mode = crate::src::inflate::BAD;
+                                                                                                continue '_inf_leave;
+                                                                                            } else {
+                                                                                                state_ref.have = 0 as ::core::ffi::c_uint;
+                                                                                                state_ref.mode = crate::src::inflate::CODELENS;
+                                                                                                break 's_1689;
+                                                                                            }
                                                                                         }
-                                                                                    }
-                                                                                    // The dictionary transition only publishes
-                                                                                    // already-established cursors and scalar state.
-                                                                                    // Adopt both compatibility records once rather
-                                                                                    // than repeatedly traversing their raw pointers.
-                                                                                    let strm_ref =
+                                                                                        // The dictionary transition only publishes
+                                                                                        // already-established cursors and scalar state.
+                                                                                        // Adopt both compatibility records once rather
+                                                                                        // than repeatedly traversing their raw pointers.
+                                                                                        let strm_ref =
                                                                                         &mut *strm;
-                                                                                    let state_ref =
+                                                                                        let state_ref =
                                                                                         &mut *state;
-                                                                                    if state_ref.havedict == 0 as ::core::ffi::c_int {
+                                                                                        if state_ref.havedict == 0 as ::core::ffi::c_int {
                                                                                         strm_ref.next_out = put as *mut crate::stdlib::Bytef;
                                                                                         strm_ref.avail_out = left as crate::stdlib::uInt;
                                                                                         strm_ref.next_in = next as *mut crate::stdlib::Bytef;
@@ -1901,14 +1906,14 @@ pub unsafe fn inflate(
                                                                                         state_ref.bits = bits;
                                                                                         return crate::zlib_h::Z_NEED_DICT;
                                                                                     }
-                                                                                    state_ref.check = crate::src::adler32::ADLER32_INITIAL
+                                                                                        state_ref.check = crate::src::adler32::ADLER32_INITIAL
                                                                                         as ::core::ffi::c_ulong;
-                                                                                    strm_ref.adler = state_ref.check as crate::stdlib::uLong;
-                                                                                    state_ref.mode =
+                                                                                        strm_ref.adler = state_ref.check as crate::stdlib::uLong;
+                                                                                        state_ref.mode =
                                                                                         crate::src::inflate::TYPE;
-                                                                                    break 'c_2339;
-                                                                                }
-                                                                                while bits < 32 as ::core::ffi::c_int as ::core::ffi::c_uint
+                                                                                        break 'c_2339;
+                                                                                    }
+                                                                                    while bits < 32 as ::core::ffi::c_int as ::core::ffi::c_uint
                                                                                 {
                                                                                     if have == 0 as ::core::ffi::c_uint {
                                                                                         break '_inf_leave;
@@ -1922,21 +1927,21 @@ pub unsafe fn inflate(
                                                                                         );
                                                                                     bits = bits.wrapping_add(8 as ::core::ffi::c_uint);
                                                                                 }
-                                                                                // TIME has no cursor lend or callback. Keep the
-                                                                                // retained header update and checksum commit on
-                                                                                // one short-lived state borrow.
-                                                                                let state_ref =
-                                                                                    &mut *state;
-                                                                                if !state_ref
-                                                                                    .head
-                                                                                    .is_null()
-                                                                                {
-                                                                                    (*state_ref
+                                                                                    // TIME has no cursor lend or callback. Keep the
+                                                                                    // retained header update and checksum commit on
+                                                                                    // one short-lived state borrow.
+                                                                                    let state_ref =
+                                                                                        &mut *state;
+                                                                                    if !state_ref
+                                                                                        .head
+                                                                                        .is_null()
+                                                                                    {
+                                                                                        (*state_ref
                                                                                         .head)
                                                                                         .time = hold
                                                                                         as crate::stdlib::uLong;
-                                                                                }
-                                                                                if state_ref.flags & 0x200 as ::core::ffi::c_int != 0
+                                                                                    }
+                                                                                    if state_ref.flags & 0x200 as ::core::ffi::c_int != 0
                                                                                     && state_ref.wrap & 4 as ::core::ffi::c_int != 0
                                                                                 {
                                                                                     hbuf[0 as ::core::ffi::c_int as usize] = hold
@@ -1952,55 +1957,56 @@ pub unsafe fn inflate(
                                                                                         &hbuf[..4],
                                                                                     );
                                                                                 }
-                                                                                hold = 0 as ::core::ffi::c_ulong;
-                                                                                bits = 0 as ::core::ffi::c_uint;
-                                                                                state_ref.mode = crate::src::inflate::OS;
-                                                                                break 's_519;
+                                                                                    hold = 0 as ::core::ffi::c_ulong;
+                                                                                    bits = 0 as ::core::ffi::c_uint;
+                                                                                    state_ref.mode = crate::src::inflate::OS;
+                                                                                    break 's_519;
+                                                                                }
+                                                                                state_ref.mode = crate::src::inflate::COPY_1;
+                                                                                break 'c_2356;
                                                                             }
-                                                                            state_ref.mode = crate::src::inflate::COPY_1;
-                                                                            break 'c_2356;
-                                                                        }
-                                                                        // This no-callback transition uses the decoder
-                                                                        // entry's validated stream/state records for its
-                                                                        // code-length cursor and error publication.
-                                                                        while state_ref.have
-                                                                            < state_ref
-                                                                                .nlen
-                                                                                .wrapping_add(
-                                                                                    state_ref.ndist,
-                                                                                )
-                                                                        {
-                                                                            loop {
-                                                                                here = *state_ref
+                                                                            // This no-callback transition uses the decoder
+                                                                            // entry's validated stream/state records for its
+                                                                            // code-length cursor and error publication.
+                                                                            while state_ref.have
+                                                                                < state_ref
+                                                                                    .nlen
+                                                                                    .wrapping_add(
+                                                                                        state_ref
+                                                                                            .ndist,
+                                                                                    )
+                                                                            {
+                                                                                loop {
+                                                                                    here = *state_ref
                                                                                     .lencode
                                                                                     .wrapping_add(
                                                                                         (hold as ::core::ffi::c_uint
                                                                                             & ((1 as ::core::ffi::c_uint) << state_ref.lenbits)
                                                                                                 .wrapping_sub(1 as ::core::ffi::c_uint)) as usize,
                                                                                     );
-                                                                                if here.bits as ::core::ffi::c_uint <= bits {
+                                                                                    if here.bits as ::core::ffi::c_uint <= bits {
                                                                                     break;
                                                                                 }
-                                                                                if have == 0 as ::core::ffi::c_uint {
+                                                                                    if have == 0 as ::core::ffi::c_uint {
                                                                                     break '_inf_leave;
                                                                                 }
-                                                                                have = have
+                                                                                    have = have
                                                                                     .wrapping_sub(
                                                                                         1,
                                                                                     );
-                                                                                let c2rust_fresh17 =
-                                                                                    next;
-                                                                                next = next
+                                                                                    let c2rust_fresh17 =
+                                                                                        next;
+                                                                                    next = next
                                                                                     .wrapping_add(
                                                                                         1,
                                                                                     );
-                                                                                hold = hold
+                                                                                    hold = hold
                                                                                     .wrapping_add(
                                                                                         (*c2rust_fresh17 as ::core::ffi::c_ulong) << bits,
                                                                                     );
-                                                                                bits = bits.wrapping_add(8 as ::core::ffi::c_uint);
-                                                                            }
-                                                                            if (here.val as ::core::ffi::c_int)
+                                                                                    bits = bits.wrapping_add(8 as ::core::ffi::c_uint);
+                                                                                }
+                                                                                if (here.val as ::core::ffi::c_int)
                                                                                 < 16 as ::core::ffi::c_int
                                                                             {
                                                                                 hold >>= here.bits as ::core::ffi::c_int;
@@ -2137,21 +2143,23 @@ pub unsafe fn inflate(
                                                                                     }
                                                                                 }
                                                                             }
-                                                                        }
-                                                                        // Code-length decoding has already consumed all
-                                                                        // input for this transition.  Keep the two
-                                                                        // compatibility records adopted while we validate
-                                                                        // the completed lens and build its bounded tables,
-                                                                        // rather than re-traversing their raw cursors for
-                                                                        // each error and mode commit.
-                                                                        let strm_ref = &mut *strm;
-                                                                        let state_ref = &mut *state;
-                                                                        if state_ref.mode as ::core::ffi::c_uint
+                                                                            }
+                                                                            // Code-length decoding has already consumed all
+                                                                            // input for this transition.  Keep the two
+                                                                            // compatibility records adopted while we validate
+                                                                            // the completed lens and build its bounded tables,
+                                                                            // rather than re-traversing their raw cursors for
+                                                                            // each error and mode commit.
+                                                                            let strm_ref =
+                                                                                &mut *strm;
+                                                                            let state_ref =
+                                                                                &mut *state;
+                                                                            if state_ref.mode as ::core::ffi::c_uint
                                                                             == crate::src::inflate::BAD as ::core::ffi::c_int as ::core::ffi::c_uint
                                                                         {
                                                                             continue '_inf_leave;
                                                                         }
-                                                                        if state_ref.lens[256 as ::core::ffi::c_int as usize]
+                                                                            if state_ref.lens[256 as ::core::ffi::c_int as usize]
                                                                             as ::core::ffi::c_int == 0 as ::core::ffi::c_int
                                                                         {
                                                                             strm_ref.msg = INFLATE_ERROR_MESSAGES[10]
@@ -2237,94 +2245,98 @@ pub unsafe fn inflate(
                                                                                 }
                                                                             }
                                                                         }
-                                                                    }
-                                                                    // Stored-block copying needs no callbacks or new
-                                                                    // ABI views.  Keep its scalar state commits on one
-                                                                    // short-lived adopted state record instead of
-                                                                    // repeatedly traversing the compatibility pointer.
-                                                                    let state_ref = &mut *state;
-                                                                    copy = state_ref.length;
-                                                                    if copy != 0 {
-                                                                        copy =
+                                                                        }
+                                                                        // Stored-block copying needs no callbacks or new
+                                                                        // ABI views.  Keep its scalar state commits on one
+                                                                        // short-lived adopted state record instead of
+                                                                        // repeatedly traversing the compatibility pointer.
+                                                                        let state_ref = &mut *state;
+                                                                        copy = state_ref.length;
+                                                                        if copy != 0 {
+                                                                            copy =
                                                                             inflate_stored_copy_len(
                                                                                 copy, have, left,
                                                                             );
-                                                                        if copy == 0 {
-                                                                            break '_inf_leave;
-                                                                        }
-                                                                        // The bounded stored-block
-                                                                        // copy is intentionally
-                                                                        // bytewise here: this legacy
-                                                                        // decoder boundary cannot lend
-                                                                        // new raw slices without
-                                                                        // increasing implementation
-                                                                        // unsafety.
-                                                                        let mut copied = 0usize;
-                                                                        while copied < copy as usize
-                                                                        {
-                                                                            *put.wrapping_add(
+                                                                            if copy == 0 {
+                                                                                break '_inf_leave;
+                                                                            }
+                                                                            // The bounded stored-block
+                                                                            // copy is intentionally
+                                                                            // bytewise here: this legacy
+                                                                            // decoder boundary cannot lend
+                                                                            // new raw slices without
+                                                                            // increasing implementation
+                                                                            // unsafety.
+                                                                            let mut copied = 0usize;
+                                                                            while copied
+                                                                                < copy as usize
+                                                                            {
+                                                                                *put.wrapping_add(
                                                                                 copied,
                                                                             ) = *next.wrapping_add(
                                                                                 copied,
                                                                             );
-                                                                            copied += 1;
-                                                                        }
-                                                                        have =
-                                                                            have.wrapping_sub(copy);
-                                                                        next = next.wrapping_add(
-                                                                            copy as usize,
-                                                                        );
-                                                                        left =
-                                                                            left.wrapping_sub(copy);
-                                                                        put = put.wrapping_add(
-                                                                            copy as usize,
-                                                                        );
-                                                                        state_ref.length =
-                                                                            state_ref
-                                                                                .length
+                                                                                copied += 1;
+                                                                            }
+                                                                            have = have
                                                                                 .wrapping_sub(copy);
-                                                                        continue '_inf_leave;
-                                                                    } else {
-                                                                        state_ref.mode = crate::src::inflate::TYPE;
-                                                                        continue '_inf_leave;
+                                                                            next = next
+                                                                                .wrapping_add(
+                                                                                    copy as usize,
+                                                                                );
+                                                                            left = left
+                                                                                .wrapping_sub(copy);
+                                                                            put = put.wrapping_add(
+                                                                                copy as usize,
+                                                                            );
+                                                                            state_ref.length =
+                                                                                state_ref
+                                                                                    .length
+                                                                                    .wrapping_sub(
+                                                                                        copy,
+                                                                                    );
+                                                                            continue '_inf_leave;
+                                                                        } else {
+                                                                            state_ref.mode = crate::src::inflate::TYPE;
+                                                                            continue '_inf_leave;
+                                                                        }
                                                                     }
-                                                                }
-                                                                while bits
-                                                                    < 16 as ::core::ffi::c_int
-                                                                        as ::core::ffi::c_uint
-                                                                {
-                                                                    if have
-                                                                        == 0 as ::core::ffi::c_uint
+                                                                    while bits
+                                                                        < 16 as ::core::ffi::c_int
+                                                                            as ::core::ffi::c_uint
                                                                     {
-                                                                        break '_inf_leave;
-                                                                    }
-                                                                    have = have.wrapping_sub(1);
-                                                                    let c2rust_fresh3 = next;
-                                                                    next = next.wrapping_add(1);
-                                                                    hold = hold.wrapping_add(
+                                                                        if have == 0
+                                                                            as ::core::ffi::c_uint
+                                                                        {
+                                                                            break '_inf_leave;
+                                                                        }
+                                                                        have = have.wrapping_sub(1);
+                                                                        let c2rust_fresh3 = next;
+                                                                        next = next.wrapping_add(1);
+                                                                        hold = hold.wrapping_add(
                                                                         (*c2rust_fresh3
                                                                             as ::core::ffi::c_ulong)
                                                                             << bits,
                                                                     );
-                                                                    bits = bits.wrapping_add(
+                                                                        bits = bits.wrapping_add(
                                                                         8 as ::core::ffi::c_uint,
                                                                     );
-                                                                }
-                                                                // OS follows TIME without any callback or cursor lend.
-                                                                // Reuse one adopted state record for the retained header,
-                                                                // optional header CRC, and mode transition.
-                                                                let state_ref = &mut *state;
-                                                                if !state_ref.head.is_null() {
-                                                                    let head = &mut *state_ref.head;
-                                                                    head.xflags = (hold
-                                                                        & 0xff
+                                                                    }
+                                                                    // OS follows TIME without any callback or cursor lend.
+                                                                    // Reuse one adopted state record for the retained header,
+                                                                    // optional header CRC, and mode transition.
+                                                                    let state_ref = &mut *state;
+                                                                    if !state_ref.head.is_null() {
+                                                                        let head =
+                                                                            &mut *state_ref.head;
+                                                                        head.xflags = (hold & 0xff
                                                                             as ::core::ffi::c_ulong)
-                                                                        as ::core::ffi::c_int;
-                                                                    head.os = (hold
-                                                                        >> 8 as ::core::ffi::c_int)
-                                                                        as ::core::ffi::c_int;
-                                                                }
-                                                                if state_ref.flags
+                                                                            as ::core::ffi::c_int;
+                                                                        head.os = (hold >> 8
+                                                                            as ::core::ffi::c_int)
+                                                                            as ::core::ffi::c_int;
+                                                                    }
+                                                                    if state_ref.flags
                                                                     & 0x200 as ::core::ffi::c_int
                                                                     != 0
                                                                     && state_ref.wrap
@@ -2344,49 +2356,145 @@ pub unsafe fn inflate(
                                                                             &hbuf[..2],
                                                                         );
                                                                 }
-                                                                hold = 0 as ::core::ffi::c_ulong;
-                                                                bits = 0 as ::core::ffi::c_uint;
-                                                                state_ref.mode =
-                                                                    crate::src::inflate::EXLEN;
-                                                                break 'c_2317;
+                                                                    hold =
+                                                                        0 as ::core::ffi::c_ulong;
+                                                                    bits = 0 as ::core::ffi::c_uint;
+                                                                    state_ref.mode =
+                                                                        crate::src::inflate::EXLEN;
+                                                                    break 'c_2317;
+                                                                }
+                                                                if flush == crate::zlib_h::Z_BLOCK
+                                                                    || flush
+                                                                        == crate::zlib_h::Z_TREES
+                                                                {
+                                                                    break '_inf_leave;
+                                                                } else {
+                                                                    break 'c_2340;
+                                                                }
                                                             }
-                                                            if flush == crate::zlib_h::Z_BLOCK
-                                                                || flush == crate::zlib_h::Z_TREES
-                                                            {
-                                                                break '_inf_leave;
-                                                            } else {
-                                                                break 'c_2340;
-                                                            }
+                                                            ret = crate::zlib_h::Z_STREAM_END;
+                                                            break '_inf_leave;
                                                         }
-                                                        ret = crate::zlib_h::Z_STREAM_END;
-                                                        break '_inf_leave;
+                                                        // The decoder entry has already validated both
+                                                        // compatibility records. Keep the block-header
+                                                        // state transition on those short-lived borrows
+                                                        // instead of repeatedly traversing raw pointers.
+                                                        let strm_ref = &mut *strm;
+                                                        let state_ref = &mut *state;
+                                                        if state_ref.last != 0 {
+                                                            hold >>=
+                                                                bits & 7 as ::core::ffi::c_uint;
+                                                            bits = bits.wrapping_sub(
+                                                                bits & 7 as ::core::ffi::c_uint,
+                                                            );
+                                                            state_ref.mode =
+                                                                crate::src::inflate::CHECK;
+                                                            continue '_inf_leave;
+                                                        } else {
+                                                            while bits
+                                                                < 3 as ::core::ffi::c_int
+                                                                    as ::core::ffi::c_uint
+                                                            {
+                                                                if have == 0 as ::core::ffi::c_uint
+                                                                {
+                                                                    break '_inf_leave;
+                                                                }
+                                                                have = have.wrapping_sub(1);
+                                                                let c2rust_fresh11 = next;
+                                                                next = next.wrapping_add(1);
+                                                                hold = hold.wrapping_add(
+                                                                    (*c2rust_fresh11
+                                                                        as ::core::ffi::c_ulong)
+                                                                        << bits,
+                                                                );
+                                                                bits = bits.wrapping_add(
+                                                                    8 as ::core::ffi::c_uint,
+                                                                );
+                                                            }
+                                                            state_ref.last = (hold
+                                                                as ::core::ffi::c_uint
+                                                                & ((1 as ::core::ffi::c_uint)
+                                                                    << 1 as ::core::ffi::c_int)
+                                                                    .wrapping_sub(
+                                                                        1 as ::core::ffi::c_uint,
+                                                                    ))
+                                                                as ::core::ffi::c_int;
+                                                            hold >>= 1 as ::core::ffi::c_int;
+                                                            bits = bits.wrapping_sub(
+                                                                1 as ::core::ffi::c_int
+                                                                    as ::core::ffi::c_uint,
+                                                            );
+                                                            match hold as ::core::ffi::c_uint
+                                                                & ((1 as ::core::ffi::c_uint)
+                                                                    << 2 as ::core::ffi::c_int)
+                                                                    .wrapping_sub(
+                                                                        1 as ::core::ffi::c_uint,
+                                                                    ) {
+                                                                0 => {
+                                                                    state_ref.mode =
+                                                                        crate::src::inflate::STORED;
+                                                                }
+                                                                1 => {
+                                                                    crate::src::inftrees::inflate_fixed_state(
+                                                                    state_ref,
+                                                                );
+                                                                    state_ref.mode =
+                                                                        crate::src::inflate::LEN_;
+                                                                    if flush
+                                                                        == crate::zlib_h::Z_TREES
+                                                                    {
+                                                                        hold >>=
+                                                                            2 as ::core::ffi::c_int;
+                                                                        bits = bits.wrapping_sub(
+                                                                        2 as ::core::ffi::c_int
+                                                                            as ::core::ffi::c_uint,
+                                                                    );
+                                                                        break '_inf_leave;
+                                                                    }
+                                                                }
+                                                                2 => {
+                                                                    state_ref.mode =
+                                                                        crate::src::inflate::TABLE;
+                                                                }
+                                                                _ => {
+                                                                    strm_ref.msg = INFLATE_ERROR_MESSAGES
+                                                                    [13]
+                                                                .as_ptr()
+                                                                    as *const ::core::ffi::c_char
+                                                                    as *mut ::core::ffi::c_char;
+                                                                    state_ref.mode =
+                                                                        crate::src::inflate::BAD;
+                                                                }
+                                                            }
+                                                            hold >>= 2 as ::core::ffi::c_int;
+                                                            bits = bits.wrapping_sub(
+                                                                2 as ::core::ffi::c_int
+                                                                    as ::core::ffi::c_uint,
+                                                            );
+                                                            continue '_inf_leave;
+                                                        }
                                                     }
-                                                    // The decoder entry has already validated both
-                                                    // compatibility records. Keep the block-header
-                                                    // state transition on those short-lived borrows
-                                                    // instead of repeatedly traversing raw pointers.
-                                                    let strm_ref = &mut *strm;
+                                                    // EXLEN only consumes the already-validated input
+                                                    // cursor and updates retained header/scalar state.
+                                                    // Keep those commits on one short-lived state borrow
+                                                    // instead of repeatedly traversing the compatibility
+                                                    // state pointer.
                                                     let state_ref = &mut *state;
-                                                    if state_ref.last != 0 {
-                                                        hold >>= bits & 7 as ::core::ffi::c_uint;
-                                                        bits = bits.wrapping_sub(
-                                                            bits & 7 as ::core::ffi::c_uint,
-                                                        );
-                                                        state_ref.mode = crate::src::inflate::CHECK;
-                                                        continue '_inf_leave;
-                                                    } else {
+                                                    if state_ref.flags & 0x400 as ::core::ffi::c_int
+                                                        != 0
+                                                    {
                                                         while bits
-                                                            < 3 as ::core::ffi::c_int
+                                                            < 16 as ::core::ffi::c_int
                                                                 as ::core::ffi::c_uint
                                                         {
                                                             if have == 0 as ::core::ffi::c_uint {
                                                                 break '_inf_leave;
                                                             }
                                                             have = have.wrapping_sub(1);
-                                                            let c2rust_fresh11 = next;
+                                                            let c2rust_fresh4 = next;
                                                             next = next.wrapping_add(1);
                                                             hold = hold.wrapping_add(
-                                                                (*c2rust_fresh11
+                                                                (*c2rust_fresh4
                                                                     as ::core::ffi::c_ulong)
                                                                     << bits,
                                                             );
@@ -2394,253 +2502,163 @@ pub unsafe fn inflate(
                                                                 8 as ::core::ffi::c_uint,
                                                             );
                                                         }
-                                                        state_ref.last = (hold
-                                                            as ::core::ffi::c_uint
-                                                            & ((1 as ::core::ffi::c_uint)
-                                                                << 1 as ::core::ffi::c_int)
-                                                                .wrapping_sub(
-                                                                    1 as ::core::ffi::c_uint,
-                                                                ))
-                                                            as ::core::ffi::c_int;
-                                                        hold >>= 1 as ::core::ffi::c_int;
-                                                        bits = bits.wrapping_sub(
-                                                            1 as ::core::ffi::c_int
-                                                                as ::core::ffi::c_uint,
-                                                        );
-                                                        match hold as ::core::ffi::c_uint
-                                                            & ((1 as ::core::ffi::c_uint)
-                                                                << 2 as ::core::ffi::c_int)
-                                                                .wrapping_sub(
-                                                                    1 as ::core::ffi::c_uint,
-                                                                ) {
-                                                            0 => {
-                                                                state_ref.mode =
-                                                                    crate::src::inflate::STORED;
-                                                            }
-                                                            1 => {
-                                                                crate::src::inftrees::inflate_fixed_state(
-                                                                    state_ref,
-                                                                );
-                                                                state_ref.mode =
-                                                                    crate::src::inflate::LEN_;
-                                                                if flush == crate::zlib_h::Z_TREES {
-                                                                    hold >>=
-                                                                        2 as ::core::ffi::c_int;
-                                                                    bits = bits.wrapping_sub(
-                                                                        2 as ::core::ffi::c_int
-                                                                            as ::core::ffi::c_uint,
-                                                                    );
-                                                                    break '_inf_leave;
-                                                                }
-                                                            }
-                                                            2 => {
-                                                                state_ref.mode =
-                                                                    crate::src::inflate::TABLE;
-                                                            }
-                                                            _ => {
-                                                                strm_ref.msg = INFLATE_ERROR_MESSAGES
-                                                                    [13]
-                                                                .as_ptr()
-                                                                    as *const ::core::ffi::c_char
-                                                                    as *mut ::core::ffi::c_char;
-                                                                state_ref.mode =
-                                                                    crate::src::inflate::BAD;
-                                                            }
+                                                        state_ref.length =
+                                                            hold as ::core::ffi::c_uint;
+                                                        if !state_ref.head.is_null() {
+                                                            (*state_ref.head).extra_len = hold
+                                                                as ::core::ffi::c_uint
+                                                                as crate::stdlib::uInt;
                                                         }
-                                                        hold >>= 2 as ::core::ffi::c_int;
-                                                        bits = bits.wrapping_sub(
-                                                            2 as ::core::ffi::c_int
-                                                                as ::core::ffi::c_uint,
-                                                        );
-                                                        continue '_inf_leave;
-                                                    }
-                                                }
-                                                // EXLEN only consumes the already-validated input
-                                                // cursor and updates retained header/scalar state.
-                                                // Keep those commits on one short-lived state borrow
-                                                // instead of repeatedly traversing the compatibility
-                                                // state pointer.
-                                                let state_ref = &mut *state;
-                                                if state_ref.flags & 0x400 as ::core::ffi::c_int
-                                                    != 0
-                                                {
-                                                    while bits
-                                                        < 16 as ::core::ffi::c_int
-                                                            as ::core::ffi::c_uint
-                                                    {
-                                                        if have == 0 as ::core::ffi::c_uint {
-                                                            break '_inf_leave;
-                                                        }
-                                                        have = have.wrapping_sub(1);
-                                                        let c2rust_fresh4 = next;
-                                                        next = next.wrapping_add(1);
-                                                        hold = hold.wrapping_add(
-                                                            (*c2rust_fresh4
-                                                                as ::core::ffi::c_ulong)
-                                                                << bits,
-                                                        );
-                                                        bits = bits
-                                                            .wrapping_add(8 as ::core::ffi::c_uint);
-                                                    }
-                                                    state_ref.length = hold as ::core::ffi::c_uint;
-                                                    if !state_ref.head.is_null() {
-                                                        (*state_ref.head).extra_len = hold
-                                                            as ::core::ffi::c_uint
-                                                            as crate::stdlib::uInt;
-                                                    }
-                                                    if state_ref.flags & 0x200 as ::core::ffi::c_int
-                                                        != 0
-                                                        && state_ref.wrap & 4 as ::core::ffi::c_int
+                                                        if state_ref.flags
+                                                            & 0x200 as ::core::ffi::c_int
                                                             != 0
-                                                    {
-                                                        hbuf[0 as ::core::ffi::c_int as usize] =
-                                                            hold as ::core::ffi::c_uchar;
-                                                        hbuf[1 as ::core::ffi::c_int as usize] =
-                                                            (hold >> 8 as ::core::ffi::c_int)
+                                                            && state_ref.wrap
+                                                                & 4 as ::core::ffi::c_int
+                                                                != 0
+                                                        {
+                                                            hbuf[0 as ::core::ffi::c_int
+                                                                as usize] =
+                                                                hold as ::core::ffi::c_uchar;
+                                                            hbuf[1 as ::core::ffi::c_int
+                                                                as usize] = (hold
+                                                                >> 8 as ::core::ffi::c_int)
                                                                 as ::core::ffi::c_uchar;
-                                                        state_ref.check = inflate_header_crc_update(
-                                                            state_ref.check,
-                                                            &hbuf[..2],
-                                                        );
+                                                            state_ref.check =
+                                                                inflate_header_crc_update(
+                                                                    state_ref.check,
+                                                                    &hbuf[..2],
+                                                                );
+                                                        }
+                                                        hold = 0 as ::core::ffi::c_ulong;
+                                                        bits = 0 as ::core::ffi::c_uint;
+                                                    } else if !state_ref.head.is_null() {
+                                                        (*state_ref.head).extra =
+                                                            ::core::ptr::null_mut::<
+                                                                crate::stdlib::Bytef,
+                                                            >(
+                                                            );
                                                     }
-                                                    hold = 0 as ::core::ffi::c_ulong;
-                                                    bits = 0 as ::core::ffi::c_uint;
-                                                } else if !state_ref.head.is_null() {
-                                                    (*state_ref.head).extra = ::core::ptr::null_mut::<
-                                                        crate::stdlib::Bytef,
-                                                    >(
-                                                    );
+                                                    state_ref.mode = crate::src::inflate::EXTRA;
+                                                    break 'c_2319;
                                                 }
-                                                state_ref.mode = crate::src::inflate::EXTRA;
-                                                break 'c_2319;
+                                                // The EXLEN branch above owns a scoped state borrow.
+                                                // Re-adopt the already-validated compatibility record
+                                                // only for this fall-through mode commit.
+                                                let state_ref = &mut *state;
+                                                state_ref.mode = crate::src::inflate::LEN;
                                             }
-                                            // The EXLEN branch above owns a scoped state borrow.
-                                            // Re-adopt the already-validated compatibility record
-                                            // only for this fall-through mode commit.
+                                            let strm_ref = &mut *strm;
                                             let state_ref = &mut *state;
-                                            state_ref.mode = crate::src::inflate::LEN;
-                                        }
-                                        let strm_ref = &mut *strm;
-                                        let state_ref = &mut *state;
-                                        let lcode = inflate_fast_table(
-                                            &state_ref.codes,
-                                            state_ref.lencode as usize,
-                                            crate::src::inftrees::inffixed_h::lenfix.as_ptr()
-                                                as usize,
-                                            &crate::src::inftrees::inffixed_h::lenfix,
-                                        );
-                                        let fast = if let Some(span) =
-                                            inflate_fast_span(have, left, out, state_ref.wsize)
-                                        {
-                                            // `out` is the output capacity at the beginning of
-                                            // this inflate call, while `put` has already advanced
-                                            // over any bytes decoded by the slow path. Lend the
-                                            // complete original span so the fast decoder keeps
-                                            // zlib's distance accounting relative to `out`.
-                                            let window = if span.window_len == 0 {
-                                                Some(&[][..])
-                                            } else if state_ref.window.is_null() {
-                                                None
-                                            } else {
-                                                Some(::core::slice::from_raw_parts(
-                                                    state_ref.window,
-                                                    span.window_len,
-                                                ))
-                                            };
-                                            if let Some(window) = window {
-                                                let input = ::core::slice::from_raw_parts(
-                                                    next,
-                                                    span.input_len,
-                                                );
-                                                let output = ::core::slice::from_raw_parts_mut(
-                                                    put.wrapping_sub(span.output_start),
-                                                    span.output_len,
-                                                );
-                                                inflate_fast_tables(
-                                                    &state_ref.codes,
-                                                    state_ref.lencode as usize,
-                                                    state_ref.distcode as usize,
-                                                )
-                                                .map(|(lcode, dcode)| {
-                                                    inflate_fast_normal(
-                                                        input,
-                                                        output,
-                                                        span.output_start,
-                                                        window,
-                                                        lcode,
-                                                        dcode,
-                                                        span.window_len,
-                                                        state_ref.whave as usize,
-                                                        state_ref.wnext as usize,
-                                                        state_ref.sane != 0,
-                                                        hold,
-                                                        bits,
-                                                        state_ref.lenbits,
-                                                        state_ref.distbits,
-                                                        out,
-                                                    )
-                                                })
-                                            } else {
-                                                None
-                                            }
-                                        } else {
-                                            None
-                                        };
-                                        if let Some(fast) = fast {
-                                            let Some(fast) = inflate_fast_commit(fast, have, left)
-                                            else {
-                                                ret = crate::zlib_h::Z_DATA_ERROR;
-                                                break '_inf_leave;
-                                            };
-                                            next = next.wrapping_add(fast.input_used as usize);
-                                            have = have.wrapping_sub(fast.input_used);
-                                            put = put.wrapping_add(fast.output_used as usize);
-                                            left = left.wrapping_sub(fast.output_used);
-                                            hold = fast.hold;
-                                            bits = fast.bits;
-                                            if let Some(mode) = fast.mode {
-                                                state_ref.mode = mode;
-                                                strm_ref.msg = match fast.error {
-                                                    Some(14) => {
-                                                        b"invalid literal/length code\0".as_ptr()
-                                                    }
-                                                    Some(15) => b"invalid distance code\0".as_ptr(),
-                                                    Some(17) => {
-                                                        b"invalid distance too far back\0".as_ptr()
-                                                    }
-                                                    _ => ::core::ptr::null(),
-                                                }
-                                                    as *mut ::core::ffi::c_char;
-                                            }
-                                            if state_ref.mode as ::core::ffi::c_uint
-                                                == crate::src::inflate::TYPE as ::core::ffi::c_int
-                                                    as ::core::ffi::c_uint
+                                            let lcode = inflate_fast_table(
+                                                &state_ref.codes,
+                                                state_ref.lencode as usize,
+                                                crate::src::inftrees::inffixed_h::lenfix.as_ptr()
+                                                    as usize,
+                                                &crate::src::inftrees::inffixed_h::lenfix,
+                                            );
+                                            let fast = if let Some(span) =
+                                                inflate_fast_span(have, left, out, state_ref.wsize)
                                             {
-                                                state_ref.back = -1 as ::core::ffi::c_int;
-                                            }
-                                            continue '_inf_leave;
-                                        } else {
-                                            // This slow-path fallback is still inside the
-                                            // short-lived boundary borrow established for the
-                                            // fast dispatch.  Keep scalar state updates on that
-                                            // borrow instead of re-traversing the raw state
-                                            // pointer.
-                                            let Some(lcode) = lcode else {
-                                                strm_ref.msg = INFLATE_ERROR_MESSAGES[14].as_ptr()
-                                                    as *const ::core::ffi::c_char
-                                                    as *mut ::core::ffi::c_char;
-                                                state_ref.mode = crate::src::inflate::BAD;
-                                                ret = crate::zlib_h::Z_DATA_ERROR;
-                                                break '_inf_leave;
+                                                // `out` is the output capacity at the beginning of
+                                                // this inflate call, while `put` has already advanced
+                                                // over any bytes decoded by the slow path. Lend the
+                                                // complete original span so the fast decoder keeps
+                                                // zlib's distance accounting relative to `out`.
+                                                let window = if span.window_len == 0 {
+                                                    Some(&[][..])
+                                                } else if state_ref.window.is_null() {
+                                                    None
+                                                } else {
+                                                    Some(::core::slice::from_raw_parts(
+                                                        state_ref.window,
+                                                        span.window_len,
+                                                    ))
+                                                };
+                                                if let Some(window) = window {
+                                                    let input = ::core::slice::from_raw_parts(
+                                                        next,
+                                                        span.input_len,
+                                                    );
+                                                    let output = ::core::slice::from_raw_parts_mut(
+                                                        put.wrapping_sub(span.output_start),
+                                                        span.output_len,
+                                                    );
+                                                    inflate_fast_tables(
+                                                        &state_ref.codes,
+                                                        state_ref.lencode as usize,
+                                                        state_ref.distcode as usize,
+                                                    )
+                                                    .map(|(lcode, dcode)| {
+                                                        inflate_fast_normal(
+                                                            input,
+                                                            output,
+                                                            span.output_start,
+                                                            window,
+                                                            lcode,
+                                                            dcode,
+                                                            span.window_len,
+                                                            state_ref.whave as usize,
+                                                            state_ref.wnext as usize,
+                                                            state_ref.sane != 0,
+                                                            hold,
+                                                            bits,
+                                                            state_ref.lenbits,
+                                                            state_ref.distbits,
+                                                            out,
+                                                        )
+                                                    })
+                                                } else {
+                                                    None
+                                                }
+                                            } else {
+                                                None
                                             };
-                                            state_ref.back = 0 as ::core::ffi::c_int;
-                                            loop {
-                                                let index = (hold as ::core::ffi::c_uint
-                                                    & ((1 as ::core::ffi::c_uint)
-                                                        << state_ref.lenbits)
-                                                        .wrapping_sub(1 as ::core::ffi::c_uint))
-                                                    as usize;
-                                                let Some(code) = lcode.get(index) else {
+                                            if let Some(fast) = fast {
+                                                let Some(fast) =
+                                                    inflate_fast_commit(fast, have, left)
+                                                else {
+                                                    ret = crate::zlib_h::Z_DATA_ERROR;
+                                                    break '_inf_leave;
+                                                };
+                                                next = next.wrapping_add(fast.input_used as usize);
+                                                have = have.wrapping_sub(fast.input_used);
+                                                put = put.wrapping_add(fast.output_used as usize);
+                                                left = left.wrapping_sub(fast.output_used);
+                                                hold = fast.hold;
+                                                bits = fast.bits;
+                                                if let Some(mode) = fast.mode {
+                                                    state_ref.mode = mode;
+                                                    strm_ref.msg = match fast.error {
+                                                        Some(14) => {
+                                                            b"invalid literal/length code\0"
+                                                                .as_ptr()
+                                                        }
+                                                        Some(15) => {
+                                                            b"invalid distance code\0".as_ptr()
+                                                        }
+                                                        Some(17) => {
+                                                            b"invalid distance too far back\0"
+                                                                .as_ptr()
+                                                        }
+                                                        _ => ::core::ptr::null(),
+                                                    }
+                                                        as *mut ::core::ffi::c_char;
+                                                }
+                                                if state_ref.mode as ::core::ffi::c_uint
+                                                    == crate::src::inflate::TYPE
+                                                        as ::core::ffi::c_int
+                                                        as ::core::ffi::c_uint
+                                                {
+                                                    state_ref.back = -1 as ::core::ffi::c_int;
+                                                }
+                                                continue '_inf_leave;
+                                            } else {
+                                                // This slow-path fallback is still inside the
+                                                // short-lived boundary borrow established for the
+                                                // fast dispatch.  Keep scalar state updates on that
+                                                // borrow instead of re-traversing the raw state
+                                                // pointer.
+                                                let Some(lcode) = lcode else {
                                                     strm_ref.msg = INFLATE_ERROR_MESSAGES[14]
                                                         .as_ptr()
                                                         as *const ::core::ffi::c_char
@@ -2649,30 +2667,47 @@ pub unsafe fn inflate(
                                                     ret = crate::zlib_h::Z_DATA_ERROR;
                                                     break '_inf_leave;
                                                 };
-                                                here = *code;
-                                                if here.bits as ::core::ffi::c_uint <= bits {
-                                                    break;
-                                                }
-                                                if have == 0 as ::core::ffi::c_uint {
-                                                    break '_inf_leave;
-                                                }
-                                                have = have.wrapping_sub(1);
-                                                let c2rust_fresh24 = next;
-                                                next = next.wrapping_add(1);
-                                                hold = hold.wrapping_add(
-                                                    (*c2rust_fresh24 as ::core::ffi::c_ulong)
-                                                        << bits,
-                                                );
-                                                bits = bits.wrapping_add(8 as ::core::ffi::c_uint);
-                                            }
-                                            if here.op as ::core::ffi::c_int != 0
-                                                && here.op as ::core::ffi::c_int
-                                                    & 0xf0 as ::core::ffi::c_int
-                                                    == 0 as ::core::ffi::c_int
-                                            {
-                                                last = here;
+                                                state_ref.back = 0 as ::core::ffi::c_int;
                                                 loop {
-                                                    let index = (last.val as ::core::ffi::c_uint)
+                                                    let index = (hold as ::core::ffi::c_uint
+                                                        & ((1 as ::core::ffi::c_uint)
+                                                            << state_ref.lenbits)
+                                                            .wrapping_sub(1 as ::core::ffi::c_uint))
+                                                        as usize;
+                                                    let Some(code) = lcode.get(index) else {
+                                                        strm_ref.msg = INFLATE_ERROR_MESSAGES[14]
+                                                            .as_ptr()
+                                                            as *const ::core::ffi::c_char
+                                                            as *mut ::core::ffi::c_char;
+                                                        state_ref.mode = crate::src::inflate::BAD;
+                                                        ret = crate::zlib_h::Z_DATA_ERROR;
+                                                        break '_inf_leave;
+                                                    };
+                                                    here = *code;
+                                                    if here.bits as ::core::ffi::c_uint <= bits {
+                                                        break;
+                                                    }
+                                                    if have == 0 as ::core::ffi::c_uint {
+                                                        break '_inf_leave;
+                                                    }
+                                                    have = have.wrapping_sub(1);
+                                                    let c2rust_fresh24 = next;
+                                                    next = next.wrapping_add(1);
+                                                    hold = hold.wrapping_add(
+                                                        (*c2rust_fresh24 as ::core::ffi::c_ulong)
+                                                            << bits,
+                                                    );
+                                                    bits =
+                                                        bits.wrapping_add(8 as ::core::ffi::c_uint);
+                                                }
+                                                if here.op as ::core::ffi::c_int != 0
+                                                    && here.op as ::core::ffi::c_int
+                                                        & 0xf0 as ::core::ffi::c_int
+                                                        == 0 as ::core::ffi::c_int
+                                                {
+                                                    last = here;
+                                                    loop {
+                                                        let index = (last.val as ::core::ffi::c_uint)
                                                         .wrapping_add(
                                                             (hold as ::core::ffi::c_uint
                                                                 & ((1 as ::core::ffi::c_uint)
@@ -2686,287 +2721,264 @@ pub unsafe fn inflate(
                                                                 >> last.bits as ::core::ffi::c_int,
                                                         )
                                                         as usize;
-                                                    let Some(code) = lcode.get(index) else {
-                                                        strm_ref.msg = INFLATE_ERROR_MESSAGES[14]
-                                                            .as_ptr()
-                                                            as *const ::core::ffi::c_char
-                                                            as *mut ::core::ffi::c_char;
-                                                        state_ref.mode = crate::src::inflate::BAD;
-                                                        ret = crate::zlib_h::Z_DATA_ERROR;
-                                                        break '_inf_leave;
-                                                    };
-                                                    here = *code;
-                                                    if (last.bits as ::core::ffi::c_int
-                                                        + here.bits as ::core::ffi::c_int)
-                                                        as ::core::ffi::c_uint
-                                                        <= bits
-                                                    {
-                                                        break;
+                                                        let Some(code) = lcode.get(index) else {
+                                                            strm_ref.msg =
+                                                                INFLATE_ERROR_MESSAGES[14].as_ptr()
+                                                                    as *const ::core::ffi::c_char
+                                                                    as *mut ::core::ffi::c_char;
+                                                            state_ref.mode =
+                                                                crate::src::inflate::BAD;
+                                                            ret = crate::zlib_h::Z_DATA_ERROR;
+                                                            break '_inf_leave;
+                                                        };
+                                                        here = *code;
+                                                        if (last.bits as ::core::ffi::c_int
+                                                            + here.bits as ::core::ffi::c_int)
+                                                            as ::core::ffi::c_uint
+                                                            <= bits
+                                                        {
+                                                            break;
+                                                        }
+                                                        if have == 0 as ::core::ffi::c_uint {
+                                                            break '_inf_leave;
+                                                        }
+                                                        have = have.wrapping_sub(1);
+                                                        let c2rust_fresh25 = next;
+                                                        next = next.wrapping_add(1);
+                                                        hold = hold.wrapping_add(
+                                                            (*c2rust_fresh25
+                                                                as ::core::ffi::c_ulong)
+                                                                << bits,
+                                                        );
+                                                        bits = bits
+                                                            .wrapping_add(8 as ::core::ffi::c_uint);
                                                     }
-                                                    if have == 0 as ::core::ffi::c_uint {
-                                                        break '_inf_leave;
-                                                    }
-                                                    have = have.wrapping_sub(1);
-                                                    let c2rust_fresh25 = next;
-                                                    next = next.wrapping_add(1);
-                                                    hold = hold.wrapping_add(
-                                                        (*c2rust_fresh25 as ::core::ffi::c_ulong)
-                                                            << bits,
+                                                    hold >>= last.bits as ::core::ffi::c_int;
+                                                    bits = bits.wrapping_sub(
+                                                        last.bits as ::core::ffi::c_uint,
                                                     );
-                                                    bits =
-                                                        bits.wrapping_add(8 as ::core::ffi::c_uint);
+                                                    state_ref.back +=
+                                                        last.bits as ::core::ffi::c_int;
                                                 }
-                                                hold >>= last.bits as ::core::ffi::c_int;
+                                                hold >>= here.bits as ::core::ffi::c_int;
                                                 bits = bits
-                                                    .wrapping_sub(last.bits as ::core::ffi::c_uint);
-                                                state_ref.back += last.bits as ::core::ffi::c_int;
-                                            }
-                                            hold >>= here.bits as ::core::ffi::c_int;
-                                            bits =
-                                                bits.wrapping_sub(here.bits as ::core::ffi::c_uint);
-                                            state_ref.back += here.bits as ::core::ffi::c_int;
-                                            state_ref.length = here.val as ::core::ffi::c_uint;
-                                            if here.op as ::core::ffi::c_int
-                                                == 0 as ::core::ffi::c_int
-                                            {
-                                                state_ref.mode = crate::src::inflate::LIT;
-                                                continue '_inf_leave;
-                                            } else if here.op as ::core::ffi::c_int
-                                                & 32 as ::core::ffi::c_int
-                                                != 0
-                                            {
-                                                state_ref.back = -1 as ::core::ffi::c_int;
-                                                state_ref.mode = crate::src::inflate::TYPE;
-                                                continue '_inf_leave;
-                                            } else if here.op as ::core::ffi::c_int
-                                                & 64 as ::core::ffi::c_int
-                                                != 0
-                                            {
-                                                strm_ref.msg = INFLATE_ERROR_MESSAGES[14].as_ptr()
-                                                    as *const ::core::ffi::c_char
-                                                    as *mut ::core::ffi::c_char;
-                                                state_ref.mode = crate::src::inflate::BAD;
-                                                continue '_inf_leave;
-                                            } else {
-                                                state_ref.extra = here.op as ::core::ffi::c_uint
-                                                    & 15 as ::core::ffi::c_uint;
-                                                state_ref.mode = crate::src::inflate::LENEXT;
-                                                break 'c_2410;
+                                                    .wrapping_sub(here.bits as ::core::ffi::c_uint);
+                                                state_ref.back += here.bits as ::core::ffi::c_int;
+                                                state_ref.length = here.val as ::core::ffi::c_uint;
+                                                if here.op as ::core::ffi::c_int
+                                                    == 0 as ::core::ffi::c_int
+                                                {
+                                                    state_ref.mode = crate::src::inflate::LIT;
+                                                    continue '_inf_leave;
+                                                } else if here.op as ::core::ffi::c_int
+                                                    & 32 as ::core::ffi::c_int
+                                                    != 0
+                                                {
+                                                    state_ref.back = -1 as ::core::ffi::c_int;
+                                                    state_ref.mode = crate::src::inflate::TYPE;
+                                                    continue '_inf_leave;
+                                                } else if here.op as ::core::ffi::c_int
+                                                    & 64 as ::core::ffi::c_int
+                                                    != 0
+                                                {
+                                                    strm_ref.msg = INFLATE_ERROR_MESSAGES[14]
+                                                        .as_ptr()
+                                                        as *const ::core::ffi::c_char
+                                                        as *mut ::core::ffi::c_char;
+                                                    state_ref.mode = crate::src::inflate::BAD;
+                                                    continue '_inf_leave;
+                                                } else {
+                                                    state_ref.extra = here.op
+                                                        as ::core::ffi::c_uint
+                                                        & 15 as ::core::ffi::c_uint;
+                                                    state_ref.mode = crate::src::inflate::LENEXT;
+                                                    break 'c_2410;
+                                                }
                                             }
                                         }
-                                    }
-                                    // The gzip extra-field transition only consumes the
-                                    // established decoder cursor and updates retained header
-                                    // state.  Adopt the decoder state once for this transition
-                                    // instead of repeatedly traversing its raw compatibility
-                                    // pointer.
-                                    let state_ref = &mut *state;
-                                    if state_ref.flags & 0x400 as ::core::ffi::c_int != 0 {
-                                        copy = state_ref.length;
-                                        if copy > have {
-                                            copy = have;
-                                        }
-                                        if copy != 0 {
-                                            if !state_ref.head.is_null() {
-                                                // The retained header is an ABI destination, but
-                                                // this transition only needs one temporary borrow
-                                                // to bound and copy its extra bytes.
-                                                let head = &mut *state_ref.head;
-                                                if !head.extra.is_null() {
-                                                    if let Some((header_offset, header_copy)) =
-                                                        inflate_header_extra_copy_plan(
-                                                            head.extra_len,
-                                                            head.extra_max,
-                                                            state_ref.length,
-                                                            copy,
-                                                        )
-                                                    {
-                                                        let mut copied = 0usize;
-                                                        while copied < header_copy {
-                                                            *head.extra.wrapping_add(
-                                                                header_offset + copied,
-                                                            ) = *next.wrapping_add(copied);
-                                                            copied += 1;
+                                        // The gzip extra-field transition only consumes the
+                                        // established decoder cursor and updates retained header
+                                        // state.  Adopt the decoder state once for this transition
+                                        // instead of repeatedly traversing its raw compatibility
+                                        // pointer.
+                                        let state_ref = &mut *state;
+                                        if state_ref.flags & 0x400 as ::core::ffi::c_int != 0 {
+                                            copy = state_ref.length;
+                                            if copy > have {
+                                                copy = have;
+                                            }
+                                            if copy != 0 {
+                                                if !state_ref.head.is_null() {
+                                                    // The retained header is an ABI destination, but
+                                                    // this transition only needs one temporary borrow
+                                                    // to bound and copy its extra bytes.
+                                                    let head = &mut *state_ref.head;
+                                                    if !head.extra.is_null() {
+                                                        if let Some((header_offset, header_copy)) =
+                                                            inflate_header_extra_copy_plan(
+                                                                head.extra_len,
+                                                                head.extra_max,
+                                                                state_ref.length,
+                                                                copy,
+                                                            )
+                                                        {
+                                                            let mut copied = 0usize;
+                                                            while copied < header_copy {
+                                                                *head.extra.wrapping_add(
+                                                                    header_offset + copied,
+                                                                ) = *next.wrapping_add(copied);
+                                                                copied += 1;
+                                                            }
                                                         }
                                                     }
                                                 }
-                                            }
-                                            if state_ref.flags & 0x200 as ::core::ffi::c_int != 0
-                                                && state_ref.wrap & 4 as ::core::ffi::c_int != 0
-                                            {
-                                                let mut checked =
-                                                    state_ref.check as crate::stdlib::uLong;
-                                                let mut checked_at = 0usize;
-                                                while checked_at < copy as usize {
-                                                    let byte = *next.wrapping_add(checked_at);
-                                                    checked = inflate_header_crc_update(
-                                                        checked as ::core::ffi::c_ulong,
-                                                        &[byte],
-                                                    )
-                                                        as crate::stdlib::uLong;
-                                                    checked_at += 1;
+                                                if state_ref.flags & 0x200 as ::core::ffi::c_int
+                                                    != 0
+                                                    && state_ref.wrap & 4 as ::core::ffi::c_int != 0
+                                                {
+                                                    let mut checked =
+                                                        state_ref.check as crate::stdlib::uLong;
+                                                    let mut checked_at = 0usize;
+                                                    while checked_at < copy as usize {
+                                                        let byte = *next.wrapping_add(checked_at);
+                                                        checked = inflate_header_crc_update(
+                                                            checked as ::core::ffi::c_ulong,
+                                                            &[byte],
+                                                        )
+                                                            as crate::stdlib::uLong;
+                                                        checked_at += 1;
+                                                    }
+                                                    state_ref.check =
+                                                        checked as ::core::ffi::c_ulong;
                                                 }
-                                                state_ref.check = checked as ::core::ffi::c_ulong;
+                                                have = have.wrapping_sub(copy);
+                                                next = next.wrapping_add(copy as usize);
+                                                state_ref.length =
+                                                    state_ref.length.wrapping_sub(copy);
                                             }
-                                            have = have.wrapping_sub(copy);
-                                            next = next.wrapping_add(copy as usize);
-                                            state_ref.length = state_ref.length.wrapping_sub(copy);
+                                            if state_ref.length != 0 {
+                                                break '_inf_leave;
+                                            }
                                         }
-                                        if state_ref.length != 0 {
-                                            break '_inf_leave;
-                                        }
+                                        state_ref.length = 0 as ::core::ffi::c_uint;
+                                        state_ref.mode = crate::src::inflate::NAME;
+                                        break 'c_2322;
                                     }
-                                    state_ref.length = 0 as ::core::ffi::c_uint;
-                                    state_ref.mode = crate::src::inflate::NAME;
-                                    break 'c_2322;
+                                    // Length extra bits only consume the decoder cursor and
+                                    // update scalar match state. Keep the compatibility-state
+                                    // access in one short-lived transition borrow, matching
+                                    // the distance-extra transition below.
+                                    let state_ref = &mut *state;
+                                    if state_ref.extra != 0 {
+                                        while bits < state_ref.extra {
+                                            if have == 0 as ::core::ffi::c_uint {
+                                                break '_inf_leave;
+                                            }
+                                            have = have.wrapping_sub(1);
+                                            let c2rust_fresh26 = next;
+                                            next = next.wrapping_add(1);
+                                            hold = hold.wrapping_add(
+                                                (*c2rust_fresh26 as ::core::ffi::c_ulong) << bits,
+                                            );
+                                            bits = bits.wrapping_add(8 as ::core::ffi::c_uint);
+                                        }
+                                        state_ref.length = state_ref.length.wrapping_add(
+                                            hold as ::core::ffi::c_uint
+                                                & ((1 as ::core::ffi::c_uint) << state_ref.extra)
+                                                    .wrapping_sub(1 as ::core::ffi::c_uint),
+                                        );
+                                        hold >>= state_ref.extra;
+                                        bits = bits.wrapping_sub(state_ref.extra);
+                                        state_ref.back = (state_ref.back as ::core::ffi::c_uint)
+                                            .wrapping_add(state_ref.extra)
+                                            as ::core::ffi::c_int;
+                                    }
+                                    state_ref.was = state_ref.length;
+                                    state_ref.mode = crate::src::inflate::DIST;
+                                    break 's_2462;
                                 }
-                                // Length extra bits only consume the decoder cursor and
-                                // update scalar match state. Keep the compatibility-state
-                                // access in one short-lived transition borrow, matching
-                                // the distance-extra transition below.
+                                // NAME consumes only the current input cursor and retained header
+                                // destination.  Keep its scalar state updates on one adopted
+                                // decoder-state borrow.
                                 let state_ref = &mut *state;
-                                if state_ref.extra != 0 {
-                                    while bits < state_ref.extra {
-                                        if have == 0 as ::core::ffi::c_uint {
-                                            break '_inf_leave;
-                                        }
-                                        have = have.wrapping_sub(1);
-                                        let c2rust_fresh26 = next;
-                                        next = next.wrapping_add(1);
-                                        hold = hold.wrapping_add(
-                                            (*c2rust_fresh26 as ::core::ffi::c_ulong) << bits,
-                                        );
-                                        bits = bits.wrapping_add(8 as ::core::ffi::c_uint);
+                                if state_ref.flags & 0x800 as ::core::ffi::c_int != 0 {
+                                    if have == 0 as ::core::ffi::c_uint {
+                                        break '_inf_leave;
                                     }
-                                    state_ref.length = state_ref.length.wrapping_add(
-                                        hold as ::core::ffi::c_uint
-                                            & ((1 as ::core::ffi::c_uint) << state_ref.extra)
-                                                .wrapping_sub(1 as ::core::ffi::c_uint),
-                                    );
-                                    hold >>= state_ref.extra;
-                                    bits = bits.wrapping_sub(state_ref.extra);
-                                    state_ref.back = (state_ref.back as ::core::ffi::c_uint)
-                                        .wrapping_add(state_ref.extra)
-                                        as ::core::ffi::c_int;
+                                    let header_crc = state_ref.flags & 0x200 as ::core::ffi::c_int
+                                        != 0
+                                        && state_ref.wrap & 4 as ::core::ffi::c_int != 0;
+                                    copy = 0 as ::core::ffi::c_uint;
+                                    loop {
+                                        let c2rust_fresh5 = copy;
+                                        copy = copy.wrapping_add(1);
+                                        len = *next.wrapping_add(c2rust_fresh5 as usize)
+                                            as ::core::ffi::c_uint;
+                                        if header_crc {
+                                            // Feed the byte while it is already available as a
+                                            // scalar, avoiding a second raw input lend solely for
+                                            // the header checksum after the name scan.
+                                            state_ref.check = inflate_header_crc_update(
+                                                state_ref.check,
+                                                &[len as crate::stdlib::Bytef],
+                                            );
+                                        }
+                                        if !state_ref.head.is_null() {
+                                            // `head` remains an ABI-owned retained destination, but
+                                            // this transition has already established that it is
+                                            // non-null. Adopt it once rather than re-dereferencing
+                                            // the compatibility pointer for its bounds and byte
+                                            // commit.
+                                            let head = &mut *state_ref.head;
+                                            if !head.name.is_null()
+                                                && state_ref.length < head.name_max
+                                            {
+                                                let c2rust_fresh6 = state_ref.length;
+                                                state_ref.length = state_ref.length.wrapping_add(1);
+                                                *head.name.wrapping_add(c2rust_fresh6 as usize) =
+                                                    len as crate::stdlib::Bytef;
+                                            }
+                                        }
+                                        if !(len != 0 && copy < have) {
+                                            break;
+                                        }
+                                    }
+                                    have = have.wrapping_sub(copy);
+                                    next = next.wrapping_add(copy as usize);
+                                    if len != 0 {
+                                        break '_inf_leave;
+                                    }
+                                } else if !state_ref.head.is_null() {
+                                    let head = &mut *state_ref.head;
+                                    head.name = ::core::ptr::null_mut::<crate::stdlib::Bytef>();
                                 }
-                                state_ref.was = state_ref.length;
-                                state_ref.mode = crate::src::inflate::DIST;
-                                break 's_2462;
+                                state_ref.length = 0 as ::core::ffi::c_uint;
+                                state_ref.mode = crate::src::inflate::COMMENT;
+                                break 'c_2325;
                             }
-                            // NAME consumes only the current input cursor and retained header
-                            // destination.  Keep its scalar state updates on one adopted
-                            // decoder-state borrow.
+                            // Keep distance-table state and its error publication on
+                            // the decoder entry's validated records. The table cursor
+                            // is resolved once to a bounded view, so both root and
+                            // subtable reads stay checked slice accesses.
+                            let strm_ref = &mut *strm;
                             let state_ref = &mut *state;
-                            if state_ref.flags & 0x800 as ::core::ffi::c_int != 0 {
-                                if have == 0 as ::core::ffi::c_uint {
-                                    break '_inf_leave;
-                                }
-                                let header_crc = state_ref.flags & 0x200 as ::core::ffi::c_int != 0
-                                    && state_ref.wrap & 4 as ::core::ffi::c_int != 0;
-                                copy = 0 as ::core::ffi::c_uint;
-                                loop {
-                                    let c2rust_fresh5 = copy;
-                                    copy = copy.wrapping_add(1);
-                                    len = *next.wrapping_add(c2rust_fresh5 as usize)
-                                        as ::core::ffi::c_uint;
-                                    if header_crc {
-                                        // Feed the byte while it is already available as a
-                                        // scalar, avoiding a second raw input lend solely for
-                                        // the header checksum after the name scan.
-                                        state_ref.check = inflate_header_crc_update(
-                                            state_ref.check,
-                                            &[len as crate::stdlib::Bytef],
-                                        );
-                                    }
-                                    if !state_ref.head.is_null() {
-                                        // `head` remains an ABI-owned retained destination, but
-                                        // this transition has already established that it is
-                                        // non-null. Adopt it once rather than re-dereferencing
-                                        // the compatibility pointer for its bounds and byte
-                                        // commit.
-                                        let head = &mut *state_ref.head;
-                                        if !head.name.is_null() && state_ref.length < head.name_max
-                                        {
-                                            let c2rust_fresh6 = state_ref.length;
-                                            state_ref.length = state_ref.length.wrapping_add(1);
-                                            *head.name.wrapping_add(c2rust_fresh6 as usize) =
-                                                len as crate::stdlib::Bytef;
-                                        }
-                                    }
-                                    if !(len != 0 && copy < have) {
-                                        break;
-                                    }
-                                }
-                                have = have.wrapping_sub(copy);
-                                next = next.wrapping_add(copy as usize);
-                                if len != 0 {
-                                    break '_inf_leave;
-                                }
-                            } else if !state_ref.head.is_null() {
-                                let head = &mut *state_ref.head;
-                                head.name = ::core::ptr::null_mut::<crate::stdlib::Bytef>();
-                            }
-                            state_ref.length = 0 as ::core::ffi::c_uint;
-                            state_ref.mode = crate::src::inflate::COMMENT;
-                            break 'c_2325;
-                        }
-                        // Keep distance-table state and its error publication on
-                        // the decoder entry's validated records. The table cursor
-                        // is resolved once to a bounded view, so both root and
-                        // subtable reads stay checked slice accesses.
-                        let strm_ref = &mut *strm;
-                        let state_ref = &mut *state;
-                        let Some(dcode) = inflate_fast_table(
-                            &state_ref.codes,
-                            state_ref.distcode as usize,
-                            crate::src::inftrees::inffixed_h::distfix.as_ptr() as usize,
-                            &crate::src::inftrees::inffixed_h::distfix,
-                        ) else {
-                            strm_ref.msg = INFLATE_ERROR_MESSAGES[15].as_ptr()
-                                as *const ::core::ffi::c_char
-                                as *mut ::core::ffi::c_char;
-                            state_ref.mode = crate::src::inflate::BAD;
-                            continue '_inf_leave;
-                        };
-                        loop {
-                            let index = (hold as ::core::ffi::c_uint
-                                & ((1 as ::core::ffi::c_uint) << state_ref.distbits)
-                                    .wrapping_sub(1 as ::core::ffi::c_uint))
-                                as usize;
-                            let Some(code) = dcode.get(index).copied() else {
+                            let Some(dcode) = inflate_fast_table(
+                                &state_ref.codes,
+                                state_ref.distcode as usize,
+                                crate::src::inftrees::inffixed_h::distfix.as_ptr() as usize,
+                                &crate::src::inftrees::inffixed_h::distfix,
+                            ) else {
                                 strm_ref.msg = INFLATE_ERROR_MESSAGES[15].as_ptr()
                                     as *const ::core::ffi::c_char
                                     as *mut ::core::ffi::c_char;
                                 state_ref.mode = crate::src::inflate::BAD;
                                 continue '_inf_leave;
                             };
-                            here = code;
-                            if here.bits as ::core::ffi::c_uint <= bits {
-                                break;
-                            }
-                            if have == 0 as ::core::ffi::c_uint {
-                                break '_inf_leave;
-                            }
-                            have = have.wrapping_sub(1);
-                            let c2rust_fresh27 = next;
-                            next = next.wrapping_add(1);
-                            hold = hold
-                                .wrapping_add((*c2rust_fresh27 as ::core::ffi::c_ulong) << bits);
-                            bits = bits.wrapping_add(8 as ::core::ffi::c_uint);
-                        }
-                        if here.op as ::core::ffi::c_int & 0xf0 as ::core::ffi::c_int
-                            == 0 as ::core::ffi::c_int
-                        {
-                            last = here;
                             loop {
-                                let index = (last.val as ::core::ffi::c_uint).wrapping_add(
-                                    (hold as ::core::ffi::c_uint
-                                        & ((1 as ::core::ffi::c_uint)
-                                            << last.bits as ::core::ffi::c_int
-                                                + last.op as ::core::ffi::c_int)
-                                            .wrapping_sub(1 as ::core::ffi::c_uint))
-                                        >> last.bits as ::core::ffi::c_int,
-                                ) as usize;
+                                let index = (hold as ::core::ffi::c_uint
+                                    & ((1 as ::core::ffi::c_uint) << state_ref.distbits)
+                                        .wrapping_sub(1 as ::core::ffi::c_uint))
+                                    as usize;
                                 let Some(code) = dcode.get(index).copied() else {
                                     strm_ref.msg = INFLATE_ERROR_MESSAGES[15].as_ptr()
                                         as *const ::core::ffi::c_char
@@ -2975,358 +2987,400 @@ pub unsafe fn inflate(
                                     continue '_inf_leave;
                                 };
                                 here = code;
-                                if (last.bits as ::core::ffi::c_int
-                                    + here.bits as ::core::ffi::c_int)
-                                    as ::core::ffi::c_uint
-                                    <= bits
-                                {
+                                if here.bits as ::core::ffi::c_uint <= bits {
                                     break;
                                 }
                                 if have == 0 as ::core::ffi::c_uint {
                                     break '_inf_leave;
                                 }
                                 have = have.wrapping_sub(1);
-                                let c2rust_fresh28 = next;
+                                let c2rust_fresh27 = next;
                                 next = next.wrapping_add(1);
                                 hold = hold.wrapping_add(
-                                    (*c2rust_fresh28 as ::core::ffi::c_ulong) << bits,
+                                    (*c2rust_fresh27 as ::core::ffi::c_ulong) << bits,
                                 );
                                 bits = bits.wrapping_add(8 as ::core::ffi::c_uint);
                             }
-                            hold >>= last.bits as ::core::ffi::c_int;
-                            bits = bits.wrapping_sub(last.bits as ::core::ffi::c_uint);
-                            state_ref.back += last.bits as ::core::ffi::c_int;
-                        }
-                        hold >>= here.bits as ::core::ffi::c_int;
-                        bits = bits.wrapping_sub(here.bits as ::core::ffi::c_uint);
-                        state_ref.back += here.bits as ::core::ffi::c_int;
-                        if here.op as ::core::ffi::c_int & 64 as ::core::ffi::c_int != 0 {
-                            strm_ref.msg = INFLATE_ERROR_MESSAGES[15].as_ptr()
-                                as *const ::core::ffi::c_char
-                                as *mut ::core::ffi::c_char;
-                            state_ref.mode = crate::src::inflate::BAD;
-                            continue '_inf_leave;
-                        } else {
-                            state_ref.offset = here.val as ::core::ffi::c_uint;
-                            state_ref.extra =
-                                here.op as ::core::ffi::c_uint & 15 as ::core::ffi::c_uint;
-                            state_ref.mode = crate::src::inflate::DISTEXT;
-                            break 'c_2422;
-                        }
-                    }
-                    // COMMENT consumes only the current input cursor and retained
-                    // header destination. Keep its scalar state updates on one
-                    // adopted decoder-state borrow, matching the NAME transition.
-                    let state_ref = &mut *state;
-                    if state_ref.flags & 0x1000 as ::core::ffi::c_int != 0 {
-                        if have == 0 as ::core::ffi::c_uint {
-                            break '_inf_leave;
-                        }
-                        let header_crc = state_ref.flags & 0x200 as ::core::ffi::c_int != 0
-                            && state_ref.wrap & 4 as ::core::ffi::c_int != 0;
-                        copy = 0 as ::core::ffi::c_uint;
-                        loop {
-                            let c2rust_fresh7 = copy;
-                            copy = copy.wrapping_add(1);
-                            len = *next.wrapping_add(c2rust_fresh7 as usize) as ::core::ffi::c_uint;
-                            if header_crc {
-                                // The byte is already available as a scalar while scanning the
-                                // NUL-terminated comment.  Feed it directly instead of forming
-                                // a second raw input view after the scan.
-                                state_ref.check = inflate_header_crc_update(
-                                    state_ref.check,
-                                    &[len as crate::stdlib::Bytef],
-                                );
+                            if here.op as ::core::ffi::c_int & 0xf0 as ::core::ffi::c_int
+                                == 0 as ::core::ffi::c_int
+                            {
+                                last = here;
+                                loop {
+                                    let index = (last.val as ::core::ffi::c_uint).wrapping_add(
+                                        (hold as ::core::ffi::c_uint
+                                            & ((1 as ::core::ffi::c_uint)
+                                                << last.bits as ::core::ffi::c_int
+                                                    + last.op as ::core::ffi::c_int)
+                                                .wrapping_sub(1 as ::core::ffi::c_uint))
+                                            >> last.bits as ::core::ffi::c_int,
+                                    ) as usize;
+                                    let Some(code) = dcode.get(index).copied() else {
+                                        strm_ref.msg = INFLATE_ERROR_MESSAGES[15].as_ptr()
+                                            as *const ::core::ffi::c_char
+                                            as *mut ::core::ffi::c_char;
+                                        state_ref.mode = crate::src::inflate::BAD;
+                                        continue '_inf_leave;
+                                    };
+                                    here = code;
+                                    if (last.bits as ::core::ffi::c_int
+                                        + here.bits as ::core::ffi::c_int)
+                                        as ::core::ffi::c_uint
+                                        <= bits
+                                    {
+                                        break;
+                                    }
+                                    if have == 0 as ::core::ffi::c_uint {
+                                        break '_inf_leave;
+                                    }
+                                    have = have.wrapping_sub(1);
+                                    let c2rust_fresh28 = next;
+                                    next = next.wrapping_add(1);
+                                    hold = hold.wrapping_add(
+                                        (*c2rust_fresh28 as ::core::ffi::c_ulong) << bits,
+                                    );
+                                    bits = bits.wrapping_add(8 as ::core::ffi::c_uint);
+                                }
+                                hold >>= last.bits as ::core::ffi::c_int;
+                                bits = bits.wrapping_sub(last.bits as ::core::ffi::c_uint);
+                                state_ref.back += last.bits as ::core::ffi::c_int;
                             }
-                            if !state_ref.head.is_null() {
-                                // As in NAME, use one transition-local borrow of the retained
-                                // ABI header destination for the bounds check and byte commit.
-                                let head = &mut *state_ref.head;
-                                if !head.comment.is_null() && state_ref.length < head.comm_max {
-                                    let c2rust_fresh8 = state_ref.length;
-                                    state_ref.length = state_ref.length.wrapping_add(1);
-                                    *head.comment.wrapping_add(c2rust_fresh8 as usize) =
-                                        len as crate::stdlib::Bytef;
+                            hold >>= here.bits as ::core::ffi::c_int;
+                            bits = bits.wrapping_sub(here.bits as ::core::ffi::c_uint);
+                            state_ref.back += here.bits as ::core::ffi::c_int;
+                            if here.op as ::core::ffi::c_int & 64 as ::core::ffi::c_int != 0 {
+                                strm_ref.msg = INFLATE_ERROR_MESSAGES[15].as_ptr()
+                                    as *const ::core::ffi::c_char
+                                    as *mut ::core::ffi::c_char;
+                                state_ref.mode = crate::src::inflate::BAD;
+                                continue '_inf_leave;
+                            } else {
+                                state_ref.offset = here.val as ::core::ffi::c_uint;
+                                state_ref.extra =
+                                    here.op as ::core::ffi::c_uint & 15 as ::core::ffi::c_uint;
+                                state_ref.mode = crate::src::inflate::DISTEXT;
+                                break 'c_2422;
+                            }
+                        }
+                        // COMMENT consumes only the current input cursor and retained
+                        // header destination. Keep its scalar state updates on one
+                        // adopted decoder-state borrow, matching the NAME transition.
+                        let state_ref = &mut *state;
+                        if state_ref.flags & 0x1000 as ::core::ffi::c_int != 0 {
+                            if have == 0 as ::core::ffi::c_uint {
+                                break '_inf_leave;
+                            }
+                            let header_crc = state_ref.flags & 0x200 as ::core::ffi::c_int != 0
+                                && state_ref.wrap & 4 as ::core::ffi::c_int != 0;
+                            copy = 0 as ::core::ffi::c_uint;
+                            loop {
+                                let c2rust_fresh7 = copy;
+                                copy = copy.wrapping_add(1);
+                                len = *next.wrapping_add(c2rust_fresh7 as usize)
+                                    as ::core::ffi::c_uint;
+                                if header_crc {
+                                    // The byte is already available as a scalar while scanning the
+                                    // NUL-terminated comment.  Feed it directly instead of forming
+                                    // a second raw input view after the scan.
+                                    state_ref.check = inflate_header_crc_update(
+                                        state_ref.check,
+                                        &[len as crate::stdlib::Bytef],
+                                    );
+                                }
+                                if !state_ref.head.is_null() {
+                                    // As in NAME, use one transition-local borrow of the retained
+                                    // ABI header destination for the bounds check and byte commit.
+                                    let head = &mut *state_ref.head;
+                                    if !head.comment.is_null() && state_ref.length < head.comm_max {
+                                        let c2rust_fresh8 = state_ref.length;
+                                        state_ref.length = state_ref.length.wrapping_add(1);
+                                        *head.comment.wrapping_add(c2rust_fresh8 as usize) =
+                                            len as crate::stdlib::Bytef;
+                                    }
+                                }
+                                if !(len != 0 && copy < have) {
+                                    break;
                                 }
                             }
-                            if !(len != 0 && copy < have) {
-                                break;
+                            have = have.wrapping_sub(copy);
+                            next = next.wrapping_add(copy as usize);
+                            if len != 0 {
+                                break '_inf_leave;
                             }
+                        } else if !state_ref.head.is_null() {
+                            let head = &mut *state_ref.head;
+                            head.comment = ::core::ptr::null_mut::<crate::stdlib::Bytef>();
                         }
-                        have = have.wrapping_sub(copy);
-                        next = next.wrapping_add(copy as usize);
-                        if len != 0 {
-                            break '_inf_leave;
-                        }
-                    } else if !state_ref.head.is_null() {
-                        let head = &mut *state_ref.head;
-                        head.comment = ::core::ptr::null_mut::<crate::stdlib::Bytef>();
+                        state_ref.mode = crate::src::inflate::HCRC;
+                        break 'c_2327;
                     }
-                    state_ref.mode = crate::src::inflate::HCRC;
-                    break 'c_2327;
+                    // Distance extra bits only consume the decoder cursor and
+                    // update scalar match state. Keep the compatibility-state
+                    // access in one short-lived transition borrow; raw input
+                    // cursor handling remains in this legacy boundary.
+                    let state_ref = &mut *state;
+                    if state_ref.extra != 0 {
+                        while bits < state_ref.extra {
+                            if have == 0 as ::core::ffi::c_uint {
+                                break '_inf_leave;
+                            }
+                            have = have.wrapping_sub(1);
+                            let c2rust_fresh29 = next;
+                            next = next.wrapping_add(1);
+                            hold = hold
+                                .wrapping_add((*c2rust_fresh29 as ::core::ffi::c_ulong) << bits);
+                            bits = bits.wrapping_add(8 as ::core::ffi::c_uint);
+                        }
+                        state_ref.offset = state_ref.offset.wrapping_add(
+                            hold as ::core::ffi::c_uint
+                                & ((1 as ::core::ffi::c_uint) << state_ref.extra)
+                                    .wrapping_sub(1 as ::core::ffi::c_uint),
+                        );
+                        hold >>= state_ref.extra;
+                        bits = bits.wrapping_sub(state_ref.extra);
+                        state_ref.back = (state_ref.back as ::core::ffi::c_uint)
+                            .wrapping_add(state_ref.extra)
+                            as ::core::ffi::c_int;
+                    }
+                    state_ref.mode = crate::src::inflate::MATCH;
+                    break 'c_2425;
                 }
-                // Distance extra bits only consume the decoder cursor and
-                // update scalar match state. Keep the compatibility-state
-                // access in one short-lived transition borrow; raw input
-                // cursor handling remains in this legacy boundary.
+                // Header-CRC completion only consumes the existing decoder
+                // cursor and updates stream/header scalars.  Keep those commits
+                // on one short-lived boundary borrow instead of repeatedly
+                // traversing the compatibility records.
+                let strm_ref = &mut *strm;
                 let state_ref = &mut *state;
-                if state_ref.extra != 0 {
-                    while bits < state_ref.extra {
+                if state_ref.flags & 0x200 as ::core::ffi::c_int != 0 {
+                    while bits < 16 as ::core::ffi::c_int as ::core::ffi::c_uint {
                         if have == 0 as ::core::ffi::c_uint {
                             break '_inf_leave;
                         }
                         have = have.wrapping_sub(1);
-                        let c2rust_fresh29 = next;
+                        let c2rust_fresh9 = next;
                         next = next.wrapping_add(1);
-                        hold = hold.wrapping_add((*c2rust_fresh29 as ::core::ffi::c_ulong) << bits);
+                        hold = hold.wrapping_add((*c2rust_fresh9 as ::core::ffi::c_ulong) << bits);
                         bits = bits.wrapping_add(8 as ::core::ffi::c_uint);
                     }
-                    state_ref.offset = state_ref.offset.wrapping_add(
-                        hold as ::core::ffi::c_uint
-                            & ((1 as ::core::ffi::c_uint) << state_ref.extra)
-                                .wrapping_sub(1 as ::core::ffi::c_uint),
-                    );
-                    hold >>= state_ref.extra;
-                    bits = bits.wrapping_sub(state_ref.extra);
-                    state_ref.back = (state_ref.back as ::core::ffi::c_uint)
-                        .wrapping_add(state_ref.extra)
-                        as ::core::ffi::c_int;
-                }
-                state_ref.mode = crate::src::inflate::MATCH;
-                break 'c_2425;
-            }
-            // Header-CRC completion only consumes the existing decoder
-            // cursor and updates stream/header scalars.  Keep those commits
-            // on one short-lived boundary borrow instead of repeatedly
-            // traversing the compatibility records.
-            let strm_ref = &mut *strm;
-            let state_ref = &mut *state;
-            if state_ref.flags & 0x200 as ::core::ffi::c_int != 0 {
-                while bits < 16 as ::core::ffi::c_int as ::core::ffi::c_uint {
-                    if have == 0 as ::core::ffi::c_uint {
-                        break '_inf_leave;
+                    if !inflate_header_crc_matches(state_ref.wrap, state_ref.check, hold) {
+                        strm_ref.msg = INFLATE_ERROR_MESSAGES[16].as_ptr()
+                            as *const ::core::ffi::c_char
+                            as *mut ::core::ffi::c_char;
+                        state_ref.mode = crate::src::inflate::BAD;
+                        continue '_inf_leave;
+                    } else {
+                        hold = 0 as ::core::ffi::c_ulong;
+                        bits = 0 as ::core::ffi::c_uint;
                     }
-                    have = have.wrapping_sub(1);
-                    let c2rust_fresh9 = next;
-                    next = next.wrapping_add(1);
-                    hold = hold.wrapping_add((*c2rust_fresh9 as ::core::ffi::c_ulong) << bits);
-                    bits = bits.wrapping_add(8 as ::core::ffi::c_uint);
                 }
-                if !inflate_header_crc_matches(state_ref.wrap, state_ref.check, hold) {
-                    strm_ref.msg = INFLATE_ERROR_MESSAGES[16].as_ptr() as *const ::core::ffi::c_char
-                        as *mut ::core::ffi::c_char;
-                    state_ref.mode = crate::src::inflate::BAD;
-                    continue '_inf_leave;
-                } else {
-                    hold = 0 as ::core::ffi::c_ulong;
-                    bits = 0 as ::core::ffi::c_uint;
+                if !state_ref.head.is_null() {
+                    let head = &mut *state_ref.head;
+                    head.hcrc =
+                        state_ref.flags >> 9 as ::core::ffi::c_int & 1 as ::core::ffi::c_int;
+                    head.done = 1 as ::core::ffi::c_int;
                 }
+                state_ref.check = inflate_header_crc_update(0, &[]);
+                strm_ref.adler = state_ref.check as crate::stdlib::uLong;
+                state_ref.mode = crate::src::inflate::TYPE;
+                continue '_inf_leave;
             }
-            if !state_ref.head.is_null() {
-                let head = &mut *state_ref.head;
-                head.hcrc = state_ref.flags >> 9 as ::core::ffi::c_int & 1 as ::core::ffi::c_int;
-                head.done = 1 as ::core::ffi::c_int;
-            }
-            state_ref.check = inflate_header_crc_update(0, &[]);
-            strm_ref.adler = state_ref.check as crate::stdlib::uLong;
-            state_ref.mode = crate::src::inflate::TYPE;
-            continue '_inf_leave;
-        }
-        if left == 0 as ::core::ffi::c_uint {
-            break;
-        }
-        // This match-copy transition does not allocate or invoke callbacks,
-        // so keep its scalar state bookkeeping on one short-lived adopted
-        // state record. The cursor copy below remains in the transitional
-        // decoder boundary.
-        let strm_ref = &mut *strm;
-        let state_ref = &mut *state;
-        copy = out.wrapping_sub(left);
-        if state_ref.offset > copy {
-            copy = state_ref.offset.wrapping_sub(copy);
-            if copy > state_ref.whave {
-                if state_ref.sane != 0 {
-                    strm_ref.msg = INFLATE_ERROR_MESSAGES[17].as_ptr() as *const ::core::ffi::c_char
-                        as *mut ::core::ffi::c_char;
-                    state_ref.mode = crate::src::inflate::BAD;
-                    continue;
-                }
-            }
-            if copy > state_ref.wnext {
-                copy = copy.wrapping_sub(state_ref.wnext);
-                from = state_ref
-                    .window
-                    .wrapping_add(state_ref.wsize.wrapping_sub(copy) as usize);
-            } else {
-                from = state_ref
-                    .window
-                    .wrapping_add(state_ref.wnext.wrapping_sub(copy) as usize);
-            }
-            if copy > state_ref.length {
-                copy = state_ref.length;
-            }
-        } else {
-            from = put.wrapping_sub(state_ref.offset as usize);
-            copy = state_ref.length;
-        }
-        if copy > left {
-            copy = left;
-        }
-        left = left.wrapping_sub(copy);
-        state_ref.length = state_ref.length.wrapping_sub(copy);
-        loop {
-            let c2rust_fresh30 = from;
-            from = from.wrapping_add(1);
-            let c2rust_fresh31 = put;
-            put = put.wrapping_add(1);
-            *c2rust_fresh31 = *c2rust_fresh30;
-            copy = copy.wrapping_sub(1);
-            if copy == 0 {
+            if left == 0 as ::core::ffi::c_uint {
                 break;
             }
-        }
-        if state_ref.length == 0 as ::core::ffi::c_uint {
-            state_ref.mode = crate::src::inflate::LEN;
-        }
-    }
-    // Keep the decoder loop's raw cursors local to that loop.  The exit
-    // commit adopts each ABI record once, so cursor publication, history
-    // planning, totals, and checksum state use ordinary field access.
-    // Compute one checked exit plan before history maintenance.  Updating the
-    // circular window may change history cursors, but it does not change the
-    // decoded input/output progress, mode, or bit state this call publishes.
-    // Reusing this plan keeps the history decision and final ABI accounting
-    // tied to the same scalar snapshot.
-    let (exit, window_error, produced) = {
-        let strm_ref = &mut *strm;
-        let state_ref = &mut *state;
-        strm_ref.next_out = put as *mut crate::stdlib::Bytef;
-        strm_ref.avail_out = left as crate::stdlib::uInt;
-        strm_ref.next_in = next as *mut crate::stdlib::Bytef;
-        strm_ref.avail_in = have as crate::stdlib::uInt;
-        state_ref.hold = hold;
-        state_ref.bits = bits;
-        let exit = inflate_exit_progress(
-            in_0,
-            strm_ref.avail_in as ::core::ffi::c_uint,
-            out,
-            strm_ref.avail_out as ::core::ffi::c_uint,
-            state_ref.wsize,
-            state_ref.mode,
-            flush,
-            state_ref.bits,
-            state_ref.last,
-        );
-        let (window_error, produced): (bool, &[crate::stdlib::Bytef]) = 'window: {
-            // Invoke a possible allocator callback before lending the caller's
-            // completed-output span. History retention and final checksum then
-            // consume that one exact bounded view.
-            let (wbits, wsize, wnext, whave, wrap) = (
-                state_ref.wbits,
-                state_ref.wsize,
-                state_ref.wnext,
-                state_ref.whave,
-                state_ref.wrap,
-            );
-            let window = if exit.update_window {
-                // The decoder boundary owns callback invocation and the one
-                // temporary ABI-window lend.  The plan and the subsequent
-                // history update remain slice/scalar-only, so no private
-                // unsafe window adapter is needed.
-                let Some(plan) = inflate_window_boundary_plan(
-                    state_ref.window.is_null(),
-                    state_ref.wbits,
-                    state_ref.wsize,
-                    exit.output_used,
-                ) else {
-                    break 'window (true, &[]);
-                };
-                if plan.allocate {
-                    let Ok(requested_wsize) = ::core::ffi::c_uint::try_from(plan.window_len) else {
-                        break 'window (true, &[]);
-                    };
-                    // `inflate()` normally reaches this boundary only after
-                    // init has installed zalloc. Treat malformed callback
-                    // state as allocation failure instead of panicking.
-                    let Some(zalloc) = strm_ref.zalloc else {
-                        break 'window (true, &[]);
-                    };
-                    state_ref.window = zalloc(
-                        strm_ref.opaque,
-                        requested_wsize,
-                        ::core::mem::size_of::<::core::ffi::c_uchar>() as crate::stdlib::uInt,
-                    ) as *mut ::core::ffi::c_uchar;
-                    if state_ref.window.is_null() {
-                        break 'window (true, &[]);
+            // This match-copy transition does not allocate or invoke callbacks,
+            // so keep its scalar state bookkeeping on one short-lived adopted
+            // state record. The cursor copy below remains in the transitional
+            // decoder boundary.
+            let strm_ref = &mut *strm;
+            let state_ref = &mut *state;
+            copy = out.wrapping_sub(left);
+            if state_ref.offset > copy {
+                copy = state_ref.offset.wrapping_sub(copy);
+                if copy > state_ref.whave {
+                    if state_ref.sane != 0 {
+                        strm_ref.msg = INFLATE_ERROR_MESSAGES[17].as_ptr()
+                            as *const ::core::ffi::c_char
+                            as *mut ::core::ffi::c_char;
+                        state_ref.mode = crate::src::inflate::BAD;
+                        continue;
                     }
                 }
-                Some(::core::slice::from_raw_parts_mut(
-                    state_ref.window,
-                    plan.window_len,
-                ))
+                if copy > state_ref.wnext {
+                    copy = copy.wrapping_sub(state_ref.wnext);
+                    from = state_ref
+                        .window
+                        .wrapping_add(state_ref.wsize.wrapping_sub(copy) as usize);
+                } else {
+                    from = state_ref
+                        .window
+                        .wrapping_add(state_ref.wnext.wrapping_sub(copy) as usize);
+                }
+                if copy > state_ref.length {
+                    copy = state_ref.length;
+                }
             } else {
-                None
-            };
-            if exit.update_window && window.is_none() {
-                break 'window (true, &[]);
+                from = put.wrapping_sub(state_ref.offset as usize);
+                copy = state_ref.length;
             }
-            let needs_output_view =
-                exit.update_window || inflate_exit_needs_checksum(wrap, exit.output_used as usize);
-            let produced = if needs_output_view && exit.output_used != 0 {
-                ::core::slice::from_raw_parts(
-                    strm_ref.next_out.wrapping_sub(exit.output_used as usize),
-                    exit.output_used as usize,
-                )
-            } else {
-                &[]
-            };
-            if let Some(window) = window {
-                let Some(update) =
-                    inflate_window_update(window, produced, wbits, wsize, wnext, whave)
-                else {
-                    break 'window (true, &[]);
-                };
-                state_ref.wsize = update.wsize;
-                state_ref.wnext = update.wnext;
-                state_ref.whave = update.whave;
+            if copy > left {
+                copy = left;
             }
-            (false, produced)
-        };
-        (exit, window_error, produced)
-    };
-    if window_error {
-        let state_ref = &mut *state;
-        state_ref.mode = crate::src::inflate::MEM;
-        return crate::zlib_h::Z_MEM_ERROR;
-    }
-    {
-        let strm_ref = &mut *strm;
-        let state_ref = &mut *state;
-        in_0 = exit.input_used;
-        out = exit.output_used;
-        strm_ref.total_in = strm_ref
-            .total_in
-            .wrapping_add(exit.input_used as crate::stdlib::uLong);
-        strm_ref.total_out = strm_ref
-            .total_out
-            .wrapping_add(exit.output_used as crate::stdlib::uLong);
-        state_ref.total = state_ref
-            .total
-            .wrapping_add(exit.output_used as ::core::ffi::c_ulong);
-        if inflate_exit_needs_checksum(state_ref.wrap, exit.output_used as usize) {
-            if let Some(check) = inflate_exit_checksum(
-                state_ref.wrap,
-                state_ref.check as crate::stdlib::uLong,
-                state_ref.flags,
-                produced,
-            ) {
-                state_ref.check = check;
-                strm_ref.adler = state_ref.check as crate::stdlib::uLong;
+            left = left.wrapping_sub(copy);
+            state_ref.length = state_ref.length.wrapping_sub(copy);
+            loop {
+                let c2rust_fresh30 = from;
+                from = from.wrapping_add(1);
+                let c2rust_fresh31 = put;
+                put = put.wrapping_add(1);
+                *c2rust_fresh31 = *c2rust_fresh30;
+                copy = copy.wrapping_sub(1);
+                if copy == 0 {
+                    break;
+                }
+            }
+            if state_ref.length == 0 as ::core::ffi::c_uint {
+                state_ref.mode = crate::src::inflate::LEN;
             }
         }
-        strm_ref.data_type = exit.data_type;
+        // Keep the decoder loop's raw cursors local to that loop.  The exit
+        // commit adopts each ABI record once, so cursor publication, history
+        // planning, totals, and checksum state use ordinary field access.
+        // Compute one checked exit plan before history maintenance.  Updating the
+        // circular window may change history cursors, but it does not change the
+        // decoded input/output progress, mode, or bit state this call publishes.
+        // Reusing this plan keeps the history decision and final ABI accounting
+        // tied to the same scalar snapshot.
+        let (exit, window_error, produced) = {
+            let strm_ref = &mut *strm;
+            let state_ref = &mut *state;
+            strm_ref.next_out = put as *mut crate::stdlib::Bytef;
+            strm_ref.avail_out = left as crate::stdlib::uInt;
+            strm_ref.next_in = next as *mut crate::stdlib::Bytef;
+            strm_ref.avail_in = have as crate::stdlib::uInt;
+            state_ref.hold = hold;
+            state_ref.bits = bits;
+            let exit = inflate_exit_progress(
+                in_0,
+                strm_ref.avail_in as ::core::ffi::c_uint,
+                out,
+                strm_ref.avail_out as ::core::ffi::c_uint,
+                state_ref.wsize,
+                state_ref.mode,
+                flush,
+                state_ref.bits,
+                state_ref.last,
+            );
+            let (window_error, produced): (bool, &[crate::stdlib::Bytef]) = 'window: {
+                // Invoke a possible allocator callback before lending the caller's
+                // completed-output span. History retention and final checksum then
+                // consume that one exact bounded view.
+                let (wbits, wsize, wnext, whave, wrap) = (
+                    state_ref.wbits,
+                    state_ref.wsize,
+                    state_ref.wnext,
+                    state_ref.whave,
+                    state_ref.wrap,
+                );
+                let window = if exit.update_window {
+                    // The decoder boundary owns callback invocation and the one
+                    // temporary ABI-window lend.  The plan and the subsequent
+                    // history update remain slice/scalar-only, so no private
+                    // unsafe window adapter is needed.
+                    let Some(plan) = inflate_window_boundary_plan(
+                        state_ref.window.is_null(),
+                        state_ref.wbits,
+                        state_ref.wsize,
+                        exit.output_used,
+                    ) else {
+                        break 'window (true, &[]);
+                    };
+                    if plan.allocate {
+                        let Ok(requested_wsize) = ::core::ffi::c_uint::try_from(plan.window_len)
+                        else {
+                            break 'window (true, &[]);
+                        };
+                        // `inflate()` normally reaches this boundary only after
+                        // init has installed zalloc. Treat malformed callback
+                        // state as allocation failure instead of panicking.
+                        let Some(zalloc) = strm_ref.zalloc else {
+                            break 'window (true, &[]);
+                        };
+                        state_ref.window = zalloc(
+                            strm_ref.opaque,
+                            requested_wsize,
+                            ::core::mem::size_of::<::core::ffi::c_uchar>() as crate::stdlib::uInt,
+                        ) as *mut ::core::ffi::c_uchar;
+                        if state_ref.window.is_null() {
+                            break 'window (true, &[]);
+                        }
+                    }
+                    Some(::core::slice::from_raw_parts_mut(
+                        state_ref.window,
+                        plan.window_len,
+                    ))
+                } else {
+                    None
+                };
+                if exit.update_window && window.is_none() {
+                    break 'window (true, &[]);
+                }
+                let needs_output_view = exit.update_window
+                    || inflate_exit_needs_checksum(wrap, exit.output_used as usize);
+                let produced = if needs_output_view && exit.output_used != 0 {
+                    ::core::slice::from_raw_parts(
+                        strm_ref.next_out.wrapping_sub(exit.output_used as usize),
+                        exit.output_used as usize,
+                    )
+                } else {
+                    &[]
+                };
+                if let Some(window) = window {
+                    let Some(update) =
+                        inflate_window_update(window, produced, wbits, wsize, wnext, whave)
+                    else {
+                        break 'window (true, &[]);
+                    };
+                    state_ref.wsize = update.wsize;
+                    state_ref.wnext = update.wnext;
+                    state_ref.whave = update.whave;
+                }
+                (false, produced)
+            };
+            (exit, window_error, produced)
+        };
+        if window_error {
+            let state_ref = &mut *state;
+            state_ref.mode = crate::src::inflate::MEM;
+            return crate::zlib_h::Z_MEM_ERROR;
+        }
+        {
+            let strm_ref = &mut *strm;
+            let state_ref = &mut *state;
+            in_0 = exit.input_used;
+            out = exit.output_used;
+            strm_ref.total_in = strm_ref
+                .total_in
+                .wrapping_add(exit.input_used as crate::stdlib::uLong);
+            strm_ref.total_out = strm_ref
+                .total_out
+                .wrapping_add(exit.output_used as crate::stdlib::uLong);
+            state_ref.total = state_ref
+                .total
+                .wrapping_add(exit.output_used as ::core::ffi::c_ulong);
+            if inflate_exit_needs_checksum(state_ref.wrap, exit.output_used as usize) {
+                if let Some(check) = inflate_exit_checksum(
+                    state_ref.wrap,
+                    state_ref.check as crate::stdlib::uLong,
+                    state_ref.flags,
+                    produced,
+                ) {
+                    state_ref.check = check;
+                    strm_ref.adler = state_ref.check as crate::stdlib::uLong;
+                }
+            }
+            strm_ref.data_type = exit.data_type;
+        }
+        inflate_exit_status(in_0, out, flush, ret)
     }
-    inflate_exit_status(in_0, out, flush, ret)
 }
 #[export_name = "inflate"]
 
