@@ -369,12 +369,11 @@ fn gz_reset_after_error(state: &mut crate::gzguts_h::gz_state) {
     state.strm.avail_in = 0 as crate::stdlib::uInt;
 }
 
-fn gz_open(
-    path: &::core::ffi::CStr,
-    mut fd: ::core::ffi::c_int,
-    parsed_mode: GzOpenMode,
-) -> crate::zlib_h::gzFile {
-    unsafe {
+macro_rules! gz_open_file {
+    ($path:expr, $fd:expr, $parsed_mode:expr) => {{
+        let path = $path;
+        let mut fd = $fd;
+        let parsed_mode = $parsed_mode;
         let mut state: crate::gzguts_h::gz_statep =
             ::core::ptr::null_mut::<crate::gzguts_h::gz_state>();
         state =
@@ -443,7 +442,7 @@ fn gz_open(
         gz_reset_before_error(state_ref);
         gz_reset_after_error(state_ref);
         return state as crate::zlib_h::gzFile;
-    }
+    }};
 }
 #[export_name = "gzopen"]
 
@@ -459,7 +458,7 @@ pub unsafe extern "C" fn gzopen_ffi(
     let Some(parsed_mode) = gz_parse_open_mode(mode_ref.to_bytes()) else {
         return ::core::ptr::null_mut::<crate::zlib_h::gzFile_s>();
     };
-    return gz_open(path_ref, -1 as ::core::ffi::c_int, parsed_mode);
+    gz_open_file!(path_ref, -1 as ::core::ffi::c_int, parsed_mode);
 }
 #[export_name = "gzopen64"]
 
@@ -475,7 +474,7 @@ pub unsafe extern "C" fn gzopen64_ffi(
     let Some(parsed_mode) = gz_parse_open_mode(mode_ref.to_bytes()) else {
         return ::core::ptr::null_mut::<crate::zlib_h::gzFile_s>();
     };
-    return gz_open(path_ref, -1 as ::core::ffi::c_int, parsed_mode);
+    gz_open_file!(path_ref, -1 as ::core::ffi::c_int, parsed_mode);
 }
 #[export_name = "gzdopen"]
 
@@ -499,7 +498,7 @@ pub unsafe extern "C" fn gzdopen_ffi(
     let Ok(path) = ::core::ffi::CStr::from_bytes_with_nul(&path.bytes[..=path.len]) else {
         return ::core::ptr::null_mut::<crate::zlib_h::gzFile_s>();
     };
-    return gz_open(path, fd, parsed_mode);
+    gz_open_file!(path, fd, parsed_mode);
 }
 fn gz_state_open(state: &crate::gzguts_h::gz_state) -> bool {
     state.mode == crate::gzguts_h::GZ_READ || state.mode == crate::gzguts_h::GZ_WRITE
