@@ -2376,15 +2376,6 @@ pub(crate) fn flush_bits_impl(s: &mut crate::src::deflate::deflate_state) {
     }
 }
 
-/// Finish the current bit buffer for an already-validated deflate state.
-///
-/// The state still owns raw allocations, so this remains an unsafe internal
-/// operation.  Its caller, however, need not discard an existing exclusive
-/// borrow merely to recreate it from a raw pointer.
-unsafe fn bi_windup(s: &mut crate::src::deflate::deflate_state) {
-    bi_windup_impl(s);
-}
-
 fn bi_windup_impl(s: &mut crate::src::deflate::deflate_state) {
     if s.bi_valid > 8 as ::core::ffi::c_int {
         s.put_pending_byte(
