@@ -672,49 +672,94 @@ pub(crate) enum InflateResetKind {
     WindowBits(::core::ffi::c_int),
 }
 
-// Reset policy is independent of the ABI stream and its opaque state
-// association. Keep the normal-state borrow in this pointer-free owner so
-// embedded callers can reuse the exact keep/full/window-bit selection without
-// reopening the stream projection.
-struct InflateResetOwner<'state> {
+// Reset policy is independent of ABI cursor provenance.  This owner receives
+// the normal decoder plus the scalar stream snapshot that reset is allowed to
+// change, so the policy can be reused without reopening a stream/state
+// association.
+struct InflateResetOwner<'state, 'stream> {
     normal: &'state mut InflateNormalState,
+    stream: &'stream mut InflateDecoderStream,
 }
 
-impl InflateResetOwner<'_> {
+// Header registration remains an ABI-boundary concern, but spelling the
+// release of that registration as a scalar completion keeps the reset core
+// from retaining the foreign handle that backs it.
+struct InflateResetCompletion {
+    clear_header_registration: bool,
+}
+
+impl InflateResetOwner<'_, '_> {
+    fn new<'normal, 'stream>(
+        normal: &'normal mut InflateNormalState,
+        stream: &'stream mut InflateDecoderStream,
+    ) -> InflateResetOwner<'normal, 'stream> {
+        InflateResetOwner { normal, stream }
+    }
+
     fn reset(self, kind: InflateResetKind) -> Result<InflateResetUpdate, ::core::ffi::c_int> {
-        match kind {
+        let update = match kind {
             InflateResetKind::Keep => Ok(inflate_reset_keep_core(self.normal)),
             InflateResetKind::Full => Ok(inflate_reset_core(self.normal)),
             InflateResetKind::WindowBits(window_bits) => {
                 inflate_reset2_normal(self.normal, window_bits)
             }
+        }?;
+        self.stream.total_out = 0;
+        self.stream.total_in = self.stream.total_out;
+        self.stream.message = None;
+        self.stream.data_type = 0;
+        if let Some(adler) = update.adler {
+            self.stream.adler = adler;
         }
+        Ok(update)
     }
 }
 
-pub(crate) unsafe fn inflate_reset_from_stream(
+// This is the pointer-free reset transaction.  It owns both reset policy and
+// scalar publication, returning only the one ABI-boundary action that cannot
+// be expressed without the retained header registration.
+fn inflate_reset_from_stream(
+    owner: InflateResetOwner<'_, '_>,
+    kind: InflateResetKind,
+) -> Result<InflateResetCompletion, ::core::ffi::c_int> {
+    owner.reset(kind)?;
+    Ok(InflateResetCompletion {
+        clear_header_registration: true,
+    })
+}
+
+// The sole reset projection ties the opaque state to the borrowed ABI stream.
+// It snapshots and republishes only scalar stream values around the
+// pointer-free reset transaction; persistent header provenance stays here.
+pub(crate) unsafe fn inflate_reset_from_abi_stream(
     strm: &mut crate::zlib_h::z_stream_s,
     kind: InflateResetKind,
 ) -> ::core::ffi::c_int {
     let Some((strm, state)) = inflate_stream_and_state(strm) else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
-    let update = match (InflateResetOwner {
-        normal: &mut state.normal,
-    })
-    .reset(kind)
-    {
-        Ok(update) => update,
+    let mut stream = InflateDecoderStream {
+        total_in: strm.total_in,
+        total_out: strm.total_out,
+        adler: strm.adler,
+        data_type: strm.data_type,
+        message: None,
+    };
+    let completion = match inflate_reset_from_stream(
+        InflateResetOwner::new(&mut state.normal, &mut stream),
+        kind,
+    ) {
+        Ok(completion) => completion,
         Err(status) => return status,
     };
-    strm.total_out = 0;
-    strm.total_in = strm.total_out;
+    strm.total_out = stream.total_out;
+    strm.total_in = stream.total_in;
     strm.msg = ::core::ptr::null_mut();
-    strm.data_type = 0;
-    if let Some(adler) = update.adler {
-        strm.adler = adler;
+    strm.data_type = stream.data_type;
+    strm.adler = stream.adler;
+    if completion.clear_header_registration {
+        state.head = None;
     }
-    state.head = None;
     crate::zlib_h::Z_OK
 }
 #[export_name = "inflateResetKeep"]
@@ -725,7 +770,7 @@ pub unsafe extern "C" fn inflateResetKeep_ffi(
     let Some(strm) = strm.as_mut() else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
-    inflate_reset_from_stream(strm, InflateResetKind::Keep)
+    inflate_reset_from_abi_stream(strm, InflateResetKind::Keep)
 }
 #[export_name = "inflateReset"]
 
@@ -735,7 +780,7 @@ pub unsafe extern "C" fn inflateReset_ffi(
     let Some(strm) = strm.as_mut() else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
-    inflate_reset_from_stream(strm, InflateResetKind::Full)
+    inflate_reset_from_abi_stream(strm, InflateResetKind::Full)
 }
 #[export_name = "inflateReset2"]
 
@@ -746,7 +791,7 @@ pub unsafe extern "C" fn inflateReset2_ffi(
     let Some(strm) = strm.as_mut() else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
-    inflate_reset_from_stream(strm, InflateResetKind::WindowBits(windowBits))
+    inflate_reset_from_abi_stream(strm, InflateResetKind::WindowBits(windowBits))
 }
 pub unsafe extern "C" fn inflateInit2_(
     strm: Option<&mut crate::zlib_h::z_stream_s>,
