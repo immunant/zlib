@@ -3669,26 +3669,32 @@ pub unsafe extern "C" fn deflateEnd(mut strm: crate::zlib_h::z_streamp) -> ::cor
     // established by deflateInit2_().
     let strm = &mut *strm;
     let state_ptr = strm.state;
-    let state = &mut *state_ptr;
-    let status = state.status;
     let zfree = strm.zfree.expect("validated by deflateStateCheck");
     let opaque = strm.opaque;
-    // The state itself is released through the caller's zfree callback, so
-    // drop the owned gzip-header snapshot before releasing that allocation.
-    drop(state.gzhead.take());
-    if let Some(pending_buf) = state.pending_buf {
-        zfree(opaque, pending_buf.as_ptr().cast());
+    // Snapshot every callback-owned allocation before the first release.
+    // Besides retaining zlib's pending/head/prev/window/state release order,
+    // this ends the mutable state projection before a re-entrant zfree()
+    // callback can observe the stream.
+    let (status, allocations) = {
+        let state = &mut *state_ptr;
+        let status = state.status;
+        // The state itself is released through the caller's zfree callback,
+        // so drop the owned gzip-header snapshot before that allocation.
+        drop(state.gzhead.take());
+        (
+            status,
+            [
+                state.pending_buf.map(|allocation| allocation.cast()),
+                state.head.map(|allocation| allocation.cast()),
+                state.prev.map(|allocation| allocation.cast()),
+                state.window.map(|allocation| allocation.cast()),
+                ::core::ptr::NonNull::new(state_ptr.cast()),
+            ],
+        )
+    };
+    for allocation in allocations.into_iter().flatten() {
+        zfree(opaque, allocation.as_ptr());
     }
-    if let Some(head) = state.head {
-        zfree(opaque, head.as_ptr().cast());
-    }
-    if let Some(prev) = state.prev {
-        zfree(opaque, prev.as_ptr().cast());
-    }
-    if let Some(window) = state.window {
-        zfree(opaque, window.as_ptr().cast());
-    }
-    zfree(opaque, state_ptr.cast());
     strm.state = ::core::ptr::null_mut::<crate::src::deflate::internal_state>();
     return if status == crate::src::deflate::BUSY_STATE {
         crate::zlib_h::Z_DATA_ERROR
