@@ -96,8 +96,6 @@ pub struct internal_state {
     pub w_mask: crate::stdlib::uInt,
     pub window: *mut crate::stdlib::Bytef,
     pub window_size: crate::zutil_h::ulg,
-    pub prev: *mut crate::src::deflate::Posf,
-    pub head: *mut crate::src::deflate::Posf,
     pub ins_h: crate::stdlib::uInt,
     pub hash_size: crate::stdlib::uInt,
     pub hash_bits: crate::stdlib::uInt,
@@ -207,7 +205,7 @@ impl Default for internal_state {
             pending_buf_size: 0, pending_out: 0, pending: 0, wrap: 0,
             gzindex: 0, method: 0, last_flush: 0, w_size: 0,
             w_bits: 0, w_mask: 0, window: ::core::ptr::null_mut(), window_size: 0,
-            prev: ::core::ptr::null_mut(), head: ::core::ptr::null_mut(), ins_h: 0, hash_size: 0,
+            ins_h: 0, hash_size: 0,
             hash_bits: 0, hash_mask: 0, hash_shift: 0, block_start: 0, match_length: 0,
             prev_match: 0, match_available: 0, strstart: 0, match_start: 0, lookahead: 0,
             prev_length: 0, max_chain_length: 0, max_lazy_match: 0, level: 0, strategy: 0,
@@ -225,6 +223,47 @@ impl Default for internal_state {
 }
 
 impl internal_state {
+    fn buffers(&self) -> &deflate_buffers {
+        self.buffers.as_deref().expect("deflate buffers initialized")
+    }
+
+    fn buffers_mut(&mut self) -> &mut deflate_buffers {
+        self.buffers.as_deref_mut().expect("deflate buffers initialized")
+    }
+
+    fn clear_head(&mut self) {
+        self.buffers_mut().head.fill(NIL as crate::src::deflate::Posf);
+    }
+
+    fn insert_hash_at(&mut self, str: crate::stdlib::uInt) -> crate::src::deflate::IPos {
+        let window_index = str
+            .wrapping_add((crate::zutil_h::MIN_MATCH - 1) as crate::stdlib::uInt)
+            as usize;
+        self.ins_h = ((self.ins_h << self.hash_shift) ^ self.buffers().window[window_index] as crate::stdlib::uInt)
+            & self.hash_mask;
+        let prev_index = (str & self.w_mask) as usize;
+        let ins_h = self.ins_h as usize;
+        let buffers = self.buffers_mut();
+        let hash_head = buffers.head[ins_h];
+        buffers.prev[prev_index] = hash_head;
+        buffers.head[ins_h] = str as crate::src::deflate::Posf;
+        hash_head as crate::src::deflate::IPos
+    }
+
+    fn slide_hash(&mut self) {
+        let wsize = self.w_size as ::core::ffi::c_uint;
+        let buffers = self.buffers_mut();
+        for value in buffers.head.iter_mut().chain(buffers.prev.iter_mut()) {
+            let value_as_uint = *value as ::core::ffi::c_uint;
+            *value = if value_as_uint >= wsize {
+                value_as_uint.wrapping_sub(wsize) as crate::src::deflate::Posf
+            } else {
+                NIL as crate::src::deflate::Posf
+            };
+        }
+        self.slid = 1;
+    }
+
     pub(crate) fn symbol_slice(&self) -> &[crate::zutil_h::uchf] {
         self.buffers
             .as_deref()
@@ -443,45 +482,6 @@ static configuration_table: [config; 10] = [
     },
 ];
 
-unsafe extern "C" fn slide_hash(mut s: *mut crate::src::deflate::deflate_state) {
-    let mut n: ::core::ffi::c_uint = 0;
-    let mut m: ::core::ffi::c_uint = 0;
-    let mut p: *mut crate::src::deflate::Posf =
-        ::core::ptr::null_mut::<crate::src::deflate::Posf>();
-    let mut wsize: crate::stdlib::uInt = (*s).w_size;
-    n = (*s).hash_size as ::core::ffi::c_uint;
-    p = (*s).head.offset(n as isize);
-    loop {
-        p = p.offset(-1);
-        m = *p as ::core::ffi::c_uint;
-        *p = (if m >= wsize {
-            m.wrapping_sub(wsize as ::core::ffi::c_uint)
-        } else {
-            NIL as ::core::ffi::c_uint
-        }) as crate::src::deflate::Pos as crate::src::deflate::Posf;
-        n = n.wrapping_sub(1);
-        if n == 0 {
-            break;
-        }
-    }
-    n = wsize as ::core::ffi::c_uint;
-    p = (*s).prev.offset(n as isize);
-    loop {
-        p = p.offset(-1);
-        m = *p as ::core::ffi::c_uint;
-        *p = (if m >= wsize {
-            m.wrapping_sub(wsize as ::core::ffi::c_uint)
-        } else {
-            NIL as ::core::ffi::c_uint
-        }) as crate::src::deflate::Pos as crate::src::deflate::Posf;
-        n = n.wrapping_sub(1);
-        if n == 0 {
-            break;
-        }
-    }
-    (*s).slid = 1 as ::core::ffi::c_int;
-}
-
 unsafe extern "C" fn read_buf(
     mut strm: crate::zlib_h::z_streamp,
     mut buf: *mut crate::stdlib::Bytef,
@@ -550,7 +550,7 @@ unsafe extern "C" fn fill_window(mut s: *mut crate::src::deflate::deflate_state)
             if (*s).insert > (*s).strstart {
                 (*s).insert = (*s).strstart;
             }
-            slide_hash(s);
+            (&mut *s).slide_hash();
             more = more.wrapping_add(wsize as ::core::ffi::c_uint);
         }
         if (*(*s).strm).avail_in == 0 as crate::stdlib::uInt {
@@ -583,10 +583,7 @@ unsafe extern "C" fn fill_window(mut s: *mut crate::src::deflate::deflate_state)
                             as isize,
                     ) as crate::stdlib::uInt)
                     & (*s).hash_mask;
-                *(*s).prev.offset((str & (*s).w_mask) as isize) =
-                    *(*s).head.offset((*s).ins_h as isize);
-                *(*s).head.offset((*s).ins_h as isize) =
-                    str as crate::src::deflate::Pos as crate::src::deflate::Posf;
+                (&mut *s).insert_hash_at(str);
                 str = str.wrapping_add(1);
                 (*s).insert = (*s).insert.wrapping_sub(1);
                 if (*s).lookahead.wrapping_add((*s).insert)
@@ -852,17 +849,7 @@ pub unsafe extern "C" fn deflateSetDictionary(
     (*s).wrap = 0 as ::core::ffi::c_int;
     if dictLength >= (*s).w_size {
         if wrap == 0 as ::core::ffi::c_int {
-            *(*s)
-                .head
-                .offset((*s).hash_size.wrapping_sub(1 as crate::stdlib::uInt) as isize) =
-                NIL as crate::src::deflate::Posf;
-            crate::stdlib::memset(
-                (*s).head as *mut ::core::ffi::c_void,
-                0 as ::core::ffi::c_int,
-                ((*s).hash_size.wrapping_sub(1 as crate::stdlib::uInt)
-                    as crate::__stddef_size_t_h::size_t)
-                    .wrapping_mul(::core::mem::size_of::<crate::src::deflate::Posf>()),
-            );
+            (&mut *s).clear_head();
             (*s).slid = 0 as ::core::ffi::c_int;
             (*s).strstart = 0 as crate::stdlib::uInt;
             (*s).block_start = 0 as ::core::ffi::c_long;
@@ -888,10 +875,7 @@ pub unsafe extern "C" fn deflateSetDictionary(
                         .wrapping_sub(1 as crate::stdlib::uInt) as isize,
                 ) as crate::stdlib::uInt)
                 & (*s).hash_mask;
-            *(*s).prev.offset((str & (*s).w_mask) as isize) =
-                *(*s).head.offset((*s).ins_h as isize);
-            *(*s).head.offset((*s).ins_h as isize) =
-                str as crate::src::deflate::Pos as crate::src::deflate::Posf;
+            (&mut *s).insert_hash_at(str);
             str = str.wrapping_add(1);
             n = n.wrapping_sub(1);
             if n == 0 {
@@ -1010,13 +994,11 @@ pub unsafe extern "C" fn deflateResetKeep_ffi(
 }
 unsafe extern "C" fn lm_init(mut s: *mut crate::src::deflate::deflate_state) {
     let s = &mut *s;
-    let (pending_buf, window, prev, head, pending_len) = {
+    let (pending_buf, window, pending_len) = {
         let buffers = s.buffers.as_mut().expect("deflate buffers initialized");
         (
             buffers.pending.as_mut_ptr(),
             buffers.window.as_mut_ptr(),
-            buffers.prev.as_mut_ptr(),
-            buffers.head.as_mut_ptr(),
             buffers.pending.len(),
         )
     };
@@ -1024,8 +1006,6 @@ unsafe extern "C" fn lm_init(mut s: *mut crate::src::deflate::deflate_state) {
     s.pending_buf_size = pending_len as crate::zutil_h::ulg;
     s.pending_out = 0;
     s.window = window;
-    s.prev = prev;
-    s.head = head;
     s.window_size = (2 as ::core::ffi::c_long as crate::zutil_h::ulg)
         .wrapping_mul(s.w_size as crate::zutil_h::ulg);
     s.buffers
@@ -1294,19 +1274,9 @@ pub fn deflateParams(
         if (*s).level != level {
             if (*s).level == 0 as ::core::ffi::c_int && (*s).matches != 0 as crate::stdlib::uInt {
                 if (*s).matches == 1 as crate::stdlib::uInt {
-                    slide_hash(s);
+                    (&mut *s).slide_hash();
                 } else {
-                    *(*s)
-                        .head
-                        .offset((*s).hash_size.wrapping_sub(1 as crate::stdlib::uInt) as isize) =
-                        NIL as crate::src::deflate::Posf;
-                    crate::stdlib::memset(
-                        (*s).head as *mut ::core::ffi::c_void,
-                        0 as ::core::ffi::c_int,
-                        ((*s).hash_size.wrapping_sub(1 as crate::stdlib::uInt)
-                            as crate::__stddef_size_t_h::size_t)
-                            .wrapping_mul(::core::mem::size_of::<crate::src::deflate::Posf>()),
-                    );
+                    (&mut *s).clear_head();
                     (*s).slid = 0 as ::core::ffi::c_int;
                 }
                 (*s).matches = 0 as crate::stdlib::uInt;
@@ -2056,17 +2026,7 @@ pub fn deflate(
                 );
                 crate::src::trees::_tr_stored_block(state, pending_buf, &[], 0);
                 if flush == crate::zlib_h::Z_FULL_FLUSH {
-                    *state
-                        .head
-                        .offset(state.hash_size.wrapping_sub(1 as crate::stdlib::uInt) as isize) =
-                        NIL as crate::src::deflate::Posf;
-                    crate::stdlib::memset(
-                        state.head as *mut ::core::ffi::c_void,
-                        0 as ::core::ffi::c_int,
-                        (state.hash_size.wrapping_sub(1 as crate::stdlib::uInt)
-                            as crate::__stddef_size_t_h::size_t)
-                            .wrapping_mul(::core::mem::size_of::<crate::src::deflate::Posf>()),
-                    );
+                    state.clear_head();
                     state.slid = 0 as ::core::ffi::c_int;
                     if state.lookahead == 0 as crate::stdlib::uInt {
                         state.strstart = 0 as crate::stdlib::uInt;
@@ -2190,13 +2150,11 @@ pub unsafe extern "C" fn deflateCopy(
     let pending_offset = ss.pending_out;
     let mut copied = ss.clone();
     copied.strm = dest;
-    let (pending_buf, window, prev, head, pending_len) = {
+    let (pending_buf, window, pending_len) = {
         let buffers = copied.buffers.as_mut().expect("deflate buffers initialized");
         (
             buffers.pending.as_mut_ptr(),
             buffers.window.as_mut_ptr(),
-            buffers.prev.as_mut_ptr(),
-            buffers.head.as_mut_ptr(),
             buffers.pending.len(),
         )
     };
@@ -2204,8 +2162,6 @@ pub unsafe extern "C" fn deflateCopy(
     copied.pending_buf_size = pending_len as crate::zutil_h::ulg;
     copied.pending_out = pending_offset;
     copied.window = window;
-    copied.prev = prev;
-    copied.head = head;
     *dest = *source;
     (*dest).state = Box::into_raw(Box::new(copied));
     return crate::zlib_h::Z_OK;
@@ -2578,17 +2534,7 @@ unsafe extern "C" fn deflate_fast(
         }
         hash_head = NIL as crate::src::deflate::IPos;
         if (*s).lookahead >= crate::zutil_h::MIN_MATCH as crate::stdlib::uInt {
-            (*s).ins_h = ((*s).ins_h << (*s).hash_shift
-                ^ *(*s).window.offset((*s).strstart.wrapping_add(
-                    (3 as ::core::ffi::c_int - 1 as ::core::ffi::c_int) as crate::stdlib::uInt,
-                ) as isize) as crate::stdlib::uInt)
-                & (*s).hash_mask;
-            *(*s).prev.offset(((*s).strstart & (*s).w_mask) as isize) =
-                *(*s).head.offset((*s).ins_h as isize);
-            hash_head = *(*s).prev.offset(((*s).strstart & (*s).w_mask) as isize)
-                as crate::src::deflate::IPos;
-            *(*s).head.offset((*s).ins_h as isize) =
-                (*s).strstart as crate::src::deflate::Pos as crate::src::deflate::Posf;
+            hash_head = (&mut *s).insert_hash_at((*s).strstart);
         }
         if hash_head != NIL as crate::src::deflate::IPos
             && ((*s).strstart as crate::src::deflate::IPos).wrapping_sub(hash_head)
@@ -2646,18 +2592,7 @@ unsafe extern "C" fn deflate_fast(
                 (*s).match_length = (*s).match_length.wrapping_sub(1);
                 loop {
                     (*s).strstart = (*s).strstart.wrapping_add(1);
-                    (*s).ins_h = ((*s).ins_h << (*s).hash_shift
-                        ^ *(*s).window.offset((*s).strstart.wrapping_add(
-                            (3 as ::core::ffi::c_int - 1 as ::core::ffi::c_int)
-                                as crate::stdlib::uInt,
-                        ) as isize) as crate::stdlib::uInt)
-                        & (*s).hash_mask;
-                    *(*s).prev.offset(((*s).strstart & (*s).w_mask) as isize) =
-                        *(*s).head.offset((*s).ins_h as isize);
-                    hash_head = *(*s).prev.offset(((*s).strstart & (*s).w_mask) as isize)
-                        as crate::src::deflate::IPos;
-                    *(*s).head.offset((*s).ins_h as isize) =
-                        (*s).strstart as crate::src::deflate::Pos as crate::src::deflate::Posf;
+                    hash_head = (&mut *s).insert_hash_at((*s).strstart);
                     (*s).match_length = (*s).match_length.wrapping_sub(1);
                     if (*s).match_length == 0 as crate::stdlib::uInt {
                         break;
@@ -2777,22 +2712,7 @@ unsafe extern "C" fn deflate_fast(
 macro_rules! insert_string {
     ($s:expr) => {{
         let state = &mut *$s;
-        let strstart = state.strstart;
-        let window_index = strstart
-            .wrapping_add((crate::zutil_h::MIN_MATCH - 1) as crate::stdlib::uInt)
-            as usize;
-        let prev_index = (strstart & state.w_mask) as usize;
-        let ins_h = {
-            let buffers = state.buffers.as_ref().expect("deflate buffers initialized");
-            ((state.ins_h << state.hash_shift) ^ buffers.window[window_index] as crate::stdlib::uInt)
-                & state.hash_mask
-        };
-        state.ins_h = ins_h;
-        let buffers = state.buffers.as_mut().expect("deflate buffers initialized");
-        let hash_head = buffers.head[ins_h as usize];
-        buffers.prev[prev_index] = hash_head;
-        buffers.head[ins_h as usize] = strstart as crate::src::deflate::Posf;
-        hash_head as crate::src::deflate::IPos
+        state.insert_hash_at(state.strstart)
     }};
 }
 
