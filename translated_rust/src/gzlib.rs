@@ -232,24 +232,25 @@ fn gz_open(
         oflag = parsed_mode.oflag;
         exclusive = parsed_mode.exclusive;
         len = path.to_bytes().len() as crate::stdlib::z_size_t;
-        (*state).path = crate::stdlib::malloc(
+        let state_path = crate::stdlib::malloc(
             (len as crate::__stddef_size_t_h::size_t)
                 .wrapping_add(1 as crate::__stddef_size_t_h::size_t),
         ) as *mut ::core::ffi::c_char;
-        if (*state).path.is_null() {
+        if state_path.is_null() {
             crate::stdlib::free(state as *mut ::core::ffi::c_void);
             return ::core::ptr::null_mut::<crate::zlib_h::gzFile_s>();
         }
+        (*state).path = state_path;
         crate::stdlib::snprintf(
-            (*state).path,
+            state_path,
             (len as crate::__stddef_size_t_h::size_t)
                 .wrapping_add(1 as crate::__stddef_size_t_h::size_t),
             b"%s\0".as_ptr() as *const ::core::ffi::c_char,
             path.as_ptr(),
         );
-        oflag = gz_open_oflag_for_mode(oflag, (*state).mode, exclusive);
+        oflag = gz_open_oflag_for_mode(oflag, parsed_mode.mode, exclusive);
         if fd == -1 as ::core::ffi::c_int {
-            (*state).fd = crate::stdlib::open(path.as_ptr(), oflag, 0o666 as ::core::ffi::c_int);
+            fd = crate::stdlib::open(path.as_ptr(), oflag, 0o666 as ::core::ffi::c_int);
         } else {
             if oflag & crate::stdlib::O_NONBLOCK != 0 {
                 crate::stdlib::fcntl(
@@ -265,8 +266,8 @@ fn gz_open(
                     crate::stdlib::fcntl(fd, crate::stdlib::F_GETFD) | crate::stdlib::O_CLOEXEC,
                 );
             }
-            (*state).fd = fd;
         }
+        (*state).fd = fd;
         let state_ref = &mut *state;
         state_ref.path_len = len as crate::__stddef_size_t_h::size_t;
         if state_ref.fd == -1 as ::core::ffi::c_int {

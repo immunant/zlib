@@ -488,6 +488,8 @@ fn fill_window(state: &mut crate::src::deflate::deflate_state) {
             }
         }
         if state.high_water < state.window_size {
+            let window =
+                ::core::slice::from_raw_parts_mut(state.window, state.window_size as usize);
             let curr: crate::zutil_h::ulg = (state.strstart as crate::zutil_h::ulg)
                 .wrapping_add(state.lookahead as crate::zutil_h::ulg);
             let mut init: crate::zutil_h::ulg = 0;
@@ -497,8 +499,6 @@ fn fill_window(state: &mut crate::src::deflate::deflate_state) {
                     init = crate::src::deflate::WIN_INIT as crate::zutil_h::ulg;
                 }
                 {
-                    let window =
-                        ::core::slice::from_raw_parts_mut(state.window, state.window_size as usize);
                     let start = curr as usize;
                     let end = start + init as usize;
                     window[start..end].fill(0);
@@ -514,8 +514,6 @@ fn fill_window(state: &mut crate::src::deflate::deflate_state) {
                     init = state.window_size.wrapping_sub(state.high_water);
                 }
                 {
-                    let window =
-                        ::core::slice::from_raw_parts_mut(state.window, state.window_size as usize);
                     let start = state.high_water as usize;
                     let end = start + init as usize;
                     window[start..end].fill(0);
@@ -2976,11 +2974,11 @@ fn deflate_fast(
                         (3 as ::core::ffi::c_int - 1 as ::core::ffi::c_int) as crate::stdlib::uInt,
                     ) as usize),
                 );
-                let ref mut c2rust_fresh46 = *state
+                let previous_head = *state.head.wrapping_add(state.ins_h as usize);
+                *state
                     .prev
-                    .wrapping_add((state.strstart & state.w_mask) as usize);
-                *c2rust_fresh46 = *state.head.wrapping_add(state.ins_h as usize);
-                hash_head = *c2rust_fresh46 as crate::src::deflate::IPos;
+                    .wrapping_add((state.strstart & state.w_mask) as usize) = previous_head;
+                hash_head = previous_head as crate::src::deflate::IPos;
                 *state.head.wrapping_add(state.ins_h as usize) =
                     state.strstart as crate::src::deflate::Pos as crate::src::deflate::Posf;
             }
@@ -3034,11 +3032,11 @@ fn deflate_fast(
                                     as crate::stdlib::uInt,
                             ) as usize),
                         );
-                        let ref mut c2rust_fresh50 = *state
+                        let previous_head = *state.head.wrapping_add(state.ins_h as usize);
+                        *state
                             .prev
-                            .wrapping_add((state.strstart & state.w_mask) as usize);
-                        *c2rust_fresh50 = *state.head.wrapping_add(state.ins_h as usize);
-                        hash_head = *c2rust_fresh50 as crate::src::deflate::IPos;
+                            .wrapping_add((state.strstart & state.w_mask) as usize) = previous_head;
+                        hash_head = previous_head as crate::src::deflate::IPos;
                         *state.head.wrapping_add(state.ins_h as usize) =
                             state.strstart as crate::src::deflate::Pos as crate::src::deflate::Posf;
                         state.match_length = state.match_length.wrapping_sub(1);
@@ -3172,11 +3170,11 @@ fn deflate_slow(
                         (3 as ::core::ffi::c_int - 1 as ::core::ffi::c_int) as crate::stdlib::uInt,
                     ) as usize),
                 );
-                let ref mut c2rust_fresh35 = *state
+                let previous_head = *state.head.wrapping_add(state.ins_h as usize);
+                *state
                     .prev
-                    .wrapping_add((state.strstart & state.w_mask) as usize);
-                *c2rust_fresh35 = *state.head.wrapping_add(state.ins_h as usize);
-                hash_head = *c2rust_fresh35 as crate::src::deflate::IPos;
+                    .wrapping_add((state.strstart & state.w_mask) as usize) = previous_head;
+                hash_head = previous_head as crate::src::deflate::IPos;
                 *state.head.wrapping_add(state.ins_h as usize) =
                     state.strstart as crate::src::deflate::Pos as crate::src::deflate::Posf;
             }
@@ -3251,11 +3249,11 @@ fn deflate_slow(
                                     as crate::stdlib::uInt,
                             ) as usize),
                         );
-                        let ref mut c2rust_fresh39 = *state
+                        let previous_head = *state.head.wrapping_add(state.ins_h as usize);
+                        *state
                             .prev
-                            .wrapping_add((state.strstart & state.w_mask) as usize);
-                        *c2rust_fresh39 = *state.head.wrapping_add(state.ins_h as usize);
-                        hash_head = *c2rust_fresh39 as crate::src::deflate::IPos;
+                            .wrapping_add((state.strstart & state.w_mask) as usize) = previous_head;
+                        hash_head = previous_head as crate::src::deflate::IPos;
                         *state.head.wrapping_add(state.ins_h as usize) =
                             state.strstart as crate::src::deflate::Pos as crate::src::deflate::Posf;
                     }
@@ -3443,7 +3441,7 @@ fn deflate_rle(
                 state.match_length = 0 as crate::stdlib::uInt;
             } else {
                 let cc: crate::zutil_h::uch =
-                    *state.window.wrapping_add(state.strstart as usize) as crate::zutil_h::uch;
+                    window[state.strstart as usize] as crate::zutil_h::uch;
                 for byte in crate::src::trees::tr_tally_literal_update(&mut state.dyn_ltree, cc) {
                     let sym_next = state.sym_next;
                     state.sym_next = state.sym_next.wrapping_add(1);
