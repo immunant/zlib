@@ -61,6 +61,28 @@ pub use crate::zlib_h::Z_MEM_ERROR;
 pub use crate::zlib_h::Z_OK;
 pub use crate::zlib_h::Z_RLE;
 
+// Public gzip entry points bind their raw handle before reaching these
+// predicates.  Keep the repeated mode/error checks reference-bound so the
+// FFI wrappers retain only their caller-owned pointer boundary.
+pub(crate) fn gz_has_mode(
+    state: &crate::gzguts_h::gz_state,
+    mode: ::core::ffi::c_int,
+) -> bool {
+    state.mode == mode
+}
+
+pub(crate) fn gz_read_state_is_usable(state: &crate::gzguts_h::gz_state) -> bool {
+    gz_has_mode(state, crate::gzguts_h::GZ_READ)
+        && (state.err == crate::zlib_h::Z_OK
+            || state.err == crate::zlib_h::Z_BUF_ERROR
+            || state.again != 0)
+}
+
+pub(crate) fn gz_write_state_is_usable(state: &crate::gzguts_h::gz_state) -> bool {
+    gz_has_mode(state, crate::gzguts_h::GZ_WRITE)
+        && (state.err == crate::zlib_h::Z_OK || state.again != 0)
+}
+
 // Keep gzip I/O requests within the unsigned-int sizes used by zlib's stream
 // fields and the POSIX read/write adapters.
 pub fn gz_stream_chunk(len: crate::stdlib::z_size_t) -> ::core::ffi::c_uint {
