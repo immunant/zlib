@@ -3191,10 +3191,11 @@ unsafe extern "C" fn deflate_rle(
     mut flush: ::core::ffi::c_int,
 ) -> block_state {
     let mut bflush: ::core::ffi::c_int = 0;
-    let sym_buf_start = (*s).sym_buf_start;
-    let sym_buf_len = ((*s).pending_buf_size as usize).wrapping_sub(sym_buf_start);
+    let state = &mut *s;
+    let sym_buf_start = state.sym_buf_start;
+    let sym_buf_len = (state.pending_buf_size as usize).wrapping_sub(sym_buf_start);
     let sym_buf = ::core::slice::from_raw_parts_mut(
-        (*s).pending_buf.wrapping_add(sym_buf_start),
+        state.pending_buf.wrapping_add(sym_buf_start),
         sym_buf_len,
     );
     loop {
@@ -3220,47 +3221,32 @@ unsafe extern "C" fn deflate_rle(
             (*s).lookahead,
         );
         if (*s).match_length >= crate::zutil_h::MIN_MATCH as crate::stdlib::uInt {
-            let mut len: crate::zutil_h::uch =
-                (*s).match_length.wrapping_sub(3 as crate::stdlib::uInt) as crate::zutil_h::uch;
-            let mut dist: crate::zutil_h::ush = 1 as ::core::ffi::c_int as crate::zutil_h::ush;
-            let c2rust_fresh50 = (*s).sym_next;
-            (*s).sym_next = (*s).sym_next.wrapping_add(1);
-            sym_buf[c2rust_fresh50 as usize] = dist as crate::zutil_h::uch as crate::zutil_h::uchf;
-            let c2rust_fresh51 = (*s).sym_next;
-            (*s).sym_next = (*s).sym_next.wrapping_add(1);
-            sym_buf[c2rust_fresh51 as usize] =
-                (dist as ::core::ffi::c_int >> 8 as ::core::ffi::c_int) as crate::zutil_h::uch
-                    as crate::zutil_h::uchf;
-            let c2rust_fresh52 = (*s).sym_next;
-            (*s).sym_next = (*s).sym_next.wrapping_add(1);
-            sym_buf[c2rust_fresh52 as usize] = len as crate::zutil_h::uchf;
-            dist = dist.wrapping_sub(1);
-            let length_code = crate::src::trees::_length_code[len as usize] as usize;
-            let distance_code = if dist < 256 {
-                crate::src::trees::_dist_code[dist as usize] as usize
-            } else {
-                crate::src::trees::_dist_code[256 + (dist as usize >> 7)] as usize
-            };
-            let length_entry = length_code + crate::src::deflate::LITERALS as usize + 1;
-            (*s).dyn_ltree[length_entry].fc = (*s).dyn_ltree[length_entry].fc.wrapping_add(1);
-            (*s).dyn_dtree[distance_code].fc = (*s).dyn_dtree[distance_code].fc.wrapping_add(1);
-            bflush = ((*s).sym_next == (*s).sym_end) as ::core::ffi::c_int;
+            let len = (*s).match_length.wrapping_sub(3 as crate::stdlib::uInt);
+            bflush = crate::src::trees::tally_symbol(
+                sym_buf,
+                &mut state.sym_next,
+                state.sym_end,
+                &mut state.dyn_ltree,
+                &mut state.dyn_dtree,
+                &mut state.matches,
+                1,
+                len,
+            );
             (*s).lookahead = (*s).lookahead.wrapping_sub((*s).match_length);
             (*s).strstart = (*s).strstart.wrapping_add((*s).match_length);
             (*s).match_length = 0 as crate::stdlib::uInt;
         } else {
-            let mut cc: crate::zutil_h::uch = window[(*s).strstart as usize] as crate::zutil_h::uch;
-            let c2rust_fresh53 = (*s).sym_next;
-            (*s).sym_next = (*s).sym_next.wrapping_add(1);
-            sym_buf[c2rust_fresh53 as usize] = 0 as crate::zutil_h::uchf;
-            let c2rust_fresh54 = (*s).sym_next;
-            (*s).sym_next = (*s).sym_next.wrapping_add(1);
-            sym_buf[c2rust_fresh54 as usize] = 0 as crate::zutil_h::uchf;
-            let c2rust_fresh55 = (*s).sym_next;
-            (*s).sym_next = (*s).sym_next.wrapping_add(1);
-            sym_buf[c2rust_fresh55 as usize] = cc as crate::zutil_h::uchf;
-            (*s).dyn_ltree[cc as usize].fc = (*s).dyn_ltree[cc as usize].fc.wrapping_add(1);
-            bflush = ((*s).sym_next == (*s).sym_end) as ::core::ffi::c_int;
+            let cc = window[(*s).strstart as usize] as crate::zutil_h::uch;
+            bflush = crate::src::trees::tally_symbol(
+                sym_buf,
+                &mut state.sym_next,
+                state.sym_end,
+                &mut state.dyn_ltree,
+                &mut state.dyn_dtree,
+                &mut state.matches,
+                0,
+                cc as ::core::ffi::c_uint,
+            );
             (*s).lookahead = (*s).lookahead.wrapping_sub(1);
             (*s).strstart = (*s).strstart.wrapping_add(1);
         }

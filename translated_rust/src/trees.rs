@@ -3470,7 +3470,7 @@ pub unsafe extern "C" fn _tr_flush_block_ffi(
 ) {
     _tr_flush_block(s, buf, stored_len, last)
 }
-fn tally_symbol(
+pub(crate) fn tally_symbol(
     sym_buf: &mut [crate::zutil_h::uchf],
     sym_next: &mut crate::stdlib::uInt,
     sym_end: crate::stdlib::uInt,
