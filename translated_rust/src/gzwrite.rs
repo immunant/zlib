@@ -405,32 +405,37 @@ pub(crate) unsafe extern "C" fn gz_zero(
     let mut first: ::core::ffi::c_int = 0;
     let mut ret: ::core::ffi::c_int = 0;
     let mut n: ::core::ffi::c_uint = 0;
-    let mut strm: crate::zlib_h::z_streamp = &raw mut (*state).strm;
-    if (*strm).avail_in != 0
+    let state = &mut *state;
+    if state.strm.avail_in != 0
         && gz_comp(state, crate::zlib_h::Z_NO_FLUSH) == -1 as ::core::ffi::c_int
     {
         return -1 as ::core::ffi::c_int;
     }
     first = 1 as ::core::ffi::c_int;
     loop {
-        n = gz_zero_chunk_plan((*state).size, (*state).skip);
+        n = gz_zero_chunk_plan(state.size, state.skip);
         if first != 0 {
-            crate::stdlib::memset(
-                (*state).in_0 as *mut ::core::ffi::c_void,
-                0 as ::core::ffi::c_int,
-                n as crate::__stddef_size_t_h::size_t,
-            );
+            // The compressor still receives the old compatibility cursor,
+            // but the sparse gap is initialized through its owned allocation
+            // rather than libc `memset`.
+            let Some(buffers) = state.buffers.as_mut() else {
+                return -1 as ::core::ffi::c_int;
+            };
+            let Some(bytes) = buffers.input.get_mut(..n as usize) else {
+                return -1 as ::core::ffi::c_int;
+            };
+            bytes.fill(0);
             first = 0 as ::core::ffi::c_int;
         }
-        (*strm).avail_in = n as crate::stdlib::uInt;
-        (*strm).next_in = (*state).in_0 as *mut crate::stdlib::Bytef;
+        state.strm.avail_in = n as crate::stdlib::uInt;
+        state.strm.next_in = state.in_0 as *mut crate::stdlib::Bytef;
         ret = gz_comp(state, crate::zlib_h::Z_NO_FLUSH);
-        n = n.wrapping_sub((*strm).avail_in as ::core::ffi::c_uint);
-        gz_zero_commit_state(&mut *state, n);
+        n = n.wrapping_sub(state.strm.avail_in as ::core::ffi::c_uint);
+        gz_zero_commit_state(state, n);
         if ret == -1 as ::core::ffi::c_int {
             return -1 as ::core::ffi::c_int;
         }
-        if (*state).skip == 0 {
+        if state.skip == 0 {
             break;
         }
     }
