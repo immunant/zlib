@@ -4921,11 +4921,6 @@ fn detect_data_type_from_ltree(dyn_ltree: &[crate::src::deflate::ct_data]) -> ::
     }
     return crate::zlib_h::Z_BINARY;
 }
-unsafe extern "C" fn detect_data_type(
-    mut s: *mut crate::src::deflate::deflate_state,
-) -> ::core::ffi::c_int {
-    detect_data_type_from_ltree(&(*s).dyn_ltree)
-}
 pub unsafe extern "C" fn _tr_flush_block(
     mut s: *mut crate::src::deflate::deflate_state,
     mut buf: *mut crate::stdlib::charf,
@@ -4936,8 +4931,9 @@ pub unsafe extern "C" fn _tr_flush_block(
     let mut static_lenb: crate::zutil_h::ulg = 0;
     let mut max_blindex: ::core::ffi::c_int = 0 as ::core::ffi::c_int;
     if (*s).level > 0 as ::core::ffi::c_int {
-        if (*(*s).strm).data_type == crate::zlib_h::Z_UNKNOWN {
-            (*(*s).strm).data_type = detect_data_type(s);
+        let strm = (*s).strm;
+        if (*strm).data_type == crate::zlib_h::Z_UNKNOWN {
+            (*strm).data_type = detect_data_type_from_ltree(&(*s).dyn_ltree);
         }
         build_tree(
             s,
