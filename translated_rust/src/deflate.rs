@@ -399,6 +399,13 @@ impl DeflateAllocation {
     fn byte_len(&self) -> Option<usize> {
         (self.items as usize).checked_mul(self.size as usize)
     }
+
+    // Typed views must agree with the callback's exact element size. Keep
+    // that check in the pointer-free allocation plan so later owned storage
+    // does not have to recover element counts from raw copy byte lengths.
+    fn element_len<T>(&self) -> Option<usize> {
+        (self.size as usize == ::core::mem::size_of::<T>()).then_some(self.items as usize)
+    }
 }
 
 struct DeflateStorageLayout {
@@ -1843,8 +1850,8 @@ struct PendingRegions {
 // allocation bases.
 struct DeflateCopyLayout {
     window_bytes: usize,
-    prev_bytes: usize,
-    head_bytes: usize,
+    prev_entries: usize,
+    head_entries: usize,
     pending: Option<PendingRegions>,
 }
 
@@ -1853,24 +1860,28 @@ fn deflate_copy_layout(
     slid: ::core::ffi::c_int,
     strstart: crate::stdlib::uInt,
     insert: crate::stdlib::uInt,
-    w_size: crate::stdlib::uInt,
-    hash_size: crate::stdlib::uInt,
+    storage: &DeflateStorageLayout,
     pending_out: usize,
     pending_len: usize,
     sym_buf_start: usize,
     sym_next: usize,
 ) -> DeflateCopyLayout {
-    let prev_entries = if slid != 0 || strstart.wrapping_sub(insert) > w_size {
-        w_size
+    let prev_capacity = storage
+        .prev
+        .element_len::<crate::src::deflate::Posf>()
+        .expect("validated previous-table allocation geometry");
+    let prev_entries = if slid != 0 || strstart.wrapping_sub(insert) > prev_capacity as crate::stdlib::uInt {
+        prev_capacity
     } else {
-        strstart.wrapping_sub(insert)
+        strstart.wrapping_sub(insert) as usize
     };
     DeflateCopyLayout {
         window_bytes: high_water as usize,
-        prev_bytes: (prev_entries as usize)
-            .wrapping_mul(::core::mem::size_of::<crate::src::deflate::Pos>()),
-        head_bytes: (hash_size as usize)
-            .wrapping_mul(::core::mem::size_of::<crate::src::deflate::Pos>()),
+        prev_entries,
+        head_entries: storage
+            .head
+            .element_len::<crate::src::deflate::Posf>()
+            .expect("validated hash-table allocation geometry"),
         pending: PendingRegions::new(pending_out, pending_len, sym_buf_start, sym_next),
     }
 }
@@ -2698,8 +2709,7 @@ pub unsafe extern "C" fn deflateCopy(
         (*ss).slid,
         (*ss).strstart,
         (*ss).insert,
-        (*ds).w_size,
-        (*ds).hash_size,
+        &storage,
         (*ss).pending_out,
         (*ss).pending as usize,
         (*ss).sym_buf_start,
@@ -2713,12 +2723,12 @@ pub unsafe extern "C" fn deflateCopy(
     ::core::ptr::copy_nonoverlapping(
         (*ss).prev.expect("initialized prev table").as_ptr(),
         (*ds).prev.expect("initialized prev table").as_ptr(),
-        copy_layout.prev_bytes / ::core::mem::size_of::<crate::src::deflate::Posf>(),
+        copy_layout.prev_entries,
     );
     ::core::ptr::copy_nonoverlapping(
         (*ss).head.expect("initialized head table").as_ptr(),
         (*ds).head.expect("initialized head table").as_ptr(),
-        copy_layout.head_bytes / ::core::mem::size_of::<crate::src::deflate::Posf>(),
+        copy_layout.head_entries,
     );
     (*ds).pending_out = (*ss).pending_out;
     // Both allocations have the copied `pending_buf_size` capacity.  Form
