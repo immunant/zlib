@@ -1498,6 +1498,26 @@ fn flush_pending_bytes(
     len as crate::stdlib::uInt
 }
 
+// `_tr_stored_block()` has already reserved these four bytes after winding up
+// the bit buffer.  Patch that header through the declared pending allocation
+// instead of reconstructing four raw cursors in the stored-block algorithm.
+fn set_stored_block_length(
+    pending_buf: &mut [crate::stdlib::Bytef],
+    pending: crate::zutil_h::ulg,
+    len: crate::stdlib::uInt,
+) {
+    let Some(start) = (pending as usize).checked_sub(4) else {
+        return;
+    };
+    let Some(header) = pending_buf.get_mut(start..start.saturating_add(4)) else {
+        return;
+    };
+    header[0] = len as crate::stdlib::Bytef;
+    header[1] = (len >> 8) as crate::stdlib::Bytef;
+    header[2] = !len as crate::stdlib::Bytef;
+    header[3] = (!len >> 8) as crate::stdlib::Bytef;
+}
+
 unsafe extern "C" fn flush_pending(mut strm: crate::zlib_h::z_streamp) {
     let mut len: ::core::ffi::c_uint = 0;
     // The stream and its opaque state are distinct allocations.  Project each
@@ -2419,22 +2439,11 @@ unsafe extern "C" fn deflate_stored(
             0 as crate::zutil_h::ulg,
             last,
         );
-        *(*s)
-            .pending_buf
-            .offset((*s).pending.wrapping_sub(4 as crate::zutil_h::ulg) as isize) =
-            len as crate::stdlib::Bytef;
-        *(*s)
-            .pending_buf
-            .offset((*s).pending.wrapping_sub(3 as crate::zutil_h::ulg) as isize) =
-            (len >> 8 as ::core::ffi::c_int) as crate::stdlib::Bytef;
-        *(*s)
-            .pending_buf
-            .offset((*s).pending.wrapping_sub(2 as crate::zutil_h::ulg) as isize) =
-            !len as crate::stdlib::Bytef;
-        *(*s)
-            .pending_buf
-            .offset((*s).pending.wrapping_sub(1 as crate::zutil_h::ulg) as isize) =
-            (!len >> 8 as ::core::ffi::c_int) as crate::stdlib::Bytef;
+        let pending_buf = ::core::slice::from_raw_parts_mut(
+            (*s).pending_buf,
+            (*s).pending_buf_size as usize,
+        );
+        set_stored_block_length(pending_buf, (*s).pending, len);
         flush_pending((*s).strm);
         if left != 0 {
             if left > len {
