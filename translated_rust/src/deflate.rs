@@ -2992,7 +2992,7 @@ fn deflate_copy_buffers(
 // raw foreign-pointer binding in the exported adapter. The distinct variant
 // guarantees the copy engine can hold two independent mutable streams.
 enum DeflateCopyInput<'a> {
-    Same(&'a mut crate::zlib_h::z_stream),
+    Same,
     Distinct(
         &'a mut crate::zlib_h::z_stream,
         &'a mut crate::zlib_h::z_stream,
@@ -3001,7 +3001,7 @@ enum DeflateCopyInput<'a> {
 
 fn deflate_copy_from_input(input: DeflateCopyInput<'_>) -> ::core::ffi::c_int {
     match input {
-        DeflateCopyInput::Same(_stream) => crate::zlib_h::Z_OK,
+        DeflateCopyInput::Same => crate::zlib_h::Z_OK,
         DeflateCopyInput::Distinct(dest, source) => deflateCopy(dest, source),
     }
 }
@@ -3018,14 +3018,16 @@ pub unsafe extern "C" fn deflateCopy_ffi(
     // references to the same foreign stream would be invalid even though
     // zlib defines self-copy as a successful no-op.
     let same_stream = dest == source;
-    // SAFETY: the non-null destination pointer is bound once at this ABI
-    // boundary. The distinct case below binds a separately proven source.
-    let dest = unsafe { &mut *dest };
     if same_stream {
-        deflate_copy_from_input(DeflateCopyInput::Same(dest))
+        // The C API defines self-copy as a successful no-op. Do not create a
+        // Rust reference from that foreign pointer merely to represent this
+        // value-only result.
+        deflate_copy_from_input(DeflateCopyInput::Same)
     } else {
-        // SAFETY: pointer inequality above permits an independent source
-        // reference for the implementation's distinct-stream operation.
+        // SAFETY: non-null pointer inequality proves the two foreign stream
+        // objects are distinct, so this ABI boundary can bind both references
+        // for the implementation's distinct-stream operation.
+        let dest = unsafe { &mut *dest };
         let source = unsafe { &mut *source };
         deflate_copy_from_input(DeflateCopyInput::Distinct(dest, source))
     }

@@ -3254,7 +3254,7 @@ pub fn inflateCopy(
 // stream. Keep that alias fact as a safe implementation input, where the
 // zlib self-copy result belongs.
 enum InflateCopyInput<'a> {
-    Same(&'a mut crate::zlib_h::z_stream),
+    Same,
     Distinct(
         &'a mut crate::zlib_h::z_stream,
         &'a mut crate::zlib_h::z_stream,
@@ -3263,7 +3263,7 @@ enum InflateCopyInput<'a> {
 
 fn inflate_copy_from_input(input: InflateCopyInput<'_>) -> ::core::ffi::c_int {
     match input {
-        InflateCopyInput::Same(_stream) => crate::zlib_h::Z_OK,
+        InflateCopyInput::Same => crate::zlib_h::Z_OK,
         InflateCopyInput::Distinct(dest, source) => inflateCopy(dest, source),
     }
 }
@@ -3475,15 +3475,16 @@ pub unsafe extern "C" fn inflateCopy_ffi(
         return crate::zlib_h::Z_STREAM_ERROR;
     }
     let same_stream = dest == source;
-    // SAFETY: this ABI conversion binds the non-null destination stream once.
-    // `same_stream` was captured before that binding, so the alias case never
-    // attempts to form a second mutable reference.
-    let dest = unsafe { &mut *dest };
     if same_stream {
-        inflate_copy_from_input(InflateCopyInput::Same(dest))
+        // zlib defines copying a stream onto itself as a successful no-op.
+        // Preserve that result without constructing a Rust reference from the
+        // aliased foreign pointer.
+        inflate_copy_from_input(InflateCopyInput::Same)
     } else {
-        // SAFETY: the pointers were proven distinct above, so this ABI
-        // conversion can bind the independent source stream.
+        // SAFETY: non-null pointer inequality proves the foreign stream
+        // objects are distinct, so this ABI boundary can bind both references
+        // for the implementation's distinct-stream operation.
+        let dest = unsafe { &mut *dest };
         let source = unsafe { &mut *source };
         inflate_copy_from_input(InflateCopyInput::Distinct(dest, source))
     }
