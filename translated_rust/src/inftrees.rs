@@ -3152,6 +3152,31 @@ mod tests {
     }
 
     #[test]
+    fn safe_table_builds_empty_alphabet_at_exact_table_boundary() {
+        let lens = [0u16; 3];
+        let mut table = [code {
+            op: 7,
+            bits: 8,
+            val: 9,
+        }; 2];
+        let mut cursor = 0;
+        let mut bits = MAXBITS as u32;
+        let mut work = [0u16; 3];
+
+        assert_eq!(
+            inflate_table_safe(CODES, &lens, &mut table, &mut cursor, &mut bits, &mut work),
+            0
+        );
+        assert_eq!(cursor, table.len());
+        assert_eq!(bits, 1);
+        for entry in table {
+            assert_eq!(entry.op, 64);
+            assert_eq!(entry.bits, 1);
+            assert_eq!(entry.val, 0);
+        }
+    }
+
+    #[test]
     fn safe_table_rejects_insufficient_table_space() {
         let lens = [1u16, 1];
         let mut table = [];
@@ -3188,6 +3213,61 @@ mod tests {
             assert_eq!(entry.val, original_entry.val);
         }
         assert_eq!(cursor, 0);
+        assert_eq!(bits, 7);
+    }
+
+    #[test]
+    fn safe_table_rejects_malformed_lengths_before_writing_output() {
+        let original_entry = code {
+            op: 7,
+            bits: 8,
+            val: 9,
+        };
+
+        for lens in [&[16u16][..], &[1u16, 1, 1][..], &[2u16, 2][..]] {
+            let mut table = [original_entry; 4];
+            let mut cursor = 0;
+            let mut bits = 7;
+            let mut work = [0u16; 3];
+
+            assert_eq!(
+                inflate_table_safe(CODES, lens, &mut table, &mut cursor, &mut bits, &mut work),
+                -1,
+                "lens={lens:?}"
+            );
+            for entry in table {
+                assert_eq!(entry.op, original_entry.op, "lens={lens:?}");
+                assert_eq!(entry.bits, original_entry.bits, "lens={lens:?}");
+                assert_eq!(entry.val, original_entry.val, "lens={lens:?}");
+            }
+            assert_eq!(cursor, 0, "lens={lens:?}");
+            assert_eq!(bits, 7, "lens={lens:?}");
+        }
+    }
+
+    #[test]
+    fn safe_table_rejects_cursor_beyond_table_without_writing_output() {
+        let lens = [1u16, 1];
+        let original_entry = code {
+            op: 7,
+            bits: 8,
+            val: 9,
+        };
+        let mut table = [original_entry; 2];
+        let mut cursor = table.len() + 1;
+        let mut bits = 7;
+        let mut work = [0u16; 2];
+
+        assert_eq!(
+            inflate_table_safe(CODES, &lens, &mut table, &mut cursor, &mut bits, &mut work),
+            1
+        );
+        for entry in table {
+            assert_eq!(entry.op, original_entry.op);
+            assert_eq!(entry.bits, original_entry.bits);
+            assert_eq!(entry.val, original_entry.val);
+        }
+        assert_eq!(cursor, 3);
         assert_eq!(bits, 7);
     }
 

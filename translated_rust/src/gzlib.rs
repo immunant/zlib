@@ -17,6 +17,7 @@ pub use crate::stdlib::fcntl;
 
 pub use crate::stdlib::open;
 
+pub use crate::stdlib::__O_CLOEXEC;
 pub use crate::stdlib::F_GETFD;
 pub use crate::stdlib::F_GETFL;
 pub use crate::stdlib::F_SETFD;
@@ -33,7 +34,6 @@ pub use crate::stdlib::O_WRONLY;
 pub use crate::stdlib::SEEK_CUR;
 pub use crate::stdlib::SEEK_END;
 pub use crate::stdlib::SEEK_SET;
-pub use crate::stdlib::__O_CLOEXEC;
 
 pub use crate::stdlib::__off64_t;
 pub use crate::stdlib::__off_t;
@@ -159,6 +159,17 @@ fn gzseek_adjust_offset(
                 skip
             }
     }
+}
+
+fn gzseek_can_fast_forward(
+    mode: ::core::ffi::c_int,
+    how: ::core::ffi::c_int,
+    position: crate::stdlib::off64_t,
+    offset: crate::stdlib::off64_t,
+) -> bool {
+    mode == crate::gzguts_h::GZ_READ
+        && how == crate::gzguts_h::COPY
+        && position + offset >= 0 as crate::stdlib::off64_t
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -548,10 +559,7 @@ pub unsafe extern "C" fn gzseek64(
     if whence == crate::stdlib::SEEK_CUR {
         (*state).skip = 0 as crate::stdlib::off64_t;
     }
-    if (*state).mode == crate::gzguts_h::GZ_READ
-        && (*state).how == crate::gzguts_h::COPY
-        && (*state).x.pos + offset >= 0 as crate::stdlib::off64_t
-    {
+    if gzseek_can_fast_forward((*state).mode, (*state).how, (*state).x.pos, offset) {
         ret = crate::stdlib::lseek64(
             (*state).fd,
             offset as crate::stdlib::__off64_t - (*state).x.have as crate::stdlib::__off64_t,
@@ -881,8 +889,8 @@ mod tests {
     use super::{
         gz_clear_read_flags, gz_is_read_or_write_mode, gz_parse_open_mode, gz_post_open_metadata,
         gz_prepare_open, gzerror_core, gzoffset64_adjust_for_buffered_read,
-        gzrewind_request_is_valid, gzseek_adjust_offset, gzseek_read_buffer_consumed,
-        gzseek_request_is_valid, gztell64_core, GzErrorMessage,
+        gzrewind_request_is_valid, gzseek_adjust_offset, gzseek_can_fast_forward,
+        gzseek_read_buffer_consumed, gzseek_request_is_valid, gztell64_core, GzErrorMessage,
     };
 
     #[test]
@@ -1033,6 +1041,34 @@ mod tests {
             gzseek_adjust_offset(30, crate::stdlib::SEEK_CUR, 12, 1, 7),
             30
         );
+    }
+
+    #[test]
+    fn gzseek_fast_forward_requires_read_copy_mode_and_nonnegative_target() {
+        assert!(gzseek_can_fast_forward(
+            crate::gzguts_h::GZ_READ,
+            crate::gzguts_h::COPY,
+            12,
+            -12
+        ));
+        assert!(!gzseek_can_fast_forward(
+            crate::gzguts_h::GZ_WRITE,
+            crate::gzguts_h::COPY,
+            12,
+            0
+        ));
+        assert!(!gzseek_can_fast_forward(
+            crate::gzguts_h::GZ_READ,
+            crate::gzguts_h::LOOK,
+            12,
+            0
+        ));
+        assert!(!gzseek_can_fast_forward(
+            crate::gzguts_h::GZ_READ,
+            crate::gzguts_h::COPY,
+            12,
+            -13
+        ));
     }
 
     #[test]
