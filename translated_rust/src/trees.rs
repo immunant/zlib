@@ -3731,14 +3731,8 @@ unsafe extern "C" fn init_block(mut s: *mut crate::src::deflate::deflate_state) 
 }
 pub unsafe extern "C" fn _tr_init(mut s: *mut crate::src::deflate::deflate_state) {
     tr_static_init();
-    (*s).l_desc.dyn_tree = &raw mut (*s).dyn_ltree as *mut crate::src::deflate::ct_data_s
-        as *mut crate::src::deflate::ct_data;
     (*s).l_desc.static_kind = crate::src::deflate::STATIC_TREE_LITERAL;
-    (*s).d_desc.dyn_tree = &raw mut (*s).dyn_dtree as *mut crate::src::deflate::ct_data_s
-        as *mut crate::src::deflate::ct_data;
     (*s).d_desc.static_kind = crate::src::deflate::STATIC_TREE_DISTANCE;
-    (*s).bl_desc.dyn_tree = &raw mut (*s).bl_tree as *mut crate::src::deflate::ct_data_s
-        as *mut crate::src::deflate::ct_data;
     (*s).bl_desc.static_kind = crate::src::deflate::STATIC_TREE_BIT_LENGTH;
     (*s).bi_buf = 0 as crate::zutil_h::ush;
     (*s).bi_valid = 0 as ::core::ffi::c_int;
@@ -3795,9 +3789,24 @@ unsafe extern "C" fn gen_bitlen(
     mut s: *mut crate::src::deflate::deflate_state,
     mut desc: *mut crate::src::deflate::tree_desc,
 ) {
-    let mut tree: *mut crate::src::deflate::ct_data = (*desc).dyn_tree;
+    let tree_kind = (*desc).static_kind;
+    let mut tree: *mut crate::src::deflate::ct_data = {
+        let state = &mut *s;
+        match tree_kind {
+            crate::src::deflate::STATIC_TREE_LITERAL => {
+                &raw mut state.dyn_ltree as *mut crate::src::deflate::ct_data_s
+                    as *mut crate::src::deflate::ct_data
+            }
+            crate::src::deflate::STATIC_TREE_DISTANCE => {
+                &raw mut state.dyn_dtree as *mut crate::src::deflate::ct_data_s
+                    as *mut crate::src::deflate::ct_data
+            }
+            _ => &raw mut state.bl_tree as *mut crate::src::deflate::ct_data_s
+                as *mut crate::src::deflate::ct_data,
+        }
+    };
     let mut max_code: ::core::ffi::c_int = (*desc).max_code;
-    let stat_desc = static_desc((*desc).static_kind);
+    let stat_desc = static_desc(tree_kind);
     let mut stree: *const crate::src::deflate::ct_data = stat_desc
         .static_tree
         .map_or(::core::ptr::null(), <[crate::src::deflate::ct_data]>::as_ptr);
@@ -3902,8 +3911,23 @@ unsafe extern "C" fn build_tree(
     mut s: *mut crate::src::deflate::deflate_state,
     mut desc: *mut crate::src::deflate::tree_desc,
 ) {
-    let mut tree: *mut crate::src::deflate::ct_data = (*desc).dyn_tree;
-    let stat_desc = static_desc((*desc).static_kind);
+    let tree_kind = (*desc).static_kind;
+    let mut tree: *mut crate::src::deflate::ct_data = {
+        let state = &mut *s;
+        match tree_kind {
+            crate::src::deflate::STATIC_TREE_LITERAL => {
+                &raw mut state.dyn_ltree as *mut crate::src::deflate::ct_data_s
+                    as *mut crate::src::deflate::ct_data
+            }
+            crate::src::deflate::STATIC_TREE_DISTANCE => {
+                &raw mut state.dyn_dtree as *mut crate::src::deflate::ct_data_s
+                    as *mut crate::src::deflate::ct_data
+            }
+            _ => &raw mut state.bl_tree as *mut crate::src::deflate::ct_data_s
+                as *mut crate::src::deflate::ct_data,
+        }
+    };
+    let stat_desc = static_desc(tree_kind);
     let mut stree: *const crate::src::deflate::ct_data = stat_desc
         .static_tree
         .map_or(::core::ptr::null(), <[crate::src::deflate::ct_data]>::as_ptr);
