@@ -601,6 +601,32 @@ fn inflate_window_copy(
     Some(())
 }
 
+/// Update the circular history window after a decoder call.  Allocation and
+/// ABI-owned buffer lending stay at the codec boundary; this core owns the
+/// window sizing, cursor planning, and bounded copies.
+fn inflate_window_update(
+    state: &mut inflate_state,
+    window: &mut [u8],
+    produced: &[u8],
+    copy: ::core::ffi::c_uint,
+) -> Option<()> {
+    if state.wsize == 0 {
+        state.wsize = 1_u32.checked_shl(state.wbits)?;
+        state.wnext = 0;
+        state.whave = 0;
+    }
+    let wsize = usize::try_from(state.wsize).ok()?;
+    if window.len() != wsize || produced.len() != usize::try_from(copy).ok()? {
+        return None;
+    }
+    let plan = inflate_window_copy_plan(state.wsize, state.wnext, state.whave, copy)?;
+    let (next, have) = plan.cursor_values()?;
+    inflate_window_copy(window, produced, plan)?;
+    state.wnext = next;
+    state.whave = have;
+    Some(())
+}
+
 /// Resolve a dynamic decode-table cursor to a bounded tail of `codes`.
 /// `cursor` is only an address token here; no implementation dereferences it.
 fn inflate_fast_dynamic_table(
@@ -663,28 +689,30 @@ unsafe extern "C" fn updatewindow(
     let strm = &mut *strm;
     let state = &mut *(strm.state as *mut crate::src::inflate::inflate_state);
     if state.window.is_null() {
+        let Some(requested_wsize) = 1_u32.checked_shl(state.wbits) else {
+            return 1 as ::core::ffi::c_int;
+        };
         state.window = Some(strm.zalloc.expect("non-null function pointer"))
             .expect("non-null function pointer")(
             strm.opaque,
-            (1 as crate::stdlib::uInt) << state.wbits,
+            requested_wsize,
             ::core::mem::size_of::<::core::ffi::c_uchar>() as crate::stdlib::uInt,
         ) as *mut ::core::ffi::c_uchar;
         if state.window.is_null() {
             return 1 as ::core::ffi::c_int;
         }
     }
-    if state.wsize == 0 as ::core::ffi::c_uint {
-        state.wsize = (1 as ::core::ffi::c_uint) << state.wbits;
-        state.wnext = 0 as ::core::ffi::c_uint;
-        state.whave = 0 as ::core::ffi::c_uint;
-    }
-    let Some(plan) = inflate_window_copy_plan(state.wsize, state.wnext, state.whave, copy) else {
-        return 1 as ::core::ffi::c_int;
-    };
-    let Some((next, have)) = plan.cursor_values() else {
-        return 1 as ::core::ffi::c_int;
-    };
-    let Ok(window_len) = usize::try_from(state.wsize) else {
+    let window_len = if state.wsize == 0 {
+        let Some(wsize) = 1_u32.checked_shl(state.wbits) else {
+            return 1 as ::core::ffi::c_int;
+        };
+        let Ok(window_len) = usize::try_from(wsize) else {
+            return 1 as ::core::ffi::c_int;
+        };
+        window_len
+    } else if let Ok(window_len) = usize::try_from(state.wsize) {
+        window_len
+    } else {
         return 1 as ::core::ffi::c_int;
     };
     let Ok(copy_len) = usize::try_from(copy) else {
@@ -702,11 +730,9 @@ unsafe extern "C" fn updatewindow(
         // `copy_len` span only after validating the source pointer above.
         ::core::slice::from_raw_parts(end.wrapping_sub(copy_len), copy_len)
     };
-    if inflate_window_copy(window, produced, plan).is_none() {
+    if inflate_window_update(state, window, produced, copy).is_none() {
         return 1 as ::core::ffi::c_int;
     }
-    state.wnext = next;
-    state.whave = have;
     return 0 as ::core::ffi::c_int;
 }
 pub unsafe extern "C" fn inflate(
