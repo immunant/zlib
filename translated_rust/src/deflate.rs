@@ -2365,6 +2365,8 @@ fn append_gzip_cstring_bytes(
     source_index: &mut usize,
     pending_buf: &mut [crate::stdlib::Bytef],
     pending: &mut crate::zutil_h::ulg,
+    hcrc: bool,
+    checksum: &mut crate::stdlib::uLong,
 ) -> bool {
     let Some(remaining) = source.get(*source_index..) else {
         return true;
@@ -2379,9 +2381,13 @@ fn append_gzip_cstring_bytes(
         .position(|&byte| byte == 0)
         .map_or(limit, |index| index + 1);
     let start = *pending as usize;
-    pending_buf[start..start + count].copy_from_slice(&remaining[..count]);
+    let copied = &remaining[..count];
+    pending_buf[start..start + count].copy_from_slice(copied);
     *source_index += count;
     *pending = pending.wrapping_add(count as crate::zutil_h::ulg);
+    if hcrc {
+        *checksum = crate::src::crc32::crc32_z(*checksum, Some(copied));
+    }
     count != 0 && remaining[count - 1] == 0
 }
 
@@ -2810,29 +2816,13 @@ pub unsafe extern "C" fn deflate(
                     gzhead.hcrc,
                 )
             };
-            let mut beg_0: crate::zutil_h::ulg = s.pending;
             loop {
                 if s.pending == s.pending_buf_size {
-                    if hcrc && s.pending > beg_0 {
-                        let state = &mut *s;
-                        let pending_buf = ::core::slice::from_raw_parts(
-                            state
-                                .pending_buf
-                                .expect("initialized pending buffer")
-                                .as_ptr(),
-                            state.pending_buf_size as usize,
-                        );
-                        strm.adler = crate::src::crc32::crc32_z(
-                            strm.adler,
-                            Some(&pending_buf[beg_0 as usize..state.pending as usize]),
-                        );
-                    }
                     flush_pending(strm, s);
                     if s.pending != 0 as crate::zutil_h::ulg {
                         s.last_flush = -1 as ::core::ffi::c_int;
                         return crate::zlib_h::Z_OK;
                     }
-                    beg_0 = 0 as crate::zutil_h::ulg;
                 }
                 let complete = {
                     let state = &mut *s;
@@ -2849,6 +2839,8 @@ pub unsafe extern "C" fn deflate(
                         &mut source_index,
                         pending_buf,
                         &mut state.pending,
+                        hcrc,
+                        &mut strm.adler,
                     );
                     state.gzindex = source_index;
                     complete
@@ -2856,20 +2848,6 @@ pub unsafe extern "C" fn deflate(
                 if complete {
                     break;
                 }
-            }
-            if hcrc && s.pending > beg_0 {
-                let state = &mut *s;
-                let pending_buf = ::core::slice::from_raw_parts(
-                    state
-                        .pending_buf
-                        .expect("initialized pending buffer")
-                        .as_ptr(),
-                    state.pending_buf_size as usize,
-                );
-                strm.adler = crate::src::crc32::crc32_z(
-                    strm.adler,
-                    Some(&pending_buf[beg_0 as usize..state.pending as usize]),
-                );
             }
             s.gzindex = 0;
         }
@@ -2893,29 +2871,13 @@ pub unsafe extern "C" fn deflate(
                     gzhead.hcrc,
                 )
             };
-            let mut beg_1: crate::zutil_h::ulg = s.pending;
             loop {
                 if s.pending == s.pending_buf_size {
-                    if hcrc && s.pending > beg_1 {
-                        let state = &mut *s;
-                        let pending_buf = ::core::slice::from_raw_parts(
-                            state
-                                .pending_buf
-                                .expect("initialized pending buffer")
-                                .as_ptr(),
-                            state.pending_buf_size as usize,
-                        );
-                        strm.adler = crate::src::crc32::crc32_z(
-                            strm.adler,
-                            Some(&pending_buf[beg_1 as usize..state.pending as usize]),
-                        );
-                    }
                     flush_pending(strm, s);
                     if s.pending != 0 as crate::zutil_h::ulg {
                         s.last_flush = -1 as ::core::ffi::c_int;
                         return crate::zlib_h::Z_OK;
                     }
-                    beg_1 = 0 as crate::zutil_h::ulg;
                 }
                 let complete = {
                     let state = &mut *s;
@@ -2932,6 +2894,8 @@ pub unsafe extern "C" fn deflate(
                         &mut source_index,
                         pending_buf,
                         &mut state.pending,
+                        hcrc,
+                        &mut strm.adler,
                     );
                     state.gzindex = source_index;
                     complete
@@ -2939,20 +2903,6 @@ pub unsafe extern "C" fn deflate(
                 if complete {
                     break;
                 }
-            }
-            if hcrc && s.pending > beg_1 {
-                let state = &mut *s;
-                let pending_buf = ::core::slice::from_raw_parts(
-                    state
-                        .pending_buf
-                        .expect("initialized pending buffer")
-                        .as_ptr(),
-                    state.pending_buf_size as usize,
-                );
-                strm.adler = crate::src::crc32::crc32_z(
-                    strm.adler,
-                    Some(&pending_buf[beg_1 as usize..state.pending as usize]),
-                );
             }
         }
         s.status = crate::src::deflate::HCRC_STATE;
