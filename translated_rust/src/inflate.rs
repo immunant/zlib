@@ -733,16 +733,14 @@ pub(crate) fn inflate_fast_tables(
 }
 
 unsafe fn updatewindow(
-    mut strm: crate::zlib_h::z_streamp,
+    strm: &mut crate::zlib_h::z_stream,
+    state: &mut crate::src::inflate::inflate_state,
     mut end: *const crate::stdlib::Bytef,
     mut copy: ::core::ffi::c_uint,
 ) -> ::core::ffi::c_int {
-    // Keep the raw stream/state adoption at this legacy codec boundary, but
-    // make all subsequent state work ordinary Rust field access. This helper
-    // is still unsafe because it invokes the caller allocator and lends the
-    // ABI-owned window/output spans below.
-    let strm = &mut *strm;
-    let state = &mut *(strm.state as *mut crate::src::inflate::inflate_state);
+    // The legacy decoder already validated and adopted these records at its
+    // boundary.  This helper is still unsafe because it invokes the caller
+    // allocator and lends the ABI-owned window/output spans below.
     if state.window.is_null() {
         let Some(window_len) = inflate_window_len(state.wbits, 0) else {
             return 1 as ::core::ffi::c_int;
@@ -2616,7 +2614,7 @@ pub unsafe fn inflate(
     // Keep the decoder loop's raw cursors local to that loop.  The exit
     // commit adopts each ABI record once, so cursor publication, history
     // planning, totals, and checksum state use ordinary field access.
-    let window_update = {
+    let window_error = {
         let strm_ref = &mut *strm;
         let state_ref = &mut *state;
         strm_ref.next_out = put as *mut crate::stdlib::Bytef;
@@ -2633,20 +2631,20 @@ pub unsafe fn inflate(
                     < crate::src::inflate::CHECK as ::core::ffi::c_int as ::core::ffi::c_uint
                     || flush != crate::zlib_h::Z_FINISH)
         {
-            Some((
+            updatewindow(
+                strm_ref,
+                state_ref,
                 strm_ref.next_out as *const crate::stdlib::Bytef,
                 out.wrapping_sub(strm_ref.avail_out as ::core::ffi::c_uint),
-            ))
+            ) != 0
         } else {
-            None
+            false
         }
     };
-    if let Some((end, copied)) = window_update {
-        if updatewindow(strm, end, copied) != 0 {
-            let state_ref = &mut *state;
-            state_ref.mode = crate::src::inflate::MEM;
-            return crate::zlib_h::Z_MEM_ERROR;
-        }
+    if window_error {
+        let state_ref = &mut *state;
+        state_ref.mode = crate::src::inflate::MEM;
+        return crate::zlib_h::Z_MEM_ERROR;
     }
     {
         let strm_ref = &mut *strm;
