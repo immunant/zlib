@@ -216,8 +216,9 @@ unsafe fn gz_init(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
             .set(crate::zlib_h::Z_MEM_ERROR, Some(b"out of memory"));
             return -1;
         };
-        let size = buffers.size();
-        let Some(output) = buffers.output_mut() else {
+        let Some(mut setup) =
+            crate::src::gzlib::GzEmbeddedDeflateSetup::from_write_buffers(&mut buffers)
+        else {
             state.buffers.clear();
             crate::src::gzlib::GzErrorState {
                 message: &mut state.msg,
@@ -229,8 +230,8 @@ unsafe fn gz_init(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
             .set(crate::zlib_h::Z_MEM_ERROR, Some(b"out of memory"));
             return -1;
         };
-        state.strm.avail_out = size;
-        state.strm.next_out = output.as_mut_ptr();
+        state.strm.avail_out = setup.output_available();
+        state.strm.next_out = setup.output_mut().as_mut_ptr();
         state.x.next = state.strm.next_out as *mut ::core::ffi::c_uchar;
     }
     return 0 as ::core::ffi::c_int;

@@ -235,6 +235,15 @@ pub(crate) struct GzEmbeddedInflateDispatch<'input, 'output> {
     call: GzEmbeddedInflateCall<'input, 'output>,
 }
 
+// The write-side counterpart starts with the one part of an embedded deflate
+// call that gzip already owns outright: its bounded compressed-output buffer.
+// Keep that borrow in an owner rather than reconstructing a cursor from
+// `gz_state` in setup.  A later input-request owner can extend this into the
+// complete embedded-deflate call without changing the allocation proof.
+pub(crate) struct GzEmbeddedDeflateSetup<'a> {
+    output: GzCodecOutputView<'a>,
+}
+
 pub(crate) struct GzCodecOutputView<'a> {
     bytes: &'a mut [u8],
 }
@@ -562,6 +571,29 @@ impl<'input, 'output> GzEmbeddedInflateDispatch<'input, 'output> {
     // ABI stream after the projection has ended.
     pub(crate) fn finish(self, snapshot: GzEmbeddedInflateResult) -> Option<GzCodecResult> {
         self.call.into_codec_result(snapshot)
+    }
+}
+
+impl<'a> GzEmbeddedDeflateSetup<'a> {
+    // The paired write allocation established by `GzBuffers` is the only
+    // source of this output view.  Direct handles have no compressed-output
+    // allocation and therefore cannot construct an embedded-deflate setup.
+    pub(crate) fn from_write_buffers(buffers: &'a mut GzWriteBufferView<'a>) -> Option<Self> {
+        let available = usize::try_from(buffers.size()).ok()?;
+        let output = buffers.output_mut()?;
+        Some(Self {
+            output: GzCodecOutputView::prefix(output, available)?,
+        })
+    }
+
+    pub(crate) fn output_available(&self) -> crate::stdlib::uInt {
+        self.output.bytes.len() as crate::stdlib::uInt
+    }
+
+    // Publishing the ABI cursor remains at the codec boundary.  All callers
+    // of this owner receive the checked, allocation-backed slice first.
+    pub(crate) fn output_mut(&mut self) -> &mut [u8] {
+        self.output.bytes_mut()
     }
 }
 
