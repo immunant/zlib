@@ -721,36 +721,30 @@ pub unsafe extern "C" fn gzread(
     mut buf: crate::stdlib::voidp,
     mut len: ::core::ffi::c_uint,
 ) -> ::core::ffi::c_int {
-    let mut state: crate::gzguts_h::gz_statep =
-        ::core::ptr::null_mut::<crate::gzguts_h::gz_state>();
     if file.is_null() {
         return -1 as ::core::ffi::c_int;
     }
-    state = file as crate::gzguts_h::gz_statep;
-    if !gzread_state_is_valid((*state).mode, (*state).err, (*state).again) {
+    let state = &mut *(file as crate::gzguts_h::gz_statep);
+    if !gzread_state_is_valid(state.mode, state.err, state.again) {
         return -1 as ::core::ffi::c_int;
     }
-    crate::src::gzlib::gz_error(
-        state as *mut crate::gzguts_h::gz_state,
-        crate::zlib_h::Z_OK,
-        ::core::ptr::null::<::core::ffi::c_char>(),
-    );
+    crate::src::gzlib::gz_error_clear(state);
     if !crate::src::gzlib::gz_request_len_fits_int(len) {
-        crate::src::gzlib::gz_error(
-            state as *mut crate::gzguts_h::gz_state,
+        crate::src::gzlib::gz_error_static(
+            state,
             crate::zlib_h::Z_STREAM_ERROR,
-            b"request does not fit in an int\0".as_ptr() as *const ::core::ffi::c_char,
+            b"request does not fit in an int\0",
         );
         return -1 as ::core::ffi::c_int;
     }
     len = gz_read(state, buf, len as crate::stdlib::z_size_t) as ::core::ffi::c_uint;
     if len == 0 as ::core::ffi::c_uint {
-        if (*state).err != crate::zlib_h::Z_OK && (*state).err != crate::zlib_h::Z_BUF_ERROR {
+        if state.err != crate::zlib_h::Z_OK && state.err != crate::zlib_h::Z_BUF_ERROR {
             return -1 as ::core::ffi::c_int;
         }
-        if (*state).again != 0 {
+        if state.again != 0 {
             crate::src::gzlib::gz_error(
-                state as *mut crate::gzguts_h::gz_state,
+                state,
                 crate::zlib_h::Z_ERRNO,
                 crate::stdlib::strerror(*crate::stdlib::__errno_location()),
             );
@@ -775,25 +769,19 @@ pub unsafe extern "C" fn gzfread(
     mut file: crate::zlib_h::gzFile,
 ) -> crate::stdlib::z_size_t {
     let mut len: crate::stdlib::z_size_t = 0;
-    let mut state: crate::gzguts_h::gz_statep =
-        ::core::ptr::null_mut::<crate::gzguts_h::gz_state>();
     if file.is_null() {
         return 0 as crate::stdlib::z_size_t;
     }
-    state = file as crate::gzguts_h::gz_statep;
-    if !gzread_state_is_valid((*state).mode, (*state).err, (*state).again) {
+    let state = &mut *(file as crate::gzguts_h::gz_statep);
+    if !gzread_state_is_valid(state.mode, state.err, state.again) {
         return 0 as crate::stdlib::z_size_t;
     }
-    crate::src::gzlib::gz_error(
-        state as *mut crate::gzguts_h::gz_state,
-        crate::zlib_h::Z_OK,
-        ::core::ptr::null::<::core::ffi::c_char>(),
-    );
+    crate::src::gzlib::gz_error_clear(state);
     let Some(request_len) = gzfread_request_len(size, nitems) else {
-        crate::src::gzlib::gz_error(
-            state as *mut crate::gzguts_h::gz_state,
+        crate::src::gzlib::gz_error_static(
+            state,
             crate::zlib_h::Z_STREAM_ERROR,
-            b"request does not fit in a size_t\0".as_ptr() as *const ::core::ffi::c_char,
+            b"request does not fit in a size_t\0",
         );
         return 0 as crate::stdlib::z_size_t;
     };
@@ -812,24 +800,18 @@ pub unsafe extern "C" fn gzfread_ffi(
 }
 pub unsafe extern "C" fn gzgetc(mut file: crate::zlib_h::gzFile) -> ::core::ffi::c_int {
     let mut buf: [::core::ffi::c_uchar; 1] = [0; 1];
-    let mut state: crate::gzguts_h::gz_statep =
-        ::core::ptr::null_mut::<crate::gzguts_h::gz_state>();
     if file.is_null() {
         return -1 as ::core::ffi::c_int;
     }
-    state = file as crate::gzguts_h::gz_statep;
-    if !gzread_state_is_valid((*state).mode, (*state).err, (*state).again) {
+    let state = &mut *(file as crate::gzguts_h::gz_statep);
+    if !gzread_state_is_valid(state.mode, state.err, state.again) {
         return -1 as ::core::ffi::c_int;
     }
-    crate::src::gzlib::gz_error(
-        state as *mut crate::gzguts_h::gz_state,
-        crate::zlib_h::Z_OK,
-        ::core::ptr::null::<::core::ffi::c_char>(),
-    );
-    if (*state).x.have != 0 {
-        let c2rust_fresh2 = (*state).x.next;
-        (*state).x.next = (*state).x.next.offset(1);
-        if !gzgetc_buffer_commit_state(&mut *state) {
+    crate::src::gzlib::gz_error_clear(state);
+    if state.x.have != 0 {
+        let c2rust_fresh2 = state.x.next;
+        state.x.next = state.x.next.offset(1);
+        if !gzgetc_buffer_commit_state(state) {
             return -1 as ::core::ffi::c_int;
         }
         return *c2rust_fresh2 as ::core::ffi::c_int;
@@ -1075,52 +1057,46 @@ pub unsafe extern "C" fn gzgets(
     let mut n: ::core::ffi::c_uint = 0;
     let mut str: *mut ::core::ffi::c_char = ::core::ptr::null_mut::<::core::ffi::c_char>();
     let mut eol: *mut ::core::ffi::c_uchar = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
-    let mut state: crate::gzguts_h::gz_statep =
-        ::core::ptr::null_mut::<crate::gzguts_h::gz_state>();
     if file.is_null() || buf.is_null() || len < 1 as ::core::ffi::c_int {
         return ::core::ptr::null_mut::<::core::ffi::c_char>();
     }
-    state = file as crate::gzguts_h::gz_statep;
-    if !gzread_state_is_valid((*state).mode, (*state).err, (*state).again) {
+    let state = &mut *(file as crate::gzguts_h::gz_statep);
+    if !gzread_state_is_valid(state.mode, state.err, state.again) {
         return ::core::ptr::null_mut::<::core::ffi::c_char>();
     }
-    crate::src::gzlib::gz_error(
-        state as *mut crate::gzguts_h::gz_state,
-        crate::zlib_h::Z_OK,
-        ::core::ptr::null::<::core::ffi::c_char>(),
-    );
-    if (*state).skip != 0 && gz_skip(state) == -1 as ::core::ffi::c_int {
+    crate::src::gzlib::gz_error_clear(state);
+    if state.skip != 0 && gz_skip(state) == -1 as ::core::ffi::c_int {
         return ::core::ptr::null_mut::<::core::ffi::c_char>();
     }
     str = buf;
     left = (len as ::core::ffi::c_uint).wrapping_sub(1 as ::core::ffi::c_uint);
     if left != 0 {
-        while !((*state).x.have == 0 as ::core::ffi::c_uint
+        while !(state.x.have == 0 as ::core::ffi::c_uint
             && gz_fetch(state) == -1 as ::core::ffi::c_int)
         {
-            if (*state).x.have == 0 as ::core::ffi::c_uint {
-                (*state).past = 1 as ::core::ffi::c_int;
+            if state.x.have == 0 as ::core::ffi::c_uint {
+                state.past = 1 as ::core::ffi::c_int;
                 break;
             } else {
-                n = gzgets_buffer_copy_plan((*state).x.have, left, None);
+                n = gzgets_buffer_copy_plan(state.x.have, left, None);
                 eol = crate::stdlib::memchr(
-                    (*state).x.next as *const ::core::ffi::c_void,
+                    state.x.next as *const ::core::ffi::c_void,
                     '\n' as ::core::ffi::c_int,
                     n as crate::__stddef_size_t_h::size_t,
                 ) as *mut ::core::ffi::c_uchar;
                 let newline_offset = if eol.is_null() {
                     None
                 } else {
-                    Some(eol.offset_from((*state).x.next) as ::core::ffi::c_uint)
+                    Some(eol.offset_from(state.x.next) as ::core::ffi::c_uint)
                 };
-                n = gzgets_buffer_copy_plan((*state).x.have, left, newline_offset);
+                n = gzgets_buffer_copy_plan(state.x.have, left, newline_offset);
                 crate::stdlib::memcpy(
                     buf as *mut ::core::ffi::c_void,
-                    (*state).x.next as *const ::core::ffi::c_void,
+                    state.x.next as *const ::core::ffi::c_void,
                     n as crate::__stddef_size_t_h::size_t,
                 );
-                (*state).x.next = (*state).x.next.offset(n as isize);
-                let Some(remaining) = gzgets_buffer_copy_commit_state(&mut *state, left, n) else {
+                state.x.next = state.x.next.offset(n as isize);
+                let Some(remaining) = gzgets_buffer_copy_commit_state(state, left, n) else {
                     return ::core::ptr::null_mut::<::core::ffi::c_char>();
                 };
                 left = remaining;
