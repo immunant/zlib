@@ -3205,55 +3205,60 @@ fn deflate_end_status(status: ::core::ffi::c_int) -> ::core::ffi::c_int {
     }
 }
 
-pub unsafe fn deflateEnd(mut strm: crate::zlib_h::z_streamp) -> ::core::ffi::c_int {
-    // Validate and snapshot every callback argument before releasing any
-    // allocation. A custom `zfree` is foreign code, so do not retain a Rust
-    // borrow of the stream or state while it runs.
-    let (state_ptr, zfree, opaque, status, pending_buf, head, prev, window) = {
-        if strm.is_null() {
-            return crate::zlib_h::Z_STREAM_ERROR;
+pub fn deflateEnd(mut strm: crate::zlib_h::z_streamp) -> ::core::ffi::c_int {
+    // This compatibility teardown still has to adopt the ABI stream/state
+    // records and invoke its C allocator. Keep that work at this codec
+    // boundary so Rust callers do not inherit an unsafe-function contract.
+    unsafe {
+        // Validate and snapshot every callback argument before releasing any
+        // allocation. A custom `zfree` is foreign code, so do not retain a Rust
+        // borrow of the stream or state while it runs.
+        let (state_ptr, zfree, opaque, status, pending_buf, head, prev, window) = {
+            if strm.is_null() {
+                return crate::zlib_h::Z_STREAM_ERROR;
+            }
+            let strm = &mut *strm;
+            let state_ptr = strm.state as *mut crate::src::deflate::deflate_state;
+            if state_ptr.is_null() {
+                return crate::zlib_h::Z_STREAM_ERROR;
+            }
+            let state = &*state_ptr;
+            if !deflate_state_values_are_valid(
+                strm.zalloc.is_some(),
+                strm.zfree.is_some(),
+                state.strm == strm as *mut crate::zlib_h::z_stream,
+                state.status,
+            ) {
+                return crate::zlib_h::Z_STREAM_ERROR;
+            }
+            let snapshot = (
+                state_ptr,
+                strm.zfree.expect("non-null function pointer"),
+                strm.opaque,
+                state.status,
+                state.pending_buf,
+                state.head,
+                state.prev,
+                state.window,
+            );
+            snapshot
+        };
+        if !pending_buf.is_null() {
+            zfree(opaque, pending_buf as crate::stdlib::voidpf);
         }
-        let strm = &mut *strm;
-        let state_ptr = strm.state as *mut crate::src::deflate::deflate_state;
-        if state_ptr.is_null() {
-            return crate::zlib_h::Z_STREAM_ERROR;
+        if !head.is_null() {
+            zfree(opaque, head as crate::stdlib::voidpf);
         }
-        let state = &*state_ptr;
-        if !deflate_state_values_are_valid(
-            strm.zalloc.is_some(),
-            strm.zfree.is_some(),
-            state.strm == strm as *mut crate::zlib_h::z_stream,
-            state.status,
-        ) {
-            return crate::zlib_h::Z_STREAM_ERROR;
+        if !prev.is_null() {
+            zfree(opaque, prev as crate::stdlib::voidpf);
         }
-        let snapshot = (
-            state_ptr,
-            strm.zfree.expect("non-null function pointer"),
-            strm.opaque,
-            state.status,
-            state.pending_buf,
-            state.head,
-            state.prev,
-            state.window,
-        );
-        snapshot
-    };
-    if !pending_buf.is_null() {
-        zfree(opaque, pending_buf as crate::stdlib::voidpf);
+        if !window.is_null() {
+            zfree(opaque, window as crate::stdlib::voidpf);
+        }
+        zfree(opaque, state_ptr as crate::stdlib::voidpf);
+        (&mut *strm).state = ::core::ptr::null_mut::<crate::src::deflate::internal_state>();
+        deflate_end_status(status)
     }
-    if !head.is_null() {
-        zfree(opaque, head as crate::stdlib::voidpf);
-    }
-    if !prev.is_null() {
-        zfree(opaque, prev as crate::stdlib::voidpf);
-    }
-    if !window.is_null() {
-        zfree(opaque, window as crate::stdlib::voidpf);
-    }
-    zfree(opaque, state_ptr as crate::stdlib::voidpf);
-    (&mut *strm).state = ::core::ptr::null_mut::<crate::src::deflate::internal_state>();
-    deflate_end_status(status)
 }
 #[export_name = "deflateEnd"]
 
