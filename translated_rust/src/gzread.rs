@@ -46,35 +46,44 @@ pub use crate::zlib_h::Z_OK;
 pub use crate::zlib_h::Z_STREAM_END;
 pub use crate::zlib_h::Z_STREAM_ERROR;
 
-unsafe extern "C" fn gz_load(
-    mut state: crate::gzguts_h::gz_statep,
-    mut buf: *mut ::core::ffi::c_uchar,
-    mut len: ::core::ffi::c_uint,
-    mut have: *mut ::core::ffi::c_uint,
-) -> ::core::ffi::c_int {
-    let mut ret: ::core::ffi::c_int = 0;
-    let mut get: ::core::ffi::c_uint = 0;
-    let mut max: ::core::ffi::c_uint = (-1 as ::core::ffi::c_int as ::core::ffi::c_uint
-        >> 2 as ::core::ffi::c_int)
-        .wrapping_add(1 as ::core::ffi::c_uint);
-    (*state).again = 0 as ::core::ffi::c_int;
-    *crate::stdlib::__errno_location() = 0 as ::core::ffi::c_int;
-    *have = 0 as ::core::ffi::c_uint;
-    loop {
-        get = len.wrapping_sub(*have);
-        if get > max {
-            get = max;
+enum GzLoadBuffer<'a> {
+    Slice(&'a mut [u8]),
+    Output,
+}
+
+unsafe fn gz_load(
+    state: &mut crate::gzguts_h::gz_state,
+    buffer: GzLoadBuffer<'_>,
+) -> Result<usize, ()> {
+    let buf = match buffer {
+        GzLoadBuffer::Slice(buf) => buf,
+        GzLoadBuffer::Output => {
+            let Some(len) = (state.size as usize).checked_mul(2) else {
+                return Err(());
+            };
+            if state.out.is_null() {
+                return Err(());
+            }
+            ::core::slice::from_raw_parts_mut(state.out, len)
         }
+    };
+    let mut ret: ::core::ffi::c_int = 0;
+    let mut have = 0usize;
+    let max = ((-1 as ::core::ffi::c_int as ::core::ffi::c_uint >> 2) + 1) as usize;
+    state.again = 0 as ::core::ffi::c_int;
+    *crate::stdlib::__errno_location() = 0 as ::core::ffi::c_int;
+    loop {
+        let get = (buf.len() - have).min(max);
         ret = crate::stdlib::read(
-            (*state).fd,
-            buf.offset(*have as isize) as *mut ::core::ffi::c_void,
-            get as crate::__stddef_size_t_h::size_t,
+            state.fd,
+            buf[have..].as_mut_ptr() as *mut ::core::ffi::c_void,
+            get,
         ) as ::core::ffi::c_int;
         if ret <= 0 as ::core::ffi::c_int {
             break;
         }
-        *have = (*have).wrapping_add(ret as ::core::ffi::c_uint);
-        if *have >= len {
+        have += ret as usize;
+        if have >= buf.len() {
             break;
         }
     }
@@ -82,62 +91,49 @@ unsafe extern "C" fn gz_load(
         if *crate::stdlib::__errno_location() == crate::stdlib::EAGAIN
             || *crate::stdlib::__errno_location() == crate::stdlib::EWOULDBLOCK
         {
-            (*state).again = 1 as ::core::ffi::c_int;
-            if *have != 0 as ::core::ffi::c_uint {
-                return 0 as ::core::ffi::c_int;
+            state.again = 1 as ::core::ffi::c_int;
+            if have != 0 {
+                return Ok(have);
             }
         }
-        crate::src::gzlib::gz_error(
-            state as *mut crate::gzguts_h::gz_state,
+        let message = crate::stdlib::strerror(*crate::stdlib::__errno_location());
+        crate::src::gzlib::gz_error_state(
+            state,
             crate::zlib_h::Z_ERRNO,
-            crate::stdlib::strerror(*crate::stdlib::__errno_location()),
+            (!message.is_null()).then(|| ::core::ffi::CStr::from_ptr(message)),
         );
-        return -1 as ::core::ffi::c_int;
+        return Err(());
     }
     if ret == 0 as ::core::ffi::c_int {
-        (*state).eof = 1 as ::core::ffi::c_int;
+        state.eof = 1 as ::core::ffi::c_int;
     }
-    return 0 as ::core::ffi::c_int;
+    Ok(have)
 }
 
-unsafe extern "C" fn gz_avail(mut state: crate::gzguts_h::gz_statep) -> ::core::ffi::c_int {
-    let mut got: ::core::ffi::c_uint = 0;
-    let mut strm: crate::zlib_h::z_streamp = &raw mut (*state).strm;
-    if (*state).err != crate::zlib_h::Z_OK && (*state).err != crate::zlib_h::Z_BUF_ERROR {
+unsafe fn gz_avail(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
+    if state.err != crate::zlib_h::Z_OK && state.err != crate::zlib_h::Z_BUF_ERROR {
         return -1 as ::core::ffi::c_int;
     }
-    if (*state).eof == 0 as ::core::ffi::c_int {
-        if (*strm).avail_in != 0 {
-            let mut p: *mut ::core::ffi::c_uchar = (*state).in_0;
-            let mut q: *const ::core::ffi::c_uchar = (*strm).next_in;
-            if q != p as *const ::core::ffi::c_uchar {
-                let mut n: ::core::ffi::c_uint = (*strm).avail_in as ::core::ffi::c_uint;
-                loop {
-                    let c2rust_fresh0 = q;
-                    q = q.offset(1);
-                    let c2rust_fresh1 = p;
-                    p = p.offset(1);
-                    *c2rust_fresh1 = *c2rust_fresh0;
-                    n = n.wrapping_sub(1);
-                    if n == 0 {
-                        break;
-                    }
-                }
-            }
-        }
-        if gz_load(
-            state,
-            (*state).in_0.offset((*strm).avail_in as isize),
-            (*state)
-                .size
-                .wrapping_sub((*strm).avail_in as ::core::ffi::c_uint),
-            &raw mut got,
-        ) == -1 as ::core::ffi::c_int
-        {
+    if state.eof == 0 as ::core::ffi::c_int {
+        let available = state.strm.avail_in as usize;
+        let capacity = state.size as usize;
+        if available > capacity || state.in_0.is_null() {
             return -1 as ::core::ffi::c_int;
         }
-        (*strm).avail_in = (*strm).avail_in.wrapping_add(got);
-        (*strm).next_in = (*state).in_0 as *mut crate::stdlib::Bytef;
+        let input_start = state.strm.next_in.addr().wrapping_sub(state.in_0.addr());
+        if available != 0 && (input_start > capacity || available > capacity - input_start) {
+            return -1 as ::core::ffi::c_int;
+        }
+        let input = ::core::slice::from_raw_parts_mut(state.in_0, capacity);
+        if available != 0 && input_start != 0 {
+            input.copy_within(input_start..input_start + available, 0);
+        }
+        let got = match gz_load(state, GzLoadBuffer::Slice(&mut input[available..])) {
+            Ok(got) => got,
+            Err(()) => return -1 as ::core::ffi::c_int,
+        };
+        state.strm.avail_in = (available + got) as crate::stdlib::uInt;
+        state.strm.next_in = state.in_0 as *mut crate::stdlib::Bytef;
     }
     return 0 as ::core::ffi::c_int;
 }
@@ -223,16 +219,16 @@ unsafe fn gz_look(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
     return 0 as ::core::ffi::c_int;
 }
 
-unsafe extern "C" fn gz_decomp(mut state: crate::gzguts_h::gz_statep) -> ::core::ffi::c_int {
+unsafe fn gz_decomp(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
     let mut ret: ::core::ffi::c_int = crate::zlib_h::Z_OK;
     let mut had: ::core::ffi::c_uint = 0;
-    let mut strm: crate::zlib_h::z_streamp = &raw mut (*state).strm;
+    let mut strm: crate::zlib_h::z_streamp = &raw mut state.strm;
     had = (*strm).avail_out as ::core::ffi::c_uint;
     loop {
         if (*strm).avail_in == 0 as crate::stdlib::uInt
             && gz_avail(state) == -1 as ::core::ffi::c_int
         {
-            ret = (*state).err;
+            ret = state.err;
             break;
         } else if (*strm).avail_in == 0 as crate::stdlib::uInt {
             if (*state).again == 0 {
@@ -318,15 +314,10 @@ unsafe fn gz_fetch(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int 
                 }
             }
             crate::gzguts_h::COPY => {
-                if gz_load(
-                    state,
-                    state.out,
-                    state.size << 1 as ::core::ffi::c_int,
-                    &raw mut state.x.have,
-                ) == -1 as ::core::ffi::c_int
-                {
-                    return -1 as ::core::ffi::c_int;
-                }
+                state.x.have = match gz_load(state, GzLoadBuffer::Output) {
+                    Ok(got) => got as ::core::ffi::c_uint,
+                    Err(()) => return -1 as ::core::ffi::c_int,
+                };
                 state.x.next = state.out;
                 return 0 as ::core::ffi::c_int;
             }
@@ -447,16 +438,17 @@ unsafe fn gz_read_impl(
                     }
                     break 's_28;
                 } else if state.how == crate::gzguts_h::COPY {
-                    err = gz_load(
-                        state as *mut crate::gzguts_h::gz_state,
-                        buf[out..].as_mut_ptr(),
-                        n,
-                        &raw mut n,
-                    );
+                    match gz_load(
+                        state,
+                        GzLoadBuffer::Slice(&mut buf[out..out + n as usize]),
+                    ) {
+                        Ok(got) => n = got as ::core::ffi::c_uint,
+                        Err(()) => err = -1 as ::core::ffi::c_int,
+                    }
                 } else {
                     state.strm.avail_out = n as crate::stdlib::uInt;
                     state.strm.next_out = buf[out..].as_mut_ptr() as *mut crate::stdlib::Bytef;
-                    err = gz_decomp(state as *mut crate::gzguts_h::gz_state);
+                    err = gz_decomp(state);
                     n = state.x.have;
                     state.x.have = 0 as ::core::ffi::c_uint;
                 }
