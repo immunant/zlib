@@ -90,6 +90,7 @@ pub struct internal_state {
     pub pending_buf: *mut crate::stdlib::Bytef,
     pub pending_buf_size: crate::zutil_h::ulg,
     pub pending_out: *mut crate::stdlib::Bytef,
+    pub pending_out_offset: usize,
     pub pending: crate::zutil_h::ulg,
     pub wrap: ::core::ffi::c_int,
     pub gzhead: crate::zlib_h::gz_headerp,
@@ -1626,6 +1627,7 @@ fn deflate_reset_keep_state(
     strm.data_type = crate::zlib_h::Z_UNKNOWN;
     state.pending = 0;
     state.pending_out = state.pending_buf;
+    state.pending_out_offset = 0;
     if state.wrap < 0 {
         state.wrap = -state.wrap;
     }
@@ -2291,26 +2293,27 @@ fn flush_pending_accounting(
 }
 
 unsafe fn flush_pending(mut strm: crate::zlib_h::z_streamp) {
-    let mut s: *mut crate::src::deflate::deflate_state =
-        (*strm).state as *mut crate::src::deflate::deflate_state;
-    crate::src::trees::_tr_flush_bits_ffi(s as *mut crate::src::deflate::internal_state);
+    let state = &mut *((*strm).state as *mut crate::src::deflate::deflate_state);
+    crate::src::trees::_tr_flush_bits_ffi(state as *mut crate::src::deflate::internal_state);
     let Some((len, remaining, avail_out, total_out, reset_pending_out)) =
-        flush_pending_accounting((*s).pending, (*strm).avail_out, (*strm).total_out)
+        flush_pending_accounting(state.pending, (*strm).avail_out, (*strm).total_out)
     else {
         return;
     };
     crate::stdlib::memcpy(
         (*strm).next_out as *mut ::core::ffi::c_void,
-        (*s).pending_out as *const ::core::ffi::c_void,
+        state.pending_out as *const ::core::ffi::c_void,
         len as crate::__stddef_size_t_h::size_t,
     );
     (*strm).next_out = (*strm).next_out.wrapping_add(len as usize);
-    (*s).pending_out = (*s).pending_out.wrapping_add(len as usize);
+    state.pending_out = state.pending_out.wrapping_add(len as usize);
+    state.pending_out_offset = state.pending_out_offset.wrapping_add(len as usize);
     (*strm).total_out = total_out;
     (*strm).avail_out = avail_out;
-    (*s).pending = remaining;
+    state.pending = remaining;
     if reset_pending_out {
-        (*s).pending_out = (*s).pending_buf;
+        state.pending_out = state.pending_buf;
+        state.pending_out_offset = 0;
     }
 }
 
@@ -3195,9 +3198,7 @@ pub unsafe extern "C" fn deflateCopy(
             .wrapping_mul(::core::mem::size_of::<crate::src::deflate::Pos>()
                 as crate::__stddef_size_t_h::size_t),
     );
-    (*ds).pending_out = (*ds)
-        .pending_buf
-        .offset((*ss).pending_out.offset_from((*ss).pending_buf) as ::core::ffi::c_long as isize);
+    (*ds).pending_out = (*ds).pending_buf.wrapping_add((*ds).pending_out_offset);
     crate::stdlib::memcpy(
         (*ds).pending_out as *mut ::core::ffi::c_void,
         (*ss).pending_out as *const ::core::ffi::c_void,
