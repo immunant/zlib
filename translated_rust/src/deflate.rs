@@ -283,6 +283,44 @@ pub(crate) struct PendingStorageView<'a> {
     layout: PendingStorageLayout,
 }
 
+/// A read-only view of the single allocation shared by pending output and
+/// symbol data.  Keeping the source side immutable lets copy operations use
+/// ordinary slice copies without reintroducing an interior `sym_buf` alias.
+pub(crate) struct PendingStorageReadView<'a> {
+    bytes: &'a [crate::stdlib::Bytef],
+    layout: PendingStorageLayout,
+}
+
+/// The initialized portions of a pending/symbol allocation that `deflateCopy`
+/// must reproduce.  Pending output begins at its drain cursor, whereas symbol
+/// data always starts at the shared allocation's symbol offset.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) struct PendingStorageCopyPlan {
+    pending_out_offset: usize,
+    pending_len: usize,
+    symbol_len: usize,
+}
+
+pub(crate) fn pending_storage_copy_plan(
+    layout: PendingStorageLayout,
+    pending_out_offset: usize,
+    pending: crate::zutil_h::ulg,
+    sym_next: crate::stdlib::uInt,
+) -> Option<PendingStorageCopyPlan> {
+    let pending_len = usize::try_from(pending).ok()?;
+    let symbol_len = usize::try_from(sym_next).ok()?;
+    let pending_end = pending_out_offset.checked_add(pending_len)?;
+    if pending_end > layout.total_len || symbol_len > layout.symbol_len {
+        return None;
+    }
+
+    Some(PendingStorageCopyPlan {
+        pending_out_offset,
+        pending_len,
+        symbol_len,
+    })
+}
+
 impl<'a> PendingStorageView<'a> {
     pub(crate) fn new(
         bytes: &'a mut [crate::stdlib::Bytef],
@@ -309,8 +347,7 @@ impl<'a> PendingStorageView<'a> {
     ) -> Option<&mut [crate::stdlib::Bytef]> {
         let start = usize::try_from(offset).ok()?;
         let len = usize::try_from(len).ok()?;
-        let end = start.checked_add(len)?;
-        self.pending_bytes().get_mut(start..end)
+        self.pending_range_usize(start, len)
     }
 
     pub(crate) fn pending_triplet(&self, first: usize) -> Option<[crate::stdlib::Bytef; 3]> {
@@ -361,6 +398,88 @@ impl<'a> PendingStorageView<'a> {
         symbols[second] = bytes[1];
         symbols[third] = bytes[2];
         true
+    }
+
+    pub(crate) fn copy_initialized_from(
+        &mut self,
+        source: &PendingStorageReadView<'_>,
+        plan: PendingStorageCopyPlan,
+    ) -> bool {
+        let Some(pending_end) = plan.pending_out_offset.checked_add(plan.pending_len) else {
+            return false;
+        };
+        if self.layout != source.layout
+            || pending_end > self.layout.total_len
+            || plan.symbol_len > self.layout.symbol_len
+        {
+            return false;
+        }
+
+        let Some(source_pending) = source.pending_range(plan.pending_out_offset, plan.pending_len)
+        else {
+            return false;
+        };
+        let Some(source_symbols) = source.symbol_prefix(plan.symbol_len) else {
+            return false;
+        };
+
+        // Preflight both destination ranges before copying either one.  The
+        // ranges may overlap temporally, so preserve the C copy order: pending
+        // bytes first, then the current symbol prefix.
+        if self.pending_range_usize(plan.pending_out_offset, plan.pending_len).is_none()
+            || self.symbol_prefix(plan.symbol_len).is_none()
+        {
+            return false;
+        }
+        let Some(destination_pending) =
+            self.pending_range_usize(plan.pending_out_offset, plan.pending_len)
+        else {
+            return false;
+        };
+        destination_pending.copy_from_slice(source_pending);
+        let Some(destination_symbols) = self.symbol_prefix(plan.symbol_len) else {
+            return false;
+        };
+        destination_symbols.copy_from_slice(source_symbols);
+        true
+    }
+
+    fn pending_range_usize(
+        &mut self,
+        offset: usize,
+        len: usize,
+    ) -> Option<&mut [crate::stdlib::Bytef]> {
+        let end = offset.checked_add(len)?;
+        self.pending_bytes().get_mut(offset..end)
+    }
+}
+
+impl<'a> PendingStorageReadView<'a> {
+    pub(crate) fn new(
+        bytes: &'a [crate::stdlib::Bytef],
+        layout: PendingStorageLayout,
+    ) -> Option<Self> {
+        if bytes.len() < layout.total_len {
+            return None;
+        }
+        Some(Self { bytes, layout })
+    }
+
+    fn pending_range(&self, offset: usize, len: usize) -> Option<&[crate::stdlib::Bytef]> {
+        let end = offset.checked_add(len)?;
+        self.bytes.get(offset..end)
+    }
+
+    fn symbol_prefix(&self, len: usize) -> Option<&[crate::stdlib::Bytef]> {
+        let end = self.layout.symbol_offset.checked_add(len)?;
+        self.bytes.get(self.layout.symbol_offset..end)
+    }
+}
+
+impl<'a> PendingStorageView<'a> {
+    fn symbol_prefix(&mut self, len: usize) -> Option<&mut [crate::stdlib::Bytef]> {
+        let end = self.layout.symbol_offset.checked_add(len)?;
+        self.bytes.get_mut(self.layout.symbol_offset..end)
     }
 }
 
@@ -3517,22 +3636,44 @@ pub unsafe extern "C" fn deflateCopy_ffi(
             .wrapping_mul(::core::mem::size_of::<crate::src::deflate::Pos>()
                 as crate::__stddef_size_t_h::size_t),
     );
-    crate::stdlib::memcpy(
-        (*ds)
-            .pending_buf
-            .wrapping_add((*ds).pending_out_offset) as *mut ::core::ffi::c_void,
-        (*ss)
-            .pending_buf
-            .wrapping_add((*ss).pending_out_offset) as *const ::core::ffi::c_void,
-        (*ss).pending as crate::__stddef_size_t_h::size_t,
-    );
-    (*ds).sym_buf =
-        (*ds).pending_buf.offset((*ds).lit_bufsize as isize) as *mut crate::zutil_h::uchf;
-    crate::stdlib::memcpy(
-        (*ds).sym_buf as *mut ::core::ffi::c_void,
-        (*ss).sym_buf as *const ::core::ffi::c_void,
-        (*ss).sym_next as crate::__stddef_size_t_h::size_t,
-    );
+    let pending_layout = pending_storage_layout((*ds).lit_bufsize);
+    let Some(pending_copy) = pending_storage_copy_plan(
+        pending_layout,
+        (*ss).pending_out_offset,
+        (*ss).pending,
+        (*ss).sym_next,
+    ) else {
+        deflateEnd_ffi(dest);
+        return crate::zlib_h::Z_STREAM_ERROR;
+    };
+    if (*ss).pending_buf.is_null() {
+        deflateEnd_ffi(dest);
+        return crate::zlib_h::Z_STREAM_ERROR;
+    }
+    // Both raw views are established at this exported ownership boundary.
+    // The safe storage core below preserves the historical copy order for
+    // the pending/symbol temporal overlay.
+    let source_pending =
+        core::slice::from_raw_parts((*ss).pending_buf, pending_layout.total_len);
+    let destination_pending =
+        core::slice::from_raw_parts_mut((*ds).pending_buf, pending_layout.total_len);
+    let Some(source_storage) = PendingStorageReadView::new(source_pending, pending_layout) else {
+        deflateEnd_ffi(dest);
+        return crate::zlib_h::Z_STREAM_ERROR;
+    };
+    let Some(mut destination_storage) =
+        PendingStorageView::new(destination_pending, pending_layout)
+    else {
+        deflateEnd_ffi(dest);
+        return crate::zlib_h::Z_STREAM_ERROR;
+    };
+    if !destination_storage.copy_initialized_from(&source_storage, pending_copy) {
+        deflateEnd_ffi(dest);
+        return crate::zlib_h::Z_STREAM_ERROR;
+    }
+    (*ds).sym_buf = (*ds)
+        .pending_buf
+        .wrapping_add(pending_layout.symbol_offset) as *mut crate::zutil_h::uchf;
     return crate::zlib_h::Z_OK;
 }
 fn longest_match_limit(
@@ -4839,7 +4980,7 @@ mod tests {
         longest_match_candidate_update, longest_match_clamp_length, longest_match_limit,
         longest_match_next_chain_length, longest_match_search_parameters, normalize_deflate_params,
         pending_buffer_needs_flush, pending_output_len, pending_short_cursors,
-        pending_storage_layout, put_short_msb_core, read_buf_checksum, read_buf_core,
+        pending_storage_copy_plan, pending_storage_layout, put_short_msb_core, read_buf_checksum, read_buf_core,
         read_buf_input_progress_after_copy, read_buf_len, read_buf_total_in_after_copy,
         short_msb_bytes, slide_hash_core, slide_hash_entry, stored_block_available_output,
         stored_block_buffered_len, stored_block_can_emit, stored_block_copy_lengths,
@@ -4849,7 +4990,7 @@ mod tests {
         DeflateBoundGzipHeader, DeflateBoundState, DeflateFastMatchProgress,
         DeflateFinalFlushAction, DeflateMatchRefillAction, DeflatePreflight,
         DeflateRleRefillAction, DeflateRleTallyPlan, FlushPendingResult, PendingDrainState,
-        PendingStorageView, ReadBufChecksum, ReadBufResult,
+        PendingStorageReadView, PendingStorageView, ReadBufChecksum, ReadBufResult,
     };
 
     #[test]
@@ -6049,6 +6190,33 @@ mod tests {
 
         assert!(!storage.write_symbol_triplet([2, 12, 3], [1, 2, 3]));
         assert_eq!(&storage.symbol_bytes()[..3], &[7, 8, 9]);
+    }
+
+    #[test]
+    fn pending_storage_copy_plan_preserves_pending_cursor_and_symbol_prefix() {
+        let layout = pending_storage_layout(4);
+        let source = [
+            0x00, 0x01, 0x02, 0x03, 0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17,
+            0x18, 0x19, 0x1a, 0x1b,
+        ];
+        let mut destination = [0xaa; 16];
+        let plan = pending_storage_copy_plan(layout, 3, 5, 4).unwrap();
+        let source_storage = PendingStorageReadView::new(&source, layout).unwrap();
+        let mut destination_storage = PendingStorageView::new(&mut destination, layout).unwrap();
+
+        assert!(destination_storage.copy_initialized_from(&source_storage, plan));
+        drop(destination_storage);
+
+        assert_eq!(&destination[..3], &[0xaa; 3]);
+        assert_eq!(&destination[3..8], &source[3..8]);
+        assert_eq!(&destination[8..], &[0xaa; 8]);
+    }
+
+    #[test]
+    fn pending_storage_copy_plan_rejects_out_of_range_initialized_bytes() {
+        let layout = pending_storage_layout(2);
+        assert_eq!(pending_storage_copy_plan(layout, 7, 2, 0), None);
+        assert_eq!(pending_storage_copy_plan(layout, 0, 0, 7), None);
     }
 
     #[test]
