@@ -457,22 +457,15 @@ where
                             0 as ::core::ffi::c_ushort;
                     }
                     state.next = 0;
-                    let mut table = &raw mut state.codes as *mut crate::src::inftrees::code;
                     state.lencode = crate::src::inflate::length_table::Dynamic(0);
                     state.lenbits = 7 as ::core::ffi::c_uint;
-                    ret = unsafe {
-                        crate::src::inftrees::inflate_table(
-                            crate::src::inftrees::CODES,
-                            &raw mut state.lens as *mut ::core::ffi::c_ushort,
-                            19 as ::core::ffi::c_uint,
-                            &raw mut table,
-                            &raw mut state.lenbits,
-                            &raw mut state.work as *mut ::core::ffi::c_ushort,
-                        )
-                    };
-                    state.next = table.addr().wrapping_sub(
-                        (&raw mut state.codes as *mut crate::src::inftrees::code).addr(),
-                    ) / ::core::mem::size_of::<crate::src::inftrees::code>();
+                    ret = crate::src::inflate::inflate_table_from_state(
+                        state,
+                        crate::src::inftrees::CODES,
+                        0,
+                        19,
+                        false,
+                    );
                     if ret != 0 {
                         set_back_error(strm, b"invalid code lengths set\0");
                         state.mode = crate::src::inflate::BAD;
@@ -631,22 +624,15 @@ where
                             continue;
                         } else {
                             state.next = 0;
-                            let mut table = &raw mut state.codes as *mut crate::src::inftrees::code;
                             state.lencode = crate::src::inflate::length_table::Dynamic(0);
                             state.lenbits = 9 as ::core::ffi::c_uint;
-                            ret = unsafe {
-                                crate::src::inftrees::inflate_table(
-                                    crate::src::inftrees::LENS,
-                                    &raw mut state.lens as *mut ::core::ffi::c_ushort,
-                                    state.nlen,
-                                    &raw mut table,
-                                    &raw mut state.lenbits,
-                                    &raw mut state.work as *mut ::core::ffi::c_ushort,
-                                )
-                            };
-                            state.next = table.addr().wrapping_sub(
-                                (&raw mut state.codes as *mut crate::src::inftrees::code).addr(),
-                            ) / ::core::mem::size_of::<crate::src::inftrees::code>();
+                            ret = crate::src::inflate::inflate_table_from_state(
+                                state,
+                                crate::src::inftrees::LENS,
+                                0,
+                                state.nlen as usize,
+                                false,
+                            );
                             if ret != 0 {
                                 set_back_error(strm, b"invalid literal/lengths set\0");
                                 state.mode = crate::src::inflate::BAD;
@@ -655,21 +641,12 @@ where
                                 state.distcode =
                                     crate::src::inflate::distance_table::Dynamic(state.next);
                                 state.distbits = 6 as ::core::ffi::c_uint;
-                                ret = unsafe {
-                                    crate::src::inftrees::inflate_table(
-                                        crate::src::inftrees::DISTS,
-                                        (&raw mut state.lens as *mut ::core::ffi::c_ushort)
-                                            .offset(state.nlen as isize),
-                                        state.ndist,
-                                        &raw mut table,
-                                        &raw mut state.distbits,
-                                        &raw mut state.work as *mut ::core::ffi::c_ushort,
-                                    )
-                                };
-                                state.next = table.addr().wrapping_sub(
-                                    (&raw mut state.codes as *mut crate::src::inftrees::code)
-                                        .addr(),
-                                ) / ::core::mem::size_of::<crate::src::inftrees::code>(
+                                ret = crate::src::inflate::inflate_table_from_state(
+                                    state,
+                                    crate::src::inftrees::DISTS,
+                                    state.nlen as usize,
+                                    state.ndist as usize,
+                                    true,
                                 );
                                 if ret != 0 {
                                     set_back_error(strm, b"invalid distances set\0");

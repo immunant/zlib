@@ -815,7 +815,7 @@ fn inflate_set_message(
 ///
 /// Copying the short lens range lets the mutable table cursor and work arena
 /// be borrowed independently without recreating the old interior pointers.
-fn inflate_table_from_state(
+pub(crate) fn inflate_table_from_state(
     state: &mut crate::src::inflate::inflate_state,
     type_0: crate::src::inftrees::codetype,
     lens_start: usize,
