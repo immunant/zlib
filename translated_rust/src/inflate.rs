@@ -3690,7 +3690,13 @@ pub unsafe extern "C" fn inflateSetDictionary_ffi(
         let Ok(window_len) = crate::stdlib::uInt::try_from(window_len) else {
             return crate::zlib_h::Z_MEM_ERROR;
         };
-        Some(zalloc.expect("non-null function pointer")(
+        // `inflate_state_check_at_boundary!` normally guarantees this, but
+        // keep a malformed callback slot from turning an ABI error into a
+        // Rust panic before the allocator boundary is reached.
+        let Some(zalloc) = zalloc else {
+            return crate::zlib_h::Z_STREAM_ERROR;
+        };
+        Some(zalloc(
             opaque,
             window_len,
             ::core::mem::size_of::<::core::ffi::c_uchar>() as crate::stdlib::uInt,
@@ -3997,14 +4003,20 @@ pub unsafe extern "C" fn inflateCopy_ffi(
         state = source_ref.state as *mut crate::src::inflate::inflate_state;
         let state_ref = &mut *state;
         (
-            source_ref.zalloc.expect("non-null function pointer"),
-            source_ref.zfree.expect("non-null function pointer"),
+            source_ref.zalloc,
+            source_ref.zfree,
             source_ref.opaque,
             !state_ref.window.is_null(),
             state_ref.whave,
             state_ref.wsize,
             state_ref.wbits,
         )
+    };
+    // The state check above establishes both callbacks for normal streams.
+    // Preserve that ABI error result for malformed callback state instead of
+    // panicking while trying to clone it.
+    let (Some(zalloc), Some(zfree)) = (zalloc, zfree) else {
+        return crate::zlib_h::Z_STREAM_ERROR;
     };
     copy = zalloc(
         opaque,
@@ -4020,9 +4032,17 @@ pub unsafe extern "C" fn inflateCopy_ffi(
             zfree(opaque, copy as crate::stdlib::voidpf);
             return crate::zlib_h::Z_STREAM_ERROR;
         }
+        let Some(window_len) = inflate_window_len(wbits, 0) else {
+            zfree(opaque, copy as crate::stdlib::voidpf);
+            return crate::zlib_h::Z_STREAM_ERROR;
+        };
+        let Ok(window_len) = crate::stdlib::uInt::try_from(window_len) else {
+            zfree(opaque, copy as crate::stdlib::voidpf);
+            return crate::zlib_h::Z_STREAM_ERROR;
+        };
         window = zalloc(
             opaque,
-            (1 as crate::stdlib::uInt) << wbits,
+            window_len,
             ::core::mem::size_of::<::core::ffi::c_uchar>() as crate::stdlib::uInt,
         ) as *mut ::core::ffi::c_uchar;
         if window.is_null() {
