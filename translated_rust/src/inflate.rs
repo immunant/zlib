@@ -2678,26 +2678,24 @@ pub unsafe extern "C" fn inflateMark_ffi(
     let state = (*strm).state as *mut crate::src::inflate::inflate_state;
     inflate_mark_value((*state).back, (*state).mode, (*state).length, (*state).was)
 }
-pub unsafe extern "C" fn inflateCodesUsed(
-    mut strm: crate::zlib_h::z_streamp,
-) -> ::core::ffi::c_ulong {
-    let mut state: *mut crate::src::inflate::inflate_state =
-        ::core::ptr::null_mut::<crate::src::inflate::inflate_state>();
-    if inflateStateCheck(strm) != 0 {
-        return -1 as ::core::ffi::c_int as ::core::ffi::c_ulong;
-    }
-    state = (*strm).state as *mut crate::src::inflate::inflate_state;
-    return (*state)
-        .next
-        .offset_from(&raw mut (*state).codes as *mut crate::src::inftrees::code)
-        as ::core::ffi::c_long as ::core::ffi::c_ulong;
+fn inflate_codes_used_offset_value(offset: ::core::ffi::c_long) -> ::core::ffi::c_ulong {
+    offset as ::core::ffi::c_ulong
 }
 #[export_name = "inflateCodesUsed"]
 
 pub unsafe extern "C" fn inflateCodesUsed_ffi(
     mut strm: crate::zlib_h::z_streamp,
 ) -> ::core::ffi::c_ulong {
-    inflateCodesUsed(strm)
+    if inflateStateCheck(strm) != 0 {
+        return -1 as ::core::ffi::c_int as ::core::ffi::c_ulong;
+    }
+    let state = (*strm).state as *mut crate::src::inflate::inflate_state;
+    inflate_codes_used_offset_value(
+        (*state)
+            .next
+            .offset_from(&raw mut (*state).codes as *mut crate::src::inftrees::code)
+            as ::core::ffi::c_long,
+    )
 }
 
 #[cfg(test)]
@@ -2711,7 +2709,8 @@ mod tests {
         inflate_prime_update, inflate_reset2_params, inflate_should_update_window,
         inflate_state_metadata_is_valid, inflate_stream_has_allocator_callbacks,
         inflate_sync_point_value, inflate_sync_remaining_input, inflate_sync_search_core,
-        inflate_undermine_core, inflate_validate_wrap, initial_window_metadata,
+        inflate_undermine_core, inflate_validate_wrap, inflate_codes_used_offset_value,
+        initial_window_metadata,
         stored_block_length, syncsearch_safe, window_needs_allocation, window_update_plan,
         InflateBlockKind, InflateCopyProgress, InflatePrimeUpdate, InflateSyncSearch, BAD, CHECK,
         CODE_LENGTH_ORDER, COPY_, COPY_1, DICT, HEAD, LEN_, MATCH, STORED, SYNC, TYPE,
@@ -2926,6 +2925,14 @@ mod tests {
         assert_eq!(
             unsafe { inflateSyncPoint_ffi(::core::ptr::null_mut()) },
             crate::zlib_h::Z_STREAM_ERROR
+        );
+    }
+
+    #[test]
+    fn inflate_codes_used_offset_preserves_negative_sentinel() {
+        assert_eq!(
+            inflate_codes_used_offset_value(-1),
+            ::core::ffi::c_ulong::MAX
         );
     }
 
