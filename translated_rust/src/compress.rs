@@ -142,7 +142,15 @@ fn compress2_z_bound(
         if stream.avail_in == 0 as crate::stdlib::uInt {
             (stream.avail_in, sourceLen) = compress_chunk(sourceLen, max);
         }
-        err = crate::src::deflate::deflate(&mut stream, compress_flush(sourceLen));
+        let input = source.and_then(|source| {
+            let offset = stream.next_in.addr().checked_sub(source.as_ptr().addr())?;
+            source.get(offset..offset.checked_add(stream.avail_in as usize)?)
+        });
+        let Some(input) = input.or_else(|| (stream.avail_in == 0).then_some(&[][..])) else {
+            err = crate::zlib_h::Z_STREAM_ERROR;
+            break;
+        };
+        err = crate::src::deflate::deflate(&mut stream, compress_flush(sourceLen), input);
         if err != crate::zlib_h::Z_OK {
             break;
         }

@@ -525,6 +525,66 @@ fn read_buf_bytes(
     len
 }
 
+// A deflate call can re-enter its window-filling helpers through several
+// compression strategies.  Keep the caller-owned input bound by the caller
+// of the named implementation, then retain a short-lived owned snapshot for
+// those helpers.  This avoids reopening the foreign input cursor in every
+// strategy while preserving the stream's C-visible cursor accounting.
+struct DeflateInputSnapshot {
+    initial_avail: crate::stdlib::uInt,
+    bytes: ::std::sync::Arc<[crate::stdlib::Bytef]>,
+}
+
+fn deflate_input_snapshots(
+) -> &'static ::std::sync::Mutex<::std::collections::BTreeMap<usize, DeflateInputSnapshot>> {
+    static SNAPSHOTS: ::std::sync::OnceLock<
+        ::std::sync::Mutex<::std::collections::BTreeMap<usize, DeflateInputSnapshot>>,
+    > = ::std::sync::OnceLock::new();
+    SNAPSHOTS.get_or_init(|| ::std::sync::Mutex::new(::std::collections::BTreeMap::new()))
+}
+
+fn deflate_stream_key(stream: &crate::zlib_h::z_stream) -> usize {
+    ::core::ptr::from_ref(stream).addr()
+}
+
+fn deflate_input_snapshot(
+    stream: &crate::zlib_h::z_stream,
+) -> Option<(crate::stdlib::uInt, ::std::sync::Arc<[crate::stdlib::Bytef]>)> {
+    deflate_input_snapshots()
+        .lock()
+        .expect("deflate input registry poisoned")
+        .get(&deflate_stream_key(stream))
+        .map(|snapshot| (snapshot.initial_avail, snapshot.bytes.clone()))
+}
+
+fn deflate_with_input_snapshot<T>(
+    stream: &mut crate::zlib_h::z_stream,
+    input: &[crate::stdlib::Bytef],
+    operation: impl FnOnce(&mut crate::zlib_h::z_stream) -> T,
+) -> T {
+    let key = deflate_stream_key(stream);
+    let previous = deflate_input_snapshots()
+        .lock()
+        .expect("deflate input registry poisoned")
+        .insert(
+            key,
+            DeflateInputSnapshot {
+                initial_avail: stream.avail_in,
+                bytes: input.into(),
+            },
+        );
+    let result = operation(stream);
+    let mut snapshots = deflate_input_snapshots()
+        .lock()
+        .expect("deflate input registry poisoned");
+    if let Some(previous) = previous {
+        snapshots.insert(key, previous);
+    } else {
+        snapshots.remove(&key);
+    }
+    result
+}
+
 // This private adapter binds the allocations owned by a validated deflater
 // before passing them to a bounded operation.  Callers that only need the
 // owned allocations pass `false` for `bind_input`, avoiding an unnecessary
@@ -543,9 +603,8 @@ fn fill_window<T>(
     ) -> T,
 ) -> T {
     // SAFETY: state validation establishes the three owned allocation
-    // lengths, and a nonempty input cursor has `avail_in` readable bytes.
-    // Bind these related ranges together once; all following work is safe
-    // slice/reference code.
+    // lengths. The caller input was bound before entering `deflate()` and is
+    // available below through its short-lived owned snapshot.
     let (window, head, prev, input) = unsafe {
         let window = if state.window_size == 0 {
             &mut []
@@ -554,13 +613,17 @@ fn fill_window<T>(
         };
         let head = ::core::slice::from_raw_parts_mut(state.head, state.hash_size as usize);
         let prev = ::core::slice::from_raw_parts_mut(state.prev, state.w_size as usize);
-        let input = if !bind_input || stream.avail_in == 0 {
-            &[]
-        } else {
-            ::core::slice::from_raw_parts(stream.next_in, stream.avail_in as usize)
-        };
+        let input = &[];
         (window, head, prev, input)
     };
+    if !bind_input || stream.avail_in == 0 {
+        return operation(state, stream, window, head, prev, input);
+    }
+    let Some((initial_avail, snapshot)) = deflate_input_snapshot(stream) else {
+        return operation(state, stream, window, head, prev, input);
+    };
+    let consumed = initial_avail.wrapping_sub(stream.avail_in) as usize;
+    let input = snapshot.get(consumed..).unwrap_or(&[]);
     operation(state, stream, window, head, prev, input)
 }
 
@@ -1664,7 +1727,11 @@ pub fn deflateParams(
     strm: &mut crate::zlib_h::z_stream,
     mut level: ::core::ffi::c_int,
     mut strategy: ::core::ffi::c_int,
+    input: &[crate::stdlib::Bytef],
 ) -> ::core::ffi::c_int {
+    if input.len() != strm.avail_in as usize {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    }
     if deflateStateCheck(strm).is_none() {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
@@ -1685,7 +1752,7 @@ pub fn deflateParams(
             && state.last_flush != -2 as ::core::ffi::c_int
     };
     if needs_flush {
-        let err = deflate(strm, crate::zlib_h::Z_BLOCK);
+        let err = deflate(strm, crate::zlib_h::Z_BLOCK, input);
         if err == crate::zlib_h::Z_STREAM_ERROR {
             return err;
         }
@@ -1754,7 +1821,18 @@ pub unsafe extern "C" fn deflateParams_ffi(
     let Some(strm) = (unsafe { strm.as_mut() }) else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
-    deflateParams(strm, level, strategy)
+    if strm.avail_in != 0 && strm.next_in.is_null() {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    }
+    // SAFETY: the C ABI supplies `avail_in` readable bytes when the input
+    // cursor is non-null. The implementation keeps the resulting snapshot
+    // internal to this call.
+    let input = if strm.avail_in == 0 {
+        &[]
+    } else {
+        unsafe { ::core::slice::from_raw_parts(strm.next_in, strm.avail_in as usize) }
+    };
+    deflateParams(strm, level, strategy, input)
 }
 fn deflate_tune(
     state: &mut crate::src::deflate::deflate_state,
@@ -2712,6 +2790,17 @@ fn deflate_finish_bound_gzip_header(
 pub fn deflate(
     strm: &mut crate::zlib_h::z_stream,
     mut flush: ::core::ffi::c_int,
+    input: &[crate::stdlib::Bytef],
+) -> ::core::ffi::c_int {
+    if input.len() != strm.avail_in as usize {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    }
+    deflate_with_input_snapshot(strm, input, |strm| deflate_dispatch(strm, flush))
+}
+
+fn deflate_dispatch(
+    strm: &mut crate::zlib_h::z_stream,
+    mut flush: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
     let Some((stream, state)) = deflateStateCheck(strm) else {
         return crate::zlib_h::Z_STREAM_ERROR;
@@ -2736,12 +2825,20 @@ pub unsafe extern "C" fn deflate_ffi(
     mut strm: crate::zlib_h::z_streamp,
     mut flush: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
-    // SAFETY: this ABI adapter only binds the caller-owned stream. The core
-    // dispatcher retains all state validation and compression behavior.
+    // SAFETY: this ABI adapter binds the caller-owned stream and input range.
+    // The core dispatcher retains all state validation and compression work.
     let Some(strm) = (unsafe { strm.as_mut() }) else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
-    deflate(strm, flush)
+    if strm.avail_in != 0 && strm.next_in.is_null() {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    }
+    let input = if strm.avail_in == 0 {
+        &[]
+    } else {
+        unsafe { ::core::slice::from_raw_parts(strm.next_in, strm.avail_in as usize) }
+    };
+    deflate(strm, flush, input)
 }
 // The public ABI wrapper binds the foreign stream pointer.  Teardown itself
 // only needs the already-owned stream and state, so keep the release plan

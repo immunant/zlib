@@ -157,9 +157,18 @@ fn gz_init(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
 fn gz_comp(
     state: &mut crate::gzguts_h::gz_state,
     mut flush: ::core::ffi::c_int,
+    input: &[crate::stdlib::Bytef],
 ) -> ::core::ffi::c_int {
     let mut ret: ::core::ffi::c_int = 0;
     let mut have: ::core::ffi::c_uint = 0;
+    if input.len() != state.strm.avail_in as usize {
+        crate::src::gzlib::gz_error(
+            state,
+            crate::zlib_h::Z_STREAM_ERROR,
+            Some(b"internal error: gzip input cursor mismatch\0"),
+        );
+        return -1;
+    }
     if crate::src::gzlib::gz_write_needs_init(state) && gz_init(state) == -1 as ::core::ffi::c_int {
         return -1 as ::core::ffi::c_int;
     }
@@ -232,7 +241,8 @@ fn gz_comp(
         have = state.strm.avail_out as ::core::ffi::c_uint;
         // `gz_init` configured this deflater, and the dispatcher validates
         // its state before advancing the gzip write machine.
-        ret = crate::src::deflate::deflate(&mut state.strm, flush);
+        let consumed = input.len().wrapping_sub(state.strm.avail_in as usize);
+        ret = crate::src::deflate::deflate(&mut state.strm, flush, &input[consumed..]);
         if ret == crate::zlib_h::Z_STREAM_ERROR {
             crate::src::gzlib::gz_error(
                 state,
@@ -251,6 +261,38 @@ fn gz_comp(
     return 0 as ::core::ffi::c_int;
 }
 
+// Buffered gzip writes retain their input in the write-buffer registry. Take
+// a bounded snapshot for one deflater call instead of reconstructing a slice
+// from the C-facing cursor in the deflate implementation.
+fn gz_comp_with_owned_input(
+    state: &mut crate::gzguts_h::gz_state,
+    flush: ::core::ffi::c_int,
+) -> ::core::ffi::c_int {
+    let available = state.strm.avail_in as usize;
+    let input = if available == 0 {
+        Some(Vec::new())
+    } else {
+        let offset = state.strm.next_in.addr().checked_sub(state.in_0.addr());
+        offset.and_then(|offset| {
+            let end = offset.checked_add(available)?;
+            crate::src::gzlib::gz_with_owned_write_input_buffer(
+                crate::src::gzlib::gz_owned_buffer_key(state),
+                |input| input.get(offset..end).map(<[u8]>::to_vec),
+            )
+            .flatten()
+        })
+    };
+    let Some(input) = input else {
+        crate::src::gzlib::gz_error(
+            state,
+            crate::zlib_h::Z_STREAM_ERROR,
+            Some(b"internal error: gzip write buffer missing\0"),
+        );
+        return -1;
+    };
+    gz_comp(state, flush, &input)
+}
+
 // Callers have already validated and bound the gzip state.  Keep this as an
 // internal Rust helper so its progress bookkeeping does not need to recover a
 // mutable reference from a raw pointer.  Zero-fill and compression remain
@@ -262,7 +304,7 @@ fn gz_zero(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
     if state.strm.avail_in != 0
         // The validated gzip state owns the initialized stream and buffers
         // required by the compression adapter.
-        && gz_comp(state, crate::zlib_h::Z_NO_FLUSH) == -1 as ::core::ffi::c_int
+        && gz_comp_with_owned_input(state, crate::zlib_h::Z_NO_FLUSH) == -1 as ::core::ffi::c_int
     {
         return -1 as ::core::ffi::c_int;
     }
@@ -293,7 +335,7 @@ fn gz_zero(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
         state.strm.next_in = state.in_0;
         // The validated gzip state owns the stream and the `in_0` range
         // configured immediately above for this compression request.
-        ret = gz_comp(state, crate::zlib_h::Z_NO_FLUSH);
+        ret = gz_comp_with_owned_input(state, crate::zlib_h::Z_NO_FLUSH);
         crate::src::gzlib::gz_zero_progress(state, n);
         if ret == -1 as ::core::ffi::c_int {
             return -1 as ::core::ffi::c_int;
@@ -362,13 +404,13 @@ fn gz_write(
             if len == 0 as crate::stdlib::z_size_t {
                 break;
             }
-            if gz_comp(state, crate::zlib_h::Z_NO_FLUSH) == -1 as ::core::ffi::c_int {
+            if gz_comp_with_owned_input(state, crate::zlib_h::Z_NO_FLUSH) == -1 as ::core::ffi::c_int {
                 return crate::src::gzlib::gz_write_error_result(state, put, len);
             }
         }
     } else {
         if state.strm.avail_in != 0
-            && gz_comp(state, crate::zlib_h::Z_NO_FLUSH) == -1 as ::core::ffi::c_int
+            && gz_comp_with_owned_input(state, crate::zlib_h::Z_NO_FLUSH) == -1 as ::core::ffi::c_int
         {
             return 0 as crate::stdlib::z_size_t;
         }
@@ -376,7 +418,7 @@ fn gz_write(
         loop {
             let mut n: ::core::ffi::c_uint = crate::src::gzlib::gz_stream_chunk(len);
             state.strm.avail_in = n as crate::stdlib::uInt;
-            ret = gz_comp(state, crate::zlib_h::Z_NO_FLUSH);
+            ret = gz_comp(state, crate::zlib_h::Z_NO_FLUSH, &source[..n as usize]);
             n = crate::src::gzlib::gz_stream_write_progress(state, &mut len, n);
             if ret == -1 as ::core::ffi::c_int {
                 return crate::src::gzlib::gz_write_error_result(state, put, len);
@@ -756,7 +798,7 @@ fn gzflush(
         }
         crate::src::gzlib::GzFlushPlan::Compress => {}
     }
-    gz_comp(state, flush);
+    gz_comp_with_owned_input(state, flush);
     return state.err;
 }
 
@@ -810,13 +852,29 @@ pub fn gzsetparams(
     }
     if state.size != 0 {
         if state.strm.avail_in != 0
-            && gz_comp(state, crate::zlib_h::Z_BLOCK) == -1 as ::core::ffi::c_int
+            && gz_comp_with_owned_input(state, crate::zlib_h::Z_BLOCK) == -1 as ::core::ffi::c_int
         {
             return state.err;
         }
         // `deflateParams` validates the already-initialized stream/state
         // pair internally, so this write-state transition stays safe.
-        crate::src::deflate::deflateParams(&mut state.strm, level, strategy);
+        let input = if state.strm.avail_in == 0 {
+            Vec::new()
+        } else {
+            let offset = state.strm.next_in.addr().checked_sub(state.in_0.addr());
+            let Some(input) = offset.and_then(|offset| {
+                let end = offset.checked_add(state.strm.avail_in as usize)?;
+                crate::src::gzlib::gz_with_owned_write_input_buffer(
+                    crate::src::gzlib::gz_owned_buffer_key(state),
+                    |input| input.get(offset..end).map(<[u8]>::to_vec),
+                )
+                .flatten()
+            }) else {
+                return crate::zlib_h::Z_STREAM_ERROR;
+            };
+            input
+        };
+        crate::src::deflate::deflateParams(&mut state.strm, level, strategy, &input);
     }
     state.level = level;
     state.strategy = strategy;
@@ -867,7 +925,7 @@ fn gz_close_write_prepare(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi:
     if state.skip != 0 && gz_zero(state) == -1 as ::core::ffi::c_int {
         ret = state.err;
     }
-    if gz_comp(state, crate::zlib_h::Z_FINISH) == -1 as ::core::ffi::c_int {
+    if gz_comp_with_owned_input(state, crate::zlib_h::Z_FINISH) == -1 as ::core::ffi::c_int {
         ret = state.err;
     }
     ret
