@@ -755,6 +755,20 @@ struct WindowMatchStep {
     next_index: Option<::core::ffi::c_uint>,
 }
 
+/// The complete bounded history portion of one match copy.
+///
+/// A match can cross the physical end of a full circular window once.  This
+/// records both contiguous ranges before copying, so malformed partial
+/// histories and oversized requests fail without partially changing the
+/// destination.  A request that would wrap more than once is deliberately
+/// rejected: after one window-distance prefix, a deflate match must continue
+/// from newly written output instead of replaying stale history bytes.
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+struct WindowMatchCopyPlan {
+    first: WindowMatchSegment,
+    second: Option<WindowMatchSegment>,
+}
+
 impl WindowHistory {
     fn new(
         size: ::core::ffi::c_uint,
@@ -912,6 +926,26 @@ impl WindowHistory {
             next_index,
         })
     }
+
+    fn match_copy_plan(
+        &self,
+        index: ::core::ffi::c_uint,
+        requested: ::core::ffi::c_uint,
+    ) -> Option<WindowMatchCopyPlan> {
+        let first = self.match_step(index, requested)?;
+        if first.remaining == 0 {
+            return Some(WindowMatchCopyPlan {
+                first: first.segment,
+                second: None,
+            });
+        }
+
+        let second = self.match_step(first.next_index?, first.remaining)?;
+        (second.remaining == 0).then_some(WindowMatchCopyPlan {
+            first: first.segment,
+            second: Some(second.segment),
+        })
+    }
 }
 
 /// A validated read-only view of the initialized inflate history window.
@@ -982,6 +1016,42 @@ impl<'a> WindowStorage<'a> {
         let destination = destination.get_mut(..source.len())?;
         destination.copy_from_slice(source);
         Some(step)
+    }
+
+    /// Copy the entire history prefix needed for a match, including one
+    /// physical wrap when the history is full.  This is a preflighted copy:
+    /// invalid partial history, a request that would wrap twice, or a short
+    /// destination leaves `destination` unchanged.
+    ///
+    /// The caller must limit `requested` to the portion that still precedes
+    /// the current output cursor.  Any remaining match bytes use the normal
+    /// sequential output copy path, where new output becomes later input.
+    fn copy_match_prefix_to(
+        &self,
+        index: ::core::ffi::c_uint,
+        requested: ::core::ffi::c_uint,
+        destination: &mut [crate::stdlib::Bytef],
+    ) -> Option<()> {
+        let plan = self.history.match_copy_plan(index, requested)?;
+        let first_end = plan.first.start.checked_add(plan.first.len)?;
+        let total = plan
+            .first
+            .len
+            .checked_add(plan.second.map_or(0, |second| second.len))?;
+        if destination.len() < total {
+            return None;
+        }
+
+        destination
+            .get_mut(..plan.first.len)?
+            .copy_from_slice(self.bytes.get(plan.first.start..first_end)?);
+        if let Some(second) = plan.second {
+            let second_end = second.start.checked_add(second.len)?;
+            destination
+                .get_mut(plan.first.len..total)?
+                .copy_from_slice(self.bytes.get(second.start..second_end)?);
+        }
+        Some(())
     }
 }
 
@@ -6205,6 +6275,49 @@ mod tests {
 
         assert_eq!(storage.copy_match_to(6, 2, &mut destination), None);
         assert_eq!(destination, *b"_");
+    }
+
+    #[test]
+    fn window_storage_copy_match_prefix_crosses_one_wrapped_boundary() {
+        let window = *b"abcdefgh";
+        let storage = super::WindowStorage::new(&window, 3, 8).unwrap();
+        let mut destination = *b"_____";
+
+        assert_eq!(storage.copy_match_prefix_to(6, 5, &mut destination), Some(()));
+        assert_eq!(destination, *b"ghabc");
+    }
+
+    #[test]
+    fn window_storage_copy_match_prefix_rejects_partial_or_repeated_wraps_atomically() {
+        let partial_window = *b"abc_____";
+        let partial = super::WindowStorage::new(&partial_window, 3, 3).unwrap();
+        let mut partial_destination = *b"keep";
+
+        assert_eq!(
+            partial.copy_match_prefix_to(1, 3, &mut partial_destination),
+            None
+        );
+        assert_eq!(partial_destination, *b"keep");
+
+        let wrapped_window = *b"abcdefgh";
+        let wrapped = super::WindowStorage::new(&wrapped_window, 3, 8).unwrap();
+        let mut repeated_destination = *b"unchanged___";
+
+        assert_eq!(
+            wrapped.copy_match_prefix_to(6, 11, &mut repeated_destination),
+            None
+        );
+        assert_eq!(repeated_destination, *b"unchanged___");
+    }
+
+    #[test]
+    fn window_storage_copy_match_prefix_rejects_short_destination_without_writing() {
+        let window = *b"abcdefgh";
+        let storage = super::WindowStorage::new(&window, 3, 8).unwrap();
+        let mut destination = *b"keep";
+
+        assert_eq!(storage.copy_match_prefix_to(6, 5, &mut destination), None);
+        assert_eq!(destination, *b"keep");
     }
 
     #[test]
