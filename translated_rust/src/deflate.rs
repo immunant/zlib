@@ -2918,14 +2918,85 @@ pub unsafe extern "C" fn deflate(
     {
         let mut bstate: block_state = need_more;
         bstate = (if s.level == 0 as ::core::ffi::c_int {
-            deflate_stored(s, strm, flush) as ::core::ffi::c_uint
+            // Level zero has no parser-specific state.  Project its three
+            // callback-owned buffers once here, then keep the stored-block
+            // policy entirely in the slice-based core.
+            let input_len = strm.avail_in as usize;
+            let input = if input_len == 0 {
+                &[]
+            } else {
+                ::core::slice::from_raw_parts(strm.next_in, input_len)
+            };
+            let output_len = strm.avail_out as usize;
+            let output = if output_len == 0 {
+                &mut []
+            } else {
+                ::core::slice::from_raw_parts_mut(strm.next_out, output_len)
+            };
+            let window = ::core::slice::from_raw_parts_mut(
+                s.window.expect("initialized window").as_ptr(),
+                s.window_size as usize,
+            );
+            let pending_buf = ::core::slice::from_raw_parts_mut(
+                s.pending_buf.expect("initialized pending buffer").as_ptr(),
+                s.pending_buf_size as usize,
+            );
+            let (result, input_pos, output_pos, total_in, total_out, adler) = {
+                let mut stored_stream = DeflateStoredStream {
+                    input,
+                    input_pos: 0,
+                    output,
+                    output_pos: 0,
+                    total_in: strm.total_in,
+                    total_out: strm.total_out,
+                    adler: strm.adler,
+                };
+                let mut stored_state = DeflateStoredState {
+                    window,
+                    pending_buf,
+                    pending: &mut s.pending,
+                    pending_out: &mut s.pending_out,
+                    bi_buf: &mut s.bi_buf,
+                    bi_valid: &mut s.bi_valid,
+                    bi_used: &mut s.bi_used,
+                    w_size: s.w_size,
+                    strstart: &mut s.strstart,
+                    block_start: &mut s.block_start,
+                    wrap: s.wrap,
+                    matches: &mut s.matches,
+                    insert: &mut s.insert,
+                    high_water: &mut s.high_water,
+                };
+                let result =
+                    deflate_stored_from_views(&mut stored_state, &mut stored_stream, flush);
+                (
+                    result,
+                    stored_stream.input_pos,
+                    stored_stream.output_pos,
+                    stored_stream.total_in,
+                    stored_stream.total_out,
+                    stored_stream.adler,
+                )
+            };
+            if input_pos != 0 {
+                strm.next_in = strm.next_in.wrapping_add(input_pos);
+            }
+            strm.avail_in = strm.avail_in.wrapping_sub(input_pos as crate::stdlib::uInt);
+            strm.next_out = strm.next_out.wrapping_add(output_pos);
+            strm.avail_out = strm
+                .avail_out
+                .wrapping_sub(output_pos as crate::stdlib::uInt);
+            strm.total_in = total_in;
+            strm.total_out = total_out;
+            strm.adler = adler;
+            result as ::core::ffi::c_uint
         } else if s.strategy == crate::zlib_h::Z_HUFFMAN_ONLY {
             deflate_huff(s, strm, flush) as ::core::ffi::c_uint
         } else if s.strategy == crate::zlib_h::Z_RLE {
             deflate_rle(s, strm, flush) as ::core::ffi::c_uint
         } else {
             let func = match configuration_table[s.level as usize].algorithm {
-                DeflateAlgorithm::Stored => deflate_stored,
+                DeflateAlgorithm::Stored => unreachable!("level zero is handled above"),
                 DeflateAlgorithm::Fast => deflate_fast,
                 DeflateAlgorithm::Slow => deflate_slow,
             };
@@ -3738,86 +3809,6 @@ fn deflate_stored_from_views(
     } else {
         need_more as ::core::ffi::c_int
     }) as block_state;
-}
-
-unsafe extern "C" fn deflate_stored(
-    state: &mut crate::src::deflate::deflate_state,
-    stream: &mut crate::zlib_h::z_stream_s,
-    flush: ::core::ffi::c_int,
-) -> block_state {
-    let input_len = stream.avail_in as usize;
-    let input = if input_len == 0 {
-        &[]
-    } else {
-        ::core::slice::from_raw_parts(stream.next_in, input_len)
-    };
-    let output_len = stream.avail_out as usize;
-    let output = if output_len == 0 {
-        &mut []
-    } else {
-        ::core::slice::from_raw_parts_mut(stream.next_out, output_len)
-    };
-    let window = ::core::slice::from_raw_parts_mut(
-        state.window.expect("initialized window").as_ptr(),
-        state.window_size as usize,
-    );
-    let pending_buf = ::core::slice::from_raw_parts_mut(
-        state
-            .pending_buf
-            .expect("initialized pending buffer")
-            .as_ptr(),
-        state.pending_buf_size as usize,
-    );
-    let (result, input_pos, output_pos, total_in, total_out, adler) = {
-        let mut stored_stream = DeflateStoredStream {
-            input,
-            input_pos: 0,
-            output,
-            output_pos: 0,
-            total_in: stream.total_in,
-            total_out: stream.total_out,
-            adler: stream.adler,
-        };
-        let mut stored_state = DeflateStoredState {
-            window,
-            pending_buf,
-            pending: &mut state.pending,
-            pending_out: &mut state.pending_out,
-            bi_buf: &mut state.bi_buf,
-            bi_valid: &mut state.bi_valid,
-            bi_used: &mut state.bi_used,
-            w_size: state.w_size,
-            strstart: &mut state.strstart,
-            block_start: &mut state.block_start,
-            wrap: state.wrap,
-            matches: &mut state.matches,
-            insert: &mut state.insert,
-            high_water: &mut state.high_water,
-        };
-        let result = deflate_stored_from_views(&mut stored_state, &mut stored_stream, flush);
-        (
-            result,
-            stored_stream.input_pos,
-            stored_stream.output_pos,
-            stored_stream.total_in,
-            stored_stream.total_out,
-            stored_stream.adler,
-        )
-    };
-    if input_pos != 0 {
-        stream.next_in = stream.next_in.wrapping_add(input_pos);
-    }
-    stream.avail_in = stream
-        .avail_in
-        .wrapping_sub(input_pos as crate::stdlib::uInt);
-    stream.next_out = stream.next_out.wrapping_add(output_pos);
-    stream.avail_out = stream
-        .avail_out
-        .wrapping_sub(output_pos as crate::stdlib::uInt);
-    stream.total_in = total_in;
-    stream.total_out = total_out;
-    stream.adler = adler;
-    result
 }
 
 // The fast parser only needs bounded storage and stream cursors.  Keep the
