@@ -399,6 +399,31 @@ impl InflateWindowStorage {
     fn install_caller_borrowed(&mut self) {
         *self = Self::CallerBorrowed;
     }
+
+    fn copy_kind_for_state(&self, state: &inflate_state) -> Option<InflateCopyWindow> {
+        match self {
+            Self::Absent => Some(InflateCopyWindow::Absent),
+            Self::Owned(window) => Some(InflateCopyWindow::Owned(window.try_copy_for_state(state)?)),
+            Self::CallbackAllocation(window) => {
+                Some(InflateCopyWindow::Callback(window.try_copy_for_state(state)?))
+            }
+            Self::CallerBorrowed => Some(InflateCopyWindow::CallerBorrowed),
+        }
+    }
+}
+
+/// A deep, pointer-free snapshot used to release the source-state owner
+/// lock before `inflateCopy` allocates the destination token.
+enum InflateCopyWindow {
+    Absent,
+    Owned(InflateOwnedWindow),
+    Callback(InflateOwnedWindow),
+    CallerBorrowed,
+}
+
+struct InflateCopySnapshot {
+    state: inflate_state,
+    window: InflateCopyWindow,
 }
 
 /// A validated mutable history-window view.  Both the legacy allocation
@@ -757,24 +782,34 @@ pub(crate) fn inflate_reset_state(
     inflateReset(strm, state)
 }
 
-/// Run one synchronous operation on the opaque inflate state owned by a
-/// stream.  The state allocation is distinct from the caller-owned stream,
-/// so this keeps the one typed conversion at a narrow boundary without
-/// returning a borrow that could alias a simultaneous stream borrow.
-fn with_inflate_stream_state<R>(
+/// The callback allocation retained in `z_stream.state` is an ABI lifetime
+/// token.  Keep the Rust state in a pointer-free owner keyed by that token,
+/// just as deflate does, so implementation code never reinterprets the
+/// foreign allocation as an `inflate_state`.
+pub(crate) fn inflate_states() -> &'static crate::src::zutil::IdentityOwner<crate::src::inflate::inflate_state> {
+    static STATES: ::std::sync::OnceLock<crate::src::zutil::IdentityOwner<crate::src::inflate::inflate_state>> = ::std::sync::OnceLock::new();
+    STATES.get_or_init(crate::src::zutil::IdentityOwner::new)
+}
+
+/// Run one synchronous operation on the typed inflate state selected by a
+/// stream's opaque callback-allocation token.
+pub(crate) fn with_inflate_stream_state<R>(
     stream: &mut crate::zlib_h::z_stream,
     action: impl FnOnce(
         &mut crate::zlib_h::z_stream,
         &mut crate::src::inflate::inflate_state,
     ) -> R,
 ) -> Option<R> {
-    let state = stream.state as *mut crate::src::inflate::inflate_state;
-    if state.is_null() {
-        return None;
-    }
-    // The opaque state allocation is separate from the caller-owned stream.
-    // Expose it only for this synchronous typed operation.
-    unsafe { Some(action(stream, &mut *state)) }
+    (!stream.state.is_null())
+        .then(|| inflate_states().with_mut(stream.state.addr(), |state| action(stream, state)))?
+}
+
+pub(crate) fn with_inflate_stream_state_ref<R>(
+    stream: &crate::zlib_h::z_stream,
+    action: impl FnOnce(&crate::src::inflate::inflate_state) -> R,
+) -> Option<R> {
+    (!stream.state.is_null())
+        .then(|| inflate_states().with_ref(stream.state.addr(), action))?
 }
 
 /// Reset a stream whose opaque state is still represented by the ABI handle.
@@ -878,6 +913,30 @@ fn apply_inflate_reset2(
     state.wbits = plan.window_bits as crate::stdlib::uInt;
     inflateReset(strm, state)
 }
+
+/// Reset a stream through its typed owner.  The callback free is deliberately
+/// kept beside the typed reset plan so the ABI wrapper only borrows its
+/// stream and dispatches.
+fn inflate_reset2_stream(
+    strm: &mut crate::zlib_h::z_stream,
+    window_bits: ::core::ffi::c_int,
+) -> ::core::ffi::c_int {
+    if !inflate_stream_has_allocators(strm) {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    }
+    with_inflate_stream_state(strm, |strm, state| {
+        let plan = match prepare_inflate_reset2(strm, state, window_bits) {
+            Ok(plan) => plan,
+            Err(error) => return error,
+        };
+        if plan.release_callback_window {
+            let window = state.window.load(::core::sync::atomic::Ordering::Relaxed);
+            strm.zfree.expect("checked allocator")(strm.opaque, window.cast());
+        }
+        apply_inflate_reset2(strm, state, plan)
+    })
+    .unwrap_or(crate::zlib_h::Z_STREAM_ERROR)
+}
 #[export_name = "inflateReset2"]
 
 pub unsafe extern "C" fn inflateReset2_ffi(
@@ -887,23 +946,7 @@ pub unsafe extern "C" fn inflateReset2_ffi(
     let Some(strm) = strm.as_mut() else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
-    if !inflate_stream_has_allocators(strm) {
-        return crate::zlib_h::Z_STREAM_ERROR;
-    }
-    let Some(state) = (strm.state as *mut crate::src::inflate::inflate_state).as_mut() else {
-        return crate::zlib_h::Z_STREAM_ERROR;
-    };
-    let plan = match prepare_inflate_reset2(strm, state, windowBits) {
-        Ok(plan) => plan,
-        Err(error) => return error,
-    };
-    if plan.release_callback_window {
-        let window = state.window.load(::core::sync::atomic::Ordering::Relaxed);
-        // This is the existing custom-allocator boundary.  It deliberately
-        // precedes the safe reset mutation, matching zlib's callback order.
-        strm.zfree.expect("checked allocator")(strm.opaque, window.cast());
-    }
-    apply_inflate_reset2(strm, state, plan)
+    inflate_reset2_stream(strm, windowBits)
 }
 
 fn initialize_inflate_state_base(
@@ -926,11 +969,11 @@ fn initialize_allocated_inflate_state(
     window_bits: ::core::ffi::c_int,
     allocator_provenance: crate::src::zutil::AllocatorProvenance,
 ) -> ::core::ffi::c_int {
-    let ret = crate::src::zutil::with_callback_state_slot(
+    let ret = crate::src::zutil::allocate_callback_owned_state(
         strm,
+        inflate_states(),
         empty_inflate_state(),
         |strm, state| {
-        strm.state = ::core::ptr::from_mut(state).cast::<crate::src::deflate::internal_state>();
         initialize_inflate_state_base(state, strm, allocator_provenance);
         match prepare_inflate_reset2(strm, state, window_bits) {
             Ok(plan) => {
@@ -943,9 +986,11 @@ fn initialize_allocated_inflate_state(
     )
     .unwrap_or(crate::zlib_h::Z_MEM_ERROR);
     if ret != crate::zlib_h::Z_OK {
+        let identity = strm.state.addr();
         Some(strm.zfree.expect("non-null function pointer"))
             .expect("non-null function pointer")(strm.opaque, strm.state.cast());
         strm.state = ::core::ptr::null_mut::<crate::src::deflate::internal_state>();
+        drop(inflate_states().take(identity));
     }
     ret
 }
@@ -3370,7 +3415,12 @@ pub fn inflateEnd(strm: &mut crate::zlib_h::z_stream_s) -> ::core::ffi::c_int {
     if !inflate_stream_has_allocators(strm) {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    with_inflate_stream_state(strm, inflate_end).unwrap_or(crate::zlib_h::Z_STREAM_ERROR)
+    let identity = strm.state.addr();
+    let result = with_inflate_stream_state(strm, inflate_end);
+    if strm.state.is_null() {
+        drop(inflate_states().take(identity));
+    }
+    result.unwrap_or(crate::zlib_h::Z_STREAM_ERROR)
 }
 #[export_name = "inflateEnd"]
 
@@ -3437,32 +3487,26 @@ pub unsafe extern "C" fn inflateGetDictionary_ffi(
     if !inflate_stream_has_allocators(strm) {
         return inflate_get_dictionary(None, None, None, None, None);
     }
-    let Some(state) = (strm.state as *const crate::src::inflate::inflate_state).as_ref() else {
-        return inflate_get_dictionary(Some(strm), None, None, None, dictLength.as_mut());
-    };
-    let window = if state.window.load(::core::sync::atomic::Ordering::Relaxed).is_null() {
-        None
-    } else {
-        Some(::core::slice::from_raw_parts(
-            state.window.load(::core::sync::atomic::Ordering::Relaxed),
-            state.wsize as usize,
-        ))
-    };
-    let dictionary = if dictionary.is_null() {
-        None
-    } else {
-        Some(::core::slice::from_raw_parts_mut(
-            dictionary,
-            state.whave as usize,
-        ))
-    };
-    inflate_get_dictionary(
-        Some(strm),
-        Some(state),
-        window,
-        dictionary,
-        dictLength.as_mut(),
-    )
+    with_inflate_stream_state_ref(strm, |state| {
+        let window = if state.window.load(::core::sync::atomic::Ordering::Relaxed).is_null() {
+            None
+        } else {
+            Some(::core::slice::from_raw_parts(
+                state.window.load(::core::sync::atomic::Ordering::Relaxed),
+                state.wsize as usize,
+            ))
+        };
+        let dictionary = if dictionary.is_null() {
+            None
+        } else {
+            Some(::core::slice::from_raw_parts_mut(
+                dictionary,
+                state.whave as usize,
+            ))
+        };
+        inflate_get_dictionary(Some(strm), Some(state), window, dictionary, dictLength.as_mut())
+    })
+    .unwrap_or_else(|| inflate_get_dictionary(Some(strm), None, None, None, dictLength.as_mut()))
 }
 fn inflate_set_dictionary_check(
     strm: &crate::zlib_h::z_stream,
@@ -3775,19 +3819,24 @@ pub unsafe extern "C" fn inflateSyncPoint_ffi(
     if !inflate_stream_has_allocators(strm) {
         return inflate_sync_point(None);
     }
-    let Some(state) = (strm.state as *const crate::src::inflate::inflate_state).as_ref() else {
-        return inflate_sync_point(None);
-    };
-    inflate_sync_point_stream(strm, state)
+    with_inflate_stream_state_ref(strm, |state| inflate_sync_point_stream(strm, state))
+        .unwrap_or_else(|| inflate_sync_point(None))
 }
 
 /// Allocate and install a deep copy after `inflateCopy` has validated the
 /// source tables.  The ABI callbacks and their untyped allocations stay
 /// confined to this named ownership boundary.
+fn snapshot_inflate_copy(source_state: &inflate_state) -> Option<InflateCopySnapshot> {
+    Some(InflateCopySnapshot {
+        state: copy_inflate_state(source_state),
+        window: source_state.window_storage.copy_kind_for_state(source_state)?,
+    })
+}
+
 fn initialize_inflate_copy(
     dest: &mut crate::zlib_h::z_stream,
     source: &crate::zlib_h::z_stream,
-    source_state: &mut crate::src::inflate::inflate_state,
+    snapshot: InflateCopySnapshot,
 ) -> ::core::ffi::c_int {
     // Keep allocation callbacks on a local stream copy until every fallible
     // allocation succeeds. This preserves C's observable rule that a failed
@@ -3809,25 +3858,23 @@ fn initialize_inflate_copy(
         adler: source.adler,
         reserved: source.reserved,
     };
-    crate::src::zutil::with_callback_state_slot(
+    let InflateCopySnapshot { state, window } = snapshot;
+    let source_token = allocation_stream.state;
+    let result = crate::src::zutil::allocate_callback_owned_state(
         &mut allocation_stream,
-        copy_inflate_state(source_state),
+        inflate_states(),
+        state,
         |allocation_stream, copy_ref| {
-            // Record the new allocation only in the local stream so failure
-            // cleanup can use the original callback pair without exposing a
-            // half-initialized destination.
-            allocation_stream.state =
-                ::core::ptr::from_mut(copy_ref).cast::<crate::src::deflate::internal_state>();
-            let mut owned_window = None;
-            let mut owned_window_failed = false;
-            if let Some(source_window) = source_state.window_storage.owned() {
-                owned_window = source_window.try_copy_for_state(source_state);
-                owned_window_failed = owned_window.is_none();
-            }
+            let (mut owned_window, callback_window, has_window) = match window {
+                InflateCopyWindow::Absent => (None, None, false),
+                InflateCopyWindow::Owned(window) => (Some(window), None, true),
+                InflateCopyWindow::Callback(window) => (None, Some(window), true),
+                InflateCopyWindow::CallerBorrowed => (None, None, true),
+            };
             let mut window = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
-            let layout = InflateWindowLayout::from_state(source_state)
+            let layout = InflateWindowLayout::from_state(copy_ref)
                 .expect("inflateCopy validated the source window layout");
-            if !source_state.window.load(::core::sync::atomic::Ordering::Relaxed).is_null() && owned_window.is_none() && !owned_window_failed {
+            if has_window && owned_window.is_none() && callback_window.is_some() {
                 window = Some(allocation_stream.zalloc.expect("validated allocator"))
                     .expect("validated allocator")(
                     allocation_stream.opaque,
@@ -3835,9 +3882,7 @@ fn initialize_inflate_copy(
                     ::core::mem::size_of::<::core::ffi::c_uchar>() as crate::stdlib::uInt,
                 ) as *mut ::core::ffi::c_uchar;
             }
-            if owned_window_failed
-                || (!source_state.window.load(::core::sync::atomic::Ordering::Relaxed).is_null() && window.is_null() && owned_window.is_none())
-            {
+            if has_window && owned_window.is_none() && window.is_null() {
                 Some(allocation_stream.zfree.expect("validated allocator"))
                     .expect("validated allocator")(
                     allocation_stream.opaque,
@@ -3848,27 +3893,22 @@ fn initialize_inflate_copy(
             if !window.is_null() {
                 // Keep the callback allocation for matching teardown, but
                 // duplicate history through independent checked storage.
-                let Some(working_window) = layout.try_owned() else {
+                let Some(mut working_window) = layout.try_owned() else {
                     let zfree = Some(allocation_stream.zfree.expect("validated allocator"))
                         .expect("validated allocator");
                     zfree(allocation_stream.opaque, window.cast());
                     zfree(allocation_stream.opaque, allocation_stream.state.cast());
                     return crate::zlib_h::Z_MEM_ERROR;
                 };
-                copy_ref.window.store(window, ::core::sync::atomic::Ordering::Relaxed);
-                copy_ref
-                    .window_storage
-                    .install_callback_allocation(working_window);
-                let history_len = source_state.whave as usize;
-                let copied = use_callback_inflate_window(source_state, layout.len, |_, source| {
-                    use_callback_inflate_window(copy_ref, layout.len, |_, destination| {
-                        let history = source.get(..history_len).ok_or(())?;
-                        let destination = destination.get_mut(..history.len()).ok_or(())?;
+                let history_len = copy_ref.whave as usize;
+                let copied = callback_window
+                    .and_then(|source| {
+                        let history = source.bytes.get(..history_len)?;
+                        let destination = working_window.bytes.get_mut(..history.len())?;
                         destination.copy_from_slice(history);
-                        Ok::<(), ()>(())
-                    })?
-                })
-                .is_ok();
+                        Some(())
+                    })
+                    .is_some();
                 if !copied {
                     let zfree = Some(allocation_stream.zfree.expect("validated allocator"))
                         .expect("validated allocator");
@@ -3876,6 +3916,10 @@ fn initialize_inflate_copy(
                     zfree(allocation_stream.opaque, allocation_stream.state.cast());
                     return crate::zlib_h::Z_MEM_ERROR;
                 }
+                copy_ref.window.store(window, ::core::sync::atomic::Ordering::Relaxed);
+                copy_ref
+                    .window_storage
+                    .install_callback_allocation(working_window);
             }
             copy_ref.strm = stream_identity(dest);
             if let Some(owned_window) = owned_window {
@@ -3886,34 +3930,23 @@ fn initialize_inflate_copy(
             crate::zlib_h::Z_OK
         },
     )
-    .unwrap_or(crate::zlib_h::Z_MEM_ERROR)
+    .unwrap_or(crate::zlib_h::Z_MEM_ERROR);
+    if result != crate::zlib_h::Z_OK && allocation_stream.state != source_token {
+        drop(inflate_states().take(allocation_stream.state.addr()));
+    }
+    result
 }
 
-/// Copy an already validated source state into a destination stream.
-///
-/// The `inflateCopy` ABI wrapper owns conversion of the opaque source-state
-/// handle.  Keeping this core typed prevents the copy validation and setup
-/// from needing to follow an ABI raw pointer itself.
-fn inflate_copy(
-    dest: Option<&mut crate::zlib_h::z_stream>,
-    source: Option<&mut crate::zlib_h::z_stream>,
-    source_state: Option<&mut crate::src::inflate::inflate_state>,
-) -> ::core::ffi::c_int {
-    let Some(source_ref) = source else {
-        return crate::zlib_h::Z_STREAM_ERROR;
-    };
-    if !inflate_stream_has_allocators(source_ref) {
-        return crate::zlib_h::Z_STREAM_ERROR;
-    }
-    let Some(state_ref) = source_state else {
-        return crate::zlib_h::Z_STREAM_ERROR;
-    };
+/// Validate and snapshot source-owned state before `inflateCopy` allocates a
+/// destination token.  The snapshot lets the owner lock end before any
+/// destination operation can acquire the same registry.
+fn prepare_inflate_copy(
+    source_ref: &crate::zlib_h::z_stream,
+    state_ref: &crate::src::inflate::inflate_state,
+) -> Option<InflateCopySnapshot> {
     if !inflate_state_valid(source_ref, state_ref) {
-        return crate::zlib_h::Z_STREAM_ERROR;
+        return None;
     }
-    let Some(dest_ref) = dest else {
-        return crate::zlib_h::Z_STREAM_ERROR;
-    };
     let valid_table_ref = |table: &InflateTableRef| match table {
         InflateTableRef::FixedLiteralLength | InflateTableRef::FixedDistance => true,
         InflateTableRef::Dynamic(index) => *index < crate::src::inftrees::ENOUGH as usize,
@@ -3923,9 +3956,29 @@ fn inflate_copy(
         || !valid_table_ref(&state_ref.distcode)
         || !inflate_window_layout_valid(state_ref)
     {
+        return None;
+    }
+    snapshot_inflate_copy(state_ref)
+}
+
+fn inflate_copy(
+    dest: Option<&mut crate::zlib_h::z_stream>,
+    source: Option<&crate::zlib_h::z_stream>,
+    snapshot: Option<InflateCopySnapshot>,
+) -> ::core::ffi::c_int {
+    let Some(source_ref) = source else {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    };
+    if !inflate_stream_has_allocators(source_ref) {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    initialize_inflate_copy(dest_ref, source_ref, state_ref)
+    let Some(dest_ref) = dest else {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    };
+    let Some(snapshot) = snapshot else {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    };
+    initialize_inflate_copy(dest_ref, source_ref, snapshot)
 }
 #[export_name = "inflateCopy"]
 
@@ -3934,15 +3987,17 @@ pub unsafe extern "C" fn inflateCopy_ffi(
     mut source: crate::zlib_h::z_streamp,
 ) -> ::core::ffi::c_int {
     let dest = dest.as_mut();
-    let Some(source) = source.as_mut() else {
+    let Some(source) = source.as_ref() else {
         return inflate_copy(dest, None, None);
     };
-    let source_state = if inflate_stream_has_allocators(source) {
-        (source.state as *mut crate::src::inflate::inflate_state).as_mut()
-    } else {
-        None
-    };
-    inflate_copy(dest, Some(source), source_state)
+    if !inflate_stream_has_allocators(source) {
+        return inflate_copy(dest, Some(source), None);
+    }
+    let snapshot = with_inflate_stream_state_ref(source, |source_state| {
+        prepare_inflate_copy(source, source_state)
+    })
+    .flatten();
+    inflate_copy(dest, Some(source), snapshot)
 }
 fn inflate_undermine(
     state: Option<&mut crate::src::inflate::inflate_state>,
@@ -4076,10 +4131,8 @@ pub unsafe extern "C" fn inflateMark_ffi(
     if !inflate_stream_has_allocators(strm) {
         return inflate_mark(None);
     }
-    let Some(state) = (strm.state as *const crate::src::inflate::inflate_state).as_ref() else {
-        return inflate_mark(None);
-    };
-    inflate_mark_stream(strm, state)
+    with_inflate_stream_state_ref(strm, |state| inflate_mark_stream(strm, state))
+        .unwrap_or_else(|| inflate_mark(None))
 }
 fn inflate_codes_used(state: Option<&crate::src::inflate::inflate_state>) -> ::core::ffi::c_ulong {
     let Some(state) = state else {
@@ -4107,8 +4160,6 @@ pub unsafe extern "C" fn inflateCodesUsed_ffi(
     if !inflate_stream_has_allocators(strm) {
         return inflate_codes_used(None);
     }
-    let Some(state) = (strm.state as *const crate::src::inflate::inflate_state).as_ref() else {
-        return inflate_codes_used(None);
-    };
-    inflate_codes_used_stream(strm, state)
+    with_inflate_stream_state_ref(strm, |state| inflate_codes_used_stream(strm, state))
+        .unwrap_or_else(|| inflate_codes_used(None))
 }

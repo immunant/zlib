@@ -170,14 +170,14 @@ fn initialize_allocated_inflate_back_state(
     window: &mut [::core::ffi::c_uchar],
     allocator_provenance: crate::src::zutil::AllocatorProvenance,
 ) -> ::core::ffi::c_int {
-    crate::src::zutil::with_callback_state_slot(
+    crate::src::zutil::allocate_callback_owned_state(
         strm,
+        crate::src::inflate::inflate_states(),
         crate::src::inflate::empty_inflate_state(),
-        |strm, state| {
+        |_strm, state| {
             state.allocator_provenance = allocator_provenance;
             initialize_inflate_back_state(state, window_bits);
             crate::src::inflate::bind_inflate_back_window(state, window);
-            strm.state = ::core::ptr::from_mut(state).cast::<crate::src::deflate::internal_state>();
             crate::zlib_h::Z_OK
         },
     )
@@ -1367,17 +1367,18 @@ pub unsafe extern "C" fn inflateBack_ffi(
     let Some(strm) = strm.as_mut() else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
-    let Some(state) = (strm.state as *mut crate::src::inflate::inflate_state).as_mut() else {
+    let Some((window_bits, window)) = crate::src::inflate::with_inflate_stream_state_ref(strm, |state| {
+        (state.wbits, state.window.load(::core::sync::atomic::Ordering::Relaxed))
+    }) else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
-    let window_bits = match usize::try_from(state.wbits) {
+    let window_bits = match usize::try_from(window_bits) {
         Ok(bits) if (8..=15).contains(&bits) => bits,
         _ => return crate::zlib_h::Z_STREAM_ERROR,
     };
     let Some(window_len) = 1usize.checked_shl(window_bits as u32) else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
-    let window = state.window.load(::core::sync::atomic::Ordering::Relaxed);
     if window.is_null() || (strm.avail_in != 0 && strm.next_in.is_null()) {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
@@ -1394,30 +1395,35 @@ pub unsafe extern "C" fn inflateBack_ffi(
     };
     let window = ::core::slice::from_raw_parts_mut(window, window_len);
     let mut current_input = strm.next_in;
-    let callback_result = inflate_back_with_callback_adapter(
-        strm,
-        state,
-        window,
-        initial_input,
-        || {
-            let mut callback_input = ::core::ptr::null_mut();
-            let length = in_0(in_desc, &raw mut callback_input);
-            current_input = callback_input;
-            if length == 0 {
-                InflateBackCallbackInput::Exhausted
-            } else if callback_input.is_null() {
-                InflateBackCallbackInput::Invalid(length as usize)
-            } else {
-                InflateBackCallbackInput::Chunk(::core::slice::from_raw_parts(
-                    callback_input,
-                    length as usize,
-                ))
-            }
-        },
-        |bytes: &mut [u8], length: ::core::ffi::c_uint| {
-            out(out_desc, bytes.as_mut_ptr(), length) == 0
-        },
-    );
+    let callback_result = crate::src::inflate::with_inflate_stream_state(strm, |strm, state| {
+        inflate_back_with_callback_adapter(
+            strm,
+            state,
+            window,
+            initial_input,
+            || {
+                let mut callback_input = ::core::ptr::null_mut();
+                let length = in_0(in_desc, &raw mut callback_input);
+                current_input = callback_input;
+                if length == 0 {
+                    InflateBackCallbackInput::Exhausted
+                } else if callback_input.is_null() {
+                    InflateBackCallbackInput::Invalid(length as usize)
+                } else {
+                    InflateBackCallbackInput::Chunk(::core::slice::from_raw_parts(
+                        callback_input,
+                        length as usize,
+                    ))
+                }
+            },
+            |bytes: &mut [u8], length: ::core::ffi::c_uint| {
+                out(out_desc, bytes.as_mut_ptr(), length) == 0
+            },
+        )
+    });
+    let Some(callback_result) = callback_result else {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    };
     match callback_result.input_cursor {
         InflateBackInputCursor::Preserve => {}
         InflateBackInputCursor::Null => strm.next_in = ::core::ptr::null_mut(),
@@ -1442,6 +1448,17 @@ fn inflate_back_end(
     strm.state = ::core::ptr::null_mut::<crate::src::deflate::internal_state>();
     crate::zlib_h::Z_OK
 }
+
+fn inflate_back_end_stream(strm: &mut crate::zlib_h::z_stream) -> ::core::ffi::c_int {
+    let identity = strm.state.addr();
+    let result = crate::src::inflate::with_inflate_stream_state(strm, |strm, state| {
+        inflate_back_end(strm, Some(state))
+    });
+    if strm.state.is_null() {
+        drop(crate::src::inflate::inflate_states().take(identity));
+    }
+    result.unwrap_or(crate::zlib_h::Z_STREAM_ERROR)
+}
 #[export_name = "inflateBackEnd"]
 
 pub unsafe extern "C" fn inflateBackEnd_ffi(
@@ -1450,7 +1467,5 @@ pub unsafe extern "C" fn inflateBackEnd_ffi(
     let Some(strm) = strm.as_mut() else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
-    let state_ptr = strm.state as *mut crate::src::inflate::inflate_state;
-    let state = state_ptr.as_ref();
-    inflate_back_end(strm, state)
+    inflate_back_end_stream(strm)
 }
