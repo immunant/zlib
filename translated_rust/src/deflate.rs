@@ -891,20 +891,20 @@ fn dictionary_tail_offset(
 }
 
 unsafe fn deflateStateCheck(mut strm: crate::zlib_h::z_streamp) -> ::core::ffi::c_int {
-    let mut s: *mut crate::src::deflate::deflate_state =
-        ::core::ptr::null_mut::<crate::src::deflate::deflate_state>();
     if strm.is_null() {
         return 1 as ::core::ffi::c_int;
     }
-    s = (*strm).state as *mut crate::src::deflate::deflate_state;
-    if s.is_null() {
+    let stream = &*strm;
+    let state = stream.state as *mut crate::src::deflate::deflate_state;
+    if state.is_null() {
         return 1 as ::core::ffi::c_int;
     }
+    let state = &*state;
     if !deflate_state_is_usable(
-        (*strm).zalloc.is_some(),
-        (*strm).zfree.is_some(),
-        (*s).strm == strm,
-        (*s).status,
+        stream.zalloc.is_some(),
+        stream.zfree.is_some(),
+        state.strm == strm,
+        state.status,
     ) {
         return 1 as ::core::ffi::c_int;
     }
@@ -922,7 +922,9 @@ pub unsafe extern "C" fn deflateSetDictionary(
     let mut wrap: ::core::ffi::c_int = 0;
     let mut avail: ::core::ffi::c_uint = 0;
     let mut next: *mut ::core::ffi::c_uchar = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
-    if deflateStateCheck(strm) != 0 || dictionary.is_null() {
+    if deflateStateCheck(strm) != 0
+        || dictionary.is_null()
+    {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
     s = (*strm).state as *mut crate::src::deflate::deflate_state;
@@ -1135,7 +1137,9 @@ pub unsafe extern "C" fn deflateSetHeader(
     mut strm: crate::zlib_h::z_streamp,
     mut head: crate::zlib_h::gz_headerp,
 ) -> ::core::ffi::c_int {
-    if deflateStateCheck(strm) != 0 || (*(*strm).state).wrap != 2 as ::core::ffi::c_int {
+    if deflateStateCheck(strm) != 0
+        || (*(*strm).state).wrap != 2 as ::core::ffi::c_int
+    {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
     (*(*strm).state).gzhead = head;
@@ -2372,7 +2376,9 @@ pub unsafe extern "C" fn deflateCopy(
         ::core::ptr::null_mut::<crate::src::deflate::deflate_state>();
     let mut ss: *mut crate::src::deflate::deflate_state =
         ::core::ptr::null_mut::<crate::src::deflate::deflate_state>();
-    if deflateStateCheck(source) != 0 || dest.is_null() {
+    if deflateStateCheck(source) != 0
+        || dest.is_null()
+    {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
     ss = (*source).state as *mut crate::src::deflate::deflate_state;

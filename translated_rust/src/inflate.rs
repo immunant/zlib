@@ -626,23 +626,37 @@ fn inflate_reset2_discards_window(
     has_window && current_wbits != requested_wbits
 }
 
+fn inflate_state_check_impl(
+    stream: Option<&crate::zlib_h::z_stream>,
+    state: Option<&crate::src::inflate::inflate_state>,
+    state_matches_stream: bool,
+) -> ::core::ffi::c_int {
+    let Some(stream) = stream else {
+        return inflate_state_check_result(false, false, false);
+    };
+    let Some(state) = state else {
+        return inflate_state_check_result(true, false, false);
+    };
+    let state_is_usable = inflate_state_is_usable(
+        stream.zalloc.is_some(),
+        stream.zfree.is_some(),
+        state_matches_stream,
+        state.mode,
+    );
+    inflate_state_check_result(true, true, state_is_usable)
+}
+
 unsafe fn inflateStateCheck(mut strm: crate::zlib_h::z_streamp) -> ::core::ffi::c_int {
     if strm.is_null() {
-        return inflate_state_check_result(false, false, false);
+        return inflate_state_check_impl(None, None, false);
     }
     let stream = &*strm;
     let state = stream.state as *mut crate::src::inflate::inflate_state;
     if state.is_null() {
-        return inflate_state_check_result(true, false, false);
+        return inflate_state_check_impl(Some(stream), None, false);
     }
     let state = &*state;
-    let state_is_usable = inflate_state_is_usable(
-        stream.zalloc.is_some(),
-        stream.zfree.is_some(),
-        state.strm == strm,
-        state.mode,
-    );
-    inflate_state_check_result(true, true, state_is_usable)
+    inflate_state_check_impl(Some(stream), Some(state), state.strm == strm)
 }
 pub unsafe extern "C" fn inflateResetKeep(
     mut strm: crate::zlib_h::z_streamp,
@@ -2911,8 +2925,8 @@ mod tests {
         inflate_mark_value, inflate_match_copy_plan, inflate_mode_data_type_flags,
         inflate_mode_is_valid, inflate_needs_buffer_error, inflate_output_checksum,
         inflate_prime_update, inflate_reset2_discards_window, inflate_reset2_params,
-        inflate_should_update_window, inflate_state_check_result, inflate_state_is_usable,
-        inflate_state_metadata_is_valid, inflate_stream_buffers_are_valid,
+        inflate_should_update_window, inflate_state_check_impl, inflate_state_check_result,
+        inflate_state_is_usable, inflate_state_metadata_is_valid, inflate_stream_buffers_are_valid,
         inflate_stream_has_allocator_callbacks, inflate_sync_input_progress,
         inflate_sync_normalized_wrap, inflate_sync_point_value, inflate_sync_remaining_input,
         inflate_sync_search_core, inflate_undermine_core, inflate_validate_core,
@@ -3643,6 +3657,29 @@ mod tests {
                 "{scenario}"
             );
         }
+    }
+
+    #[test]
+    fn inflate_state_check_impl_rejects_missing_stream_or_state() {
+        let stream = crate::zlib_h::z_stream {
+            next_in: ::core::ptr::null_mut(),
+            avail_in: 0,
+            total_in: 0,
+            next_out: ::core::ptr::null_mut(),
+            avail_out: 0,
+            total_out: 0,
+            msg: ::core::ptr::null_mut(),
+            state: ::core::ptr::null_mut(),
+            zalloc: None,
+            zfree: None,
+            opaque: ::core::ptr::null_mut(),
+            data_type: 0,
+            adler: 0,
+            reserved: 0,
+        };
+
+        assert_eq!(inflate_state_check_impl(None, None, false), 1);
+        assert_eq!(inflate_state_check_impl(Some(&stream), None, false), 1);
     }
 
     #[test]
