@@ -1092,37 +1092,34 @@ pub unsafe extern "C" fn deflateSetDictionary_ffi(
 ) -> ::core::ffi::c_int {
     deflateSetDictionary(strm, dictionary, dictLength)
 }
-pub unsafe extern "C" fn deflateGetDictionary(
-    mut strm: crate::zlib_h::z_streamp,
-    mut dictionary: *mut crate::stdlib::Bytef,
-    mut dictLength: *mut crate::stdlib::uInt,
-) -> ::core::ffi::c_int {
-    let mut s: *mut crate::src::deflate::deflate_state =
-        ::core::ptr::null_mut::<crate::src::deflate::deflate_state>();
-    let mut len: crate::stdlib::uInt = 0;
-    if deflateStateCheck(strm) != 0 {
-        return crate::zlib_h::Z_STREAM_ERROR;
-    }
-    s = (*strm).state as *mut crate::src::deflate::deflate_state;
-    len = (*s).strstart.wrapping_add((*s).lookahead);
-    if len > (*s).w_size {
-        len = (*s).w_size;
-    }
-    if !dictionary.is_null() && len != 0 {
-        crate::stdlib::memcpy(
-            dictionary as *mut ::core::ffi::c_void,
-            (*s).window
-                .offset((*s).strstart as isize)
-                .offset((*s).lookahead as isize)
-                .offset(-(len as isize)) as *const ::core::ffi::c_void,
-            len as crate::__stddef_size_t_h::size_t,
-        );
-    }
-    if !dictLength.is_null() {
-        *dictLength = len;
-    }
-    return crate::zlib_h::Z_OK;
+fn deflate_dictionary_range_state(
+    state: &crate::src::deflate::deflate_state,
+) -> Option<::core::ops::Range<usize>> {
+    let len = state
+        .strstart
+        .wrapping_add(state.lookahead)
+        .min(state.w_size);
+    let end = usize::try_from(state.strstart)
+        .ok()?
+        .checked_add(usize::try_from(state.lookahead).ok()?)?;
+    let len = usize::try_from(len).ok()?;
+    let start = end.checked_sub(len)?;
+    Some(start..end)
 }
+
+fn deflate_get_dictionary_state(
+    state: &crate::src::deflate::deflate_state,
+    window: &[crate::stdlib::Byte],
+    dictionary: &mut [crate::stdlib::Byte],
+) -> Option<::core::ffi::c_int> {
+    let range = deflate_dictionary_range_state(state)?;
+    if dictionary.len() != range.len() {
+        return None;
+    }
+    dictionary.copy_from_slice(window.get(range)?);
+    Some(crate::zlib_h::Z_OK)
+}
+
 #[export_name = "deflateGetDictionary"]
 
 pub unsafe extern "C" fn deflateGetDictionary_ffi(
@@ -1130,7 +1127,31 @@ pub unsafe extern "C" fn deflateGetDictionary_ffi(
     mut dictionary: *mut crate::stdlib::Bytef,
     mut dictLength: *mut crate::stdlib::uInt,
 ) -> ::core::ffi::c_int {
-    deflateGetDictionary(strm, dictionary, dictLength)
+    if deflateStateCheck(strm) != 0 {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    }
+    let state = &*((*strm).state as *mut crate::src::deflate::deflate_state);
+    let Some(range) = deflate_dictionary_range_state(state) else {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    };
+    let len = range.len();
+    if !dictionary.is_null() && len != 0 {
+        let Ok(window_len) = usize::try_from(state.window_size) else {
+            return crate::zlib_h::Z_STREAM_ERROR;
+        };
+        if state.window.is_null() {
+            return crate::zlib_h::Z_STREAM_ERROR;
+        }
+        let window = ::core::slice::from_raw_parts(state.window, window_len);
+        let output = ::core::slice::from_raw_parts_mut(dictionary, len);
+        if deflate_get_dictionary_state(state, window, output).is_none() {
+            return crate::zlib_h::Z_STREAM_ERROR;
+        }
+    }
+    if !dictLength.is_null() {
+        *dictLength = len as crate::stdlib::uInt;
+    }
+    crate::zlib_h::Z_OK
 }
 pub unsafe extern "C" fn deflateResetKeep(
     mut strm: crate::zlib_h::z_streamp,
