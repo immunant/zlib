@@ -531,86 +531,6 @@ impl DeflateCallbackStorageOwner {
             .then_some(DeflatePendingStorage { pending_buf })
     }
 
-    // The owner persists with the callback lifecycle, while this operation
-    // view borrows only the three regions needed by dictionary installation.
-    // Verify the view against the immutable callback requests here so no
-    // dictionary policy needs to recover a capacity from mutable codec state.
-    fn dictionary_storage<'storage>(
-        &self,
-        storage: DeflateCallbackStorage<'storage>,
-    ) -> Option<DeflateDictionaryStorage<'storage>> {
-        if !(self.window && self.prev && self.head) {
-            return None;
-        }
-        let layout = self.storage;
-        let window = storage.window?;
-        let prev = storage.prev?;
-        let head = storage.head?;
-        if window.len() != layout.window.byte_len()?
-            || prev.len() != layout.prev.element_len::<crate::src::deflate::Posf>()?
-            || head.len() != layout.head.element_len::<crate::src::deflate::Posf>()?
-        {
-            return None;
-        }
-        Some(DeflateDictionaryStorage { window, prev, head })
-    }
-
-    // Dispatch is the one C4 operation that needs every callback-backed
-    // region.  Consume the call-scoped projection into one complete,
-    // pointer-free view here, after checking both the lifecycle completion
-    // and the immutable callback geometry.  The stream boundary still forms
-    // the raw slices; the dispatch core cannot request a lone buffer.
-    fn dispatch_storage<'storage>(
-        &self,
-        storage: DeflateCallbackStorage<'storage>,
-    ) -> Option<DeflateDispatchStorage<'storage>> {
-        if !(self.window && self.prev && self.head && self.pending) {
-            return None;
-        }
-        let layout = self.storage;
-        let pending_buf = self.pending_storage(storage.pending)?.pending_buf;
-        let window = storage.window?;
-        let prev = storage.prev?;
-        let head = storage.head?;
-        if window.len() != layout.window.byte_len()?
-            || prev.len() != layout.prev.element_len::<crate::src::deflate::Posf>()?
-            || head.len() != layout.head.element_len::<crate::src::deflate::Posf>()?
-        {
-            return None;
-        }
-        Some(DeflateDispatchStorage {
-            pending_buf,
-            window,
-            prev,
-            head,
-        })
-    }
-
-    fn dispatch_request<'storage>(
-        &self,
-        storage: DeflateCallbackStorage<'storage>,
-    ) -> Option<(
-        DeflateDispatchStorage<'storage>,
-        DeflateAbiCursors<'storage>,
-    )> {
-        let DeflateCallbackStorage {
-            window,
-            prev,
-            head,
-            pending,
-            cursors,
-        } = storage;
-        let cursors = cursors?;
-        let storage = self.dispatch_storage(DeflateCallbackStorage {
-            window,
-            prev,
-            head,
-            pending,
-            cursors: None,
-        })?;
-        Some((storage, cursors))
-    }
-
     // A deflate copy crosses two independently callback-paired allocation
     // lifecycles.  Verify their immutable request geometry before the ABI
     // boundary performs its bounded raw copies.  The pointer-free copy facade
@@ -1749,8 +1669,7 @@ pub unsafe fn deflateInit2_(
     stream.msg = ::core::ptr::null_mut::<::core::ffi::c_char>();
     stream.data_type = crate::zlib_h::Z_UNKNOWN;
     let head = callback_storage
-        .head
-        .take()
+        .into_head()
         .expect("complete callback storage has a hash-table view");
     stream.adler = reset_keep_core(
         &mut state.pending,
@@ -1837,6 +1756,169 @@ struct DeflateCallbackStorage<'stream> {
     head: Option<&'stream mut [crate::src::deflate::Posf]>,
     pending: Option<&'stream mut [crate::stdlib::Bytef]>,
     cursors: Option<DeflateAbiCursors<'stream>>,
+}
+
+// This per-request owner joins the persistent, pointer-free lifecycle ledger
+// with the bounded views formed by the ABI/state boundary.  It deliberately
+// owns no callback identity and cannot outlive those views.  All C4 consumers
+// therefore receive checked ordinary slices instead of reopening opaque state
+// or recovering geometry from mutable codec fields.
+struct DeflateCallbackStorageRequest<'stream> {
+    lifecycle: DeflateCallbackStorageOwner,
+    storage: DeflateCallbackStorage<'stream>,
+}
+
+impl<'stream> DeflateCallbackStorageRequest<'stream> {
+    fn new(
+        lifecycle: DeflateCallbackStorageOwner,
+        storage: DeflateCallbackStorage<'stream>,
+    ) -> Self {
+        Self { lifecycle, storage }
+    }
+
+    fn empty(lifecycle: DeflateCallbackStorageOwner) -> Self {
+        Self::new(
+            lifecycle,
+            DeflateCallbackStorage {
+                window: None,
+                prev: None,
+                head: None,
+                pending: None,
+                cursors: None,
+            },
+        )
+    }
+
+    fn has_cursors(&self) -> bool {
+        self.storage.cursors.is_some()
+    }
+
+    // Cursor views belong to the same call-scoped owner as callback storage.
+    // This keeps a dispatch request from pairing views from different ABI
+    // observations and ensures that the owner is the sole handoff point to
+    // the pointer-free compressor state machine.
+    fn with_cursors(mut self, cursors: DeflateAbiCursors<'stream>) -> Self {
+        self.storage.cursors = Some(cursors);
+        self
+    }
+
+    fn window(&self) -> Option<&[crate::stdlib::Bytef]> {
+        self.storage.window.as_deref()
+    }
+
+    fn into_head(self) -> Option<&'stream mut [crate::src::deflate::Posf]> {
+        if !self.lifecycle.head {
+            return None;
+        }
+        let head = self.storage.head?;
+        (head.len()
+            == self
+                .lifecycle
+                .storage
+                .head
+                .element_len::<crate::src::deflate::Posf>()?)
+        .then_some(head)
+    }
+
+    // The dictionary path needs the three history regions but not pending
+    // output or caller cursors.  Check lifecycle completion and immutable
+    // allocation geometry before handing those slices to the safe kernel.
+    fn into_dictionary_storage(self) -> Option<DeflateDictionaryStorage<'stream>> {
+        if !(self.lifecycle.window && self.lifecycle.prev && self.lifecycle.head) {
+            return None;
+        }
+        let layout = self.lifecycle.storage;
+        let window = self.storage.window?;
+        let prev = self.storage.prev?;
+        let head = self.storage.head?;
+        if window.len() != layout.window.byte_len()?
+            || prev.len() != layout.prev.element_len::<crate::src::deflate::Posf>()?
+            || head.len() != layout.head.element_len::<crate::src::deflate::Posf>()?
+        {
+            return None;
+        }
+        Some(DeflateDictionaryStorage { window, prev, head })
+    }
+
+    // Dispatch is the one C4 operation that needs every callback-backed
+    // region.  Consuming the request into this complete pointer-free view
+    // prevents the state machine from requesting a lone callback buffer.
+    fn into_dispatch_storage(self) -> Option<DeflateDispatchStorage<'stream>> {
+        if !(self.lifecycle.window
+            && self.lifecycle.prev
+            && self.lifecycle.head
+            && self.lifecycle.pending)
+        {
+            return None;
+        }
+        let layout = self.lifecycle.storage;
+        let pending_buf = self.storage.pending?;
+        let window = self.storage.window?;
+        let prev = self.storage.prev?;
+        let head = self.storage.head?;
+        if pending_buf.len() != layout.pending.byte_len()?
+            || window.len() != layout.window.byte_len()?
+            || prev.len() != layout.prev.element_len::<crate::src::deflate::Posf>()?
+            || head.len() != layout.head.element_len::<crate::src::deflate::Posf>()?
+        {
+            return None;
+        }
+        Some(DeflateDispatchStorage {
+            pending_buf,
+            window,
+            prev,
+            head,
+        })
+    }
+
+    fn into_dispatch_request(
+        self,
+    ) -> Option<(DeflateDispatchStorage<'stream>, DeflateAbiCursors<'stream>)> {
+        let DeflateCallbackStorage {
+            window,
+            prev,
+            head,
+            pending,
+            cursors,
+        } = self.storage;
+        let cursors = cursors?;
+        let storage = Self {
+            lifecycle: self.lifecycle,
+            storage: DeflateCallbackStorage {
+                window,
+                prev,
+                head,
+                pending,
+                cursors: None,
+            },
+        }
+        .into_dispatch_storage()?;
+        Some((storage, cursors))
+    }
+
+    fn into_parameter_tables(
+        self,
+        needs_previous: bool,
+    ) -> Option<DeflateCallbackHashStorage<'stream>> {
+        if !(self.lifecycle.head && (!needs_previous || self.lifecycle.prev)) {
+            return None;
+        }
+        let layout = self.lifecycle.storage;
+        let head = self.storage.head?;
+        if head.len() != layout.head.element_len::<crate::src::deflate::Posf>()? {
+            return None;
+        }
+        let prev = if needs_previous {
+            let prev = self.storage.prev?;
+            if prev.len() != layout.prev.element_len::<crate::src::deflate::Posf>()? {
+                return None;
+            }
+            Some(prev)
+        } else {
+            None
+        };
+        Some(DeflateCallbackHashStorage { head, prev })
+    }
 }
 
 // The ABI stream projection creates these bounded caller views alongside the
@@ -1939,8 +2021,8 @@ fn admit_deflate_projection(
         projection,
         DeflateStorageProjection::Complete | DeflateStorageProjection::Dispatch
     ) || parameter_requires_flush;
-    let dispatch_cursors = matches!(projection, DeflateStorageProjection::Dispatch)
-        || parameter_requires_flush;
+    let dispatch_cursors =
+        matches!(projection, DeflateStorageProjection::Dispatch) || parameter_requires_flush;
     Some(DeflateProjectionAdmission {
         storage_layout,
         complete_storage,
@@ -1958,7 +2040,7 @@ unsafe fn deflate_stream_and_state<'stream, 'request>(
 ) -> Option<(
     &'stream mut crate::zlib_h::z_stream_s,
     &'stream mut crate::src::deflate::deflate_state,
-    DeflateCallbackStorage<'stream>,
+    DeflateCallbackStorageRequest<'stream>,
 )> {
     if strm.zalloc.is_none() || strm.zfree.is_none() {
         return None;
@@ -2053,6 +2135,8 @@ unsafe fn deflate_stream_and_state<'stream, 'request>(
             cursors: None,
         },
     };
+    let lifecycle = state.callback_storage;
+    let mut storage = DeflateCallbackStorageRequest::new(lifecycle, storage);
     if dispatch_cursors {
         if strm.next_out.is_null() || (strm.avail_in != 0 && strm.next_in.is_null()) {
             strm.msg = crate::src::zutil::zError(crate::zlib_h::Z_STREAM_ERROR)
@@ -2066,21 +2150,11 @@ unsafe fn deflate_stream_and_state<'stream, 'request>(
             ::core::slice::from_raw_parts(strm.next_in, strm.avail_in as usize)
         };
         let output = ::core::slice::from_raw_parts_mut(strm.next_out, strm.avail_out as usize);
-        storage.cursors = Some(DeflateAbiCursors { input, output });
+        storage = storage.with_cursors(DeflateAbiCursors { input, output });
     }
     if let DeflateStorageProjection::DictionaryInstall { dictionary, result } = projection {
-        let Some(storage) = state.callback_storage.dictionary_storage(storage) else {
-            return Some((
-                strm,
-                state,
-                DeflateCallbackStorage {
-                    window: None,
-                    prev: None,
-                    head: None,
-                    pending: None,
-                    cursors: None,
-                },
-            ));
+        let Some(storage) = storage.into_dictionary_storage() else {
+            return Some((strm, state, DeflateCallbackStorageRequest::empty(lifecycle)));
         };
         let mut dictionary_state = DictionaryState {
             wrap: state.wrap,
@@ -2108,17 +2182,7 @@ unsafe fn deflate_stream_and_state<'stream, 'request>(
             dictionary,
             strm.adler,
         ) else {
-            return Some((
-                strm,
-                state,
-                DeflateCallbackStorage {
-                    window: None,
-                    prev: None,
-                    head: None,
-                    pending: None,
-                    cursors: None,
-                },
-            ));
+            return Some((strm, state, DeflateCallbackStorageRequest::empty(lifecycle)));
         };
         state.wrap = dictionary_state.wrap;
         state.slid = dictionary_state.slid;
@@ -2135,17 +2199,7 @@ unsafe fn deflate_stream_and_state<'stream, 'request>(
             strm.adler = checksum;
         }
         *result = crate::zlib_h::Z_OK;
-        return Some((
-            strm,
-            state,
-            DeflateCallbackStorage {
-                window: None,
-                prev: None,
-                head: None,
-                pending: None,
-                cursors: None,
-            },
-        ));
+        return Some((strm, state, DeflateCallbackStorageRequest::empty(lifecycle)));
     }
     if let DeflateStorageProjection::DictionaryQuery {
         dictionary,
@@ -2153,7 +2207,7 @@ unsafe fn deflate_stream_and_state<'stream, 'request>(
         result,
     } = projection
     {
-        let Some(window) = storage.window.as_deref() else {
+        let Some(window) = storage.window() else {
             return Some((strm, state, storage));
         };
         let mut len = state.strstart.wrapping_add(state.lookahead);
@@ -5610,7 +5664,7 @@ pub(crate) unsafe fn deflate_scalar_from_abi_stream(
             strm.data_type = crate::zlib_h::Z_UNKNOWN;
             strm.adler = adler;
             if matches!(kind, DeflateResetKind::Full) {
-                let head = storage.head.expect("full-reset hash projection");
+                let head = storage.into_head().expect("full-reset hash projection");
                 let w_size = state.w_size;
                 let config = &configuration_table[state.level as usize];
                 DeflateResetCore {
@@ -5634,9 +5688,8 @@ pub(crate) unsafe fn deflate_scalar_from_abi_stream(
             crate::zlib_h::Z_OK
         }
         Operation::Scalar(DeflateAbiAction::Prime { bits, value }) => {
-            let pending_buf = state
-                .callback_storage
-                .dispatch_storage(storage)
+            let pending_buf = storage
+                .into_dispatch_storage()
                 .expect("complete pending storage projection")
                 .pending_buf;
             deflate_prime_bits(
@@ -5692,19 +5745,15 @@ pub(crate) unsafe fn deflate_scalar_from_abi_stream(
             parameter_update,
         } => {
             if let Some(plan) = parameter_update {
-                if storage.cursors.is_none() {
+                if !storage.has_cursors() {
                     let needs_table_cleanup =
                         state.level != plan.level && state.level == 0 && state.matches != 0;
                     let tables = if needs_table_cleanup {
-                        let prev = if state.matches == 1 {
-                            Some(storage.prev.expect("parameter previous-table projection"))
-                        } else {
-                            None
-                        };
-                        Some(DeflateCallbackHashStorage {
-                            head: storage.head.expect("parameter hash-table projection"),
-                            prev,
-                        })
+                        Some(
+                            storage
+                                .into_parameter_tables(state.matches == 1)
+                                .expect("parameter hash-table projection"),
+                        )
                     } else {
                         None
                     };
@@ -5730,7 +5779,7 @@ pub(crate) unsafe fn deflate_scalar_from_abi_stream(
             // handling, plus pending bytes and the caller cursors. The parameter
             // projection has formed those only after it admitted the block flush.
             let Some((storage, DeflateAbiCursors { input, output })) =
-                state.callback_storage.dispatch_request(storage)
+                storage.into_dispatch_request()
             else {
                 return crate::zlib_h::Z_STREAM_ERROR;
             };
@@ -5866,9 +5915,7 @@ pub(crate) unsafe fn deflate_scalar_from_abi_stream(
             strm.adler = adler;
             strm.data_type = data_type;
             if let Some(message) = message {
-                strm.msg = crate::src::zutil::zError(message)
-                    .as_ptr()
-                    .cast_mut();
+                strm.msg = crate::src::zutil::zError(message).as_ptr().cast_mut();
             }
             state.status = status;
             state.pending_out = pending_out;
@@ -6236,19 +6283,17 @@ unsafe fn deflate_copy_from_abi_boundary(
     assert!(ss
         .callback_storage
         .copy_geometry(&ds.callback_storage, &copy_layout));
-    let source_storage = ss
-        .callback_storage
-        .dispatch_storage(source_storage)
+    let source_storage = source_storage
+        .into_dispatch_storage()
         .expect("complete source copy storage projection");
-    let Some((_dest, ds, destination_storage)) =
+    let Some((_dest, _ds, destination_storage)) =
         deflate_stream_and_state(dest, DeflateStorageProjection::Complete)
     else {
         deflateEnd(::core::ptr::NonNull::from(dest));
         return crate::zlib_h::Z_MEM_ERROR;
     };
-    let destination_storage = ds
-        .callback_storage
-        .dispatch_storage(destination_storage)
+    let destination_storage = destination_storage
+        .into_dispatch_storage()
         .expect("complete destination copy storage projection");
     copy_deflate_storage_regions(source_storage, destination_storage, &copy_layout);
     return crate::zlib_h::Z_OK;
