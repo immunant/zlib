@@ -1397,37 +1397,69 @@ pub unsafe extern "C" fn deflateGetDictionary_ffi(
 ) -> ::core::ffi::c_int {
     deflateGetDictionary(strm, dictionary, dictLength)
 }
-pub unsafe extern "C" fn deflateResetKeep(
-    mut strm: crate::zlib_h::z_streamp,
-) -> ::core::ffi::c_int {
-    let mut s: *mut crate::src::deflate::deflate_state =
-        ::core::ptr::null_mut::<crate::src::deflate::deflate_state>();
-    if deflateStateCheck(strm) != 0 {
-        return crate::zlib_h::Z_STREAM_ERROR;
+// Reset state that contains no allocation handles or stream backlinks.  The
+// ABI-facing caller projects these fields once, leaving reset policy and tree
+// initialization in this pointer-free core.
+fn reset_keep_core(
+    pending: &mut crate::zutil_h::ulg,
+    pending_out: &mut usize,
+    wrap: &mut ::core::ffi::c_int,
+    status: &mut ::core::ffi::c_int,
+    last_flush: &mut ::core::ffi::c_int,
+    dyn_ltree: &mut [crate::src::deflate::ct_data_s; 573],
+    dyn_dtree: &mut [crate::src::deflate::ct_data_s; 61],
+    bl_tree: &mut [crate::src::deflate::ct_data_s; 39],
+    l_desc: &mut crate::src::deflate::tree_desc_s,
+    d_desc: &mut crate::src::deflate::tree_desc_s,
+    bl_desc: &mut crate::src::deflate::tree_desc_s,
+    static_len: &mut crate::zutil_h::ulg,
+    opt_len: &mut crate::zutil_h::ulg,
+    matches: &mut crate::stdlib::uInt,
+    sym_next: &mut crate::stdlib::uInt,
+    bi_buf: &mut crate::zutil_h::ush,
+    bi_valid: &mut ::core::ffi::c_int,
+    bi_used: &mut ::core::ffi::c_int,
+) -> crate::stdlib::uLong {
+    *pending = 0;
+    *pending_out = 0;
+    if *wrap < 0 {
+        *wrap = -*wrap;
     }
-    (*strm).total_out = 0 as crate::stdlib::uLong;
-    (*strm).total_in = (*strm).total_out;
-    (*strm).msg = ::core::ptr::null_mut::<::core::ffi::c_char>();
-    (*strm).data_type = crate::zlib_h::Z_UNKNOWN;
-    s = (*strm).state as *mut crate::src::deflate::deflate_state;
-    (*s).pending = 0 as crate::zutil_h::ulg;
-    (*s).pending_out = 0;
-    if (*s).wrap < 0 as ::core::ffi::c_int {
-        (*s).wrap = -(*s).wrap;
-    }
-    (*s).status = if (*s).wrap == 2 as ::core::ffi::c_int {
+    *status = if *wrap == 2 {
         crate::src::deflate::GZIP_STATE
     } else {
         crate::src::deflate::INIT_STATE
     };
-    (*strm).adler = if (*s).wrap == 2 as ::core::ffi::c_int {
-        crate::src::crc32::crc32_z(0 as crate::stdlib::uLong, None)
-    } else {
-        crate::src::adler32::adler32_z(0 as crate::stdlib::uLong, None)
-    };
-    (*s).last_flush = -2 as ::core::ffi::c_int;
-    let state = &mut *s;
+    *last_flush = -2;
     crate::src::trees::tr_init(
+        dyn_ltree, dyn_dtree, bl_tree, l_desc, d_desc, bl_desc, static_len, opt_len, matches,
+        sym_next, bi_buf, bi_valid, bi_used,
+    );
+    if *wrap == 2 {
+        crate::src::crc32::crc32_z(0, None)
+    } else {
+        crate::src::adler32::adler32_z(0, None)
+    }
+}
+
+pub unsafe extern "C" fn deflateResetKeep(
+    mut strm: crate::zlib_h::z_streamp,
+) -> ::core::ffi::c_int {
+    if deflateStateCheck(strm) != 0 {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    }
+    let strm = &mut *strm;
+    strm.total_out = 0;
+    strm.total_in = 0;
+    strm.msg = ::core::ptr::null_mut::<::core::ffi::c_char>();
+    strm.data_type = crate::zlib_h::Z_UNKNOWN;
+    let state = &mut *(strm.state as *mut crate::src::deflate::deflate_state);
+    strm.adler = reset_keep_core(
+        &mut state.pending,
+        &mut state.pending_out,
+        &mut state.wrap,
+        &mut state.status,
+        &mut state.last_flush,
         &mut state.dyn_ltree,
         &mut state.dyn_dtree,
         &mut state.bl_tree,
