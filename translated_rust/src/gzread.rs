@@ -82,27 +82,6 @@ struct GzReadRequest {
     policy: GzReadPolicy,
 }
 
-// Allocate the read side's paired buffers before changing the ABI-shaped
-// state.  The eventual gzip owner can take this transaction directly, while
-// this boundary still performs the existing stream/cursor projection.
-struct GzReadBuffers {
-    input: Box<[u8]>,
-    output: Box<[u8]>,
-    size: ::core::ffi::c_uint,
-}
-
-impl GzReadBuffers {
-    fn allocate(want: ::core::ffi::c_uint) -> Option<Self> {
-        let input = crate::src::gzlib::gz_buffer(want)?;
-        let output = crate::src::gzlib::gz_buffer(want << 1)?;
-        Some(Self {
-            input,
-            output,
-            size: want,
-        })
-    }
-}
-
 impl GzReadPolicy {
     fn accepts_read(&self) -> bool {
         self.mode == crate::gzguts_h::GZ_READ
@@ -712,7 +691,7 @@ fn gz_decomp_loop(
 
 unsafe fn gz_look(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
     if state.buffers.size == 0 as ::core::ffi::c_uint {
-        let Some(buffers) = GzReadBuffers::allocate(state.want) else {
+        let Some(buffers) = crate::gzguts_h::GzBuffers::allocate_read(state.want) else {
             crate::src::gzlib::GzErrorState {
                 message: &mut state.msg,
                 error: &mut state.err,
@@ -723,9 +702,7 @@ unsafe fn gz_look(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
             .set(crate::zlib_h::Z_MEM_ERROR, Some(b"out of memory"));
             return -1 as ::core::ffi::c_int;
         };
-        state.buffers.input = Some(buffers.input);
-        state.buffers.output = Some(buffers.output);
-        state.buffers.size = buffers.size;
+        state.buffers = buffers;
         state.strm.zalloc = None;
         state.strm.zfree = None;
         state.strm.opaque = ::core::ptr::null_mut::<::core::ffi::c_void>();
@@ -738,9 +715,7 @@ unsafe fn gz_look(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
             ::core::mem::size_of::<crate::zlib_h::z_stream>() as ::core::ffi::c_int,
         ) != crate::zlib_h::Z_OK
         {
-            state.buffers.output = None;
-            state.buffers.input = None;
-            state.buffers.size = 0 as ::core::ffi::c_uint;
+            state.buffers.clear();
             crate::src::gzlib::GzErrorState {
                 message: &mut state.msg,
                 error: &mut state.err,

@@ -61,6 +61,31 @@ pub use crate::zlib_h::Z_MEM_ERROR;
 pub use crate::zlib_h::Z_OK;
 pub use crate::zlib_h::Z_RLE;
 
+impl crate::gzguts_h::GzBuffers {
+    // Allocate gzip read storage as one owner transaction.  Keeping the
+    // paired buffers together ensures that a failed second allocation drops
+    // the first immediately, and lets read initialization publish the owner
+    // in one assignment before projecting ABI cursors.
+    pub(crate) fn allocate_read(want: ::core::ffi::c_uint) -> Option<Self> {
+        let input = gz_buffer(want)?;
+        let output = gz_buffer(want << 1)?;
+        Some(Self {
+            size: want,
+            input: Some(input),
+            output: Some(output),
+        })
+    }
+
+    // Reset the complete allocation transaction after codec initialization
+    // fails.  Do not leave one side of the paired owner installed: later
+    // retries must follow the same allocation path as a fresh handle.
+    pub(crate) fn clear(&mut self) {
+        self.input = None;
+        self.output = None;
+        self.size = 0;
+    }
+}
+
 // This is the scalar portion of a gzip handle that position queries need.
 // Keep it pointer-free so the query rules can move out of the ABI state before
 // the resource-owning gzip facade is introduced.
