@@ -133,14 +133,11 @@ pub unsafe extern "C" fn zcalloc(
     mut items: ::core::ffi::c_uint,
     mut size: ::core::ffi::c_uint,
 ) -> crate::stdlib::voidpf {
-    return if ::core::mem::size_of::<crate::stdlib::uInt>() > 2 as usize {
-        crate::stdlib::malloc(items.wrapping_mul(size) as crate::__stddef_size_t_h::size_t)
-    } else {
-        crate::stdlib::calloc(
-            items as crate::__stddef_size_t_h::size_t,
-            size as crate::__stddef_size_t_h::size_t,
-        )
-    };
+    // `uInt` is the ABI's fixed-width `u32`, so this is the translated C
+    // branch selected on every supported target.  Keep its wrapping product
+    // and allocation semantics, without retaining the unreachable calloc
+    // branch as an extra foreign call in the implementation.
+    crate::stdlib::malloc(items.wrapping_mul(size) as crate::__stddef_size_t_h::size_t)
 }
 #[export_name = "zcalloc"]
 
