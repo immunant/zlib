@@ -114,8 +114,15 @@ macro_rules! compress2_z_at_boundary {
                 };
                 sourceLen = sourceLen.wrapping_sub(stream.avail_in as crate::stdlib::z_size_t);
             }
+            let input_len = stream.avail_in as usize;
+            let mut input = if input_len == 0 {
+                &[]
+            } else {
+                ::core::slice::from_raw_parts(stream.next_in, input_len)
+            };
             err = crate::src::deflate::deflate(
                 &mut stream,
+                &mut input,
                 if sourceLen != 0 {
                     crate::zlib_h::Z_NO_FLUSH
                 } else {

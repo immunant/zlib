@@ -250,7 +250,16 @@ macro_rules! gz_comp_at_boundary {
                     }
                 }
                 let have = state_ref.strm.avail_out;
-                ret = crate::src::deflate::deflate(&mut state_ref.strm, flush);
+                let input_len = state_ref.strm.avail_in as usize;
+                if input_len != 0 && state_ref.strm.next_in.is_null() {
+                    break 'gz_comp_result -1;
+                }
+                let mut input = if input_len == 0 {
+                    &[]
+                } else {
+                    ::core::slice::from_raw_parts(state_ref.strm.next_in, input_len)
+                };
+                ret = crate::src::deflate::deflate(&mut state_ref.strm, &mut input, flush);
                 match crate::src::gzwrite::gz_comp_after_deflate(
                     have,
                     state_ref.strm.avail_out,
