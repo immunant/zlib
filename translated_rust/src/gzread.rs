@@ -809,15 +809,16 @@ macro_rules! gzgetc_body {
             return -1 as ::core::ffi::c_int;
         }
         state = $file as crate::gzguts_h::gz_statep;
-        if !gz_read_state_ready(&*state) {
+        let state = &mut *state;
+        if !gz_read_state_ready(state) {
             return -1 as ::core::ffi::c_int;
         }
-        let buffered = if (*state).x.have != 0 {
-            Some(*(*state).x.next)
+        let buffered = if state.x.have != 0 {
+            Some(*state.x.next)
         } else {
             None
         };
-        gzgetc_impl(&mut *state, buffered, &mut buf)
+        gzgetc_impl(state, buffered, &mut buf)
     }};
 }
 
@@ -926,36 +927,33 @@ pub unsafe extern "C" fn gzungetc_ffi(
         return -1 as ::core::ffi::c_int;
     }
     state = file as crate::gzguts_h::gz_statep;
-    if (*state).mode != crate::gzguts_h::GZ_READ {
+    let state = &mut *state;
+    if state.mode != crate::gzguts_h::GZ_READ {
         return -1 as ::core::ffi::c_int;
     }
-    if (*state).how == crate::gzguts_h::LOOK && (*state).x.have == 0 as ::core::ffi::c_uint {
-        gz_look(&mut *state);
+    if state.how == crate::gzguts_h::LOOK && state.x.have == 0 as ::core::ffi::c_uint {
+        gz_look(state);
     }
-    if !gz_read_state_ready(&*state) {
+    if !gz_read_state_ready(state) {
         return -1 as ::core::ffi::c_int;
     }
-    crate::src::gzlib::gz_error_clear(&mut *state, crate::zlib_h::Z_OK);
-    {
-        let state_ref = &mut *state;
-        if state_ref.skip != 0 && gz_skip(state_ref) == -1 as ::core::ffi::c_int {
-            return -1 as ::core::ffi::c_int;
-        }
+    crate::src::gzlib::gz_error_clear(state, crate::zlib_h::Z_OK);
+    if state.skip != 0 && gz_skip(state) == -1 as ::core::ffi::c_int {
+        return -1 as ::core::ffi::c_int;
     }
     if c < 0 as ::core::ffi::c_int {
         return -1 as ::core::ffi::c_int;
     }
-    let state_ref = &mut *state;
-    let next_index = if state_ref.x.have == 0 {
+    let next_index = if state.x.have == 0 {
         0
     } else {
-        state_ref.x.next.offset_from(state_ref.out) as usize
+        state.x.next.offset_from(state.out) as usize
     };
     let out = ::core::slice::from_raw_parts_mut(
-        state_ref.out as *mut crate::stdlib::Bytef,
-        (state_ref.size << 1 as ::core::ffi::c_int) as usize,
+        state.out as *mut crate::stdlib::Bytef,
+        (state.size << 1 as ::core::ffi::c_int) as usize,
     );
-    gzungetc_impl(state_ref, out, next_index, c)
+    gzungetc_impl(state, out, next_index, c)
 }
 #[export_name = "gzgets"]
 pub unsafe extern "C" fn gzgets_ffi(
@@ -1026,11 +1024,11 @@ pub unsafe extern "C" fn gzdirect_ffi(mut file: crate::zlib_h::gzFile) -> ::core
     if file.is_null() {
         return 0 as ::core::ffi::c_int;
     }
-    let state = file as crate::gzguts_h::gz_statep;
-    if gz_direct_needs_look(&*state) {
-        gz_look(&mut *state);
+    let state = &mut *(file as crate::gzguts_h::gz_statep);
+    if gz_direct_needs_look(state) {
+        gz_look(state);
     }
-    gzdirect(&*state)
+    gzdirect(state)
 }
 #[export_name = "gzclose_r"]
 pub unsafe extern "C" fn gzclose_r_ffi(mut file: crate::zlib_h::gzFile) -> ::core::ffi::c_int {

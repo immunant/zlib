@@ -2243,36 +2243,26 @@ pub unsafe extern "C" fn deflateEnd_ffi(mut strm: crate::zlib_h::z_streamp) -> :
     if deflate_state_check_raw!(strm) != 0 {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    status = (*(*strm).state).status;
-    if !(*(*strm).state).pending_buf.is_null() {
-        Some((*strm).zfree.expect("non-null function pointer")).expect("non-null function pointer")(
-            (*strm).opaque,
-            (*(*strm).state).pending_buf as crate::stdlib::voidpf,
-        );
+    let strm_ref = &mut *strm;
+    let state_ptr = strm_ref.state;
+    let state = &mut *state_ptr;
+    let zfree = strm_ref.zfree.expect("non-null function pointer");
+    let opaque = strm_ref.opaque;
+    status = state.status;
+    if !state.pending_buf.is_null() {
+        zfree(opaque, state.pending_buf as crate::stdlib::voidpf);
     }
-    if !(*(*strm).state).head.is_null() {
-        Some((*strm).zfree.expect("non-null function pointer")).expect("non-null function pointer")(
-            (*strm).opaque,
-            (*(*strm).state).head as crate::stdlib::voidpf,
-        );
+    if !state.head.is_null() {
+        zfree(opaque, state.head as crate::stdlib::voidpf);
     }
-    if !(*(*strm).state).prev.is_null() {
-        Some((*strm).zfree.expect("non-null function pointer")).expect("non-null function pointer")(
-            (*strm).opaque,
-            (*(*strm).state).prev as crate::stdlib::voidpf,
-        );
+    if !state.prev.is_null() {
+        zfree(opaque, state.prev as crate::stdlib::voidpf);
     }
-    if !(*(*strm).state).window.is_null() {
-        Some((*strm).zfree.expect("non-null function pointer")).expect("non-null function pointer")(
-            (*strm).opaque,
-            (*(*strm).state).window as crate::stdlib::voidpf,
-        );
+    if !state.window.is_null() {
+        zfree(opaque, state.window as crate::stdlib::voidpf);
     }
-    Some((*strm).zfree.expect("non-null function pointer")).expect("non-null function pointer")(
-        (*strm).opaque,
-        (*strm).state as crate::stdlib::voidpf,
-    );
-    (*strm).state = ::core::ptr::null_mut::<crate::src::deflate::internal_state>();
+    zfree(opaque, state_ptr as crate::stdlib::voidpf);
+    strm_ref.state = ::core::ptr::null_mut::<crate::src::deflate::internal_state>();
     return if status == crate::src::deflate::BUSY_STATE {
         crate::zlib_h::Z_DATA_ERROR
     } else {
@@ -2362,7 +2352,9 @@ pub unsafe extern "C" fn deflateCopy_ffi(
         dest_head.copy_from_slice(source_head);
     }
     (*ds).pending_out_offset = (*ss).pending_out_offset;
-    (*ds).pending_out = (*ds).pending_buf.offset((*ds).pending_out_offset as isize);
+    (*ds).pending_out = (*ds)
+        .pending_buf
+        .wrapping_add((*ds).pending_out_offset as usize);
     {
         let pending_start = (*ss).pending_out_offset as usize;
         let pending_end = pending_start + (*ss).pending as usize;
@@ -2376,7 +2368,7 @@ pub unsafe extern "C" fn deflateCopy_ffi(
         );
     }
     (*ds).sym_buf =
-        (*ds).pending_buf.offset((*ds).lit_bufsize as isize) as *mut crate::zutil_h::uchf;
+        (*ds).pending_buf.wrapping_add((*ds).lit_bufsize as usize) as *mut crate::zutil_h::uchf;
     {
         let sym_start = (*ss).lit_bufsize as usize;
         let sym_end = sym_start + (*ss).sym_next as usize;
