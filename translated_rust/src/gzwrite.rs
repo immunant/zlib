@@ -15,7 +15,8 @@ pub use crate::src::deflate::deflate;
 pub use crate::src::deflate::deflateEnd;
 pub use crate::src::deflate::deflateInit2_;
 pub use crate::src::deflate::deflateParams;
-pub use crate::src::deflate::deflateReset;
+use crate::src::deflate::deflate_reset_keep_from_stream;
+use crate::src::deflate::DeflateResetKind;
 pub use crate::src::deflate::internal_state;
 pub use crate::stdlib::uInt;
 pub use crate::stdlib::uLong;
@@ -331,7 +332,7 @@ unsafe fn gz_comp(
         if state.strm.avail_in == 0 as crate::stdlib::uInt && flush == crate::zlib_h::Z_NO_FLUSH {
             return 0 as ::core::ffi::c_int;
         }
-        crate::src::deflate::deflateReset(&mut state.strm);
+        deflate_reset_keep_from_stream(&mut state.strm, DeflateResetKind::Full);
         state.reset = 0 as ::core::ffi::c_int;
     }
     ret = crate::zlib_h::Z_OK;

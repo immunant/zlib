@@ -1867,7 +1867,7 @@ fn deflateResetKeep(owner: DeflateResetKeepOwner<'_>) -> crate::stdlib::uLong {
 // Keep both phases under one stream/state projection: reopening `strm.state`
 // after the keep reset would create a second raw-state transaction for the
 // full reset.
-enum DeflateResetKind {
+pub(crate) enum DeflateResetKind {
     Keep,
     Full,
 }
@@ -1875,7 +1875,7 @@ enum DeflateResetKind {
 // The FFI wrapper validates and borrows the stream handle.  This adapter owns
 // the opaque-state projection and stream publication, leaving both reset
 // cores free of raw-pointer-carrying types.
-unsafe fn deflate_reset_keep_from_stream(
+pub(crate) unsafe fn deflate_reset_keep_from_stream(
     strm: &mut crate::zlib_h::z_stream_s,
     kind: DeflateResetKind,
 ) -> ::core::ffi::c_int {
@@ -1947,12 +1947,6 @@ pub unsafe extern "C" fn deflateResetKeep_ffi(
     };
     deflate_reset_keep_from_stream(strm, DeflateResetKind::Keep)
 }
-// As with `deflateResetKeep`, the raw stream handle belongs exclusively to
-// the export wrapper.  The complete reset remains in the same state/table
-// projection as the common keep-reset phase.
-pub unsafe fn deflateReset(strm: &mut crate::zlib_h::z_stream_s) -> ::core::ffi::c_int {
-    deflate_reset_keep_from_stream(strm, DeflateResetKind::Full)
-}
 #[export_name = "deflateReset"]
 
 pub unsafe extern "C" fn deflateReset_ffi(
@@ -1961,7 +1955,7 @@ pub unsafe extern "C" fn deflateReset_ffi(
     let Some(strm) = strm.as_mut() else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
-    deflateReset(strm)
+    deflate_reset_keep_from_stream(strm, DeflateResetKind::Full)
 }
 // Header registration is ordinary owned-state policy once the ABI header has
 // been copied.  Keeping the mode check and replacement here lets the boundary
