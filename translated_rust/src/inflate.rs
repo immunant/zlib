@@ -2384,6 +2384,27 @@ pub(crate) use inflate_end_at_boundary;
 pub unsafe extern "C" fn inflateEnd_ffi(mut strm: crate::zlib_h::z_streamp) -> ::core::ffi::c_int {
     inflate_end_at_boundary!(strm)
 }
+
+/// Copy the logical inflate dictionary out of its circular history buffer.
+///
+/// The ABI wrapper validates and lends both buffers for this call.  Keeping
+/// the wraparound arithmetic here makes the two copies bounds-checked slice
+/// operations instead of pointer offsets at the boundary.
+fn inflate_dictionary_copy(
+    window: &[crate::stdlib::Byte],
+    wnext: usize,
+    whave: usize,
+    dictionary: &mut [crate::stdlib::Byte],
+) -> Option<()> {
+    if whave > window.len() || wnext > whave || dictionary.len() != whave {
+        return None;
+    }
+    let (tail, head) = dictionary.split_at_mut(whave.checked_sub(wnext)?);
+    tail.copy_from_slice(window.get(wnext..whave)?);
+    head.copy_from_slice(window.get(..wnext)?);
+    Some(())
+}
+
 #[export_name = "inflateGetDictionary"]
 pub unsafe extern "C" fn inflateGetDictionary_ffi(
     mut strm: crate::zlib_h::z_streamp,
@@ -2397,18 +2418,23 @@ pub unsafe extern "C" fn inflateGetDictionary_ffi(
     }
     state = (*strm).state as *mut crate::src::inflate::inflate_state;
     if (*state).whave != 0 && !dictionary.is_null() {
-        crate::stdlib::memcpy(
-            dictionary as *mut ::core::ffi::c_void,
-            (*state).window.offset((*state).wnext as isize) as *const ::core::ffi::c_void,
-            (*state).whave.wrapping_sub((*state).wnext) as crate::__stddef_size_t_h::size_t,
-        );
-        crate::stdlib::memcpy(
-            dictionary
-                .offset((*state).whave as isize)
-                .offset(-((*state).wnext as isize)) as *mut ::core::ffi::c_void,
-            (*state).window as *const ::core::ffi::c_void,
-            (*state).wnext as crate::__stddef_size_t_h::size_t,
-        );
+        let Ok(window_len) = usize::try_from((*state).wsize) else {
+            return crate::zlib_h::Z_STREAM_ERROR;
+        };
+        let Ok(wnext) = usize::try_from((*state).wnext) else {
+            return crate::zlib_h::Z_STREAM_ERROR;
+        };
+        let Ok(whave) = usize::try_from((*state).whave) else {
+            return crate::zlib_h::Z_STREAM_ERROR;
+        };
+        if (*state).window.is_null() {
+            return crate::zlib_h::Z_STREAM_ERROR;
+        }
+        let window = ::core::slice::from_raw_parts((*state).window, window_len);
+        let output = ::core::slice::from_raw_parts_mut(dictionary, whave);
+        if inflate_dictionary_copy(window, wnext, whave, output).is_none() {
+            return crate::zlib_h::Z_STREAM_ERROR;
+        }
     }
     if !dictLength.is_null() {
         *dictLength = (*state).whave as crate::stdlib::uInt;
