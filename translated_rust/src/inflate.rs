@@ -2488,14 +2488,27 @@ unsafe extern "C" fn syncsearch(
     mut buf: *const ::core::ffi::c_uchar,
     mut len: ::core::ffi::c_uint,
 ) -> ::core::ffi::c_uint {
+    let have = &mut *have;
+    let buf = if len == 0 {
+        &[]
+    } else {
+        ::core::slice::from_raw_parts(buf, len as usize)
+    };
+    syncsearch_bytes(have, buf)
+}
+
+fn syncsearch_bytes(
+    have: &mut ::core::ffi::c_uint,
+    buf: &[::core::ffi::c_uchar],
+) -> ::core::ffi::c_uint {
     let mut got = *have;
-    let mut next = 0 as ::core::ffi::c_uint;
-    while next < len && got < 4 as ::core::ffi::c_uint {
-        got = syncsearch_byte(got, *buf.offset(next as isize));
-        next = next.wrapping_add(1);
+    let mut next = 0usize;
+    while next < buf.len() && got < 4 as ::core::ffi::c_uint {
+        got = syncsearch_byte(got, buf[next]);
+        next += 1;
     }
     *have = got;
-    next
+    next as ::core::ffi::c_uint
 }
 pub unsafe extern "C" fn inflateSync(mut strm: crate::zlib_h::z_streamp) -> ::core::ffi::c_int {
     let mut len: ::core::ffi::c_uint = 0;
