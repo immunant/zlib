@@ -172,23 +172,41 @@ pub(crate) static INFLATE_ERROR_MESSAGES: [&[u8]; 18] = [
     b"invalid distance too far back\0",
 ];
 
+/// Validate the scalar portion of an inflate stream/state relationship.
+/// Pointer validation remains at the ABI adapter, while this core documents
+/// the complete set of modes accepted by zlib without pointer access.
+fn inflate_state_values_are_valid(
+    has_zalloc: bool,
+    has_zfree: bool,
+    state_matches_stream: bool,
+    mode: crate::src::inflate::inflate_mode,
+) -> bool {
+    has_zalloc
+        && has_zfree
+        && state_matches_stream
+        && (crate::src::inflate::HEAD..=crate::src::inflate::SYNC).contains(&mode)
+}
+
 unsafe extern "C" fn inflateStateCheck(mut strm: crate::zlib_h::z_streamp) -> ::core::ffi::c_int {
-    let mut state: *mut crate::src::inflate::inflate_state =
-        ::core::ptr::null_mut::<crate::src::inflate::inflate_state>();
-    if strm.is_null() || (*strm).zalloc.is_none() || (*strm).zfree.is_none() {
-        return 1 as ::core::ffi::c_int;
+    if strm.is_null() {
+        return 1;
     }
-    state = (*strm).state as *mut crate::src::inflate::inflate_state;
-    if state.is_null()
-        || (*state).strm != strm
-        || ((*state).mode as ::core::ffi::c_uint)
-            < crate::src::inflate::HEAD as ::core::ffi::c_int as ::core::ffi::c_uint
-        || (*state).mode as ::core::ffi::c_uint
-            > crate::src::inflate::SYNC as ::core::ffi::c_int as ::core::ffi::c_uint
-    {
-        return 1 as ::core::ffi::c_int;
+    let strm_ref = &*strm;
+    let state = strm_ref.state as *mut crate::src::inflate::inflate_state;
+    if state.is_null() {
+        return 1;
     }
-    return 0 as ::core::ffi::c_int;
+    let state = &*state;
+    if inflate_state_values_are_valid(
+        strm_ref.zalloc.is_some(),
+        strm_ref.zfree.is_some(),
+        state.strm == strm,
+        state.mode,
+    ) {
+        0
+    } else {
+        1
+    }
 }
 pub unsafe extern "C" fn inflateResetKeep(
     mut strm: crate::zlib_h::z_streamp,
