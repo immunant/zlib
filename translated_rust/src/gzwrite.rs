@@ -1693,9 +1693,7 @@ pub(crate) unsafe fn gzip_write_state_adapter(
                         },
                         |action| match action {
                             GzCompCodecAction::End => {
-                                crate::src::deflate::deflateEnd(::core::ptr::NonNull::from(
-                                    &mut *strm,
-                                ));
+                                crate::src::deflate::deflateEnd(&mut *strm);
                                 GzCompCodecResult::Complete
                             }
                             GzCompCodecAction::Reset => {

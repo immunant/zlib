@@ -6325,14 +6325,10 @@ pub unsafe extern "C" fn deflate_ffi(
         },
     )
 }
-// The callback-backed release transaction consumes a validated stream handle.
-// Embedded users (notably gzip close) can form that handle from their existing
-// stream borrow instead of reconstructing a raw stream pointer. The callback
-// provenance and every release remain together here.
-pub unsafe fn deflateEnd(
-    mut strm: ::core::ptr::NonNull<crate::zlib_h::z_stream_s>,
-) -> ::core::ffi::c_int {
-    let strm = strm.as_mut();
+// The callback-backed release transaction consumes the validated stream borrow
+// supplied by its ABI caller. The callback provenance and every release stay
+// in the owner; callers do not reconstruct or re-project the opaque state.
+pub unsafe fn deflateEnd(strm: &mut crate::zlib_h::z_stream_s) -> ::core::ffi::c_int {
     // Convert the opaque state before dispatching to the callback owner.  The
     // owner retains both the state allocation and all backing handles through
     // the complete matching-release transaction.
@@ -6346,7 +6342,7 @@ pub unsafe fn deflateEnd(
 #[export_name = "deflateEnd"]
 
 pub unsafe extern "C" fn deflateEnd_ffi(mut strm: crate::zlib_h::z_streamp) -> ::core::ffi::c_int {
-    let Some(strm) = ::core::ptr::NonNull::new(strm) else {
+    let Some(strm) = strm.as_mut() else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
     deflateEnd(strm)
