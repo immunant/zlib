@@ -781,12 +781,12 @@ impl WindowHistory {
     }
 }
 
-fn initial_window_metadata(wbits: ::core::ffi::c_uint) -> WindowMetadata {
-    WindowMetadata {
-        wsize: (1 as ::core::ffi::c_uint) << wbits,
+fn initial_window_metadata(wbits: ::core::ffi::c_uint) -> Option<WindowMetadata> {
+    Some(WindowMetadata {
+        wsize: (1 as ::core::ffi::c_uint).checked_shl(wbits)?,
         wnext: 0,
         whave: 0,
-    }
+    })
 }
 
 fn window_metadata_update_plan(
@@ -794,7 +794,7 @@ fn window_metadata_update_plan(
     wbits: ::core::ffi::c_uint,
 ) -> Option<WindowMetadata> {
     if current_wsize == 0 {
-        Some(initial_window_metadata(wbits))
+        initial_window_metadata(wbits)
     } else {
         None
     }
@@ -844,8 +844,8 @@ fn window_needs_allocation(ownership: WindowOwnership) -> bool {
 
 fn window_allocation_request(
     wbits: crate::stdlib::uInt,
-) -> (crate::stdlib::uInt, crate::stdlib::uInt) {
-    (1_u32 << wbits, 1)
+) -> Option<(crate::stdlib::uInt, crate::stdlib::uInt)> {
+    Some((1_u32.checked_shl(wbits)?, 1))
 }
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
@@ -860,12 +860,12 @@ enum WindowAllocationPlan {
 fn window_allocation_plan(
     ownership: WindowOwnership,
     wbits: crate::stdlib::uInt,
-) -> WindowAllocationPlan {
+) -> Option<WindowAllocationPlan> {
     if window_needs_allocation(ownership) {
-        let (items, size) = window_allocation_request(wbits);
-        WindowAllocationPlan::Allocate { items, size }
+        let (items, size) = window_allocation_request(wbits)?;
+        Some(WindowAllocationPlan::Allocate { items, size })
     } else {
-        WindowAllocationPlan::Existing
+        Some(WindowAllocationPlan::Existing)
     }
 }
 
@@ -1350,7 +1350,11 @@ fn update_window_core(
     window: &mut [crate::stdlib::Bytef],
     produced: &[crate::stdlib::Bytef],
 ) -> Option<()> {
-    let metadata = window_metadata_update_plan(*wsize, wbits);
+    let metadata = if *wsize == 0 {
+        Some(window_metadata_update_plan(*wsize, wbits)?)
+    } else {
+        None
+    };
     let expected_size = metadata.map(|metadata| metadata.wsize).unwrap_or(*wsize);
     if window.len() != expected_size as usize {
         return None;
@@ -1397,14 +1401,16 @@ fn update_window_slice_plan(
     wsize: ::core::ffi::c_uint,
     wbits: ::core::ffi::c_uint,
     copy: ::core::ffi::c_uint,
-) -> UpdateWindowSlicePlan {
-    let updated_wsize = window_metadata_update_plan(wsize, wbits)
-        .map(|metadata| metadata.wsize)
-        .unwrap_or(wsize);
-    UpdateWindowSlicePlan {
+) -> Option<UpdateWindowSlicePlan> {
+    let updated_wsize = if wsize == 0 {
+        window_metadata_update_plan(wsize, wbits)?.wsize
+    } else {
+        wsize
+    };
+    Some(UpdateWindowSlicePlan {
         window_len: update_window_buffer_len(updated_wsize),
         produced_len: update_window_produced_len(copy),
-    }
+    })
 }
 
 fn update_window_plan(
@@ -1412,17 +1418,17 @@ fn update_window_plan(
     wsize: ::core::ffi::c_uint,
     wbits: ::core::ffi::c_uint,
     copy: ::core::ffi::c_uint,
-) -> UpdateWindowPlan {
-    UpdateWindowPlan {
-        allocation: window_allocation_plan(ownership, wbits),
-        slices: update_window_slice_plan(wsize, wbits, copy),
-    }
+) -> Option<UpdateWindowPlan> {
+    Some(UpdateWindowPlan {
+        allocation: window_allocation_plan(ownership, wbits)?,
+        slices: update_window_slice_plan(wsize, wbits, copy)?,
+    })
 }
 
 fn update_window_state_plan(
     state: &crate::src::inflate::inflate_state,
     copy: ::core::ffi::c_uint,
-) -> UpdateWindowPlan {
+) -> Option<UpdateWindowPlan> {
     update_window_plan(
         WindowOwnership::normal_inflate(!state.window.is_null()),
         state.wsize,
@@ -1470,7 +1476,9 @@ fn updatewindow(
 ) -> ::core::ffi::c_int {
     unsafe {
         let state = &mut *((*strm).state as *mut crate::src::inflate::inflate_state);
-        let plan = update_window_state_plan(state, copy);
+        let Some(plan) = update_window_state_plan(state, copy) else {
+            return 1;
+        };
         if let Some((items, size)) = window_allocation_request_for_plan(plan.allocation) {
             state.window = Some((*strm).zalloc.expect("non-null function pointer"))
                 .expect("non-null function pointer")(
@@ -5131,19 +5139,19 @@ mod tests {
     fn initial_window_metadata_resets_history_positions() {
         assert_eq!(
             initial_window_metadata(8),
-            super::WindowMetadata {
+            Some(super::WindowMetadata {
                 wsize: 256,
                 wnext: 0,
                 whave: 0,
-            }
+            })
         );
         assert_eq!(
             initial_window_metadata(15),
-            super::WindowMetadata {
+            Some(super::WindowMetadata {
                 wsize: 32_768,
                 wnext: 0,
                 whave: 0,
-            }
+            })
         );
     }
 
@@ -5182,47 +5190,53 @@ mod tests {
 
     #[test]
     fn window_allocation_failure_requires_a_missing_allocated_window() {
-        let allocation = window_allocation_plan(WindowOwnership::Missing, 15);
+        let allocation = window_allocation_plan(WindowOwnership::Missing, 15).unwrap();
         assert!(window_allocation_failed(allocation, WindowOwnership::Missing));
         assert!(!window_allocation_failed(
             allocation,
             WindowOwnership::CallbackOwned
         ));
         assert!(!window_allocation_failed(
-            window_allocation_plan(WindowOwnership::CallerBorrowed, 15),
+            window_allocation_plan(WindowOwnership::CallerBorrowed, 15).unwrap(),
             WindowOwnership::CallerBorrowed
         ));
     }
 
     #[test]
     fn window_allocation_request_matches_supported_window_widths() {
-        assert_eq!(window_allocation_request(8), (256, 1));
-        assert_eq!(window_allocation_request(15), (32_768, 1));
+        assert_eq!(window_allocation_request(8), Some((256, 1)));
+        assert_eq!(window_allocation_request(15), Some((32_768, 1)));
+        assert_eq!(window_allocation_request(32), None);
+        assert_eq!(initial_window_metadata(32), None);
     }
 
     #[test]
     fn window_allocation_plan_distinguishes_existing_and_required_windows() {
         assert_eq!(
             window_allocation_plan(WindowOwnership::CallbackOwned, 15),
-            WindowAllocationPlan::Existing
+            Some(WindowAllocationPlan::Existing)
         );
         assert_eq!(
             window_allocation_plan(WindowOwnership::Missing, 8),
-            WindowAllocationPlan::Allocate {
+            Some(WindowAllocationPlan::Allocate {
                 items: 256,
                 size: 1,
-            }
+            })
         );
     }
 
     #[test]
     fn window_allocation_request_for_plan_preserves_allocation_branch() {
         assert_eq!(
-            window_allocation_request_for_plan(window_allocation_plan(WindowOwnership::Missing, 8)),
+            window_allocation_request_for_plan(
+                window_allocation_plan(WindowOwnership::Missing, 8).unwrap()
+            ),
             Some((256, 1))
         );
         assert_eq!(
-            window_allocation_request_for_plan(window_allocation_plan(WindowOwnership::CallbackOwned, 15)),
+            window_allocation_request_for_plan(
+                window_allocation_plan(WindowOwnership::CallbackOwned, 15).unwrap()
+            ),
             None
         );
     }
@@ -5332,6 +5346,21 @@ mod tests {
         );
         assert_eq!((wsize, wnext, whave), (8, 3, 5));
         assert_eq!(window, [0; 7]);
+    }
+
+    #[test]
+    fn window_update_core_rejects_an_unrepresentable_initial_width_without_mutation() {
+        let mut window = [0; 8];
+        let mut wsize = 0;
+        let mut wnext = 0;
+        let mut whave = 0;
+
+        assert_eq!(
+            update_window_core(32, &mut wsize, &mut wnext, &mut whave, &mut window, b"XY"),
+            None
+        );
+        assert_eq!((wsize, wnext, whave), (0, 0, 0));
+        assert_eq!(window, [0; 8]);
     }
 
     #[test]
@@ -5550,47 +5579,52 @@ mod tests {
     fn update_window_slice_plan_preserves_buffer_and_output_lengths() {
         assert_eq!(
             update_window_slice_plan(0, 3, 0),
-            super::UpdateWindowSlicePlan {
+            Some(super::UpdateWindowSlicePlan {
                 window_len: 8,
                 produced_len: None,
-            }
+            })
         );
         assert_eq!(
             update_window_slice_plan(8, 15, ::core::ffi::c_uint::MAX),
-            super::UpdateWindowSlicePlan {
+            Some(super::UpdateWindowSlicePlan {
                 window_len: 8,
                 produced_len: Some(::core::ffi::c_uint::MAX as usize),
-            }
+            })
         );
+        assert_eq!(update_window_slice_plan(0, 32, 0), None);
     }
 
     #[test]
     fn update_window_plan_combines_allocation_and_slice_decisions() {
         assert_eq!(
             super::update_window_plan(WindowOwnership::Missing, 0, 3, 5),
-            super::UpdateWindowPlan {
+            Some(super::UpdateWindowPlan {
                 allocation: WindowAllocationPlan::Allocate { items: 8, size: 1 },
                 slices: super::UpdateWindowSlicePlan {
                     window_len: 8,
                     produced_len: Some(5),
                 },
-            }
+            })
         );
         assert_eq!(
             super::update_window_plan(WindowOwnership::CallbackOwned, 8, 3, 0),
-            super::UpdateWindowPlan {
+            Some(super::UpdateWindowPlan {
                 allocation: WindowAllocationPlan::Existing,
                 slices: super::UpdateWindowSlicePlan {
                     window_len: 8,
                     produced_len: None,
                 },
-            }
+            })
+        );
+        assert_eq!(
+            super::update_window_plan(WindowOwnership::Missing, 0, 32, 0),
+            None
         );
     }
 
     #[test]
     fn update_window_slices_after_allocation_rejects_missing_new_window() {
-        let plan = super::update_window_plan(WindowOwnership::Missing, 0, 3, 5);
+        let plan = super::update_window_plan(WindowOwnership::Missing, 0, 3, 5).unwrap();
 
         assert_eq!(
             update_window_slices_after_allocation(plan, WindowOwnership::Missing),
@@ -5600,7 +5634,7 @@ mod tests {
 
     #[test]
     fn update_window_slices_after_allocation_preserves_ready_slice_lengths() {
-        let allocation_plan = super::update_window_plan(WindowOwnership::Missing, 0, 3, 5);
+        let allocation_plan = super::update_window_plan(WindowOwnership::Missing, 0, 3, 5).unwrap();
         assert_eq!(
             update_window_slices_after_allocation(
                 allocation_plan,
@@ -5612,7 +5646,8 @@ mod tests {
             })
         );
 
-        let existing_plan = super::update_window_plan(WindowOwnership::CallerBorrowed, 8, 3, 0);
+        let existing_plan =
+            super::update_window_plan(WindowOwnership::CallerBorrowed, 8, 3, 0).unwrap();
         assert_eq!(
             update_window_slices_after_allocation(existing_plan, WindowOwnership::CallerBorrowed),
             Ok(super::UpdateWindowSlicePlan {
