@@ -2108,10 +2108,7 @@ pub unsafe extern "C" fn inflate(
         (*strm).adler = (*state).check as crate::stdlib::uLong;
     }
     (*strm).data_type = inflate_data_type_value((*state).bits, (*state).last, (*state).mode);
-    if (in_0 == 0 as ::core::ffi::c_uint && out == 0 as ::core::ffi::c_uint
-        || flush == crate::zlib_h::Z_FINISH)
-        && ret == crate::zlib_h::Z_OK
-    {
+    if inflate_needs_buffer_error(in_0, out, flush, ret) {
         ret = crate::zlib_h::Z_BUF_ERROR;
     }
     return ret;
@@ -2301,6 +2298,16 @@ fn inflate_data_type_value(
         } else {
             0 as ::core::ffi::c_int
         })
+}
+
+fn inflate_needs_buffer_error(
+    consumed: ::core::ffi::c_uint,
+    produced: ::core::ffi::c_uint,
+    flush: ::core::ffi::c_int,
+    result: ::core::ffi::c_int,
+) -> bool {
+    (consumed == 0 && produced == 0 || flush == crate::zlib_h::Z_FINISH)
+        && result == crate::zlib_h::Z_OK
 }
 
 fn syncsearch_safe(have: &mut ::core::ffi::c_uint, buf: &[::core::ffi::c_uchar]) -> usize {
@@ -2639,7 +2646,8 @@ mod tests {
     use super::{
         apply_window_update, dynamic_header_counts, inflate_data_type_value,
         inflate_header_wrap_allows_capture, inflate_mark_value, inflate_mode_is_valid,
-        inflate_prime_update, inflate_reset2_params, inflate_state_metadata_is_valid,
+        inflate_needs_buffer_error, inflate_prime_update, inflate_reset2_params,
+        inflate_state_metadata_is_valid,
         inflate_sync_point_value, inflate_sync_search_core, inflate_validate_wrap,
         initial_window_metadata, syncsearch_safe, window_update_plan,
         InflatePrimeUpdate, InflateSyncSearch, BAD, CODE_LENGTH_ORDER, COPY_, COPY_1, HEAD, LEN_, MATCH,
@@ -2653,6 +2661,25 @@ mod tests {
         assert_eq!(inflate_data_type_value(5, 0, TYPE), 5 + 128);
         assert_eq!(inflate_data_type_value(5, 0, LEN_), 5 + 256);
         assert_eq!(inflate_data_type_value(5, 0, COPY_), 5 + 256);
+    }
+
+    #[test]
+    fn inflate_buffer_error_predicate_matches_progress_and_finish_rules() {
+        assert!(inflate_needs_buffer_error(0, 0, 0, crate::zlib_h::Z_OK));
+        assert!(!inflate_needs_buffer_error(1, 0, 0, crate::zlib_h::Z_OK));
+        assert!(!inflate_needs_buffer_error(0, 1, 0, crate::zlib_h::Z_OK));
+        assert!(inflate_needs_buffer_error(
+            1,
+            1,
+            crate::zlib_h::Z_FINISH,
+            crate::zlib_h::Z_OK
+        ));
+        assert!(!inflate_needs_buffer_error(
+            0,
+            0,
+            crate::zlib_h::Z_FINISH,
+            crate::zlib_h::Z_STREAM_END
+        ));
     }
 
     #[test]

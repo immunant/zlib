@@ -611,22 +611,27 @@ pub unsafe extern "C" fn gzopen64_ffi(
 ) -> crate::zlib_h::gzFile {
     gzopen64(path, mode)
 }
+fn gzdopen_has_valid_descriptor(fd: ::core::ffi::c_int) -> bool {
+    fd != -1 as ::core::ffi::c_int
+}
+
 pub unsafe extern "C" fn gzdopen(
     mut fd: ::core::ffi::c_int,
     mut mode: *const ::core::ffi::c_char,
 ) -> crate::zlib_h::gzFile {
     let mut path: *mut ::core::ffi::c_char = ::core::ptr::null_mut::<::core::ffi::c_char>();
     let mut gz: crate::zlib_h::gzFile = ::core::ptr::null_mut::<crate::zlib_h::gzFile_s>();
-    if fd == -1 as ::core::ffi::c_int || {
-        path = crate::stdlib::malloc(
-            (7 as crate::__stddef_size_t_h::size_t).wrapping_add(
-                (3 as crate::__stddef_size_t_h::size_t)
-                    .wrapping_mul(::core::mem::size_of::<::core::ffi::c_int>()
-                        as crate::__stddef_size_t_h::size_t),
-            ),
-        ) as *mut ::core::ffi::c_char;
-        path.is_null()
-    } {
+    if !gzdopen_has_valid_descriptor(fd) {
+        return ::core::ptr::null_mut::<crate::zlib_h::gzFile_s>();
+    }
+    path = crate::stdlib::malloc(
+        (7 as crate::__stddef_size_t_h::size_t).wrapping_add(
+            (3 as crate::__stddef_size_t_h::size_t)
+                .wrapping_mul(::core::mem::size_of::<::core::ffi::c_int>()
+                    as crate::__stddef_size_t_h::size_t),
+        ),
+    ) as *mut ::core::ffi::c_char;
+    if path.is_null() {
         return ::core::ptr::null_mut::<crate::zlib_h::gzFile_s>();
     }
     crate::stdlib::snprintf(
@@ -1078,7 +1083,8 @@ mod tests {
         gz_open_recorded_offset, gz_open_should_set_close_on_exec, gz_open_should_set_nonblocking,
         gz_parse_open_mode, gz_post_open_metadata, gz_prepare_open, gz_reset_core,
         gzbuffer_normalized_want, gzclearerr_core, gzerror_core, gzeof_core, gzeof_result,
-        gzoffset64_adjust_for_buffered_read, gzoffset64_result, gzrewind_request_is_valid,
+        gzdopen_has_valid_descriptor, gzoffset64_adjust_for_buffered_read, gzoffset64_result,
+        gzrewind_request_is_valid,
         gzseek_adjust_offset,
         gzseek_can_fast_forward, gzseek_clears_pending_skip, gzseek_error_allows_positioning,
         gzseek_fast_forward_lseek_offset, gzseek_fast_forward_reset,
@@ -1711,6 +1717,14 @@ mod tests {
         assert!(!gz_open_needs_open(-2));
         assert!(!gz_open_needs_open(0));
         assert!(!gz_open_needs_open(17));
+    }
+
+    #[test]
+    fn gzdopen_rejects_only_the_missing_descriptor_sentinel() {
+        assert!(!gzdopen_has_valid_descriptor(-1));
+        assert!(gzdopen_has_valid_descriptor(-2));
+        assert!(gzdopen_has_valid_descriptor(0));
+        assert!(gzdopen_has_valid_descriptor(17));
     }
 
     #[test]

@@ -2840,6 +2840,15 @@ fn code_type(type_0: crate::src::inftrees::codetype) -> Option<CodeType> {
     }
 }
 
+fn table_capacity_for_type(type_0: crate::src::inftrees::codetype) -> Option<usize> {
+    match type_0 {
+        CODES => Some(128),
+        LENS => Some(ENOUGH_LENS as usize),
+        DISTS => Some(ENOUGH_DISTS as usize),
+        _ => None,
+    }
+}
+
 fn table_entry_for_symbol(
     type_0: CodeType,
     symbol: u16,
@@ -3098,11 +3107,8 @@ pub unsafe extern "C" fn inflate_table_ffi(
         return -1;
     }
 
-    let table_capacity = match type_0 {
-        CODES => 128,
-        LENS => ENOUGH_LENS as usize,
-        DISTS => ENOUGH_DISTS as usize,
-        _ => return -1,
+    let Some(table_capacity) = table_capacity_for_type(type_0) else {
+        return -1;
     };
     let table_start = *table_out;
     if table_start.is_null() {
@@ -3158,6 +3164,18 @@ mod tests {
         assert_table_entry(table_entry_for_symbol(CodeType::Codes, 18, 7), 0, 7, 18);
         assert_table_entry(table_entry_for_symbol(CodeType::Codes, 19, 7), 96, 7, 0);
         assert!(table_entry_for_symbol(CodeType::Codes, 20, 7).is_none());
+    }
+
+    #[test]
+    fn table_capacity_for_type_accepts_known_table_kinds() {
+        assert_eq!(table_capacity_for_type(CODES), Some(128));
+        assert_eq!(table_capacity_for_type(LENS), Some(ENOUGH_LENS as usize));
+        assert_eq!(table_capacity_for_type(DISTS), Some(ENOUGH_DISTS as usize));
+    }
+
+    #[test]
+    fn table_capacity_for_type_rejects_unknown_table_kinds() {
+        assert_eq!(table_capacity_for_type(3), None);
     }
 
     #[test]
