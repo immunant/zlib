@@ -2332,27 +2332,26 @@ fn longest_match_in_buffers(
     )
 }
 
-unsafe extern "C" fn longest_match(
-    s: *mut crate::src::deflate::deflate_state,
+fn longest_match(
+    s: &mut crate::src::deflate::deflate_state,
     cur_match: crate::src::deflate::IPos,
 ) -> crate::stdlib::uInt {
-    let state = &mut *s;
-    let buffers = state.buffers.as_ref().expect("deflate buffers initialized");
+    let buffers = s.buffers.as_ref().expect("deflate buffers initialized");
     let (length, match_start) = longest_match_in_buffers(
         &buffers.window,
         &buffers.prev,
-        state.strstart,
-        state.lookahead,
-        state.prev_length,
-        state.max_chain_length,
-        state.good_match,
-        state.nice_match,
-        state.w_size,
-        state.w_mask,
+        s.strstart,
+        s.lookahead,
+        s.prev_length,
+        s.max_chain_length,
+        s.good_match,
+        s.nice_match,
+        s.w_size,
+        s.w_mask,
         cur_match,
     );
     if match_start != 0 {
-        state.match_start = match_start;
+        s.match_start = match_start;
     }
     length
 }
@@ -2664,182 +2663,104 @@ unsafe extern "C" fn deflate_stored(
 }
 
 unsafe extern "C" fn deflate_fast(
-    mut s: *mut crate::src::deflate::deflate_state,
+    s: *mut crate::src::deflate::deflate_state,
     strm: &mut crate::zlib_h::z_stream,
-    mut flush: ::core::ffi::c_int,
+    flush: ::core::ffi::c_int,
 ) -> block_state {
-    let mut hash_head: crate::src::deflate::IPos = 0;
-    let mut bflush: ::core::ffi::c_int = 0;
+    let s = &mut *s;
     loop {
-        if (*s).lookahead < crate::src::deflate::MIN_LOOKAHEAD as crate::stdlib::uInt {
-            fill_window(s, strm);
-            if (*s).lookahead < crate::src::deflate::MIN_LOOKAHEAD as crate::stdlib::uInt
+        if s.lookahead < crate::src::deflate::MIN_LOOKAHEAD as crate::stdlib::uInt {
+            fill_window(std::ptr::from_mut(s), strm);
+            if s.lookahead < crate::src::deflate::MIN_LOOKAHEAD as crate::stdlib::uInt
                 && flush == crate::zlib_h::Z_NO_FLUSH
             {
                 return need_more;
             }
-            if (*s).lookahead == 0 as crate::stdlib::uInt {
+            if s.lookahead == 0 as crate::stdlib::uInt {
                 break;
             }
         }
-        hash_head = NIL as crate::src::deflate::IPos;
-        if (*s).lookahead >= crate::zutil_h::MIN_MATCH as crate::stdlib::uInt {
-            hash_head = (&mut *s).insert_hash_at((*s).strstart);
+        let mut hash_head = NIL as crate::src::deflate::IPos;
+        if s.lookahead >= crate::zutil_h::MIN_MATCH as crate::stdlib::uInt {
+            hash_head = s.insert_hash_at(s.strstart);
         }
         if hash_head != NIL as crate::src::deflate::IPos
-            && ((*s).strstart as crate::src::deflate::IPos).wrapping_sub(hash_head)
-                <= (*s)
-                    .w_size
+            && (s.strstart as crate::src::deflate::IPos).wrapping_sub(hash_head)
+                <= s.w_size
                     .wrapping_sub(crate::src::deflate::MIN_LOOKAHEAD as crate::stdlib::uInt)
         {
-            (*s).match_length = longest_match(s, hash_head);
+            s.match_length = longest_match(s, hash_head);
         }
-        if (*s).match_length >= crate::zutil_h::MIN_MATCH as crate::stdlib::uInt {
-            let mut len: crate::zutil_h::uch =
-                (*s).match_length.wrapping_sub(3 as crate::stdlib::uInt) as crate::zutil_h::uch;
-            let mut dist: crate::zutil_h::ush =
-                (*s).strstart.wrapping_sub((*s).match_start) as crate::zutil_h::ush;
-            let c2rust_fresh44 = (*s).sym_next;
-            (*s).sym_next = (*s).sym_next.wrapping_add(1);
-            (&mut (*s).buffers)
-                .as_deref_mut()
-                .expect("deflate buffers initialized")
-                .sym_buf[c2rust_fresh44 as usize] =
-                dist as crate::zutil_h::uch as crate::zutil_h::uchf;
-            let c2rust_fresh45 = (*s).sym_next;
-            (*s).sym_next = (*s).sym_next.wrapping_add(1);
-            (&mut (*s).buffers)
-                .as_deref_mut()
-                .expect("deflate buffers initialized")
-                .sym_buf[c2rust_fresh45 as usize] =
-                (dist as ::core::ffi::c_int >> 8 as ::core::ffi::c_int) as crate::zutil_h::uch
-                    as crate::zutil_h::uchf;
-            let c2rust_fresh46 = (*s).sym_next;
-            (*s).sym_next = (*s).sym_next.wrapping_add(1);
-            (&mut (*s).buffers)
-                .as_deref_mut()
-                .expect("deflate buffers initialized")
-                .sym_buf[c2rust_fresh46 as usize] = len as crate::zutil_h::uchf;
-            dist = dist.wrapping_sub(1);
-            let length_code = crate::src::trees::_length_code[len as usize] as ::core::ffi::c_int;
-            let dist_code = crate::src::trees::_dist_code[if (dist as ::core::ffi::c_int)
-                < 256 as ::core::ffi::c_int
+        let bflush = if s.match_length >= crate::zutil_h::MIN_MATCH as crate::stdlib::uInt {
+            let len = s.match_length.wrapping_sub(3) as crate::zutil_h::uch;
+            let dist = s.strstart.wrapping_sub(s.match_start) as crate::zutil_h::ush;
+            let flush_block =
+                s.tally_symbol(dist as ::core::ffi::c_uint, len as ::core::ffi::c_uint) != 0;
+            s.lookahead = s.lookahead.wrapping_sub(s.match_length);
+            if s.match_length <= s.max_lazy_match
+                && s.lookahead >= crate::zutil_h::MIN_MATCH as crate::stdlib::uInt
             {
-                dist as usize
-            } else {
-                (256 as ::core::ffi::c_int
-                    + (dist as ::core::ffi::c_int >> 7 as ::core::ffi::c_int))
-                    as usize
-            }] as ::core::ffi::c_int;
-            (*s).dyn_ltree[(length_code
-                + crate::src::deflate::LITERALS
-                + 1 as ::core::ffi::c_int) as usize]
-                .fc
-                .freq = (*s).dyn_ltree[(length_code
-                + crate::src::deflate::LITERALS
-                + 1 as ::core::ffi::c_int) as usize]
-                .fc
-                .freq
-                .wrapping_add(1);
-            (*s).dyn_dtree[dist_code as usize].fc.freq =
-                (*s).dyn_dtree[dist_code as usize].fc.freq.wrapping_add(1);
-            bflush = ((*s).sym_next == (*s).sym_end) as ::core::ffi::c_int;
-            (*s).lookahead = (*s).lookahead.wrapping_sub((*s).match_length);
-            if (*s).match_length <= (*s).max_lazy_match
-                && (*s).lookahead >= crate::zutil_h::MIN_MATCH as crate::stdlib::uInt
-            {
-                (*s).match_length = (*s).match_length.wrapping_sub(1);
+                s.match_length = s.match_length.wrapping_sub(1);
                 loop {
-                    (*s).strstart = (*s).strstart.wrapping_add(1);
-                    hash_head = (&mut *s).insert_hash_at((*s).strstart);
-                    (*s).match_length = (*s).match_length.wrapping_sub(1);
-                    if (*s).match_length == 0 as crate::stdlib::uInt {
+                    s.strstart = s.strstart.wrapping_add(1);
+                    hash_head = s.insert_hash_at(s.strstart);
+                    s.match_length = s.match_length.wrapping_sub(1);
+                    if s.match_length == 0 as crate::stdlib::uInt {
                         break;
                     }
                 }
-                (*s).strstart = (*s).strstart.wrapping_add(1);
+                s.strstart = s.strstart.wrapping_add(1);
             } else {
-                (*s).strstart = (*s).strstart.wrapping_add((*s).match_length);
-                (*s).match_length = 0 as crate::stdlib::uInt;
-                (*s).ins_h = (&*s).buffers().window[(*s).strstart as usize] as crate::stdlib::uInt;
-                (*s).ins_h = ((*s).ins_h << (*s).hash_shift
-                    ^ (&*s).buffers().window[(*s).strstart.wrapping_add(1) as usize]
+                s.strstart = s.strstart.wrapping_add(s.match_length);
+                s.match_length = 0;
+                s.ins_h = s.buffers().window[s.strstart as usize] as crate::stdlib::uInt;
+                s.ins_h = (s.ins_h << s.hash_shift
+                    ^ s.buffers().window[s.strstart.wrapping_add(1) as usize]
                         as crate::stdlib::uInt)
-                    & (*s).hash_mask;
+                    & s.hash_mask;
             }
+            flush_block
         } else {
-            let mut cc: crate::zutil_h::uch =
-                (&*s).buffers().window[(*s).strstart as usize] as crate::zutil_h::uch;
-            let c2rust_fresh47 = (*s).sym_next;
-            (*s).sym_next = (*s).sym_next.wrapping_add(1);
-            (&mut (*s).buffers)
-                .as_deref_mut()
-                .expect("deflate buffers initialized")
-                .sym_buf[c2rust_fresh47 as usize] = 0 as crate::zutil_h::uchf;
-            let c2rust_fresh48 = (*s).sym_next;
-            (*s).sym_next = (*s).sym_next.wrapping_add(1);
-            (&mut (*s).buffers)
-                .as_deref_mut()
-                .expect("deflate buffers initialized")
-                .sym_buf[c2rust_fresh48 as usize] = 0 as crate::zutil_h::uchf;
-            let c2rust_fresh49 = (*s).sym_next;
-            (*s).sym_next = (*s).sym_next.wrapping_add(1);
-            (&mut (*s).buffers)
-                .as_deref_mut()
-                .expect("deflate buffers initialized")
-                .sym_buf[c2rust_fresh49 as usize] = cc as crate::zutil_h::uchf;
-            (*s).dyn_ltree[cc as usize].fc.freq =
-                (*s).dyn_ltree[cc as usize].fc.freq.wrapping_add(1);
-            bflush = ((*s).sym_next == (*s).sym_end) as ::core::ffi::c_int;
-            (*s).lookahead = (*s).lookahead.wrapping_sub(1);
-            (*s).strstart = (*s).strstart.wrapping_add(1);
-        }
-        if bflush != 0 {
-            encode_block!(s, 0);
-            (*s).block_start = (*s).strstart as ::core::ffi::c_long;
+            let cc = s.buffers().window[s.strstart as usize] as crate::zutil_h::uch;
+            let flush_block = s.tally_symbol(0, cc as ::core::ffi::c_uint) != 0;
+            s.lookahead = s.lookahead.wrapping_sub(1);
+            s.strstart = s.strstart.wrapping_add(1);
+            flush_block
+        };
+        if bflush {
+            encode_block_from_window(s, 0);
+            s.block_start = s.strstart as ::core::ffi::c_long;
             flush_pending(strm);
             if strm.avail_out == 0 as crate::stdlib::uInt {
-                return (if false {
-                    finish_started as ::core::ffi::c_int
-                } else {
-                    need_more as ::core::ffi::c_int
-                }) as block_state;
+                return need_more;
             }
         }
     }
-    (*s).insert = if (*s).strstart
+    s.insert = if s.strstart
         < (crate::zutil_h::MIN_MATCH - 1 as ::core::ffi::c_int) as crate::stdlib::uInt
     {
-        (*s).strstart
+        s.strstart
     } else {
         (crate::zutil_h::MIN_MATCH - 1 as ::core::ffi::c_int) as crate::stdlib::uInt
     };
     if flush == crate::zlib_h::Z_FINISH {
-        encode_block!(s, 1);
-        (*s).block_start = (*s).strstart as ::core::ffi::c_long;
+        encode_block_from_window(s, 1);
+        s.block_start = s.strstart as ::core::ffi::c_long;
         flush_pending(strm);
         if strm.avail_out == 0 as crate::stdlib::uInt {
-            return (if true {
-                finish_started as ::core::ffi::c_int
-            } else {
-                need_more as ::core::ffi::c_int
-            }) as block_state;
+            return finish_started;
         }
         return finish_done;
     }
-    if (*s).sym_next != 0 {
-        encode_block!(s, 0);
-        (*s).block_start = (*s).strstart as ::core::ffi::c_long;
+    if s.sym_next != 0 {
+        encode_block_from_window(s, 0);
+        s.block_start = s.strstart as ::core::ffi::c_long;
         flush_pending(strm);
         if strm.avail_out == 0 as crate::stdlib::uInt {
-            return (if false {
-                finish_started as ::core::ffi::c_int
-            } else {
-                need_more as ::core::ffi::c_int
-            }) as block_state;
+            return need_more;
         }
     }
-    return block_done;
+    block_done
 }
 
 macro_rules! insert_string {
