@@ -3612,16 +3612,13 @@ pub unsafe extern "C" fn _tr_flush_block_ffi(
     };
     tr_flush_block_impl(state, data_type, pending_buf, stored, stored_len, last);
 }
-#[export_name = "_tr_tally"]
 
-pub unsafe extern "C" fn _tr_tally_ffi(
-    mut s: *mut crate::src::deflate::deflate_state,
-    mut dist: ::core::ffi::c_uint,
-    mut lc: ::core::ffi::c_uint,
+fn tr_tally_impl(
+    state: &mut crate::src::deflate::deflate_state,
+    sym_buf: &mut [crate::stdlib::Bytef],
+    dist: ::core::ffi::c_uint,
+    lc: ::core::ffi::c_uint,
 ) -> ::core::ffi::c_int {
-    let state = &mut *s;
-    let original_dist = dist;
-    let sym_buf = ::core::slice::from_raw_parts_mut(state.sym_buf, state.sym_end as usize);
     append_sym_bytes(
         sym_buf,
         &mut state.sym_next,
@@ -3638,16 +3635,28 @@ pub unsafe extern "C" fn _tr_tally_ffi(
             0,
         );
     } else {
-        let codes = tr_tally_match_codes(original_dist, lc);
+        let codes = tr_tally_match_codes(dist, lc);
         tr_tally_update_counts(
             &mut state.dyn_ltree,
             &mut state.dyn_dtree,
             &mut state.matches,
-            original_dist,
+            dist,
             lc,
             codes.length_code,
             codes.dist_code,
         );
     }
-    return (state.sym_next == state.sym_end) as ::core::ffi::c_int;
+    (state.sym_next == state.sym_end) as ::core::ffi::c_int
+}
+
+#[export_name = "_tr_tally"]
+
+pub unsafe extern "C" fn _tr_tally_ffi(
+    mut s: *mut crate::src::deflate::deflate_state,
+    mut dist: ::core::ffi::c_uint,
+    mut lc: ::core::ffi::c_uint,
+) -> ::core::ffi::c_int {
+    let state = &mut *s;
+    let sym_buf = ::core::slice::from_raw_parts_mut(state.sym_buf, state.sym_end as usize);
+    tr_tally_impl(state, sym_buf, dist, lc)
 }
