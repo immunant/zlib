@@ -222,14 +222,14 @@ pub mod zlib_h {
     pub const Z_NULL: ::core::ffi::c_int = 0 as ::core::ffi::c_int;
 
     pub type in_func = Option<
-        unsafe extern "C" fn(
+        extern "C" fn(
             *mut ::core::ffi::c_void,
             *mut *mut ::core::ffi::c_uchar,
         ) -> ::core::ffi::c_uint,
     >;
 
     pub type out_func = Option<
-        unsafe extern "C" fn(
+        extern "C" fn(
             *mut ::core::ffi::c_void,
             *mut ::core::ffi::c_uchar,
             ::core::ffi::c_uint,
