@@ -376,16 +376,16 @@ fn slide_hash_entry(
     }) as crate::src::deflate::Pos as crate::src::deflate::Posf
 }
 
-unsafe extern "C" fn slide_hash(mut s: *mut crate::src::deflate::deflate_state) {
+unsafe fn slide_hash(s: &mut crate::src::deflate::deflate_state) {
     let mut n: ::core::ffi::c_uint = 0;
     let mut m: ::core::ffi::c_uint = 0;
     let mut p: *mut crate::src::deflate::Posf =
         ::core::ptr::null_mut::<crate::src::deflate::Posf>();
-    let mut wsize: crate::stdlib::uInt = (*s).w_size;
-    n = (*s).hash_size as ::core::ffi::c_uint;
-    p = (*s).head.offset(n as isize) as *mut crate::src::deflate::Posf;
+    let mut wsize: crate::stdlib::uInt = s.w_size;
+    n = s.hash_size as ::core::ffi::c_uint;
+    p = s.head.wrapping_add(n as usize) as *mut crate::src::deflate::Posf;
     loop {
-        p = p.offset(-1);
+        p = p.wrapping_sub(1);
         m = *p as ::core::ffi::c_uint;
         *p = slide_hash_entry(m, wsize);
         n = n.wrapping_sub(1);
@@ -394,9 +394,9 @@ unsafe extern "C" fn slide_hash(mut s: *mut crate::src::deflate::deflate_state) 
         }
     }
     n = wsize as ::core::ffi::c_uint;
-    p = (*s).prev.offset(n as isize) as *mut crate::src::deflate::Posf;
+    p = s.prev.wrapping_add(n as usize) as *mut crate::src::deflate::Posf;
     loop {
-        p = p.offset(-1);
+        p = p.wrapping_sub(1);
         m = *p as ::core::ffi::c_uint;
         *p = slide_hash_entry(m, wsize);
         n = n.wrapping_sub(1);
@@ -404,7 +404,7 @@ unsafe extern "C" fn slide_hash(mut s: *mut crate::src::deflate::deflate_state) 
             break;
         }
     }
-    (*s).slid = 1 as ::core::ffi::c_int;
+    s.slid = 1 as ::core::ffi::c_int;
 }
 
 fn deflate_hash_update(
@@ -441,7 +441,7 @@ unsafe extern "C" fn read_buf(
         (*strm).adler =
             crate::src::crc32::crc32_ffi((*strm).adler, buf, len as crate::stdlib::uInt);
     }
-    (*strm).next_in = (*strm).next_in.offset(len as isize);
+    (*strm).next_in = (*strm).next_in.wrapping_add(len as usize);
     (*strm).total_in = (*strm).total_in.wrapping_add(len as crate::stdlib::uLong);
     return len;
 }
@@ -472,18 +472,19 @@ unsafe extern "C" fn fill_window(mut s: *mut crate::src::deflate::deflate_state)
                     .wrapping_sub(crate::src::deflate::MIN_LOOKAHEAD as crate::stdlib::uInt),
             )
         {
+            let state = &mut *s;
             crate::stdlib::memcpy(
-                (*s).window as *mut ::core::ffi::c_void,
-                (*s).window.offset(wsize as isize) as *const ::core::ffi::c_void,
+                state.window as *mut ::core::ffi::c_void,
+                state.window.wrapping_add(wsize as usize) as *const ::core::ffi::c_void,
                 wsize.wrapping_sub(more) as crate::__stddef_size_t_h::size_t,
             );
-            (*s).match_start = (*s).match_start.wrapping_sub(wsize);
-            (*s).strstart = (*s).strstart.wrapping_sub(wsize);
-            (*s).block_start -= wsize as ::core::ffi::c_long;
-            if (*s).insert > (*s).strstart {
-                (*s).insert = (*s).strstart;
+            state.match_start = state.match_start.wrapping_sub(wsize);
+            state.strstart = state.strstart.wrapping_sub(wsize);
+            state.block_start -= wsize as ::core::ffi::c_long;
+            if state.insert > state.strstart {
+                state.insert = state.strstart;
             }
-            slide_hash(s);
+            slide_hash(state);
             more = more.wrapping_add(wsize as ::core::ffi::c_uint);
         }
         if (*(*s).strm).avail_in == 0 as crate::stdlib::uInt {
@@ -492,8 +493,8 @@ unsafe extern "C" fn fill_window(mut s: *mut crate::src::deflate::deflate_state)
         n = read_buf(
             (*s).strm,
             (*s).window
-                .offset((*s).strstart as isize)
-                .offset((*s).lookahead as isize),
+                .wrapping_add((*s).strstart as usize)
+                .wrapping_add((*s).lookahead as usize),
             more,
         );
         (*s).lookahead = (*s).lookahead.wrapping_add(n);
@@ -501,29 +502,29 @@ unsafe extern "C" fn fill_window(mut s: *mut crate::src::deflate::deflate_state)
             >= crate::zutil_h::MIN_MATCH as crate::stdlib::uInt
         {
             let mut str: crate::stdlib::uInt = (*s).strstart.wrapping_sub((*s).insert);
-            (*s).ins_h = *(*s).window.offset(str as isize) as crate::stdlib::uInt;
+            (*s).ins_h = *(*s).window.wrapping_add(str as usize) as crate::stdlib::uInt;
             (*s).ins_h = deflate_hash_update(
                 (*s).ins_h,
                 (*s).hash_shift,
                 (*s).hash_mask,
                 *(*s)
                     .window
-                    .offset(str.wrapping_add(1 as crate::stdlib::uInt) as isize),
+                    .wrapping_add(str.wrapping_add(1 as crate::stdlib::uInt) as usize),
             );
             while (*s).insert != 0 {
                 (*s).ins_h = deflate_hash_update(
                     (*s).ins_h,
                     (*s).hash_shift,
                     (*s).hash_mask,
-                    *(*s).window.offset(
+                    *(*s).window.wrapping_add(
                         str.wrapping_add(3 as crate::stdlib::uInt)
                             .wrapping_sub(1 as crate::stdlib::uInt)
-                            as isize,
+                            as usize,
                     ),
                 );
-                *(*s).prev.offset((str & (*s).w_mask) as isize) =
-                    *(*s).head.offset((*s).ins_h as isize);
-                *(*s).head.offset((*s).ins_h as isize) =
+                *(*s).prev.wrapping_add((str & (*s).w_mask) as usize) =
+                    *(*s).head.wrapping_add((*s).ins_h as usize);
+                *(*s).head.wrapping_add((*s).ins_h as usize) =
                     str as crate::src::deflate::Pos as crate::src::deflate::Posf;
                 str = str.wrapping_add(1);
                 (*s).insert = (*s).insert.wrapping_sub(1);
@@ -550,7 +551,7 @@ unsafe extern "C" fn fill_window(mut s: *mut crate::src::deflate::deflate_state)
                 init = crate::src::deflate::WIN_INIT as crate::zutil_h::ulg;
             }
             crate::stdlib::memset(
-                (*s).window.offset(curr as isize) as *mut ::core::ffi::c_void,
+                (*s).window.wrapping_add(curr as usize) as *mut ::core::ffi::c_void,
                 0 as ::core::ffi::c_int,
                 init as ::core::ffi::c_uint as crate::__stddef_size_t_h::size_t,
             );
@@ -565,7 +566,7 @@ unsafe extern "C" fn fill_window(mut s: *mut crate::src::deflate::deflate_state)
                 init = (*s).window_size.wrapping_sub((*s).high_water);
             }
             crate::stdlib::memset(
-                (*s).window.offset((*s).high_water as isize) as *mut ::core::ffi::c_void,
+                (*s).window.wrapping_add((*s).high_water as usize) as *mut ::core::ffi::c_void,
                 0 as ::core::ffi::c_int,
                 init as ::core::ffi::c_uint as crate::__stddef_size_t_h::size_t,
             );
@@ -1263,7 +1264,7 @@ pub unsafe extern "C" fn deflateParams_ffi(
     if (*s).level != level {
         if (*s).level == 0 as ::core::ffi::c_int && (*s).matches != 0 as crate::stdlib::uInt {
             if (*s).matches == 1 as crate::stdlib::uInt {
-                slide_hash(s);
+                slide_hash(&mut *s);
             } else {
                 *(*s)
                     .head
@@ -1653,8 +1654,8 @@ unsafe extern "C" fn flush_pending(mut strm: crate::zlib_h::z_streamp) {
         (*s).pending_out as *const ::core::ffi::c_void,
         len as crate::__stddef_size_t_h::size_t,
     );
-    (*strm).next_out = (*strm).next_out.offset(len as isize);
-    (*s).pending_out = (*s).pending_out.offset(len as isize);
+    (*strm).next_out = (*strm).next_out.wrapping_add(len as usize);
+    (*s).pending_out = (*s).pending_out.wrapping_add(len as usize);
     (*strm).total_out = (*strm).total_out.wrapping_add(len as crate::stdlib::uLong);
     (*strm).avail_out = (*strm).avail_out.wrapping_sub(len);
     (*s).pending = (*s).pending.wrapping_sub(len as crate::zutil_h::ulg);
@@ -2584,16 +2585,20 @@ unsafe extern "C" fn deflate_stored(
         let len_bytes = crate::src::trees::stored_block_len_bytes(len as crate::zutil_h::ulg);
         *(*s)
             .pending_buf
-            .offset((*s).pending.wrapping_sub(4 as crate::zutil_h::ulg) as isize) = len_bytes[0];
+            .wrapping_add((*s).pending.wrapping_sub(4 as crate::zutil_h::ulg) as usize) =
+            len_bytes[0];
         *(*s)
             .pending_buf
-            .offset((*s).pending.wrapping_sub(3 as crate::zutil_h::ulg) as isize) = len_bytes[1];
+            .wrapping_add((*s).pending.wrapping_sub(3 as crate::zutil_h::ulg) as usize) =
+            len_bytes[1];
         *(*s)
             .pending_buf
-            .offset((*s).pending.wrapping_sub(2 as crate::zutil_h::ulg) as isize) = len_bytes[2];
+            .wrapping_add((*s).pending.wrapping_sub(2 as crate::zutil_h::ulg) as usize) =
+            len_bytes[2];
         *(*s)
             .pending_buf
-            .offset((*s).pending.wrapping_sub(1 as crate::zutil_h::ulg) as isize) = len_bytes[3];
+            .wrapping_add((*s).pending.wrapping_sub(1 as crate::zutil_h::ulg) as usize) =
+            len_bytes[3];
         flush_pending((*s).strm);
         if left != 0 {
             if left > len {
@@ -2601,10 +2606,11 @@ unsafe extern "C" fn deflate_stored(
             }
             crate::stdlib::memcpy(
                 (*(*s).strm).next_out as *mut ::core::ffi::c_void,
-                (*s).window.offset((*s).block_start as isize) as *const ::core::ffi::c_void,
+                (*s).window.wrapping_offset((*s).block_start as isize)
+                    as *const ::core::ffi::c_void,
                 left as crate::__stddef_size_t_h::size_t,
             );
-            (*(*s).strm).next_out = (*(*s).strm).next_out.offset(left as isize);
+            (*(*s).strm).next_out = (*(*s).strm).next_out.wrapping_add(left as usize);
             (*(*s).strm).avail_out = (*(*s).strm).avail_out.wrapping_sub(left);
             (*(*s).strm).total_out = (*(*s).strm)
                 .total_out
@@ -2614,7 +2620,7 @@ unsafe extern "C" fn deflate_stored(
         }
         if len != 0 {
             read_buf((*s).strm, (*(*s).strm).next_out, len);
-            (*(*s).strm).next_out = (*(*s).strm).next_out.offset(len as isize);
+            (*(*s).strm).next_out = (*(*s).strm).next_out.wrapping_add(len as usize);
             (*(*s).strm).avail_out = (*(*s).strm).avail_out.wrapping_sub(len);
             (*(*s).strm).total_out = (*(*s).strm)
                 .total_out
