@@ -657,11 +657,8 @@ pub unsafe extern "C" fn gzdopen_ffi(
     gzdopen(fd, mode)
 }
 fn gzbuffer_normalized_want(size: ::core::ffi::c_uint) -> Option<::core::ffi::c_uint> {
-    if (size << 1 as ::core::ffi::c_int) < size {
-        None
-    } else {
-        Some(size.max(8 as ::core::ffi::c_uint))
-    }
+    size.checked_mul(2)?;
+    Some(size.max(8 as ::core::ffi::c_uint))
 }
 
 fn gzbuffer_core(
@@ -1267,6 +1264,17 @@ mod tests {
     #[test]
     fn gzbuffer_rejects_sizes_that_overflow_when_doubled() {
         assert_eq!(gzbuffer_normalized_want(::core::ffi::c_uint::MAX), None);
+    }
+
+    #[test]
+    fn gzbuffer_normalization_checks_doubling_boundary() {
+        let largest_doublable = ::core::ffi::c_uint::MAX / 2;
+
+        assert_eq!(
+            gzbuffer_normalized_want(largest_doublable),
+            Some(largest_doublable)
+        );
+        assert_eq!(gzbuffer_normalized_want(largest_doublable + 1), None);
     }
 
     #[test]
