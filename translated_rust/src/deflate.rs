@@ -2530,6 +2530,15 @@ fn literal_byte(
     window[strstart as usize] as crate::zutil_h::uch
 }
 
+fn block_start_bytes(
+    window: &[crate::stdlib::Bytef],
+    block_start: ::core::ffi::c_long,
+) -> Option<&[crate::stdlib::Bytef]> {
+    usize::try_from(block_start)
+        .ok()
+        .and_then(|start| window.get(start..))
+}
+
 pub const MAX_STORED: ::core::ffi::c_int = 65535 as ::core::ffi::c_int;
 
 fn stored_block_length_bytes(output: &mut [crate::stdlib::Bytef], len: ::core::ffi::c_uint) {
@@ -2866,12 +2875,9 @@ unsafe extern "C" fn deflate_fast(
         if bflush != 0 {
             crate::src::trees::_tr_flush_block(
                 s as *mut crate::src::deflate::internal_state,
-                if (*s).block_start >= 0 as ::core::ffi::c_long {
-                    (*s).window
-                        .offset((*s).block_start as ::core::ffi::c_uint as isize)
-                        as *mut crate::stdlib::charf
-                } else {
-                    ::core::ptr::null_mut::<crate::stdlib::charf>()
+                match block_start_bytes(window, (*s).block_start) {
+                    Some(bytes) => bytes.as_ptr() as *mut crate::stdlib::charf,
+                    None => ::core::ptr::null_mut::<crate::stdlib::charf>(),
                 },
                 ((*s).strstart as ::core::ffi::c_long - (*s).block_start) as crate::zutil_h::ulg,
                 0 as ::core::ffi::c_int,
@@ -2897,12 +2903,12 @@ unsafe extern "C" fn deflate_fast(
     if flush == crate::zlib_h::Z_FINISH {
         crate::src::trees::_tr_flush_block(
             s as *mut crate::src::deflate::internal_state,
-            if (*s).block_start >= 0 as ::core::ffi::c_long {
-                (*s).window
-                    .offset((*s).block_start as ::core::ffi::c_uint as isize)
-                    as *mut crate::stdlib::charf
-            } else {
-                ::core::ptr::null_mut::<crate::stdlib::charf>()
+            match block_start_bytes(
+                ::core::slice::from_raw_parts((*s).window, (*s).window_size as usize),
+                (*s).block_start,
+            ) {
+                Some(bytes) => bytes.as_ptr() as *mut crate::stdlib::charf,
+                None => ::core::ptr::null_mut::<crate::stdlib::charf>(),
             },
             ((*s).strstart as ::core::ffi::c_long - (*s).block_start) as crate::zutil_h::ulg,
             1 as ::core::ffi::c_int,
@@ -2921,12 +2927,12 @@ unsafe extern "C" fn deflate_fast(
     if (*s).sym_next != 0 {
         crate::src::trees::_tr_flush_block(
             s as *mut crate::src::deflate::internal_state,
-            if (*s).block_start >= 0 as ::core::ffi::c_long {
-                (*s).window
-                    .offset((*s).block_start as ::core::ffi::c_uint as isize)
-                    as *mut crate::stdlib::charf
-            } else {
-                ::core::ptr::null_mut::<crate::stdlib::charf>()
+            match block_start_bytes(
+                ::core::slice::from_raw_parts((*s).window, (*s).window_size as usize),
+                (*s).block_start,
+            ) {
+                Some(bytes) => bytes.as_ptr() as *mut crate::stdlib::charf,
+                None => ::core::ptr::null_mut::<crate::stdlib::charf>(),
             },
             ((*s).strstart as ::core::ffi::c_long - (*s).block_start) as crate::zutil_h::ulg,
             0 as ::core::ffi::c_int,
@@ -3030,12 +3036,9 @@ unsafe extern "C" fn deflate_slow(
             if bflush != 0 {
                 crate::src::trees::_tr_flush_block(
                     s as *mut crate::src::deflate::internal_state,
-                    if (*s).block_start >= 0 as ::core::ffi::c_long {
-                        (*s).window
-                            .offset((*s).block_start as ::core::ffi::c_uint as isize)
-                            as *mut crate::stdlib::charf
-                    } else {
-                        ::core::ptr::null_mut::<crate::stdlib::charf>()
+                    match block_start_bytes(window, (*s).block_start) {
+                        Some(bytes) => bytes.as_ptr() as *mut crate::stdlib::charf,
+                        None => ::core::ptr::null_mut::<crate::stdlib::charf>(),
                     },
                     ((*s).strstart as ::core::ffi::c_long - (*s).block_start)
                         as crate::zutil_h::ulg,
@@ -3057,12 +3060,9 @@ unsafe extern "C" fn deflate_slow(
             if bflush != 0 {
                 crate::src::trees::_tr_flush_block(
                     s as *mut crate::src::deflate::internal_state,
-                    if (*s).block_start >= 0 as ::core::ffi::c_long {
-                        (*s).window
-                            .offset((*s).block_start as ::core::ffi::c_uint as isize)
-                            as *mut crate::stdlib::charf
-                    } else {
-                        ::core::ptr::null_mut::<crate::stdlib::charf>()
+                    match block_start_bytes(window, (*s).block_start) {
+                        Some(bytes) => bytes.as_ptr() as *mut crate::stdlib::charf,
+                        None => ::core::ptr::null_mut::<crate::stdlib::charf>(),
                     },
                     ((*s).strstart as ::core::ffi::c_long - (*s).block_start)
                         as crate::zutil_h::ulg,
@@ -3101,12 +3101,12 @@ unsafe extern "C" fn deflate_slow(
     if flush == crate::zlib_h::Z_FINISH {
         crate::src::trees::_tr_flush_block(
             s as *mut crate::src::deflate::internal_state,
-            if (*s).block_start >= 0 as ::core::ffi::c_long {
-                (*s).window
-                    .offset((*s).block_start as ::core::ffi::c_uint as isize)
-                    as *mut crate::stdlib::charf
-            } else {
-                ::core::ptr::null_mut::<crate::stdlib::charf>()
+            match block_start_bytes(
+                ::core::slice::from_raw_parts((*s).window, (*s).window_size as usize),
+                (*s).block_start,
+            ) {
+                Some(bytes) => bytes.as_ptr() as *mut crate::stdlib::charf,
+                None => ::core::ptr::null_mut::<crate::stdlib::charf>(),
             },
             ((*s).strstart as ::core::ffi::c_long - (*s).block_start) as crate::zutil_h::ulg,
             1 as ::core::ffi::c_int,
@@ -3125,12 +3125,12 @@ unsafe extern "C" fn deflate_slow(
     if (*s).sym_next != 0 {
         crate::src::trees::_tr_flush_block(
             s as *mut crate::src::deflate::internal_state,
-            if (*s).block_start >= 0 as ::core::ffi::c_long {
-                (*s).window
-                    .offset((*s).block_start as ::core::ffi::c_uint as isize)
-                    as *mut crate::stdlib::charf
-            } else {
-                ::core::ptr::null_mut::<crate::stdlib::charf>()
+            match block_start_bytes(
+                ::core::slice::from_raw_parts((*s).window, (*s).window_size as usize),
+                (*s).block_start,
+            ) {
+                Some(bytes) => bytes.as_ptr() as *mut crate::stdlib::charf,
+                None => ::core::ptr::null_mut::<crate::stdlib::charf>(),
             },
             ((*s).strstart as ::core::ffi::c_long - (*s).block_start) as crate::zutil_h::ulg,
             0 as ::core::ffi::c_int,
@@ -3214,12 +3214,9 @@ unsafe extern "C" fn deflate_rle(
         if bflush != 0 {
             crate::src::trees::_tr_flush_block(
                 s as *mut crate::src::deflate::internal_state,
-                if (*s).block_start >= 0 as ::core::ffi::c_long {
-                    (*s).window
-                        .offset((*s).block_start as ::core::ffi::c_uint as isize)
-                        as *mut crate::stdlib::charf
-                } else {
-                    ::core::ptr::null_mut::<crate::stdlib::charf>()
+                match block_start_bytes(window, (*s).block_start) {
+                    Some(bytes) => bytes.as_ptr() as *mut crate::stdlib::charf,
+                    None => ::core::ptr::null_mut::<crate::stdlib::charf>(),
                 },
                 ((*s).strstart as ::core::ffi::c_long - (*s).block_start) as crate::zutil_h::ulg,
                 0 as ::core::ffi::c_int,
@@ -3239,12 +3236,12 @@ unsafe extern "C" fn deflate_rle(
     if flush == crate::zlib_h::Z_FINISH {
         crate::src::trees::_tr_flush_block(
             s as *mut crate::src::deflate::internal_state,
-            if (*s).block_start >= 0 as ::core::ffi::c_long {
-                (*s).window
-                    .offset((*s).block_start as ::core::ffi::c_uint as isize)
-                    as *mut crate::stdlib::charf
-            } else {
-                ::core::ptr::null_mut::<crate::stdlib::charf>()
+            match block_start_bytes(
+                ::core::slice::from_raw_parts((*s).window, (*s).window_size as usize),
+                (*s).block_start,
+            ) {
+                Some(bytes) => bytes.as_ptr() as *mut crate::stdlib::charf,
+                None => ::core::ptr::null_mut::<crate::stdlib::charf>(),
             },
             ((*s).strstart as ::core::ffi::c_long - (*s).block_start) as crate::zutil_h::ulg,
             1 as ::core::ffi::c_int,
@@ -3263,12 +3260,12 @@ unsafe extern "C" fn deflate_rle(
     if (*s).sym_next != 0 {
         crate::src::trees::_tr_flush_block(
             s as *mut crate::src::deflate::internal_state,
-            if (*s).block_start >= 0 as ::core::ffi::c_long {
-                (*s).window
-                    .offset((*s).block_start as ::core::ffi::c_uint as isize)
-                    as *mut crate::stdlib::charf
-            } else {
-                ::core::ptr::null_mut::<crate::stdlib::charf>()
+            match block_start_bytes(
+                ::core::slice::from_raw_parts((*s).window, (*s).window_size as usize),
+                (*s).block_start,
+            ) {
+                Some(bytes) => bytes.as_ptr() as *mut crate::stdlib::charf,
+                None => ::core::ptr::null_mut::<crate::stdlib::charf>(),
             },
             ((*s).strstart as ::core::ffi::c_long - (*s).block_start) as crate::zutil_h::ulg,
             0 as ::core::ffi::c_int,
@@ -3310,12 +3307,9 @@ unsafe extern "C" fn deflate_huff(
         if bflush != 0 {
             crate::src::trees::_tr_flush_block(
                 s as *mut crate::src::deflate::internal_state,
-                if (*s).block_start >= 0 as ::core::ffi::c_long {
-                    (*s).window
-                        .offset((*s).block_start as ::core::ffi::c_uint as isize)
-                        as *mut crate::stdlib::charf
-                } else {
-                    ::core::ptr::null_mut::<crate::stdlib::charf>()
+                match block_start_bytes(window, (*s).block_start) {
+                    Some(bytes) => bytes.as_ptr() as *mut crate::stdlib::charf,
+                    None => ::core::ptr::null_mut::<crate::stdlib::charf>(),
                 },
                 ((*s).strstart as ::core::ffi::c_long - (*s).block_start) as crate::zutil_h::ulg,
                 0 as ::core::ffi::c_int,
@@ -3335,12 +3329,12 @@ unsafe extern "C" fn deflate_huff(
     if flush == crate::zlib_h::Z_FINISH {
         crate::src::trees::_tr_flush_block(
             s as *mut crate::src::deflate::internal_state,
-            if (*s).block_start >= 0 as ::core::ffi::c_long {
-                (*s).window
-                    .offset((*s).block_start as ::core::ffi::c_uint as isize)
-                    as *mut crate::stdlib::charf
-            } else {
-                ::core::ptr::null_mut::<crate::stdlib::charf>()
+            match block_start_bytes(
+                ::core::slice::from_raw_parts((*s).window, (*s).window_size as usize),
+                (*s).block_start,
+            ) {
+                Some(bytes) => bytes.as_ptr() as *mut crate::stdlib::charf,
+                None => ::core::ptr::null_mut::<crate::stdlib::charf>(),
             },
             ((*s).strstart as ::core::ffi::c_long - (*s).block_start) as crate::zutil_h::ulg,
             1 as ::core::ffi::c_int,
@@ -3359,12 +3353,12 @@ unsafe extern "C" fn deflate_huff(
     if (*s).sym_next != 0 {
         crate::src::trees::_tr_flush_block(
             s as *mut crate::src::deflate::internal_state,
-            if (*s).block_start >= 0 as ::core::ffi::c_long {
-                (*s).window
-                    .offset((*s).block_start as ::core::ffi::c_uint as isize)
-                    as *mut crate::stdlib::charf
-            } else {
-                ::core::ptr::null_mut::<crate::stdlib::charf>()
+            match block_start_bytes(
+                ::core::slice::from_raw_parts((*s).window, (*s).window_size as usize),
+                (*s).block_start,
+            ) {
+                Some(bytes) => bytes.as_ptr() as *mut crate::stdlib::charf,
+                None => ::core::ptr::null_mut::<crate::stdlib::charf>(),
             },
             ((*s).strstart as ::core::ffi::c_long - (*s).block_start) as crate::zutil_h::ulg,
             0 as ::core::ffi::c_int,
