@@ -604,9 +604,7 @@ pub unsafe extern "C" fn gzputs(
         ::core::ptr::null::<::core::ffi::c_char>(),
     );
     len = crate::stdlib::strlen(s) as crate::stdlib::z_size_t;
-    if (len as ::core::ffi::c_int) < 0 as ::core::ffi::c_int
-        || len as ::core::ffi::c_uint as crate::stdlib::z_size_t != len
-    {
+    if !crate::src::gzlib::gz_len_fits_int(len) {
         crate::src::gzlib::gz_error(
             state as *mut crate::gzguts_h::gz_state,
             crate::zlib_h::Z_STREAM_ERROR,
