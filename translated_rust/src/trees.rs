@@ -2355,8 +2355,12 @@ fn bi_reverse(mut code: ::core::ffi::c_uint, mut len: ::core::ffi::c_int) -> ::c
     return res >> 1 as ::core::ffi::c_int;
 }
 
-unsafe fn bi_flush(s: *mut crate::src::deflate::deflate_state) {
-    let s = &mut *s;
+/// Flush complete bytes from the bit buffer of an already-validated state.
+///
+/// `deflate_state` still carries raw owned allocations, so this helper stays
+/// unsafe until the state owner is converted.  It does not, however, need to
+/// recreate the exclusive state borrow from a raw pointer itself.
+unsafe fn bi_flush(s: &mut crate::src::deflate::deflate_state) {
     if s.bi_valid == 16 as ::core::ffi::c_int {
         s.put_pending_byte(
             (s.bi_buf as ::core::ffi::c_int & 0xff as ::core::ffi::c_int) as crate::zutil_h::uch,
@@ -3053,13 +3057,17 @@ pub unsafe extern "C" fn _tr_stored_block_ffi(
 ) {
     _tr_stored_block(s, buf, stored_len, last)
 }
-pub unsafe extern "C" fn _tr_flush_bits(mut s: *mut crate::src::deflate::deflate_state) {
+pub unsafe fn _tr_flush_bits(s: &mut crate::src::deflate::deflate_state) {
     bi_flush(s);
 }
 #[export_name = "_tr_flush_bits"]
 
 pub unsafe extern "C" fn _tr_flush_bits_ffi(mut s: *mut crate::src::deflate::deflate_state) {
-    _tr_flush_bits(s)
+    if s.is_null() {
+        return;
+    }
+    // The exported boundary validates and converts the opaque state once.
+    bi_flush(&mut *s);
 }
 unsafe fn tr_align(s: &mut crate::src::deflate::deflate_state) {
     let len: ::core::ffi::c_int = 3;
@@ -3107,7 +3115,7 @@ unsafe fn tr_align(s: &mut crate::src::deflate::deflate_state) {
             as crate::zutil_h::ush;
         s.bi_valid += len_0;
     }
-    bi_flush(s as *mut crate::src::deflate::deflate_state);
+    bi_flush(s);
 }
 
 pub unsafe extern "C" fn _tr_align(mut s: *mut crate::src::deflate::deflate_state) {

@@ -1259,13 +1259,11 @@ pub unsafe extern "C" fn deflatePrime(
     mut bits: ::core::ffi::c_int,
     mut value: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
-    let mut s: *mut crate::src::deflate::deflate_state =
-        ::core::ptr::null_mut::<crate::src::deflate::deflate_state>();
     let mut put: ::core::ffi::c_int = 0;
     if deflateStateCheck(strm) != 0 {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    s = (*strm).state as *mut crate::src::deflate::deflate_state;
+    let s = &mut *((*strm).state as *mut crate::src::deflate::deflate_state);
     let pending_state = &*s;
     if bits < 0 as ::core::ffi::c_int
         || bits > 16 as ::core::ffi::c_int
@@ -1278,16 +1276,16 @@ pub unsafe extern "C" fn deflatePrime(
         return crate::zlib_h::Z_BUF_ERROR;
     }
     loop {
-        put = crate::src::deflate::Buf_size - (*s).bi_valid;
+        put = crate::src::deflate::Buf_size - s.bi_valid;
         if put > bits {
             put = bits;
         }
-        (*s).bi_buf = ((*s).bi_buf as ::core::ffi::c_int
+        s.bi_buf = (s.bi_buf as ::core::ffi::c_int
             | ((value & ((1 as ::core::ffi::c_int) << put) - 1 as ::core::ffi::c_int)
-                << (*s).bi_valid) as crate::zutil_h::ush as ::core::ffi::c_int)
+                << s.bi_valid) as crate::zutil_h::ush as ::core::ffi::c_int)
             as crate::zutil_h::ush;
-        (*s).bi_valid += put;
-        crate::src::trees::_tr_flush_bits(s as *mut crate::src::deflate::internal_state);
+        s.bi_valid += put;
+        crate::src::trees::_tr_flush_bits(s);
         value >>= put;
         bits -= put;
         if bits == 0 {
@@ -1575,29 +1573,29 @@ unsafe extern "C" fn putShortMSB(
 
 unsafe extern "C" fn flush_pending(mut strm: crate::zlib_h::z_streamp) {
     let mut len: ::core::ffi::c_uint = 0;
-    let mut s: *mut crate::src::deflate::deflate_state =
-        (*strm).state as *mut crate::src::deflate::deflate_state;
-    crate::src::trees::_tr_flush_bits(s as *mut crate::src::deflate::internal_state);
-    len = if (*s).pending > (*strm).avail_out as crate::zutil_h::ulg {
-        (*strm).avail_out as ::core::ffi::c_uint
+    let strm = &mut *strm;
+    let s = &mut *(strm.state as *mut crate::src::deflate::deflate_state);
+    crate::src::trees::_tr_flush_bits(s);
+    len = if s.pending > strm.avail_out as crate::zutil_h::ulg {
+        strm.avail_out as ::core::ffi::c_uint
     } else {
-        (*s).pending as ::core::ffi::c_uint
+        s.pending as ::core::ffi::c_uint
     };
     if len == 0 as ::core::ffi::c_uint {
         return;
     }
     crate::stdlib::memcpy(
-        (*strm).next_out as *mut ::core::ffi::c_void,
-        (*s).pending_buf.offset((*s).pending_out as isize) as *const ::core::ffi::c_void,
+        strm.next_out as *mut ::core::ffi::c_void,
+        s.pending_buf.offset(s.pending_out as isize) as *const ::core::ffi::c_void,
         len as crate::__stddef_size_t_h::size_t,
     );
-    (*strm).next_out = (*strm).next_out.offset(len as isize);
-    (*s).pending_out = (*s).pending_out.wrapping_add(len as usize);
-    (*strm).total_out = (*strm).total_out.wrapping_add(len as crate::stdlib::uLong);
-    (*strm).avail_out = (*strm).avail_out.wrapping_sub(len);
-    (*s).pending = (*s).pending.wrapping_sub(len as crate::zutil_h::ulg);
-    if (*s).pending == 0 as crate::zutil_h::ulg {
-        (*s).pending_out = 0;
+    strm.next_out = strm.next_out.offset(len as isize);
+    s.pending_out = s.pending_out.wrapping_add(len as usize);
+    strm.total_out = strm.total_out.wrapping_add(len as crate::stdlib::uLong);
+    strm.avail_out = strm.avail_out.wrapping_sub(len);
+    s.pending = s.pending.wrapping_sub(len as crate::zutil_h::ulg);
+    if s.pending == 0 as crate::zutil_h::ulg {
+        s.pending_out = 0;
     }
 }
 pub unsafe extern "C" fn deflate(
