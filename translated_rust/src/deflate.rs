@@ -837,9 +837,12 @@ pub unsafe extern "C" fn deflateSetDictionary(
     (*s).wrap = 0 as ::core::ffi::c_int;
     if dictLength >= (*s).w_size {
         if wrap == 0 as ::core::ffi::c_int {
+            // The initialized head table has `hash_size` entries, so this
+            // selects its final entry without using `offset`'s in-bounds raw
+            // pointer operation.
             *(*s)
                 .head
-                .offset((*s).hash_size.wrapping_sub(1 as crate::stdlib::uInt) as isize) =
+                .wrapping_add((*s).hash_size.wrapping_sub(1 as crate::stdlib::uInt) as usize) =
                 NIL as crate::src::deflate::Posf;
             crate::stdlib::memset(
                 (*s).head as *mut ::core::ffi::c_void,
@@ -872,14 +875,14 @@ pub unsafe extern "C" fn deflateSetDictionary(
         );
         loop {
             (*s).ins_h = ((*s).ins_h << (*s).hash_shift
-                ^ *(*s).window.offset(
+                ^ *(*s).window.wrapping_add(
                     str.wrapping_add(3 as crate::stdlib::uInt)
-                        .wrapping_sub(1 as crate::stdlib::uInt) as isize,
+                        .wrapping_sub(1 as crate::stdlib::uInt) as usize,
                 ) as crate::stdlib::uInt)
                 & (*s).hash_mask;
-            *(*s).prev.offset((str & (*s).w_mask) as isize) =
-                *(*s).head.offset((*s).ins_h as isize);
-            *(*s).head.offset((*s).ins_h as isize) =
+            *(*s).prev.wrapping_add((str & (*s).w_mask) as usize) =
+                *(*s).head.wrapping_add((*s).ins_h as usize);
+            *(*s).head.wrapping_add((*s).ins_h as usize) =
                 str as crate::src::deflate::Pos as crate::src::deflate::Posf;
             str = str.wrapping_add(1);
             n = n.wrapping_sub(1);
