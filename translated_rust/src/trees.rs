@@ -3601,7 +3601,7 @@ pub unsafe extern "C" fn _tr_flush_block_ffi(
     tr_flush_block_impl(state, data_type, pending_buf, stored, stored_len, last);
 }
 
-pub(crate) fn tr_tally_impl(
+fn tr_tally_impl(
     state: &mut crate::src::deflate::deflate_state,
     sym_buf: &mut [crate::stdlib::Bytef],
     dist: ::core::ffi::c_uint,

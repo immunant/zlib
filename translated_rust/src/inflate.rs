@@ -1169,6 +1169,8 @@ pub unsafe extern "C" fn inflate_ffi(
         ::core::ptr::null_mut::<crate::src::inflate::inflate_state>();
     let mut next: *mut ::core::ffi::c_uchar = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
     let mut put: *mut ::core::ffi::c_uchar = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
+    let mut output_start: *mut ::core::ffi::c_uchar =
+        ::core::ptr::null_mut::<::core::ffi::c_uchar>();
     let mut have: ::core::ffi::c_uint = 0;
     let mut left: ::core::ffi::c_uint = 0;
     let mut hold: ::core::ffi::c_ulong = 0;
@@ -1208,6 +1210,7 @@ pub unsafe extern "C" fn inflate_ffi(
             state_ref.mode = crate::src::inflate::TYPEDO;
         }
         put = strm_ref.next_out as *mut ::core::ffi::c_uchar;
+        output_start = put;
         left = strm_ref.avail_out as ::core::ffi::c_uint;
         next = strm_ref.next_in as *mut ::core::ffi::c_uchar;
         have = strm_ref.avail_in as ::core::ffi::c_uint;
@@ -2432,10 +2435,7 @@ pub unsafe extern "C" fn inflate_ffi(
         let output = if produced == 0 as ::core::ffi::c_uint {
             &[][..]
         } else {
-            ::core::slice::from_raw_parts(
-                strm_ref.next_out.wrapping_sub(produced as usize),
-                produced as usize,
-            )
+            ::core::slice::from_raw_parts(output_start, produced as usize)
         };
         updatewindow_impl(
             state_ref.wbits,
@@ -2452,10 +2452,7 @@ pub unsafe extern "C" fn inflate_ffi(
     strm_ref.total_out = strm_ref.total_out.wrapping_add(out as crate::stdlib::uLong);
     state_ref.total = state_ref.total.wrapping_add(out as ::core::ffi::c_ulong);
     if state_ref.wrap & 4 as ::core::ffi::c_int != 0 && out != 0 {
-        let output = ::core::slice::from_raw_parts(
-            strm_ref.next_out.wrapping_sub(out as usize),
-            out as usize,
-        );
+        let output = ::core::slice::from_raw_parts(output_start, out as usize);
         state_ref.check = inflate_update_output_check(
             state_ref.check as crate::stdlib::uLong,
             state_ref.flags,

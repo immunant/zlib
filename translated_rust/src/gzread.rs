@@ -697,7 +697,7 @@ fn gzungetc_impl(
     match gzungetc_pushback_plan(state.x.have, state.size, next_index == 0) {
         GzUngetcPlan::Empty { write_index } => {
             state.x.have = 1 as ::core::ffi::c_uint;
-            state.x.next = out.as_mut_ptr().wrapping_add(write_index);
+            state.x.next = out[write_index..].as_mut_ptr();
             out[write_index] = c as ::core::ffi::c_uchar;
             state.x.pos -= 1;
             state.past = 0 as ::core::ffi::c_int;
@@ -714,13 +714,13 @@ fn gzungetc_impl(
         GzUngetcPlan::Existing { shift_to_end } => {
             if shift_to_end {
                 next_index = gz_shift_pushback_buffer(out, state.x.have as usize);
-                state.x.next = out.as_mut_ptr().wrapping_add(next_index);
+                state.x.next = out[next_index..].as_mut_ptr();
             }
         }
     }
     state.x.have = state.x.have.wrapping_add(1);
     next_index = next_index.wrapping_sub(1);
-    state.x.next = out.as_mut_ptr().wrapping_add(next_index);
+    state.x.next = out[next_index..].as_mut_ptr();
     out[next_index] = c as ::core::ffi::c_uchar;
     state.x.pos -= 1;
     state.past = 0 as ::core::ffi::c_int;

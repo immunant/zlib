@@ -3551,14 +3551,12 @@ fn deflate_huff(
             state.match_length = 0 as crate::stdlib::uInt;
             let cc: crate::zutil_h::uch =
                 *state.window.wrapping_add(state.strstart as usize) as crate::zutil_h::uch;
-            let sym_buf =
-                &mut *::core::ptr::slice_from_raw_parts_mut(state.sym_buf, state.sym_end as usize);
-            bflush = crate::src::trees::tr_tally_impl(
-                state,
-                sym_buf,
-                0 as ::core::ffi::c_uint,
-                cc as ::core::ffi::c_uint,
-            );
+            for byte in crate::src::trees::tr_tally_literal_update(&mut state.dyn_ltree, cc) {
+                let sym_next = state.sym_next;
+                state.sym_next = state.sym_next.wrapping_add(1);
+                *state.sym_buf.wrapping_add(sym_next as usize) = byte;
+            }
+            bflush = (state.sym_next == state.sym_end) as ::core::ffi::c_int;
             state.lookahead = state.lookahead.wrapping_sub(1);
             state.strstart = state.strstart.wrapping_add(1);
             if bflush != 0 {
