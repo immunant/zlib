@@ -459,6 +459,10 @@ fn gz_look_needs_more_input(avail_in: crate::stdlib::uInt, again: ::core::ffi::c
     avail_in == 0 || again != 0 && avail_in < 4
 }
 
+fn gz_look_output_buffer_len(want: ::core::ffi::c_uint) -> ::core::ffi::c_uint {
+    want << 1 as ::core::ffi::c_int
+}
+
 enum GzLookGzipSource {
     Forced,
     Header,
@@ -500,7 +504,7 @@ unsafe extern "C" fn gz_look(mut state: crate::gzguts_h::gz_statep) -> ::core::f
         (*state).in_0 = crate::stdlib::malloc((*state).want as crate::__stddef_size_t_h::size_t)
             as *mut ::core::ffi::c_uchar;
         (*state).out = crate::stdlib::malloc(
-            ((*state).want << 1 as ::core::ffi::c_int) as crate::__stddef_size_t_h::size_t,
+            gz_look_output_buffer_len((*state).want) as crate::__stddef_size_t_h::size_t
         ) as *mut ::core::ffi::c_uchar;
         if (*state).in_0.is_null() || (*state).out.is_null() {
             crate::stdlib::free((*state).out as *mut ::core::ffi::c_void);
@@ -1561,6 +1565,15 @@ mod tests {
     fn gz_look_needs_more_input_retries_until_header_is_wide_enough() {
         assert!(gz_look_needs_more_input(3, 1));
         assert!(!gz_look_needs_more_input(4, 1));
+    }
+
+    #[test]
+    fn gz_look_output_buffer_len_doubles_with_unsigned_wrapping() {
+        assert_eq!(gz_look_output_buffer_len(8), 16);
+        assert_eq!(
+            gz_look_output_buffer_len(::core::ffi::c_uint::MAX),
+            ::core::ffi::c_uint::MAX - 1
+        );
     }
 
     #[test]

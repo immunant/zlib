@@ -217,7 +217,7 @@ fn gzrewind_request_is_valid(mode: ::core::ffi::c_int, err: ::core::ffi::c_int) 
     mode == crate::gzguts_h::GZ_READ && gzseek_error_allows_positioning(err)
 }
 
-fn gzrewind_seek_succeeded(result: crate::stdlib::__off64_t) -> bool {
+fn gz_lseek_succeeded(result: crate::stdlib::__off64_t) -> bool {
     result != -1 as ::core::ffi::c_int as crate::stdlib::__off64_t
 }
 
@@ -700,7 +700,7 @@ pub unsafe extern "C" fn gzrewind_ffi(mut file: crate::zlib_h::gzFile) -> ::core
         if !gzrewind_request_is_valid(state_ref.mode, state_ref.err) {
             return -1 as ::core::ffi::c_int;
         }
-        if !gzrewind_seek_succeeded(crate::stdlib::lseek64(
+        if !gz_lseek_succeeded(crate::stdlib::lseek64(
             state_ref.fd,
             state_ref.start as crate::stdlib::__off64_t,
             crate::stdlib::SEEK_SET,
@@ -742,7 +742,7 @@ pub unsafe extern "C" fn gzseek64(
             gzseek_fast_forward_lseek_offset(offset, (*state).x.have) as crate::stdlib::__off64_t,
             crate::stdlib::SEEK_CUR,
         ) as crate::stdlib::off64_t;
-        if ret == -1 as ::core::ffi::c_int as crate::stdlib::off64_t {
+        if !gz_lseek_succeeded(ret as crate::stdlib::__off64_t) {
             return -1 as ::core::ffi::c_int as crate::stdlib::off64_t;
         }
         gzseek_fast_forward_reset(&mut *state);
@@ -1065,7 +1065,7 @@ mod tests {
         gz_parse_open_mode, gz_post_open_metadata, gz_prepare_open, gz_reset_core,
         gzbuffer_normalized_want, gzclearerr_core, gzdopen_has_valid_descriptor, gzeof_result,
         gzerror_core, gzoffset64_adjust_for_buffered_read, gzoffset64_result,
-        gzrewind_request_is_valid, gzrewind_seek_succeeded, gzseek_adjust_offset,
+        gz_lseek_succeeded, gzrewind_request_is_valid, gzseek_adjust_offset,
         gzseek_can_fast_forward, gzseek_clears_pending_skip, gzseek_effective_skip,
         gzseek_error_allows_positioning, gzseek_fast_forward_lseek_offset,
         gzseek_fast_forward_reset, gzseek_plan_read_buffer_consumption,
@@ -1083,10 +1083,10 @@ mod tests {
     }
 
     #[test]
-    fn gzrewind_seek_succeeded_rejects_only_the_lseek_failure_sentinel() {
-        assert!(!gzrewind_seek_succeeded(-1));
-        assert!(gzrewind_seek_succeeded(0));
-        assert!(gzrewind_seek_succeeded(17));
+    fn gz_lseek_succeeded_rejects_only_the_lseek_failure_sentinel() {
+        assert!(!gz_lseek_succeeded(-1));
+        assert!(gz_lseek_succeeded(0));
+        assert!(gz_lseek_succeeded(17));
     }
 
     #[test]

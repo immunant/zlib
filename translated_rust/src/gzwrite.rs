@@ -214,6 +214,13 @@ fn gz_write_chunk_consumed_len(
     chunk_len.wrapping_sub(remaining_avail_in as ::core::ffi::c_uint)
 }
 
+fn gz_write_advanced_pos(
+    pos: crate::stdlib::off64_t,
+    consumed: ::core::ffi::c_uint,
+) -> crate::stdlib::off64_t {
+    pos + consumed as crate::stdlib::off64_t
+}
+
 fn gz_write_apply_direct_progress(
     pos: &mut crate::stdlib::off64_t,
     remaining: &mut crate::stdlib::z_size_t,
@@ -221,7 +228,7 @@ fn gz_write_apply_direct_progress(
     remaining_avail_in: crate::stdlib::uInt,
 ) -> bool {
     let consumed = gz_write_chunk_consumed_len(chunk_len, remaining_avail_in);
-    *pos += consumed as crate::stdlib::off64_t;
+    *pos = gz_write_advanced_pos(*pos, consumed);
     *remaining = remaining.wrapping_sub(consumed as crate::stdlib::z_size_t);
     *remaining != 0
 }
@@ -233,7 +240,7 @@ fn gz_zero_apply_progress(
     remaining_avail_in: crate::stdlib::uInt,
 ) -> bool {
     let consumed = gz_write_chunk_consumed_len(chunk_len, remaining_avail_in);
-    *pos += consumed as crate::stdlib::off64_t;
+    *pos = gz_write_advanced_pos(*pos, consumed);
     *skip -= consumed as crate::stdlib::off64_t;
     *skip != 0
 }
@@ -969,7 +976,7 @@ mod tests {
         gz_comp_needs_output_write, gz_comp_needs_reset, gz_comp_output_produced,
         gz_comp_output_write_chunk_len, gz_comp_remaining_direct_input, gz_comp_reset_action,
         gz_comp_reset_after_flush, gz_comp_skips_empty_flush, gz_comp_write_chunk_len,
-        gz_comp_write_failed, gz_has_pending_input, gz_has_pending_skip,
+        gz_comp_write_failed, gz_has_pending_input, gz_has_pending_skip, gz_write_advanced_pos,
         gz_write_apply_direct_progress, gz_write_buffered_copy_len, gz_write_buffered_step,
         gz_write_chunk_consumed_len, gz_write_chunk_len, gz_write_errno_is_retryable,
         gz_write_error_result, gz_write_is_empty, gz_write_needs_input_reset,
@@ -1521,6 +1528,12 @@ mod tests {
     #[test]
     fn gz_write_chunk_consumed_len_preserves_wrapping_accounting() {
         assert_eq!(gz_write_chunk_consumed_len(0, 1), ::core::ffi::c_uint::MAX);
+    }
+
+    #[test]
+    fn gz_write_advanced_pos_advances_by_consumed_input() {
+        assert_eq!(gz_write_advanced_pos(100, 24), 124);
+        assert_eq!(gz_write_advanced_pos(-1, 1), 0);
     }
 
     #[test]
