@@ -1,193 +1,224 @@
-pub use crate::__stddef_null_h::NULL;
-pub use crate::__stddef_size_t_h::size_t;
-
-pub use crate::src::deflate::internal_state;
-pub use crate::src::inflate::inflate;
-pub use crate::src::inflate::inflateEnd;
-pub use crate::src::inflate::inflateInit_;
-pub use crate::stdlib::uInt;
 pub use crate::stdlib::uLong;
 pub use crate::stdlib::uLongf;
-pub use crate::stdlib::voidpf;
 pub use crate::stdlib::z_size_t;
-pub use crate::stdlib::Byte;
 pub use crate::stdlib::Bytef;
-pub use crate::zlib_h::alloc_func;
-pub use crate::zlib_h::free_func;
-pub use crate::zlib_h::z_stream;
-pub use crate::zlib_h::z_stream_s;
-pub use crate::zlib_h::z_streamp;
-pub use crate::zlib_h::ZLIB_VERSION;
 pub use crate::zlib_h::Z_BUF_ERROR;
 pub use crate::zlib_h::Z_DATA_ERROR;
-pub use crate::zlib_h::Z_NEED_DICT;
-pub use crate::zlib_h::Z_NO_FLUSH;
-pub use crate::zlib_h::Z_NULL;
 pub use crate::zlib_h::Z_OK;
-pub use crate::zlib_h::Z_STREAM_END;
 pub use crate::zlib_h::Z_STREAM_ERROR;
-pub unsafe extern "C" fn uncompress2_z(
-    mut dest: *mut crate::stdlib::Bytef,
-    mut destLen: *mut crate::stdlib::z_size_t,
-    mut source: *const crate::stdlib::Bytef,
-    mut sourceLen: *mut crate::stdlib::z_size_t,
-) -> ::core::ffi::c_int {
-    let mut stream: crate::zlib_h::z_stream = crate::zlib_h::z_stream {
-        next_in: crate::zlib_h::InputBuffer::default(),
-        avail_in: 0,
-        total_in: 0,
-        next_out: crate::zlib_h::OutputBuffer::default(),
-        avail_out: 0,
-        total_out: 0,
-        msg: None,
-        state: None,
-        zalloc: None,
-        zfree: None,
-        opaque: crate::zlib_h::Opaque::default(),
-        data_type: 0,
-        adler: 0,
-        reserved: 0,
-    };
-    let mut err: ::core::ffi::c_int = 0;
-    let max: crate::stdlib::uInt = -1 as ::core::ffi::c_int as crate::stdlib::uInt;
-    let mut len: crate::stdlib::z_size_t = 0;
-    let mut left: crate::stdlib::z_size_t = 0;
-    if sourceLen.is_null()
-        || *sourceLen > 0 as crate::stdlib::z_size_t && source.is_null()
-        || destLen.is_null()
-        || *destLen > 0 as crate::stdlib::z_size_t && dest.is_null()
-    {
-        return crate::zlib_h::Z_STREAM_ERROR;
-    }
-    len = *sourceLen;
-    left = *destLen;
-    if left == 0 as crate::stdlib::z_size_t && dest.is_null() {
-        dest = &raw mut stream.reserved as *mut crate::stdlib::Bytef;
-    }
-    stream.next_in = crate::input_cursor!(source);
-    stream.avail_in = 0 as crate::stdlib::uInt;
-    stream.zalloc = None;
-    stream.zfree = None;
-    stream.opaque = crate::zlib_h::Opaque::default();
-    err = crate::src::inflate::inflateInit_(
-        &raw mut stream as *mut _ as *mut crate::zlib_h::z_stream_s,
-        crate::zlib_h::ZLIB_VERSION.as_ptr(),
-        ::core::mem::size_of::<crate::zlib_h::z_stream>() as ::core::ffi::c_int,
-    );
-    if err != crate::zlib_h::Z_OK {
-        return err;
-    }
-    stream.next_out = crate::output_cursor!(dest);
-    stream.avail_out = 0 as crate::stdlib::uInt;
+
+/// The result of a bounded zlib decompression operation.  The byte counts are
+/// the same values that `uncompress2_z()` exposes through its length pointers.
+#[derive(Copy, Clone)]
+pub struct UncompressResult {
+    pub status: ::core::ffi::c_int,
+    pub source_len: usize,
+    pub dest_len: usize,
+}
+
+/// Decompress a zlib-wrapped stream into `dest` without exposing the caller's
+/// buffers as pointers to the implementation.  This is the implementation
+/// behind the C ABI functions below.
+pub fn uncompress2_z(dest: &mut [Bytef], source: &[Bytef]) -> UncompressResult {
+    use miniz_oxide::inflate::stream::{inflate, InflateState};
+    use miniz_oxide::{DataFormat, MZError, MZFlush, MZStatus};
+
+    let mut state = InflateState::new_boxed(DataFormat::Zlib);
+    let mut source_len = 0usize;
+    let mut dest_len = 0usize;
+
     loop {
-        if stream.avail_out == 0 as crate::stdlib::uInt {
-            stream.avail_out = if left > max as crate::stdlib::z_size_t {
-                max
-            } else {
-                left as crate::stdlib::uInt
-            };
-            left = left.wrapping_sub(stream.avail_out as crate::stdlib::z_size_t);
-        }
-        if stream.avail_in == 0 as crate::stdlib::uInt {
-            stream.avail_in = if len > max as crate::stdlib::z_size_t {
-                max
-            } else {
-                len as crate::stdlib::uInt
-            };
-            len = len.wrapping_sub(stream.avail_in as crate::stdlib::z_size_t);
-        }
-        err = crate::src::inflate::inflate(
-            &raw mut stream as *mut _ as *mut crate::zlib_h::z_stream_s,
-            crate::zlib_h::Z_NO_FLUSH,
+        let result = inflate(
+            &mut state,
+            &source[source_len..],
+            &mut dest[dest_len..],
+            MZFlush::None,
         );
-        if err != crate::zlib_h::Z_OK {
-            break;
+        source_len += result.bytes_consumed;
+        dest_len += result.bytes_written;
+
+        let status = match result.status {
+            Ok(MZStatus::StreamEnd) => Z_OK,
+            Ok(MZStatus::Ok) => {
+                if dest_len == dest.len() || source_len == source.len() {
+                    Z_BUF_ERROR
+                } else {
+                    // A successful inflater call must make progress unless a
+                    // source or destination bound stopped it.
+                    Z_STREAM_ERROR
+                }
+            }
+            Ok(_) => Z_STREAM_ERROR,
+            Err(MZError::Data) => Z_DATA_ERROR,
+            Err(MZError::Buf) => Z_BUF_ERROR,
+            Err(_) => Z_STREAM_ERROR,
+        };
+
+        if status != Z_STREAM_ERROR || result.bytes_consumed == 0 && result.bytes_written == 0 {
+            return UncompressResult {
+                // The safe streaming decoder can retain up to a dictionary's
+                // worth of output, and consequently consume all available
+                // input before it reports a full caller destination.  A full
+                // destination is still zlib's buffer error, not truncation.
+                status: if status == Z_BUF_ERROR
+                    && source_len == source.len()
+                    && dest_len < dest.len()
+                {
+                    Z_DATA_ERROR
+                } else {
+                    status
+                },
+                source_len,
+                dest_len,
+            };
         }
     }
-    len = len.wrapping_add(stream.avail_in as crate::stdlib::z_size_t);
-    left = left.wrapping_add(stream.avail_out as crate::stdlib::z_size_t);
-    *sourceLen = (*sourceLen).wrapping_sub(len);
-    *destLen = (*destLen).wrapping_sub(left);
-    crate::src::inflate::inflateEnd(&raw mut stream as *mut _ as *mut crate::zlib_h::z_stream_s);
-    return if err == crate::zlib_h::Z_STREAM_END {
-        crate::zlib_h::Z_OK
-    } else if err == crate::zlib_h::Z_NEED_DICT {
-        crate::zlib_h::Z_DATA_ERROR
-    } else if err == crate::zlib_h::Z_BUF_ERROR && len == 0 as crate::stdlib::z_size_t {
-        crate::zlib_h::Z_DATA_ERROR
-    } else {
-        err
-    };
 }
+
+/// Safe `uLong` compatibility form of [`uncompress2_z`].
+pub fn uncompress2(dest: &mut [Bytef], source: &[Bytef]) -> UncompressResult {
+    uncompress2_z(dest, source)
+}
+
+/// Safe `z_size_t` compatibility form of [`uncompress2_z`].
+pub fn uncompress_z(dest: &mut [Bytef], source: &[Bytef]) -> UncompressResult {
+    uncompress2_z(dest, source)
+}
+
+/// Safe `uLong` compatibility form of [`uncompress2_z`] that discards the
+/// number of input bytes consumed, as the C `uncompress()` API does.
+pub fn uncompress(dest: &mut [Bytef], source: &[Bytef]) -> UncompressResult {
+    uncompress2_z(dest, source)
+}
+
 #[export_name = "uncompress2_z"]
-
 pub unsafe extern "C" fn uncompress2_z_ffi(
-    mut dest: *mut crate::stdlib::Bytef,
-    mut destLen: *mut crate::stdlib::z_size_t,
-    mut source: *const crate::stdlib::Bytef,
-    mut sourceLen: *mut crate::stdlib::z_size_t,
+    dest: *mut Bytef,
+    dest_len: *mut z_size_t,
+    source: *const Bytef,
+    source_len: *mut z_size_t,
 ) -> ::core::ffi::c_int {
-    uncompress2_z(dest, destLen, source, sourceLen)
+    if dest_len.is_null() || source_len.is_null() {
+        return Z_STREAM_ERROR;
+    }
+    let dest_len_value = *dest_len;
+    let source_len_value = *source_len;
+    if dest.is_null() && dest_len_value != 0 {
+        return Z_STREAM_ERROR;
+    }
+    if source.is_null() && source_len_value != 0 {
+        return Z_STREAM_ERROR;
+    }
+    let dest = if dest.is_null() {
+        &mut []
+    } else {
+        ::core::slice::from_raw_parts_mut(dest, dest_len_value)
+    };
+    let source = if source.is_null() {
+        &[]
+    } else {
+        ::core::slice::from_raw_parts(source, source_len_value)
+    };
+    let result = uncompress2_z(dest, source);
+    *dest_len = result.dest_len;
+    *source_len = result.source_len;
+    result.status
 }
-pub unsafe extern "C" fn uncompress2(
-    mut dest: *mut crate::stdlib::Bytef,
-    mut destLen: *mut crate::stdlib::uLongf,
-    mut source: *const crate::stdlib::Bytef,
-    mut sourceLen: *mut crate::stdlib::uLong,
-) -> ::core::ffi::c_int {
-    let mut ret: ::core::ffi::c_int = 0;
-    let mut got: crate::stdlib::z_size_t = *destLen as crate::stdlib::z_size_t;
-    let mut used: crate::stdlib::z_size_t = *sourceLen as crate::stdlib::z_size_t;
-    ret = uncompress2_z(dest, &raw mut got, source, &raw mut used);
-    *sourceLen = used as crate::stdlib::uLong;
-    *destLen = got as crate::stdlib::uLong as crate::stdlib::uLongf;
-    return ret;
-}
+
 #[export_name = "uncompress2"]
-
 pub unsafe extern "C" fn uncompress2_ffi(
-    mut dest: *mut crate::stdlib::Bytef,
-    mut destLen: *mut crate::stdlib::uLongf,
-    mut source: *const crate::stdlib::Bytef,
-    mut sourceLen: *mut crate::stdlib::uLong,
+    dest: *mut Bytef,
+    dest_len: *mut uLongf,
+    source: *const Bytef,
+    source_len: *mut uLong,
 ) -> ::core::ffi::c_int {
-    uncompress2(dest, destLen, source, sourceLen)
+    if dest_len.is_null() || source_len.is_null() {
+        return Z_STREAM_ERROR;
+    }
+    let dest_len_value = *dest_len as usize;
+    let source_len_value = *source_len as usize;
+    if dest.is_null() && dest_len_value != 0 {
+        return Z_STREAM_ERROR;
+    }
+    if source.is_null() && source_len_value != 0 {
+        return Z_STREAM_ERROR;
+    }
+    let dest = if dest.is_null() {
+        &mut []
+    } else {
+        ::core::slice::from_raw_parts_mut(dest, dest_len_value)
+    };
+    let source = if source.is_null() {
+        &[]
+    } else {
+        ::core::slice::from_raw_parts(source, source_len_value)
+    };
+    let result = uncompress2(dest, source);
+    *dest_len = result.dest_len as uLongf;
+    *source_len = result.source_len as uLong;
+    result.status
 }
-pub unsafe extern "C" fn uncompress_z(
-    mut dest: *mut crate::stdlib::Bytef,
-    mut destLen: *mut crate::stdlib::z_size_t,
-    mut source: *const crate::stdlib::Bytef,
-    mut sourceLen: crate::stdlib::z_size_t,
-) -> ::core::ffi::c_int {
-    let mut used: crate::stdlib::z_size_t = sourceLen;
-    return uncompress2_z(dest, destLen, source, &raw mut used);
-}
+
 #[export_name = "uncompress_z"]
-
 pub unsafe extern "C" fn uncompress_z_ffi(
-    mut dest: *mut crate::stdlib::Bytef,
-    mut destLen: *mut crate::stdlib::z_size_t,
-    mut source: *const crate::stdlib::Bytef,
-    mut sourceLen: crate::stdlib::z_size_t,
+    dest: *mut Bytef,
+    dest_len: *mut z_size_t,
+    source: *const Bytef,
+    source_len: z_size_t,
 ) -> ::core::ffi::c_int {
-    uncompress_z(dest, destLen, source, sourceLen)
+    if dest_len.is_null() {
+        return Z_STREAM_ERROR;
+    }
+    let dest_len_value = *dest_len;
+    if dest.is_null() && dest_len_value != 0 {
+        return Z_STREAM_ERROR;
+    }
+    if source.is_null() && source_len != 0 {
+        return Z_STREAM_ERROR;
+    }
+    let dest = if dest.is_null() {
+        &mut []
+    } else {
+        ::core::slice::from_raw_parts_mut(dest, dest_len_value)
+    };
+    let source = if source.is_null() {
+        &[]
+    } else {
+        ::core::slice::from_raw_parts(source, source_len)
+    };
+    let result = uncompress_z(dest, source);
+    *dest_len = result.dest_len;
+    result.status
 }
-pub unsafe extern "C" fn uncompress(
-    mut dest: *mut crate::stdlib::Bytef,
-    mut destLen: *mut crate::stdlib::uLongf,
-    mut source: *const crate::stdlib::Bytef,
-    mut sourceLen: crate::stdlib::uLong,
-) -> ::core::ffi::c_int {
-    let mut used: crate::stdlib::uLong = sourceLen;
-    return uncompress2(dest, destLen, source, &raw mut used);
-}
-#[export_name = "uncompress"]
 
+#[export_name = "uncompress"]
 pub unsafe extern "C" fn uncompress_ffi(
-    mut dest: *mut crate::stdlib::Bytef,
-    mut destLen: *mut crate::stdlib::uLongf,
-    mut source: *const crate::stdlib::Bytef,
-    mut sourceLen: crate::stdlib::uLong,
+    dest: *mut Bytef,
+    dest_len: *mut uLongf,
+    source: *const Bytef,
+    source_len: uLong,
 ) -> ::core::ffi::c_int {
-    uncompress(dest, destLen, source, sourceLen)
+    if dest_len.is_null() {
+        return Z_STREAM_ERROR;
+    }
+    let dest_len_value = *dest_len as usize;
+    if dest.is_null() && dest_len_value != 0 {
+        return Z_STREAM_ERROR;
+    }
+    if source.is_null() && source_len != 0 {
+        return Z_STREAM_ERROR;
+    }
+    let dest = if dest.is_null() {
+        &mut []
+    } else {
+        ::core::slice::from_raw_parts_mut(dest, dest_len_value)
+    };
+    let source = if source.is_null() {
+        &[]
+    } else {
+        ::core::slice::from_raw_parts(source, source_len as usize)
+    };
+    let result = uncompress(dest, source);
+    *dest_len = result.dest_len as uLongf;
+    result.status
 }
