@@ -387,12 +387,16 @@ impl<'a> GzInputStorage<'a> {
         input: &'a mut [crate::stdlib::Byte],
         next_in: usize,
         avail_in: crate::stdlib::uInt,
-    ) -> Self {
-        Self {
+    ) -> Option<Self> {
+        let available_end = next_in.checked_add(avail_in as usize)?;
+        if available_end > input.len() {
+            return None;
+        }
+        Some(Self {
             input,
             next_in,
             avail_in,
-        }
+        })
     }
 
     fn prepare_refill(
@@ -419,9 +423,14 @@ impl<'a> GzInputStorage<'a> {
         Ok(Some([header[0], header[1], header[2], header[3]]))
     }
 
-    fn set_cursor(&mut self, next_in: usize, avail_in: crate::stdlib::uInt) {
+    fn set_cursor(&mut self, next_in: usize, avail_in: crate::stdlib::uInt) -> Option<()> {
+        let available_end = next_in.checked_add(avail_in as usize)?;
+        if available_end > self.input.len() {
+            return None;
+        }
         self.next_in = next_in;
         self.avail_in = avail_in;
+        Some(())
     }
 }
 
@@ -991,8 +1000,17 @@ unsafe fn gz_avail(
     }
     let q = state.strm.next_in;
     let input = core::slice::from_raw_parts_mut(p, state.size as usize);
-    let input_offset = (q as usize).wrapping_sub(p as usize);
-    let mut input = GzInputStorage::new(input, input_offset, state.strm.avail_in);
+    // zlib permits a null `next_in` while `avail_in` is zero.  In that
+    // empty-input state there is no cursor to preserve, so normalize it to
+    // the input buffer's start before establishing the safe view.
+    let input_offset = if state.strm.avail_in == 0 {
+        0
+    } else {
+        (q as usize).wrapping_sub(p as usize)
+    };
+    let Some(mut input) = GzInputStorage::new(input, input_offset, state.strm.avail_in) else {
+        return -1 as ::core::ffi::c_int;
+    };
 
     if let GzAvailAction::Refill { compact_input } = action {
         let (buf, len, prior_avail_in) = {
@@ -1011,7 +1029,9 @@ unsafe fn gz_avail(
             Err(()) => return -1 as ::core::ffi::c_int,
             Ok(GzAvailNextInAction::ResetToInputStart) => {
                 state.strm.next_in = state.in_0;
-                input.set_cursor(0, state.strm.avail_in);
+                if input.set_cursor(0, state.strm.avail_in).is_none() {
+                    return -1 as ::core::ffi::c_int;
+                }
             }
         }
     }
@@ -2234,7 +2254,7 @@ mod tests {
     #[test]
     fn gz_input_storage_returns_only_the_validated_read_region() {
         let mut input = *b"abcdefgh";
-        let mut storage = GzInputStorage::new(&mut input, 2, 6);
+        let mut storage = GzInputStorage::new(&mut input, 2, 6).unwrap();
         let refill = storage.prepare_refill(8, true).unwrap();
 
         assert_eq!(refill.prior_avail_in, 6);
@@ -2246,17 +2266,24 @@ mod tests {
     }
 
     #[test]
-    fn gz_input_storage_rejects_a_cursor_outside_its_owned_buffer() {
+    fn gz_input_storage_rejects_a_cursor_range_outside_its_owned_buffer() {
         let mut input = *b"abcdefgh";
-        let mut storage = GzInputStorage::new(&mut input, 3, 6);
+        assert!(GzInputStorage::new(&mut input, 3, 6).is_none());
+    }
 
-        assert!(storage.prepare_refill(8, true).is_none());
+    #[test]
+    fn gz_input_storage_refuses_to_replace_a_valid_cursor_with_an_invalid_one() {
+        let mut input = *b"abcdefgh";
+        let mut storage = GzInputStorage::new(&mut input, 2, 4).unwrap();
+
+        assert_eq!(storage.set_cursor(5, 4), None);
+        assert_eq!(storage.gzip_header(), Ok(Some([b'c', b'd', b'e', b'f'])));
     }
 
     #[test]
     fn gz_input_storage_peeks_a_complete_gzip_header_without_moving_its_cursor() {
         let mut input = *b"xx\x1f\x8b\x08\x1fyy";
-        let storage = GzInputStorage::new(&mut input, 2, 4);
+        let storage = GzInputStorage::new(&mut input, 2, 4).unwrap();
 
         assert_eq!(storage.gzip_header(), Ok(Some([31, 139, 8, 31])));
     }
@@ -2264,12 +2291,12 @@ mod tests {
     #[test]
     fn gz_input_storage_defers_short_or_invalid_gzip_header_probes() {
         let mut short_input = *b"abc";
-        let short_storage = GzInputStorage::new(&mut short_input, 0, 3);
+        let short_storage = GzInputStorage::new(&mut short_input, 0, 3).unwrap();
         assert_eq!(short_storage.gzip_header(), Ok(None));
 
         let mut input = *b"abcdefgh";
         let invalid_storage = GzInputStorage::new(&mut input, 5, 4);
-        assert_eq!(invalid_storage.gzip_header(), Err(()));
+        assert!(invalid_storage.is_none());
     }
 
     #[test]
