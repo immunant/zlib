@@ -1388,7 +1388,6 @@ fn gz_decomp_apply_trailing_junk_plan(
 
 unsafe fn gz_decomp(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
     let mut ret: ::core::ffi::c_int = crate::zlib_h::Z_OK;
-    let mut strm: crate::zlib_h::z_streamp = &raw mut state.strm;
     let had = gz_decomp_stream_state(&state.strm).avail_out as ::core::ffi::c_uint;
     loop {
         let needs_input_load =
@@ -1413,7 +1412,7 @@ unsafe fn gz_decomp(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int
             GzDecompInputAction::Inflate => {}
         }
         ret = crate::src::inflate::inflate(
-            strm as *mut crate::zlib_h::z_stream_s,
+            &raw mut state.strm,
             crate::zlib_h::Z_NO_FLUSH,
         );
         let stream_state = gz_decomp_stream_state(&state.strm);

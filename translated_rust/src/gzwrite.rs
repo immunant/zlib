@@ -1282,23 +1282,13 @@ fn gz_zero_chunk_plan(
     }
 }
 
-fn gz_zero_prepare_chunk(
-    state: &mut crate::gzguts_h::gz_state,
-    first: ::core::ffi::c_int,
-) -> GzZeroPreparedChunk {
-    let chunk = gz_zero_chunk_plan(first, state.size, state.skip);
-    state.strm.avail_in = chunk.len as crate::stdlib::uInt;
-    state.strm.next_in = state.in_0;
-
-    chunk
-}
-
 fn gz_zero_prepare_and_initialize_chunk(
-    state: &mut crate::gzguts_h::gz_state,
+    size: ::core::ffi::c_uint,
+    skip: crate::stdlib::off64_t,
     input: &mut GzWriteInputStorage<'_>,
     first: &mut ::core::ffi::c_int,
 ) -> GzZeroPreparedChunk {
-    let chunk = gz_zero_prepare_chunk(state, *first);
+    let chunk = gz_zero_chunk_plan(*first, size, skip);
     if chunk.initialize_buffer {
         input.zero_prefix_and_mark(first, chunk.len as usize);
     }
@@ -1331,7 +1321,10 @@ unsafe fn gz_zero(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
     }
     first = 1 as ::core::ffi::c_int;
     loop {
-        let chunk = gz_zero_prepare_and_initialize_chunk(state, &mut input, &mut first);
+        let chunk =
+            gz_zero_prepare_and_initialize_chunk(state.size, state.skip, &mut input, &mut first);
+        state.strm.avail_in = chunk.len as crate::stdlib::uInt;
+        state.strm.next_in = state.in_0;
         let ret = gz_comp(state, crate::zlib_h::Z_NO_FLUSH);
         match gz_zero_apply_comp_progress(
             &mut state.x.pos,
@@ -3492,24 +3485,21 @@ mod tests {
 
         let initial = {
             let mut input = GzWriteInputStorage::new(&mut buffer);
-            gz_zero_prepare_and_initialize_chunk(&mut state, &mut input, &mut first)
+            gz_zero_prepare_and_initialize_chunk(state.size, state.skip, &mut input, &mut first)
         };
         assert_eq!(initial.len, 4);
         assert!(initial.initialize_buffer);
         assert_eq!(buffer, [0; 4]);
         assert_eq!(first, 0);
-        assert_eq!(state.strm.avail_in, 4);
-        assert_eq!(state.strm.next_in, state.in_0);
 
         state.skip = 2;
         let final_chunk = {
             let mut input = GzWriteInputStorage::new(&mut buffer);
-            gz_zero_prepare_and_initialize_chunk(&mut state, &mut input, &mut first)
+            gz_zero_prepare_and_initialize_chunk(state.size, state.skip, &mut input, &mut first)
         };
         assert_eq!(final_chunk.len, 2);
         assert!(!final_chunk.initialize_buffer);
         assert_eq!(buffer, [0; 4]);
-        assert_eq!(state.strm.avail_in, 2);
     }
 
     #[test]

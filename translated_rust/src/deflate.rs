@@ -423,6 +423,40 @@ fn deflate_rle_can_scan_match(
     lookahead >= crate::zutil_h::MIN_MATCH as crate::stdlib::uInt && strstart > 0
 }
 
+fn deflate_rle_scan_indices(
+    strstart: crate::stdlib::uInt,
+) -> (
+    crate::stdlib::uInt,
+    [crate::stdlib::uInt; 3],
+    crate::stdlib::uInt,
+    crate::stdlib::uInt,
+) {
+    let initial = [strstart, strstart.wrapping_add(1), strstart.wrapping_add(2)];
+    (
+        strstart.wrapping_sub(1),
+        initial,
+        initial[2],
+        strstart.wrapping_add(crate::zutil_h::MAX_MATCH as crate::stdlib::uInt),
+    )
+}
+
+fn deflate_rle_next_scan_indices(
+    scan: crate::stdlib::uInt,
+) -> ([crate::stdlib::uInt; 8], crate::stdlib::uInt) {
+    let first = scan.wrapping_add(1);
+    let comparisons = [
+        first,
+        first.wrapping_add(1),
+        first.wrapping_add(2),
+        first.wrapping_add(3),
+        first.wrapping_add(4),
+        first.wrapping_add(5),
+        first.wrapping_add(6),
+        first.wrapping_add(7),
+    ];
+    (comparisons, comparisons[7])
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum DeflateRleTallyPlan {
     MatchWithoutCount,
@@ -4034,9 +4068,6 @@ unsafe fn deflate_rle(
     mut flush: ::core::ffi::c_int,
 ) -> block_state {
     let mut bflush: ::core::ffi::c_int = 0;
-    let mut prev: crate::stdlib::uInt = 0;
-    let mut scan: *mut crate::stdlib::Bytef = ::core::ptr::null_mut::<crate::stdlib::Bytef>();
-    let mut strend: *mut crate::stdlib::Bytef = ::core::ptr::null_mut::<crate::stdlib::Bytef>();
     loop {
         if (*s).lookahead <= crate::zutil_h::MAX_MATCH as crate::stdlib::uInt {
             fill_window(s);
@@ -4048,66 +4079,42 @@ unsafe fn deflate_rle(
         }
         (*s).match_length = 0 as crate::stdlib::uInt;
         if deflate_rle_can_scan_match((*s).lookahead, (*s).strstart) {
-            scan = (*s)
-                .window
-                .wrapping_offset((*s).strstart as isize)
-                .wrapping_offset(-(1 as ::core::ffi::c_int as isize));
-            prev = *scan as crate::stdlib::uInt;
-            scan = scan.wrapping_add(1);
-            if prev == *scan as crate::stdlib::uInt
-                && {
-                    scan = scan.wrapping_add(1);
-                    prev == *scan as crate::stdlib::uInt
-                }
-                && {
-                    scan = scan.wrapping_add(1);
-                    prev == *scan as crate::stdlib::uInt
-                }
+            let window = (*s).window;
+            let (previous_index, initial_indices, mut scan, strend) =
+                deflate_rle_scan_indices((*s).strstart);
+            let previous = *window.wrapping_add(previous_index as usize) as crate::stdlib::uInt;
+            if previous == *window.wrapping_add(initial_indices[0] as usize) as crate::stdlib::uInt
+                && previous
+                    == *window.wrapping_add(initial_indices[1] as usize) as crate::stdlib::uInt
+                && previous
+                    == *window.wrapping_add(initial_indices[2] as usize) as crate::stdlib::uInt
             {
-                strend = (*s)
-                    .window
-                    .wrapping_offset((*s).strstart as isize)
-                    .wrapping_offset(crate::zutil_h::MAX_MATCH as isize);
                 loop {
-                    scan = scan.wrapping_add(1);
-                    if !(prev == *scan as crate::stdlib::uInt
-                        && {
-                            scan = scan.wrapping_add(1);
-                            prev == *scan as crate::stdlib::uInt
-                        }
-                        && {
-                            scan = scan.wrapping_add(1);
-                            prev == *scan as crate::stdlib::uInt
-                        }
-                        && {
-                            scan = scan.wrapping_add(1);
-                            prev == *scan as crate::stdlib::uInt
-                        }
-                        && {
-                            scan = scan.wrapping_add(1);
-                            prev == *scan as crate::stdlib::uInt
-                        }
-                        && {
-                            scan = scan.wrapping_add(1);
-                            prev == *scan as crate::stdlib::uInt
-                        }
-                        && {
-                            scan = scan.wrapping_add(1);
-                            prev == *scan as crate::stdlib::uInt
-                        }
-                        && {
-                            scan = scan.wrapping_add(1);
-                            prev == *scan as crate::stdlib::uInt
-                        }
+                    let (comparisons, next_scan) = deflate_rle_next_scan_indices(scan);
+                    scan = next_scan;
+                    if !(previous
+                        == *window.wrapping_add(comparisons[0] as usize) as crate::stdlib::uInt
+                        && previous
+                            == *window.wrapping_add(comparisons[1] as usize) as crate::stdlib::uInt
+                        && previous
+                            == *window.wrapping_add(comparisons[2] as usize) as crate::stdlib::uInt
+                        && previous
+                            == *window.wrapping_add(comparisons[3] as usize) as crate::stdlib::uInt
+                        && previous
+                            == *window.wrapping_add(comparisons[4] as usize) as crate::stdlib::uInt
+                        && previous
+                            == *window.wrapping_add(comparisons[5] as usize) as crate::stdlib::uInt
+                        && previous
+                            == *window.wrapping_add(comparisons[6] as usize) as crate::stdlib::uInt
+                        && previous
+                            == *window.wrapping_add(comparisons[7] as usize) as crate::stdlib::uInt
                         && scan < strend)
                     {
                         break;
                     }
                 }
-                (*s).match_length = deflate_rle_match_length(
-                    strend.offset_from(scan) as ::core::ffi::c_long as crate::stdlib::uInt,
-                    (*s).lookahead,
-                );
+                (*s).match_length =
+                    deflate_rle_match_length(strend.wrapping_sub(scan), (*s).lookahead);
             }
         }
         match deflate_rle_tally_plan((*s).match_length) {
@@ -4344,11 +4351,12 @@ mod tests {
         deflate_prime_bits_valid, deflate_request_is_invalid, deflate_reset_status_and_adler,
         deflate_rle_can_scan_match, deflate_rle_clamp_match_length, deflate_rle_match_length,
         deflate_rle_match_state_after_emit, deflate_rle_match_tally_plan,
-        deflate_rle_refill_action, deflate_rle_tally_plan, deflate_set_dictionary_allowed,
-        deflate_should_return_buf_error, deflate_slow_can_search_match, deflate_state_is_usable,
-        deflate_state_status_valid, deflate_version_matches, dictionary_tail_offset,
-        fill_window_available_space, fill_window_cursor, fill_window_has_insertable_match,
-        fill_window_hash_update, fill_window_high_water_after_zero, fill_window_insert_after_slide,
+        deflate_rle_next_scan_indices, deflate_rle_refill_action, deflate_rle_scan_indices,
+        deflate_rle_tally_plan, deflate_set_dictionary_allowed, deflate_should_return_buf_error,
+        deflate_slow_can_search_match, deflate_state_is_usable, deflate_state_status_valid,
+        deflate_version_matches, dictionary_tail_offset, fill_window_available_space,
+        fill_window_cursor, fill_window_has_insertable_match, fill_window_hash_update,
+        fill_window_high_water_after_zero, fill_window_insert_after_slide,
         fill_window_should_refill, fill_window_should_slide, fill_window_state_after_slide,
         fill_window_zero_range, flush_pending_accounting, gzip_default_xfl, gzip_header_crc,
         gzip_header_crc_pending, gzip_header_crc_pending_range, lm_head_reset_plan, lm_init_plan,
@@ -4696,6 +4704,24 @@ mod tests {
         assert_eq!(
             fill_window_high_water_after_zero(crate::zutil_h::ulg::MAX, 1),
             0
+        );
+    }
+
+    #[test]
+    fn deflate_rle_scan_indices_preserve_initial_and_unrolled_positions() {
+        assert_eq!(deflate_rle_scan_indices(10), (9, [10, 11, 12], 12, 268));
+        assert_eq!(
+            deflate_rle_next_scan_indices(12),
+            ([13, 14, 15, 16, 17, 18, 19, 20], 20),
+        );
+        assert_eq!(
+            deflate_rle_scan_indices(crate::stdlib::uInt::MAX),
+            (
+                crate::stdlib::uInt::MAX - 1,
+                [crate::stdlib::uInt::MAX, 0, 1],
+                1,
+                257,
+            ),
         );
     }
 
