@@ -2170,12 +2170,9 @@ pub unsafe extern "C" fn deflate(
         } else if (*s).strategy == crate::zlib_h::Z_RLE {
             deflate_rle(s, flush) as ::core::ffi::c_uint
         } else {
-            Some(
-                (*(&raw const configuration_table as *const config).offset((*s).level as isize))
-                    .func
-                    .expect("non-null function pointer"),
-            )
-            .expect("non-null function pointer")(s, flush) as ::core::ffi::c_uint
+            configuration_table[(*s).level as usize]
+                .func
+                .expect("non-null function pointer")(s, flush) as ::core::ffi::c_uint
         }) as block_state;
         if bstate as ::core::ffi::c_uint
             == finish_started as ::core::ffi::c_int as ::core::ffi::c_uint
