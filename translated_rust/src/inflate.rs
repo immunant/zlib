@@ -906,9 +906,12 @@ pub(crate) fn updatewindow<T>(
             Ok(operation(state, None))
         }
         InflateWindowAccess::CopyFrom(source) => {
-            window
-                .expect("window copies require a bound window")
-                .copy_from_slice(source);
+            let window = window.expect("window copies require a bound window");
+            // `inflateCopy()` preserves only the initialized history
+            // (`whave` bytes), exactly as zlib's zmemcpy does.  In
+            // particular, a custom allocator is not required to initialize
+            // the rest of either window allocation.
+            window[..source.len()].copy_from_slice(source);
             Ok(operation(state, None))
         }
         InflateWindowAccess::Inspect => {
@@ -3168,6 +3171,8 @@ pub fn inflateCopy(
             &mut source_state,
             InflateWindowAccess::Inspect,
             |source_state, source_window| {
+                let source_history = &source_window
+                    .expect("source copy window is bound")[..plan.window_copy_len];
                 inflate_copy_state(dest, &source_stream, copy, source_state, &plan, None);
                 // Preserve the copied state's exact window metadata, then
                 // populate its already-allocated storage through the shared
@@ -3177,9 +3182,7 @@ pub fn inflateCopy(
                 updatewindow(
                     dest,
                     copy,
-                    InflateWindowAccess::CopyFrom(
-                        source_window.expect("source copy window is bound"),
-                    ),
+                    InflateWindowAccess::CopyFrom(source_history),
                     |_copy, _window| {},
                 )
                 .expect("a copied destination window is already allocated");
