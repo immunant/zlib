@@ -239,12 +239,14 @@ unsafe fn gz_zero(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
     return 0 as ::core::ffi::c_int;
 }
 
-unsafe extern "C" fn gz_write(
-    mut state: crate::gzguts_h::gz_statep,
+// Exported entry points validate their handle before calling this helper.  Keep
+// the internal state reference-bound; `buf` remains a caller-owned raw buffer
+// at the FFI boundary.
+unsafe fn gz_write(
+    state: &mut crate::gzguts_h::gz_state,
     mut buf: crate::stdlib::voidpc,
     mut len: crate::stdlib::z_size_t,
 ) -> crate::stdlib::z_size_t {
-    let state = &mut *state;
     let mut put: crate::stdlib::z_size_t = len;
     let mut ret: ::core::ffi::c_int = 0;
     let buffered = loop {
