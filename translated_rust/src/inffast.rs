@@ -322,16 +322,21 @@ fn finish_inflate_fast(
 // its views. In addition to documenting the loop's indexing assumptions,
 // this prevents a direct ABI call with incomplete cursors from doing cursor
 // arithmetic at all.
+struct InflateFastCursors {
+    used: usize,
+    output_len: usize,
+}
+
 fn inflate_fast_cursor_lengths(
     strm: &crate::zlib_h::z_stream,
     start: ::core::ffi::c_uint,
-) -> Option<(usize, usize)> {
+) -> Option<InflateFastCursors> {
     if strm.avail_in < 6 || strm.avail_out < 258 {
         return None;
     }
     let used = start.checked_sub(strm.avail_out)? as usize;
     let output_len = used.checked_add(strm.avail_out as usize)?;
-    Some((used, output_len))
+    Some(InflateFastCursors { used, output_len })
 }
 
 // A regular inflater establishes these scalar invariants before entering the
@@ -354,6 +359,23 @@ fn inflate_fast_state_is_usable(state: &crate::src::inflate::inflate_state) -> b
         return state.whave == 0 && state.sane != 0;
     }
     state.wnext < state.wsize
+}
+
+// Validate every stream- and state-derived condition before the raw cursor
+// adapter constructs either caller view.  The adapter then only performs the
+// two foreign-range bindings selected by this reference-bound preflight.
+fn inflate_fast_preflight(
+    strm: &crate::zlib_h::z_stream,
+    state: &crate::src::inflate::inflate_state,
+    start: ::core::ffi::c_uint,
+) -> Option<InflateFastCursors> {
+    if !inflate_fast_state_is_usable(state)
+        || strm.next_in.is_null()
+        || strm.next_out.is_null()
+    {
+        return None;
+    }
+    inflate_fast_cursor_lengths(strm, start)
 }
 
 // Once its caller has bound the stream cursors, the fast decoder is entirely
@@ -421,15 +443,9 @@ pub fn inflate_fast(
     let Some((strm, state)) = crate::src::inflate::inflateStateCheck(strm) else {
         return;
     };
-    if !inflate_fast_state_is_usable(state) {
-        return;
-    }
-    let Some((used, output_len)) = inflate_fast_cursor_lengths(strm, start) else {
+    let Some(cursors) = inflate_fast_preflight(strm, state, start) else {
         return;
     };
-    if strm.next_in.is_null() || strm.next_out.is_null() {
-        return;
-    }
     let input = if strm.avail_in == 0 {
         &[]
     } else {
@@ -437,14 +453,19 @@ pub fn inflate_fast(
         // bytes at this cursor.
         unsafe { ::core::slice::from_raw_parts(strm.next_in, strm.avail_in as usize) }
     };
-    let output = if output_len == 0 {
+    let output = if cursors.output_len == 0 {
         &mut []
     } else {
         // SAFETY: the fast-path precondition makes the bytes already used,
         // plus `avail_out` remaining bytes, one writable output range.
-        unsafe { ::core::slice::from_raw_parts_mut(strm.next_out.wrapping_sub(used), output_len) }
+        unsafe {
+            ::core::slice::from_raw_parts_mut(
+                strm.next_out.wrapping_sub(cursors.used),
+                cursors.output_len,
+            )
+        }
     };
-    inflate_fast_slices(strm, state, used, input, output)
+    inflate_fast_slices(strm, state, cursors.used, input, output)
 }
 
 #[export_name = "inflate_fast"]
