@@ -1655,31 +1655,34 @@ mod callback_owner {
         // The caller has already converted `strm.state` once to this typed
         // handle.  Keep the only release-time state projection inside the
         // owner, next to the liveness ledger and the callback order.
-        let state = state_handle.as_mut();
-        drop(state.gzhead.take());
-        let release_plan = state.callback_storage.take_release_plan(state.status);
-        // Snapshot the recorded, typed handles before the first callback.
-        // `Iterator::map()` would retain this state borrow until each later
-        // iteration, including across a re-entrant `zfree` call.  Array::map
-        // is eager, so the complete liveness validation and handle lookup end
-        // before a callback can inspect or alter the stream again.
-        let allocations = release_plan.ordered_slots().map(|slot| {
-            slot.and_then(|slot| match slot {
-                DeflateCallbackSlot::Storage(DeflateStorageSlot::Pending) => {
-                    state.pending_buf.map(|value| value.cast())
-                }
-                DeflateCallbackSlot::Storage(DeflateStorageSlot::Head) => {
-                    state.head.map(|value| value.cast())
-                }
-                DeflateCallbackSlot::Storage(DeflateStorageSlot::Prev) => {
-                    state.prev.map(|value| value.cast())
-                }
-                DeflateCallbackSlot::Storage(DeflateStorageSlot::Window) => {
-                    state.window.map(|value| value.cast())
-                }
-                DeflateCallbackSlot::State => Some(state_handle.cast()),
-            })
-        });
+        let (release_plan, allocations) = {
+            let state = state_handle.as_mut();
+            drop(state.gzhead.take());
+            let release_plan = state.callback_storage.take_release_plan(state.status);
+            // Snapshot the recorded, typed handles before the first callback.
+            // `Iterator::map()` would retain this state borrow until each later
+            // iteration, including across a re-entrant `zfree` call.  Array::map
+            // is eager, and this explicit scope ends the complete state
+            // projection before a callback can inspect or alter the stream.
+            let allocations = release_plan.ordered_slots().map(|slot| {
+                slot.and_then(|slot| match slot {
+                    DeflateCallbackSlot::Storage(DeflateStorageSlot::Pending) => {
+                        state.pending_buf.map(|value| value.cast())
+                    }
+                    DeflateCallbackSlot::Storage(DeflateStorageSlot::Head) => {
+                        state.head.map(|value| value.cast())
+                    }
+                    DeflateCallbackSlot::Storage(DeflateStorageSlot::Prev) => {
+                        state.prev.map(|value| value.cast())
+                    }
+                    DeflateCallbackSlot::Storage(DeflateStorageSlot::Window) => {
+                        state.window.map(|value| value.cast())
+                    }
+                    DeflateCallbackSlot::State => Some(state_handle.cast()),
+                })
+            });
+            (release_plan, allocations)
+        };
         for allocation in allocations.into_iter().flatten() {
             let callback = stream
                 .zfree
