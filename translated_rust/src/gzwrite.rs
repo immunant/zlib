@@ -328,6 +328,12 @@ unsafe fn gz_init(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
         state.strm.avail_out = call.output_available();
         state.strm.next_out = call.output_mut().as_mut_ptr();
         state.x.next = state.strm.next_out as *mut ::core::ffi::c_uchar;
+        state.buffers.deflate_state = Some(crate::src::gzlib::GzEmbeddedDeflateState::new(
+            0,
+            state.strm.avail_out,
+            state.strm.total_in,
+            state.strm.total_out,
+        ));
     }
     return 0 as ::core::ffi::c_int;
 }
@@ -476,11 +482,23 @@ unsafe fn gz_comp(
         let input_available = state.strm.avail_in;
         let output_available = state.strm.avail_out;
         let output_cursor = state.strm.next_out.addr();
+        // Availability belongs to this request, since callers may have
+        // staged fresh input since the last pass. Totals persist with the
+        // paired gzip buffers so later write policy need not trust ABI
+        // counters between calls.
+        let persisted = state.buffers.deflate_state.unwrap_or_else(|| {
+            crate::src::gzlib::GzEmbeddedDeflateState::new(
+                input_available,
+                output_available,
+                state.strm.total_in,
+                state.strm.total_out,
+            )
+        });
         let codec_state = crate::src::gzlib::GzEmbeddedDeflateState::new(
             input_available,
             output_available,
-            state.strm.total_in,
-            state.strm.total_out,
+            persisted.total_in(),
+            persisted.total_out(),
         );
         let input = if input_available == 0 {
             // zlib permits a flush/finalization pass with no current input;
@@ -547,6 +565,7 @@ unsafe fn gz_comp(
         state.strm.avail_out = codec_state.output_available();
         state.strm.total_in = codec_state.total_in();
         state.strm.total_out = codec_state.total_out();
+        state.buffers.deflate_state = Some(codec_state);
         if external_input.is_none() {
             let Some(cursor) = state.buffers.input_cursor.as_ref() else {
                 return -1;

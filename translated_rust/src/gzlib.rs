@@ -113,6 +113,7 @@ impl crate::gzguts_h::GzBuffers {
             input: Some(input),
             output,
             input_cursor: None,
+            deflate_state: None,
             output_cursor: None,
         })
     }
@@ -129,6 +130,7 @@ impl crate::gzguts_h::GzBuffers {
             input: Some(input),
             output: Some(output),
             input_cursor: Some(GzCodecInput::empty()),
+            deflate_state: None,
             output_cursor: None,
         })
     }
@@ -152,6 +154,7 @@ impl crate::gzguts_h::GzBuffers {
         self.input = None;
         self.output = None;
         self.input_cursor = None;
+        self.deflate_state = None;
         self.output_cursor = None;
         self.size = 0;
     }
@@ -298,6 +301,7 @@ pub(crate) struct GzEmbeddedDeflateProgress {
 // bounded request/result handoff rather than having gzip state recompute
 // cursor progress after every ABI projection.  A future codec owner can hold
 // this directly while its boundary adapter alone publishes `z_stream`.
+#[derive(Clone, Copy)]
 pub(crate) struct GzEmbeddedDeflateState {
     input_available: crate::stdlib::uInt,
     output_available: crate::stdlib::uInt,
@@ -2057,6 +2061,7 @@ unsafe fn gz_open(path: GzOpenPath<'_>, mode: &[u8]) -> Option<Box<crate::gzguts
                 input: None,
                 output: None,
                 input_cursor: None,
+                deflate_state: None,
                 output_cursor: None,
             },
             direct: initial.direct,

@@ -48,6 +48,10 @@ pub mod gzguts_h {
         // input bytes.  Keep it as a checked index/count rather than relying
         // on the ABI stream cursor between refill and inflate calls.
         pub input_cursor: Option<crate::src::gzlib::GzCodecInput>,
+        // Compressed write handles retain the scalar portion of their
+        // embedded deflater with the paired buffers. The ABI `strm` is still
+        // the temporary codec projection, not the persistent progress owner.
+        pub(crate) deflate_state: Option<crate::src::gzlib::GzEmbeddedDeflateState>,
         // A completed inflate pass produces bytes in `output`.  Retain that
         // checked output cursor with its owner as well, rather than making
         // the ABI `x.next` pointer the only record of where those bytes are.
