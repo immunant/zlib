@@ -1584,7 +1584,12 @@ pub unsafe extern "C" fn gzfwrite_ffi(
     };
     gzfwrite_result(size, len, gz_write(state, buf, len))
 }
-unsafe fn gzputc(mut file: crate::zlib_h::gzFile, mut c: ::core::ffi::c_int) -> ::core::ffi::c_int {
+#[export_name = "gzputc"]
+
+pub unsafe extern "C" fn gzputc_ffi(
+    mut file: crate::zlib_h::gzFile,
+    mut c: ::core::ffi::c_int,
+) -> ::core::ffi::c_int {
     let buf = [c as ::core::ffi::c_uchar];
     let mut state: crate::gzguts_h::gz_statep =
         ::core::ptr::null_mut::<crate::gzguts_h::gz_state>();
@@ -1612,15 +1617,9 @@ unsafe fn gzputc(mut file: crate::zlib_h::gzFile, mut c: ::core::ffi::c_int) -> 
     }
     return gzputc_result(c);
 }
-#[export_name = "gzputc"]
+#[export_name = "gzputs"]
 
-pub unsafe extern "C" fn gzputc_ffi(
-    mut file: crate::zlib_h::gzFile,
-    mut c: ::core::ffi::c_int,
-) -> ::core::ffi::c_int {
-    gzputc(file, c)
-}
-unsafe fn gzputs(
+pub unsafe extern "C" fn gzputs_ffi(
     mut file: crate::zlib_h::gzFile,
     mut s: *const ::core::ffi::c_char,
 ) -> ::core::ffi::c_int {
@@ -1652,14 +1651,6 @@ unsafe fn gzputs(
     }
     put = gz_write(state, s as crate::stdlib::voidpc, len);
     return gzputs_result(len, put);
-}
-#[export_name = "gzputs"]
-
-pub unsafe extern "C" fn gzputs_ffi(
-    mut file: crate::zlib_h::gzFile,
-    mut s: *const ::core::ffi::c_char,
-) -> ::core::ffi::c_int {
-    gzputs(file, s)
 }
 #[export_name = "gzflush"]
 pub unsafe extern "C" fn gzflush_ffi(
