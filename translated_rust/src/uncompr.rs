@@ -28,9 +28,9 @@ pub use crate::zlib_h::Z_STREAM_END;
 pub use crate::zlib_h::Z_STREAM_ERROR;
 pub unsafe extern "C" fn uncompress2_z(
     mut dest: *mut crate::stdlib::Bytef,
-    mut destLen: *mut crate::stdlib::z_size_t,
+    destLen: &mut crate::stdlib::z_size_t,
     mut source: *const crate::stdlib::Bytef,
-    mut sourceLen: *mut crate::stdlib::z_size_t,
+    sourceLen: &mut crate::stdlib::z_size_t,
 ) -> ::core::ffi::c_int {
     let mut stream: crate::zlib_h::z_stream = crate::zlib_h::z_stream {
         next_in: ::core::ptr::null_mut::<crate::stdlib::Bytef>(),
@@ -52,9 +52,7 @@ pub unsafe extern "C" fn uncompress2_z(
     let max: crate::stdlib::uInt = -1 as ::core::ffi::c_int as crate::stdlib::uInt;
     let mut len: crate::stdlib::z_size_t = 0;
     let mut left: crate::stdlib::z_size_t = 0;
-    if sourceLen.is_null()
-        || *sourceLen > 0 as crate::stdlib::z_size_t && source.is_null()
-        || destLen.is_null()
+    if *sourceLen > 0 as crate::stdlib::z_size_t && source.is_null()
         || *destLen > 0 as crate::stdlib::z_size_t && dest.is_null()
     {
         return crate::zlib_h::Z_STREAM_ERROR;
@@ -127,18 +125,23 @@ pub unsafe extern "C" fn uncompress2_z_ffi(
     mut source: *const crate::stdlib::Bytef,
     mut sourceLen: *mut crate::stdlib::z_size_t,
 ) -> ::core::ffi::c_int {
-    uncompress2_z(dest, destLen, source, sourceLen)
+    if destLen.is_null() || sourceLen.is_null() {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    }
+    // SAFETY: the foreign caller supplied both required length pointers.
+    // `uncompress2_z` validates the associated byte buffers.
+    uncompress2_z(dest, unsafe { &mut *destLen }, source, unsafe { &mut *sourceLen })
 }
 pub unsafe extern "C" fn uncompress2(
     mut dest: *mut crate::stdlib::Bytef,
-    mut destLen: *mut crate::stdlib::uLongf,
+    destLen: &mut crate::stdlib::uLongf,
     mut source: *const crate::stdlib::Bytef,
-    mut sourceLen: *mut crate::stdlib::uLong,
+    sourceLen: &mut crate::stdlib::uLong,
 ) -> ::core::ffi::c_int {
     let mut ret: ::core::ffi::c_int = 0;
     let mut got: crate::stdlib::z_size_t = *destLen as crate::stdlib::z_size_t;
     let mut used: crate::stdlib::z_size_t = *sourceLen as crate::stdlib::z_size_t;
-    ret = uncompress2_z(dest, &raw mut got, source, &raw mut used);
+    ret = uncompress2_z(dest, &mut got, source, &mut used);
     *sourceLen = used as crate::stdlib::uLong;
     *destLen = got as crate::stdlib::uLong as crate::stdlib::uLongf;
     return ret;
@@ -151,16 +154,21 @@ pub unsafe extern "C" fn uncompress2_ffi(
     mut source: *const crate::stdlib::Bytef,
     mut sourceLen: *mut crate::stdlib::uLong,
 ) -> ::core::ffi::c_int {
-    uncompress2(dest, destLen, source, sourceLen)
+    if destLen.is_null() || sourceLen.is_null() {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    }
+    // SAFETY: the foreign caller supplied both required length pointers.
+    // `uncompress2` validates the associated byte buffers.
+    uncompress2(dest, unsafe { &mut *destLen }, source, unsafe { &mut *sourceLen })
 }
 pub unsafe extern "C" fn uncompress_z(
     mut dest: *mut crate::stdlib::Bytef,
-    mut destLen: *mut crate::stdlib::z_size_t,
+    destLen: &mut crate::stdlib::z_size_t,
     mut source: *const crate::stdlib::Bytef,
     mut sourceLen: crate::stdlib::z_size_t,
 ) -> ::core::ffi::c_int {
     let mut used: crate::stdlib::z_size_t = sourceLen;
-    return uncompress2_z(dest, destLen, source, &raw mut used);
+    return uncompress2_z(dest, destLen, source, &mut used);
 }
 #[export_name = "uncompress_z"]
 
@@ -170,16 +178,21 @@ pub unsafe extern "C" fn uncompress_z_ffi(
     mut source: *const crate::stdlib::Bytef,
     mut sourceLen: crate::stdlib::z_size_t,
 ) -> ::core::ffi::c_int {
-    uncompress_z(dest, destLen, source, sourceLen)
+    if destLen.is_null() {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    }
+    // SAFETY: the foreign caller supplied the required destination-length
+    // output pointer. `uncompress_z` preserves the zero-capacity null rule.
+    uncompress_z(dest, unsafe { &mut *destLen }, source, sourceLen)
 }
 pub unsafe extern "C" fn uncompress(
     mut dest: *mut crate::stdlib::Bytef,
-    mut destLen: *mut crate::stdlib::uLongf,
+    destLen: &mut crate::stdlib::uLongf,
     mut source: *const crate::stdlib::Bytef,
     mut sourceLen: crate::stdlib::uLong,
 ) -> ::core::ffi::c_int {
     let mut used: crate::stdlib::uLong = sourceLen;
-    return uncompress2(dest, destLen, source, &raw mut used);
+    return uncompress2(dest, destLen, source, &mut used);
 }
 #[export_name = "uncompress"]
 
@@ -189,5 +202,10 @@ pub unsafe extern "C" fn uncompress_ffi(
     mut source: *const crate::stdlib::Bytef,
     mut sourceLen: crate::stdlib::uLong,
 ) -> ::core::ffi::c_int {
-    uncompress(dest, destLen, source, sourceLen)
+    if destLen.is_null() {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    }
+    // SAFETY: the foreign caller supplied the required destination-length
+    // output pointer. `uncompress` preserves the zero-capacity null rule.
+    uncompress(dest, unsafe { &mut *destLen }, source, sourceLen)
 }

@@ -26,7 +26,7 @@ pub use crate::zlib_h::Z_STREAM_END;
 pub use crate::zlib_h::Z_STREAM_ERROR;
 pub unsafe extern "C" fn compress2_z(
     mut dest: *mut crate::stdlib::Bytef,
-    mut destLen: *mut crate::stdlib::z_size_t,
+    destLen: &mut crate::stdlib::z_size_t,
     mut source: *const crate::stdlib::Bytef,
     mut sourceLen: crate::stdlib::z_size_t,
     mut level: ::core::ffi::c_int,
@@ -51,7 +51,6 @@ pub unsafe extern "C" fn compress2_z(
     let max: crate::stdlib::uInt = -1 as ::core::ffi::c_int as crate::stdlib::uInt;
     let mut left: crate::stdlib::z_size_t = 0;
     if sourceLen > 0 as crate::stdlib::z_size_t && source.is_null()
-        || destLen.is_null()
         || *destLen > 0 as crate::stdlib::z_size_t && dest.is_null()
     {
         return crate::zlib_h::Z_STREAM_ERROR;
@@ -120,11 +119,16 @@ pub unsafe extern "C" fn compress2_z_ffi(
     mut sourceLen: crate::stdlib::z_size_t,
     mut level: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
-    compress2_z(dest, destLen, source, sourceLen, level)
+    if destLen.is_null() {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    }
+    // SAFETY: the foreign caller supplied the required destination-length
+    // output pointer. `compress2_z` validates the associated byte buffers.
+    compress2_z(dest, unsafe { &mut *destLen }, source, sourceLen, level)
 }
 pub unsafe extern "C" fn compress2(
     mut dest: *mut crate::stdlib::Bytef,
-    mut destLen: *mut crate::stdlib::uLongf,
+    destLen: &mut crate::stdlib::uLongf,
     mut source: *const crate::stdlib::Bytef,
     mut sourceLen: crate::stdlib::uLong,
     mut level: ::core::ffi::c_int,
@@ -133,7 +137,7 @@ pub unsafe extern "C" fn compress2(
     let mut got: crate::stdlib::z_size_t = *destLen as crate::stdlib::z_size_t;
     ret = compress2_z(
         dest,
-        &raw mut got,
+        &mut got,
         source,
         sourceLen as crate::stdlib::z_size_t,
         level,
@@ -150,11 +154,16 @@ pub unsafe extern "C" fn compress2_ffi(
     mut sourceLen: crate::stdlib::uLong,
     mut level: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
-    compress2(dest, destLen, source, sourceLen, level)
+    if destLen.is_null() {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    }
+    // SAFETY: the foreign caller supplied the required destination-length
+    // output pointer. `compress2` validates the associated byte buffers.
+    compress2(dest, unsafe { &mut *destLen }, source, sourceLen, level)
 }
 pub unsafe extern "C" fn compress_z(
     mut dest: *mut crate::stdlib::Bytef,
-    mut destLen: *mut crate::stdlib::z_size_t,
+    destLen: &mut crate::stdlib::z_size_t,
     mut source: *const crate::stdlib::Bytef,
     mut sourceLen: crate::stdlib::z_size_t,
 ) -> ::core::ffi::c_int {
@@ -174,11 +183,16 @@ pub unsafe extern "C" fn compress_z_ffi(
     mut source: *const crate::stdlib::Bytef,
     mut sourceLen: crate::stdlib::z_size_t,
 ) -> ::core::ffi::c_int {
-    compress_z(dest, destLen, source, sourceLen)
+    if destLen.is_null() {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    }
+    // SAFETY: the foreign caller supplied the required destination-length
+    // output pointer. `compress_z` validates the associated byte buffers.
+    compress_z(dest, unsafe { &mut *destLen }, source, sourceLen)
 }
 pub unsafe extern "C" fn compress(
     mut dest: *mut crate::stdlib::Bytef,
-    mut destLen: *mut crate::stdlib::uLongf,
+    destLen: &mut crate::stdlib::uLongf,
     mut source: *const crate::stdlib::Bytef,
     mut sourceLen: crate::stdlib::uLong,
 ) -> ::core::ffi::c_int {
@@ -198,7 +212,12 @@ pub unsafe extern "C" fn compress_ffi(
     mut source: *const crate::stdlib::Bytef,
     mut sourceLen: crate::stdlib::uLong,
 ) -> ::core::ffi::c_int {
-    compress(dest, destLen, source, sourceLen)
+    if destLen.is_null() {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    }
+    // SAFETY: the foreign caller supplied the required destination-length
+    // output pointer. `compress` validates the associated byte buffers.
+    compress(dest, unsafe { &mut *destLen }, source, sourceLen)
 }
 pub extern "C" fn compressBound_z(
     mut sourceLen: crate::stdlib::z_size_t,
