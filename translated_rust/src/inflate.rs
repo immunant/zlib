@@ -1103,12 +1103,12 @@ pub unsafe extern "C" fn inflate(
                                                                                                             (*state).check = (if (*state).flags != 0 {
                                                                                                                 crate::src::crc32::crc32_z(
                                                                                                                     (*state).check as crate::stdlib::uLong,
-                                                                                                                    core::slice::from_raw_parts(put.wrapping_offset(-(out as isize)), out as usize),
+                                                                                                                    core::slice::from_raw_parts(put.wrapping_sub(out as usize), out as usize),
                                                                                                                 )
                                                                                                             } else {
                                                                                                                 crate::src::adler32::adler32_z(
                                                                                                                     (*state).check as crate::stdlib::uLong,
-                                                                                                                    core::slice::from_raw_parts(put.wrapping_offset(-(out as isize)), out as usize),
+                                                                                                                    core::slice::from_raw_parts(put.wrapping_sub(out as usize), out as usize),
                                                                                                                 )
                                                                                                             }) as ::core::ffi::c_ulong;
                                                                                                             (*strm).adler = (*state).check as crate::stdlib::uLong;
@@ -1330,10 +1330,10 @@ pub unsafe extern "C" fn inflate(
                                                                             loop {
                                                                                 here = *(*state)
                                                                                     .lencode
-                                                                                    .wrapping_offset(
+                                                                                    .wrapping_add(
                                                                                         (hold as ::core::ffi::c_uint
                                                                                             & ((1 as ::core::ffi::c_uint) << (*state).lenbits)
-                                                                                                .wrapping_sub(1 as ::core::ffi::c_uint)) as isize,
+                                                                                                .wrapping_sub(1 as ::core::ffi::c_uint)) as usize,
                                                                                     );
                                                                                 if here.bits as ::core::ffi::c_uint <= bits {
                                                                                     break;
@@ -1862,12 +1862,12 @@ pub unsafe extern "C" fn inflate(
                                         } else {
                                             (*state).back = 0 as ::core::ffi::c_int;
                                             loop {
-                                                here = *(*state).lencode.wrapping_offset(
+                                                here = *(*state).lencode.wrapping_add(
                                                     (hold as ::core::ffi::c_uint
                                                         & ((1 as ::core::ffi::c_uint)
                                                             << (*state).lenbits)
                                                             .wrapping_sub(1 as ::core::ffi::c_uint))
-                                                        as isize,
+                                                        as usize,
                                                 );
                                                 if here.bits as ::core::ffi::c_uint <= bits {
                                                     break;
@@ -1891,7 +1891,7 @@ pub unsafe extern "C" fn inflate(
                                             {
                                                 last = here;
                                                 loop {
-                                                    here = *(*state).lencode.wrapping_offset(
+                                                    here = *(*state).lencode.wrapping_add(
                                                         (last.val as ::core::ffi::c_uint)
                                                             .wrapping_add(
                                                             (hold as ::core::ffi::c_uint
@@ -1905,7 +1905,7 @@ pub unsafe extern "C" fn inflate(
                                                                     ))
                                                                 >> last.bits as ::core::ffi::c_int,
                                                         )
-                                                            as isize,
+                                                            as usize,
                                                     );
                                                     if (last.bits as ::core::ffi::c_int
                                                         + here.bits as ::core::ffi::c_int)
@@ -1984,7 +1984,7 @@ pub unsafe extern "C" fn inflate(
                                                 crate::stdlib::memcpy(
                                                     (*(*state).head)
                                                         .extra
-                                                        .wrapping_offset(len as isize)
+                                                        .wrapping_add(len as usize)
                                                         as *mut ::core::ffi::c_void,
                                                     next as *const ::core::ffi::c_void,
                                                     (if len.wrapping_add(copy)
@@ -2059,7 +2059,7 @@ pub unsafe extern "C" fn inflate(
                                 loop {
                                     let c2rust_fresh5 = copy;
                                     copy = copy.wrapping_add(1);
-                                    len = *next.wrapping_offset(c2rust_fresh5 as isize)
+                                    len = *next.wrapping_add(c2rust_fresh5 as usize)
                                         as ::core::ffi::c_uint;
                                     if !(*state).head.is_null()
                                         && !(*(*state).head).name.is_null()
@@ -2069,7 +2069,7 @@ pub unsafe extern "C" fn inflate(
                                         (*state).length = (*state).length.wrapping_add(1);
                                         *(*(*state).head)
                                             .name
-                                            .wrapping_offset(c2rust_fresh6 as isize) =
+                                            .wrapping_add(c2rust_fresh6 as usize) =
                                             len as crate::stdlib::Bytef;
                                     }
                                     if !(len != 0 && copy < have) {
@@ -2099,11 +2099,11 @@ pub unsafe extern "C" fn inflate(
                             break 'c_2325;
                         }
                         loop {
-                            here = *(*state).distcode.wrapping_offset(
+                            here = *(*state).distcode.wrapping_add(
                                 (hold as ::core::ffi::c_uint
                                     & ((1 as ::core::ffi::c_uint) << (*state).distbits)
                                         .wrapping_sub(1 as ::core::ffi::c_uint))
-                                    as isize,
+                                    as usize,
                             );
                             if here.bits as ::core::ffi::c_uint <= bits {
                                 break;
@@ -2123,7 +2123,7 @@ pub unsafe extern "C" fn inflate(
                         {
                             last = here;
                             loop {
-                                here = *(*state).distcode.wrapping_offset(
+                                here = *(*state).distcode.wrapping_add(
                                     (last.val as ::core::ffi::c_uint).wrapping_add(
                                         (hold as ::core::ffi::c_uint
                                             & ((1 as ::core::ffi::c_uint)
@@ -2131,7 +2131,7 @@ pub unsafe extern "C" fn inflate(
                                                     + last.op as ::core::ffi::c_int)
                                                 .wrapping_sub(1 as ::core::ffi::c_uint))
                                             >> last.bits as ::core::ffi::c_int,
-                                    ) as isize,
+                                    ) as usize,
                                 );
                                 if (last.bits as ::core::ffi::c_int
                                     + here.bits as ::core::ffi::c_int)
@@ -2180,7 +2180,7 @@ pub unsafe extern "C" fn inflate(
                         loop {
                             let c2rust_fresh7 = copy;
                             copy = copy.wrapping_add(1);
-                            len = *next.wrapping_offset(c2rust_fresh7 as isize)
+                            len = *next.wrapping_add(c2rust_fresh7 as usize)
                                 as ::core::ffi::c_uint;
                             if !(*state).head.is_null()
                                 && !(*(*state).head).comment.is_null()
@@ -2190,7 +2190,7 @@ pub unsafe extern "C" fn inflate(
                                 (*state).length = (*state).length.wrapping_add(1);
                                 *(*(*state).head)
                                     .comment
-                                    .wrapping_offset(c2rust_fresh8 as isize) =
+                                    .wrapping_add(c2rust_fresh8 as usize) =
                                     len as crate::stdlib::Bytef;
                             }
                             if !(len != 0 && copy < have) {
@@ -2360,7 +2360,7 @@ pub unsafe extern "C" fn inflate(
             crate::src::crc32::crc32_z(
                 (*state).check as crate::stdlib::uLong,
                 core::slice::from_raw_parts(
-                    (*strm).next_out.wrapping_offset(-(out as isize)),
+                    (*strm).next_out.wrapping_sub(out as usize),
                     out as usize,
                 ),
             )
@@ -2368,7 +2368,7 @@ pub unsafe extern "C" fn inflate(
             crate::src::adler32::adler32_z(
                 (*state).check as crate::stdlib::uLong,
                 core::slice::from_raw_parts(
-                    (*strm).next_out.wrapping_offset(-(out as isize)),
+                    (*strm).next_out.wrapping_sub(out as usize),
                     out as usize,
                 ),
             )
@@ -2813,25 +2813,25 @@ pub unsafe extern "C" fn inflateCopy_ffi(
                 .wrapping_sub(1) as *const crate::src::inftrees::code
     {
         (*copy).lencode = (&raw mut (*copy).codes as *mut crate::src::inftrees::code)
-            .wrapping_offset(
+            .wrapping_add(
                 (*state)
                     .lencode
                     .offset_from(&raw mut (*state).codes as *mut crate::src::inftrees::code)
-                    as isize,
+                    as usize,
             );
         (*copy).distcode = (&raw mut (*copy).codes as *mut crate::src::inftrees::code)
-            .wrapping_offset(
+            .wrapping_add(
                 (*state)
                     .distcode
                     .offset_from(&raw mut (*state).codes as *mut crate::src::inftrees::code)
-                    as isize,
+                    as usize,
             );
     }
-    (*copy).next = (&raw mut (*copy).codes as *mut crate::src::inftrees::code).wrapping_offset(
+    (*copy).next = (&raw mut (*copy).codes as *mut crate::src::inftrees::code).wrapping_add(
         (*state)
             .next
             .offset_from(&raw mut (*state).codes as *mut crate::src::inftrees::code)
-            as isize,
+            as usize,
     );
     if !window.is_null() {
         crate::stdlib::memcpy(
