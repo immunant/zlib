@@ -2568,8 +2568,9 @@ pub fn inflate(
                                                                                     bits = bits.wrapping_add(8 as ::core::ffi::c_uint);
                                                                                 }
                                                                                         // TIME has no cursor lend or callback. Keep the
-                                                                                        // retained header update and checksum commit on
-                                                                                        // one short-lived state borrow.
+                                                                                        // header update on the invocation-local retained
+                                                                                        // header borrow and the checksum commit on one
+                                                                                        // short-lived state borrow.
                                                                                         let state_ref =
                                                                                         &mut *state_ref;
                                                                                         let time_plan = inflate_gzip_time_plan(
@@ -2577,14 +2578,9 @@ pub fn inflate(
                                                                                         state_ref.wrap,
                                                                                         hold,
                                                                                     );
-                                                                                        if !state_ref
-                                                                                        .head
-                                                                                        .is_null()
-                                                                                    {
-                                                                                        (*state_ref
-                                                                                        .head)
-                                                                                        .time = time_plan.time;
-                                                                                    }
+                                                                                        if let Some(head) = gzip_header.as_deref_mut() {
+                                                                                            head.time = time_plan.time;
+                                                                                        }
                                                                                         inflate_gzip_time_commit(
                                                                                         state_ref,
                                                                                         time_plan,
