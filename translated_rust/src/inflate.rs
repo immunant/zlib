@@ -2406,6 +2406,28 @@ fn inflate_sync_remaining_input(
     &input[consumed..]
 }
 
+fn inflate_sync_input_progress(
+    avail_in: crate::stdlib::uInt,
+    total_in: crate::stdlib::uLong,
+    consumed: usize,
+) -> (crate::stdlib::uInt, crate::stdlib::uLong) {
+    (
+        avail_in.wrapping_sub(consumed as crate::stdlib::uInt),
+        total_in.wrapping_add(consumed as crate::stdlib::uLong),
+    )
+}
+
+fn inflate_sync_normalized_wrap(
+    flags: ::core::ffi::c_int,
+    wrap: ::core::ffi::c_int,
+) -> ::core::ffi::c_int {
+    if flags == -1 {
+        0
+    } else {
+        wrap & !4
+    }
+}
+
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 enum InflateSyncSearch {
     BufferError,
@@ -2456,10 +2478,11 @@ pub unsafe extern "C" fn inflateSync_ffi(mut strm: crate::zlib_h::z_streamp) -> 
     }
 
     let state = (*strm).state as *mut crate::src::inflate::inflate_state;
-    let input = if (*strm).avail_in == 0 {
+    let avail_in = (*strm).avail_in;
+    let input = if avail_in == 0 {
         &[]
     } else {
-        ::core::slice::from_raw_parts((*strm).next_in, (*strm).avail_in as usize)
+        ::core::slice::from_raw_parts((*strm).next_in, avail_in as usize)
     };
     let result = inflate_sync_search_core(
         &mut (*state).mode,
@@ -2474,26 +2497,20 @@ pub unsafe extern "C" fn inflateSync_ffi(mut strm: crate::zlib_h::z_streamp) -> 
             consumed
         }
     };
-    (*strm).avail_in = (*strm)
-        .avail_in
-        .wrapping_sub(consumed as crate::stdlib::uInt);
+    let (remaining_input, total_input) =
+        inflate_sync_input_progress(avail_in, (*strm).total_in, consumed);
+    (*strm).avail_in = remaining_input;
     if consumed != 0 {
         (*strm).next_in =
             inflate_sync_remaining_input(input, consumed).as_ptr() as *mut ::core::ffi::c_uchar;
     }
-    (*strm).total_in = (*strm)
-        .total_in
-        .wrapping_add(consumed as crate::stdlib::uLong);
+    (*strm).total_in = total_input;
     if let InflateSyncSearch::DataError { .. } = result {
         return crate::zlib_h::Z_DATA_ERROR;
     }
 
-    if (*state).flags == -1 {
-        (*state).wrap = 0;
-    } else {
-        (*state).wrap &= !4;
-    }
     let flags = (*state).flags;
+    (*state).wrap = inflate_sync_normalized_wrap(flags, (*state).wrap);
     let input_total = (*strm).total_in;
     let output_total = (*strm).total_out;
     inflateReset(strm);
@@ -2708,9 +2725,9 @@ mod tests {
         inflate_mode_data_type_flags, inflate_mode_is_valid, inflate_needs_buffer_error,
         inflate_prime_update, inflate_reset2_params, inflate_should_update_window,
         inflate_state_metadata_is_valid, inflate_stream_has_allocator_callbacks,
-        inflate_sync_point_value, inflate_sync_remaining_input, inflate_sync_search_core,
-        inflate_undermine_core, inflate_validate_wrap, inflate_codes_used_offset_value,
-        initial_window_metadata,
+        inflate_sync_input_progress, inflate_sync_normalized_wrap, inflate_sync_point_value,
+        inflate_sync_remaining_input, inflate_sync_search_core, inflate_undermine_core,
+        inflate_validate_wrap, inflate_codes_used_offset_value, initial_window_metadata,
         stored_block_length, syncsearch_safe, window_needs_allocation, window_update_plan,
         InflateBlockKind, InflateCopyProgress, InflatePrimeUpdate, InflateSyncSearch, BAD, CHECK,
         CODE_LENGTH_ORDER, COPY_, COPY_1, DICT, HEAD, LEN_, MATCH, STORED, SYNC, TYPE,
@@ -2990,6 +3007,26 @@ mod tests {
         assert_eq!(inflate_sync_remaining_input(&input, 0), b"marker");
         assert_eq!(inflate_sync_remaining_input(&input, 2), b"rker");
         assert_eq!(inflate_sync_remaining_input(&input, input.len()), b"");
+    }
+
+    #[test]
+    fn inflate_sync_input_progress_preserves_wrapping_counters() {
+        assert_eq!(inflate_sync_input_progress(8, 12, 3), (5, 15));
+        assert_eq!(
+            inflate_sync_input_progress(0, crate::stdlib::uLong::MAX, 0),
+            (0, crate::stdlib::uLong::MAX)
+        );
+        assert_eq!(
+            inflate_sync_input_progress(1, crate::stdlib::uLong::MAX, 2),
+            (crate::stdlib::uInt::MAX, 1)
+        );
+    }
+
+    #[test]
+    fn inflate_sync_normalized_wrap_resets_unknown_headers_and_validation() {
+        assert_eq!(inflate_sync_normalized_wrap(-1, 7), 0);
+        assert_eq!(inflate_sync_normalized_wrap(0, 7), 3);
+        assert_eq!(inflate_sync_normalized_wrap(42, 9), 9);
     }
 
     #[test]

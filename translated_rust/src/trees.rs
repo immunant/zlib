@@ -3660,6 +3660,17 @@ fn tally_symbol_bytes(
     ]
 }
 
+fn tally_match_tree_indices(
+    dist: ::core::ffi::c_uint,
+    lc: ::core::ffi::c_uint,
+) -> (usize, usize) {
+    let length_code = crate::src::trees::_length_code[lc as usize] as ::core::ffi::c_int
+        + crate::src::deflate::LITERALS
+        + 1 as ::core::ffi::c_int;
+    let distance_code = crate::src::trees::_dist_code[dist_code_index(dist.wrapping_sub(1))];
+    (length_code as usize, distance_code as usize)
+}
+
 fn bi_windup_core(
     bi_buf: &mut crate::zutil_h::ush,
     bi_valid: &mut ::core::ffi::c_int,
@@ -5087,21 +5098,14 @@ pub unsafe extern "C" fn _tr_tally(
         (*s).dyn_ltree[lc as usize].fc.value = (*s).dyn_ltree[lc as usize].fc.value.wrapping_add(1);
     } else {
         (*s).matches = (*s).matches.wrapping_add(1);
-        dist = dist.wrapping_sub(1);
-        (*s).dyn_ltree[(crate::src::trees::_length_code[lc as usize] as ::core::ffi::c_int
-            + crate::src::deflate::LITERALS
-            + 1 as ::core::ffi::c_int) as usize]
-            .fc
-            .value = (*s).dyn_ltree[(crate::src::trees::_length_code[lc as usize]
-            as ::core::ffi::c_int
-            + crate::src::deflate::LITERALS
-            + 1 as ::core::ffi::c_int) as usize]
+        let (length_index, distance_index) = tally_match_tree_indices(dist, lc);
+        (*s).dyn_ltree[length_index].fc.value = (*s).dyn_ltree[length_index]
             .fc
             .value
             .wrapping_add(1);
-        (*s).dyn_dtree[crate::src::trees::_dist_code[dist_code_index(dist)] as usize]
+        (*s).dyn_dtree[distance_index]
             .fc
-            .value = (*s).dyn_dtree[crate::src::trees::_dist_code[dist_code_index(dist)] as usize]
+            .value = (*s).dyn_dtree[distance_index]
             .fc
             .value
             .wrapping_add(1);
@@ -5123,8 +5127,8 @@ mod tests {
     use super::{
         bi_flush_core, bi_reverse, bi_windup_core, bl_order, detect_data_type_from_ltree,
         dist_code_index, next_code_for_len, next_codes, pending_cursor_after_bytes,
-        static_bl_desc, static_d_desc, static_l_desc, tally_symbol_bytes, tree_run_limits,
-        MAX_BITS,
+        static_bl_desc, static_d_desc, static_l_desc, tally_match_tree_indices,
+        tally_symbol_bytes, tree_run_limits, MAX_BITS,
     };
 
     fn ltree_with_frequency(
@@ -5268,5 +5272,13 @@ mod tests {
     fn tally_symbol_encoding_preserves_little_endian_distance_bytes() {
         assert_eq!(tally_symbol_bytes(0x1234, 0x56), [0x34, 0x12, 0x56]);
         assert_eq!(tally_symbol_bytes(0x1_00ff, 0x1_0001), [0xff, 0x00, 0x01]);
+    }
+
+    #[test]
+    fn tally_match_tree_indices_use_deflate_length_and_distance_codes() {
+        assert_eq!(tally_match_tree_indices(1, 0), (257, 0));
+        assert_eq!(tally_match_tree_indices(256, 255), (285, 15));
+        assert_eq!(tally_match_tree_indices(257, 255), (285, 16));
+        assert_eq!(tally_match_tree_indices(32_768, 255), (285, 29));
     }
 }
