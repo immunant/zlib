@@ -2166,6 +2166,27 @@ enum DeflateParamsHashAction {
     Clear,
 }
 
+// zlib's configuration table selects one of three compressor routines.  Keep
+// that policy as data instead of comparing function addresses: Rust does not
+// promise meaningful equality for function pointers across codegen units.
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+enum DeflateCompressionFunction {
+    Stored,
+    Fast,
+    Slow,
+}
+
+fn deflate_compression_function_for_level(
+    level: ::core::ffi::c_int,
+) -> Option<DeflateCompressionFunction> {
+    match level {
+        0 => Some(DeflateCompressionFunction::Stored),
+        1..=3 => Some(DeflateCompressionFunction::Fast),
+        4..=9 => Some(DeflateCompressionFunction::Slow),
+        _ => None,
+    }
+}
+
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 struct DeflateParamsPlan {
     level: ::core::ffi::c_int,
@@ -2180,9 +2201,10 @@ fn deflate_params_plan(
     strategy: ::core::ffi::c_int,
 ) -> Option<DeflateParamsPlan> {
     let (level, strategy) = normalize_deflate_params(level, strategy)?;
+    let current_function = deflate_compression_function_for_level(state.level)?;
+    let requested_function = deflate_compression_function_for_level(level)?;
     let flush_before_apply = (strategy != state.strategy
-        || configuration_table[state.level as usize].func
-            != configuration_table[level as usize].func)
+        || current_function != requested_function)
         && state.last_flush != -2;
     let hash_action = if state.level != level
         && state.level == 0
@@ -4908,6 +4930,38 @@ mod tests {
         assert_eq!(state.good_match, 4);
         assert_eq!(state.nice_match, 8);
         assert_eq!(state.max_chain_length, 4);
+    }
+
+    #[test]
+    fn deflate_params_plan_uses_configuration_function_groups() {
+        use super::DeflateCompressionFunction::{Fast, Slow, Stored};
+
+        assert_eq!(super::deflate_compression_function_for_level(0), Some(Stored));
+        for level in 1..=3 {
+            assert_eq!(super::deflate_compression_function_for_level(level), Some(Fast));
+        }
+        for level in 4..=9 {
+            assert_eq!(super::deflate_compression_function_for_level(level), Some(Slow));
+        }
+        assert_eq!(super::deflate_compression_function_for_level(-1), None);
+        assert_eq!(super::deflate_compression_function_for_level(10), None);
+
+        let mut state = super::internal_state::newly_allocated();
+        state.level = 1;
+        state.strategy = crate::zlib_h::Z_DEFAULT_STRATEGY;
+        state.last_flush = crate::zlib_h::Z_NO_FLUSH;
+
+        assert!(!super::deflate_params_plan(&state, 3, state.strategy)
+            .expect("valid parameters must produce a plan")
+            .flush_before_apply);
+        assert!(super::deflate_params_plan(&state, 4, state.strategy)
+            .expect("valid parameters must produce a plan")
+            .flush_before_apply);
+
+        state.level = 0;
+        assert!(super::deflate_params_plan(&state, 1, state.strategy)
+            .expect("valid parameters must produce a plan")
+            .flush_before_apply);
     }
 
     #[test]
