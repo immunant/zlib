@@ -277,24 +277,6 @@ pub use crate::zlib_h::Z_TREES;
 pub use crate::zlib_h::Z_VERSION_ERROR;
 pub use crate::zutil_h::DEF_WBITS;
 
-unsafe extern "C" fn inflateStateCheck(mut strm: crate::zlib_h::z_streamp) -> ::core::ffi::c_int {
-    if strm.is_null() || (*strm).zalloc.is_none() || (*strm).zfree.is_none() {
-        return 1 as ::core::ffi::c_int;
-    }
-    let Some(state_handle) = (&*strm).inflate_state() else {
-        return 1 as ::core::ffi::c_int;
-    };
-    let state = state_handle.borrow();
-    if ((*state).mode as ::core::ffi::c_uint)
-        < crate::src::inflate::HEAD as ::core::ffi::c_int as ::core::ffi::c_uint
-        || (*state).mode as ::core::ffi::c_uint
-            > crate::src::inflate::SYNC as ::core::ffi::c_int as ::core::ffi::c_uint
-    {
-        return 1 as ::core::ffi::c_int;
-    }
-    return 0 as ::core::ffi::c_int;
-}
-
 fn inflate_state_invalid(strm: &crate::zlib_h::z_stream) -> bool {
     if strm.zalloc.is_none() || strm.zfree.is_none() {
         return true;
@@ -307,6 +289,10 @@ fn inflate_state_invalid(strm: &crate::zlib_h::z_stream) -> bool {
         < crate::src::inflate::HEAD as ::core::ffi::c_int as ::core::ffi::c_uint
         || (state.mode as ::core::ffi::c_uint)
             > crate::src::inflate::SYNC as ::core::ffi::c_int as ::core::ffi::c_uint
+}
+
+fn inflateStateCheck(strm: &crate::zlib_h::z_stream) -> ::core::ffi::c_int {
+    inflate_state_invalid(strm) as ::core::ffi::c_int
 }
 pub fn inflateResetKeep(strm: &mut crate::zlib_h::z_stream) -> ::core::ffi::c_int {
     if inflate_state_invalid(strm) {
@@ -489,8 +475,8 @@ pub unsafe extern "C" fn inflateInit__ffi(
     };
     inflateInit_(strm, *version, stream_size)
 }
-pub unsafe extern "C" fn inflatePrime(
-    mut strm: crate::zlib_h::z_streamp,
+pub fn inflatePrime(
+    strm: &mut crate::zlib_h::z_stream,
     mut bits: ::core::ffi::c_int,
     mut value: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
@@ -500,7 +486,7 @@ pub unsafe extern "C" fn inflatePrime(
     if bits == 0 as ::core::ffi::c_int {
         return crate::zlib_h::Z_OK;
     }
-    let state_handle = (&*strm)
+    let state_handle = strm
         .inflate_state()
         .expect("inflate state was checked above");
     let mut state = state_handle.borrow_mut();
@@ -533,6 +519,9 @@ pub unsafe extern "C" fn inflatePrime_ffi(
     mut bits: ::core::ffi::c_int,
     mut value: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
+    let Some(strm) = (unsafe { strm.as_mut() }) else {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    };
     inflatePrime(strm, bits, value)
 }
 fn updatewindow_from_slice(
@@ -646,7 +635,10 @@ pub unsafe extern "C" fn inflate(
         1 as ::core::ffi::c_ushort,
         15 as ::core::ffi::c_ushort,
     ];
-    if inflateStateCheck(strm) != 0
+    let Some(strm_ref) = strm.as_ref() else {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    };
+    if inflateStateCheck(strm_ref) != 0
         || (*strm).next_out.is_null()
         || (*strm).next_in.0.is_none() && (*strm).avail_in != 0 as crate::stdlib::uInt
     {
@@ -2629,25 +2621,26 @@ pub unsafe extern "C" fn inflateSync_ffi(mut strm: crate::zlib_h::z_streamp) -> 
     };
     inflateSync(strm, input)
 }
-pub unsafe extern "C" fn inflateSyncPoint(
-    mut strm: crate::zlib_h::z_streamp,
-) -> ::core::ffi::c_int {
+pub fn inflateSyncPoint(strm: &crate::zlib_h::z_stream) -> ::core::ffi::c_int {
     if inflateStateCheck(strm) != 0 {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    let state_handle = (&*strm)
+    let state_handle = strm
         .inflate_state()
         .expect("inflate state was checked above");
-    let mut state = state_handle.borrow_mut();
-    return ((*state).mode as ::core::ffi::c_uint
+    let state = state_handle.borrow();
+    return (state.mode as ::core::ffi::c_uint
         == crate::src::inflate::STORED as ::core::ffi::c_int as ::core::ffi::c_uint
-        && (*state).bits == 0 as ::core::ffi::c_uint) as ::core::ffi::c_int;
+        && state.bits == 0 as ::core::ffi::c_uint) as ::core::ffi::c_int;
 }
 #[export_name = "inflateSyncPoint"]
 
 pub unsafe extern "C" fn inflateSyncPoint_ffi(
     mut strm: crate::zlib_h::z_streamp,
 ) -> ::core::ffi::c_int {
+    let Some(strm) = (unsafe { strm.as_ref() }) else {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    };
     inflateSyncPoint(strm)
 }
 pub fn inflate_copy(
