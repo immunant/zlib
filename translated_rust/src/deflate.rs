@@ -1471,7 +1471,7 @@ pub unsafe extern "C" fn deflateInit2_(
         (*s).status = crate::src::deflate::FINISH_STATE;
         (*strm).msg =
             z_error_message(-4 as ::core::ffi::c_int).as_ptr() as *mut ::core::ffi::c_char;
-        deflateEnd(strm);
+        deflateEnd_ffi(strm);
         return crate::zlib_h::Z_MEM_ERROR;
     }
     (*s).sym_buf =
@@ -3383,7 +3383,11 @@ pub unsafe extern "C" fn deflate_ffi(
 ) -> ::core::ffi::c_int {
     deflate(strm, flush)
 }
-pub unsafe extern "C" fn deflateEnd(mut strm: crate::zlib_h::z_streamp) -> ::core::ffi::c_int {
+#[export_name = "deflateEnd"]
+
+pub unsafe extern "C" fn deflateEnd_ffi(
+    mut strm: crate::zlib_h::z_streamp,
+) -> ::core::ffi::c_int {
     let mut status: ::core::ffi::c_int = 0;
     if deflateStateCheck(strm) != 0 {
         return crate::zlib_h::Z_STREAM_ERROR;
@@ -3423,11 +3427,6 @@ pub unsafe extern "C" fn deflateEnd(mut strm: crate::zlib_h::z_streamp) -> ::cor
     } else {
         crate::zlib_h::Z_OK
     };
-}
-#[export_name = "deflateEnd"]
-
-pub unsafe extern "C" fn deflateEnd_ffi(mut strm: crate::zlib_h::z_streamp) -> ::core::ffi::c_int {
-    deflateEnd(strm)
 }
 fn deflate_copy_prev_len(
     slid: ::core::ffi::c_int,
@@ -3509,7 +3508,7 @@ pub unsafe extern "C" fn deflateCopy(
         || (*ds).head.is_null()
         || (*ds).pending_buf.is_null()
     {
-        deflateEnd(dest);
+        deflateEnd_ffi(dest);
         return crate::zlib_h::Z_MEM_ERROR;
     }
     crate::stdlib::memcpy(

@@ -2,7 +2,7 @@ pub use crate::__stddef_null_h::NULL;
 pub use crate::__stddef_size_t_h::size_t;
 
 pub use crate::src::deflate::deflate;
-pub use crate::src::deflate::deflateEnd;
+pub use crate::src::deflate::deflateEnd_ffi as deflateEnd;
 pub use crate::src::deflate::internal_state;
 pub use crate::stdlib::uInt;
 pub use crate::stdlib::uLong;
@@ -190,21 +190,22 @@ fn compress_bound(source_len: crate::stdlib::uLong) -> crate::stdlib::uLong {
 #[export_name = "compress2_z"]
 pub unsafe extern "C" fn compress2_z_ffi(
     dest: *mut crate::stdlib::Bytef,
-    destLen: *mut crate::stdlib::z_size_t,
+    mut destLen: *mut crate::stdlib::z_size_t,
     source: *const crate::stdlib::Bytef,
     sourceLen: crate::stdlib::z_size_t,
     level: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
-    if destLen.is_null() {
+    let Some(dest_len) = destLen.as_mut() else {
         return crate::zlib_h::Z_STREAM_ERROR;
-    }
+    };
 
-    let plan = match plan_compress2_buffers(sourceLen, *destLen, source.is_null(), dest.is_null()) {
+    let plan = match plan_compress2_buffers(sourceLen, *dest_len, source.is_null(), dest.is_null())
+    {
         Ok(plan) => plan,
         Err(status) => return status,
     };
 
-    *destLen = 0;
+    *dest_len = 0;
 
     let mut stream = crate::zlib_h::z_stream_s {
         next_in: ::core::ptr::null_mut::<crate::stdlib::Bytef>(),
@@ -268,27 +269,27 @@ pub unsafe extern "C" fn compress2_z_ffi(
     };
 
     let result = finish_compress(status, dest_progress.used);
-    *destLen = result.dest_len;
-    crate::src::deflate::deflateEnd(&mut stream);
+    *dest_len = result.dest_len;
+    crate::src::deflate::deflateEnd_ffi(&mut stream);
     result.status
 }
 
 #[export_name = "compress2"]
 pub unsafe extern "C" fn compress2_ffi(
     dest: *mut crate::stdlib::Bytef,
-    destLen: *mut crate::stdlib::uLongf,
+    mut destLen: *mut crate::stdlib::uLongf,
     source: *const crate::stdlib::Bytef,
     sourceLen: crate::stdlib::uLong,
     level: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
-    if destLen.is_null() {
+    let Some(dest_len) = destLen.as_mut() else {
         return crate::zlib_h::Z_STREAM_ERROR;
-    }
+    };
 
-    let lengths = LegacyCompressLengths::from_legacy(*destLen, sourceLen);
+    let lengths = LegacyCompressLengths::from_legacy(*dest_len, sourceLen);
     let mut got = lengths.dest;
     let status = compress2_z_ffi(dest, &mut got, source, lengths.source, level);
-    *destLen = LegacyCompressLengths::destination_from_z(got);
+    *dest_len = LegacyCompressLengths::destination_from_z(got);
     status
 }
 
@@ -339,9 +340,9 @@ pub extern "C" fn compressBound_ffi(sourceLen: crate::stdlib::uLong) -> crate::s
 #[cfg(test)]
 mod tests {
     use super::{
-        compress_bound, compress_bound_z_impl, finish_compress, next_compress_chunk,
-        plan_compress2_buffers, CompressBufferPlan, CompressProgress, LegacyCompressLengths,
-        MAX_CHUNK,
+        compress2_ffi, compress2_z_ffi, compress_bound, compressBound_z_ffi,
+        compress_bound_z_impl, finish_compress, next_compress_chunk, plan_compress2_buffers,
+        CompressBufferPlan, CompressProgress, LegacyCompressLengths, MAX_CHUNK,
     };
 
     #[test]
@@ -389,6 +390,73 @@ mod tests {
                 dest_capacity: 1,
             })
         );
+    }
+
+    #[test]
+    fn compress2_rejects_a_missing_output_length() {
+        assert_eq!(
+            unsafe {
+                compress2_z_ffi(
+                    core::ptr::null_mut(),
+                    core::ptr::null_mut(),
+                    core::ptr::null(),
+                    0,
+                    crate::zlib_h::Z_DEFAULT_COMPRESSION,
+                )
+            },
+            crate::zlib_h::Z_STREAM_ERROR
+        );
+        assert_eq!(
+            unsafe {
+                compress2_ffi(
+                    core::ptr::null_mut(),
+                    core::ptr::null_mut(),
+                    core::ptr::null(),
+                    0,
+                    crate::zlib_h::Z_DEFAULT_COMPRESSION,
+                )
+            },
+            crate::zlib_h::Z_STREAM_ERROR
+        );
+    }
+
+    #[test]
+    fn compress2_updates_z_and_legacy_output_lengths() {
+        let source = b"ffi output length";
+        let capacity = compressBound_z_ffi(source.len());
+        let mut z_dest = vec![0; capacity];
+        let mut z_len = z_dest.len();
+        assert_eq!(
+            unsafe {
+                compress2_z_ffi(
+                    z_dest.as_mut_ptr(),
+                    &mut z_len,
+                    source.as_ptr(),
+                    source.len(),
+                    crate::zlib_h::Z_DEFAULT_COMPRESSION,
+                )
+            },
+            crate::zlib_h::Z_OK
+        );
+        assert!(z_len > 0);
+        assert!(z_len <= z_dest.len());
+
+        let mut legacy_dest = vec![0; capacity];
+        let mut legacy_len = legacy_dest.len() as crate::stdlib::uLongf;
+        assert_eq!(
+            unsafe {
+                compress2_ffi(
+                    legacy_dest.as_mut_ptr(),
+                    &mut legacy_len,
+                    source.as_ptr(),
+                    source.len() as crate::stdlib::uLong,
+                    crate::zlib_h::Z_DEFAULT_COMPRESSION,
+                )
+            },
+            crate::zlib_h::Z_OK
+        );
+        assert_eq!(legacy_len as usize, z_len);
+        assert_eq!(&legacy_dest[..legacy_len as usize], &z_dest[..z_len]);
     }
 
     #[test]

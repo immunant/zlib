@@ -15,7 +15,7 @@ pub use crate::stdlib::off64_t;
 pub use crate::stdlib::ssize_t;
 
 pub use crate::src::deflate::deflate;
-pub use crate::src::deflate::deflateEnd;
+pub use crate::src::deflate::deflateEnd_ffi as deflateEnd;
 pub use crate::src::deflate::deflateInit2_;
 pub use crate::src::deflate::deflateReset_ffi as deflateReset;
 pub use crate::src::deflate::internal_state;
@@ -2000,7 +2000,7 @@ pub unsafe extern "C" fn gzclose_w_ffi(mut file: crate::zlib_h::gzFile) -> ::cor
         GzCloseBufferAction::Keep => {}
         GzCloseBufferAction::FreeBuffers { end_deflate } => {
             if end_deflate {
-                crate::src::deflate::deflateEnd(
+                crate::src::deflate::deflateEnd_ffi(
                     &raw mut (*state).strm as *mut _ as *mut crate::zlib_h::z_stream_s,
                 );
                 crate::stdlib::free((*state).out as *mut ::core::ffi::c_void);
