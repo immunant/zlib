@@ -1,10 +1,20 @@
 // =============== BEGIN inftrees_h ================
-#[derive(Copy, Clone)]
 #[repr(C)]
 pub struct code {
     pub op: ::core::ffi::c_uchar,
     pub bits: ::core::ffi::c_uchar,
     pub val: ::core::ffi::c_ushort,
+}
+
+impl code {
+    #[inline]
+    pub fn copied_from(value: &Self) -> Self {
+        Self {
+            op: value.op,
+            bits: value.bits,
+            val: value.val,
+        }
+    }
 }
 
 pub const ENOUGH_LENS: ::core::ffi::c_int = 852 as ::core::ffi::c_int;
@@ -3014,7 +3024,7 @@ pub fn inflate_table(
         here.op = 64 as ::core::ffi::c_int as ::core::ffi::c_uchar;
         here.bits = 1 as ::core::ffi::c_int as ::core::ffi::c_uchar;
         here.val = 0 as ::core::ffi::c_int as ::core::ffi::c_ushort;
-        table[0] = here;
+        table[0] = code::copied_from(&here);
         table[1] = here;
         *bits = 1 as ::core::ffi::c_uint;
         return (0 as ::core::ffi::c_int, 2);
@@ -3120,7 +3130,7 @@ pub fn inflate_table(
         min = fill;
         loop {
             fill = fill.wrapping_sub(incr);
-            table[next + (huff >> drop_0).wrapping_add(fill) as usize] = here;
+            table[next + (huff >> drop_0).wrapping_add(fill) as usize] = code::copied_from(&here);
             if fill == 0 as ::core::ffi::c_uint {
                 break;
             }
