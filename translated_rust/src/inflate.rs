@@ -3082,6 +3082,9 @@ pub unsafe extern "C" fn inflateSync_ffi(mut strm: crate::zlib_h::z_streamp) -> 
     let Some(strm) = (unsafe { strm.as_mut() }) else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
+    if strm.avail_in != 0 && strm.next_in.is_null() {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    }
     // SAFETY: a non-empty zlib input cursor is required to point at
     // `avail_in` readable bytes. An empty input cursor is not dereferenced.
     let input = if strm.avail_in == 0 {
