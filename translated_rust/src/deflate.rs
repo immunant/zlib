@@ -878,6 +878,25 @@ unsafe extern "C" fn deflateStateCheck(mut strm: crate::zlib_h::z_streamp) -> ::
     }
     return 0 as ::core::ffi::c_int;
 }
+
+fn deflate_state_is_valid(
+    strm: &crate::zlib_h::z_stream,
+    state: &crate::src::deflate::deflate_state,
+) -> bool {
+    strm.zalloc.is_some()
+        && strm.zfree.is_some()
+        && matches!(
+            state.status,
+            crate::src::deflate::INIT_STATE
+                | crate::src::deflate::GZIP_STATE
+                | crate::src::deflate::EXTRA_STATE
+                | crate::src::deflate::NAME_STATE
+                | crate::src::deflate::COMMENT_STATE
+                | crate::src::deflate::HCRC_STATE
+                | crate::src::deflate::BUSY_STATE
+                | crate::src::deflate::FINISH_STATE
+        )
+}
 pub unsafe extern "C" fn deflateSetDictionary(
     mut strm: crate::zlib_h::z_streamp,
     mut dictionary: *const crate::stdlib::Bytef,
@@ -2212,21 +2231,14 @@ pub unsafe extern "C" fn deflateEnd(mut strm: crate::zlib_h::z_streamp) -> ::cor
 pub unsafe extern "C" fn deflateEnd_ffi(mut strm: crate::zlib_h::z_streamp) -> ::core::ffi::c_int {
     deflateEnd(strm)
 }
-pub unsafe extern "C" fn deflateCopy(
-    mut dest: crate::zlib_h::z_streamp,
-    mut source: crate::zlib_h::z_streamp,
-) -> ::core::ffi::c_int {
-    if deflateStateCheck(source) != 0 || dest.is_null() {
-        return crate::zlib_h::Z_STREAM_ERROR;
-    }
-    let ss = &*((*source).state as *const crate::src::deflate::deflate_state);
-    let pending_offset = ss.pending_out;
-    let mut copied = ss.clone();
+pub fn deflateCopy(
+    source: &crate::src::deflate::deflate_state,
+) -> Box<crate::src::deflate::deflate_state> {
+    let pending_offset = source.pending_out;
+    let mut copied = source.clone();
     copied.pending_buf_size = copied.buffers().pending.len() as crate::zutil_h::ulg;
     copied.pending_out = pending_offset;
-    *dest = *source;
-    (*dest).state = Box::into_raw(Box::new(copied));
-    return crate::zlib_h::Z_OK;
+    Box::new(copied)
 }
 #[export_name = "deflateCopy"]
 
@@ -2234,7 +2246,24 @@ pub unsafe extern "C" fn deflateCopy_ffi(
     mut dest: crate::zlib_h::z_streamp,
     mut source: crate::zlib_h::z_streamp,
 ) -> ::core::ffi::c_int {
-    deflateCopy(dest, source)
+    if dest.is_null() || source.is_null() {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    }
+
+    let source = &*source;
+    if source.state.is_null() {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    }
+    let source_state = &*source.state;
+    if !deflate_state_is_valid(source, source_state) {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    }
+
+    let copied = deflateCopy(source_state);
+    let dest = &mut *dest;
+    *dest = *source;
+    dest.state = Box::into_raw(copied);
+    crate::zlib_h::Z_OK
 }
 fn longest_match_in_buffers(
     window: &[crate::stdlib::Bytef],
