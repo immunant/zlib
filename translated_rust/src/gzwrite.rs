@@ -13,7 +13,7 @@ pub use crate::stdlib::ssize_t;
 
 pub use crate::src::deflate::deflateEnd;
 pub use crate::src::deflate::deflateInit2_;
-pub use crate::src::deflate::deflate_from_stream as deflate;
+pub use crate::src::deflate::deflate_dispatch_from_abi_stream as deflate;
 pub use crate::src::deflate::deflate_params_from_stream as deflateParams;
 use crate::src::deflate::deflate_reset_keep_from_stream;
 pub use crate::src::deflate::internal_state;
@@ -510,7 +510,7 @@ unsafe fn gz_comp(
                 strm.avail_in = input_available;
                 strm.next_out = output.as_mut_ptr();
                 strm.avail_out = output_available;
-                let result = crate::src::deflate::deflate_from_stream(strm, flush);
+                let result = crate::src::deflate::deflate_dispatch_from_abi_stream(strm, flush);
                 crate::src::gzlib::GzEmbeddedDeflateResult {
                     result,
                     remaining_input: strm.avail_in,

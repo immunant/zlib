@@ -762,7 +762,7 @@ fn deflate_one_shot_abi(
             stream.avail_in = request.input.len() as crate::stdlib::uInt;
             stream.next_out = request.output.as_mut_ptr();
             stream.avail_out = request.output.len() as crate::stdlib::uInt;
-            status = unsafe { deflate_from_stream(&mut stream, request.flush) };
+            status = unsafe { deflate_dispatch_from_abi_stream(&mut stream, request.flush) };
             (stream.avail_in, stream.avail_out)
         };
         owner.commit(
@@ -2517,7 +2517,8 @@ pub unsafe fn deflate_params_from_stream(
             && state.last_flush != -2 as ::core::ffi::c_int
     };
     if needs_flush {
-        let mut err: ::core::ffi::c_int = deflate_from_stream(strm, crate::zlib_h::Z_BLOCK);
+        let mut err: ::core::ffi::c_int =
+            deflate_dispatch_from_abi_stream(strm, crate::zlib_h::Z_BLOCK);
         if err == crate::zlib_h::Z_STREAM_ERROR {
             return err;
         }
@@ -3881,7 +3882,9 @@ impl DeflateDispatch<'_, '_, '_> {
 
 // The complete deflate state machine operates on the bounded dispatch owner.
 // In particular, it never observes ABI pointers or callback allocation
-// handles; the stream adapter below is the sole projection/publication site.
+// handles; the ABI adapter below is the sole projection/publication site.
+// Consuming the view before returning makes the completion independent of the
+// caller cursor and callback-storage borrows that were used to construct it.
 fn deflate(dispatch: &mut DeflateDispatch<'_, '_, '_>) -> ::core::ffi::c_int {
     let strm = &mut dispatch.stream;
     let s = &mut dispatch.state;
@@ -4511,10 +4514,19 @@ fn deflate(dispatch: &mut DeflateDispatch<'_, '_, '_>) -> ::core::ffi::c_int {
     };
 }
 
-// This is the only raw deflate-call boundary.  It validates the ABI cursors,
-// projects callback storage exactly once, and commits the pointer-free
-// dispatch update only after all temporary slice borrows have ended.
-pub unsafe fn deflate_from_stream(
+// This is the callback-paired dispatch owner.  It owns every bounded caller
+// and callback-storage view until the state machine has completed, and then
+// returns only scalar cursor and state updates.  In particular, neither the
+// core nor its completion can retain an ABI pointer or allocation handle.
+fn deflate_from_stream(mut dispatch: DeflateDispatch<'_, '_, '_>) -> DeflateDispatchCompletion {
+    let result = deflate(&mut dispatch);
+    dispatch.complete(result)
+}
+
+// This is the only raw deflate-call boundary. It validates the ABI cursors,
+// forms the callback-paired dispatch owner once, and publishes its scalar
+// completion only after every temporary slice borrow has ended.
+pub unsafe fn deflate_dispatch_from_abi_stream(
     strm: &mut crate::zlib_h::z_stream_s,
     flush: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
@@ -4557,7 +4569,7 @@ pub unsafe fn deflate_from_stream(
         state.head.expect("initialized head table").as_ptr(),
         state.hash_size as usize,
     );
-    let mut dispatch = DeflateDispatch {
+    let dispatch = DeflateDispatch {
         flush,
         stream: DeflateDispatchStream {
             input,
@@ -4631,7 +4643,6 @@ pub unsafe fn deflate_from_stream(
             slid: state.slid,
         },
     };
-    let result = deflate(&mut dispatch);
     let DeflateDispatchCompletion {
         result,
         stream:
@@ -4683,7 +4694,7 @@ pub unsafe fn deflate_from_stream(
                 high_water,
                 slid,
             },
-    } = dispatch.complete(result);
+    } = deflate_from_stream(dispatch);
     strm.next_in = strm.next_in.wrapping_add(next_in);
     strm.next_out = strm.next_out.wrapping_add(next_out);
     strm.avail_in = avail_in;
@@ -4743,7 +4754,7 @@ pub unsafe extern "C" fn deflate_ffi(
     let Some(strm) = strm.as_mut() else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
-    deflate_from_stream(strm, flush)
+    deflate_dispatch_from_abi_stream(strm, flush)
 }
 // The callback-backed release transaction consumes a validated stream handle.
 // Embedded users (notably gzip close) can form that handle from their existing
