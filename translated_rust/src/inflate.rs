@@ -3081,6 +3081,52 @@ fn inflate_sync_aligned_bytes(
     Some((hold, bits, bytes, len))
 }
 
+/// The pointer-free portion of an `inflateSync()` attempt.  The ABI wrapper
+/// lends its current input span and commits the returned scalars only after
+/// this has bounded the marker scan.
+struct InflateSyncPlan {
+    hold: ::core::ffi::c_ulong,
+    bits: ::core::ffi::c_uint,
+    have: ::core::ffi::c_uint,
+    consumed: ::core::ffi::c_uint,
+}
+
+/// Align a partially-read deflate stream, if necessary, then search the
+/// supplied compressed bytes for zlib's four-byte synchronization marker.
+/// `was_sync` reflects the incoming mode; callers still publish `SYNC` at
+/// their ABI boundary before invoking this core, matching zlib's error-path
+/// state transition when the bit accumulator is malformed.
+fn inflate_sync_plan(
+    input: &[u8],
+    was_sync: bool,
+    hold: ::core::ffi::c_ulong,
+    bits: ::core::ffi::c_uint,
+    have: ::core::ffi::c_uint,
+) -> Result<InflateSyncPlan, ::core::ffi::c_int> {
+    if input.is_empty() && bits < 8 {
+        return Err(crate::zlib_h::Z_BUF_ERROR);
+    }
+
+    let (hold, bits, mut have) = if was_sync {
+        (hold, bits, have)
+    } else {
+        let Some((hold, bits, aligned, aligned_len)) = inflate_sync_aligned_bytes(hold, bits)
+        else {
+            return Err(crate::zlib_h::Z_STREAM_ERROR);
+        };
+        let mut have = 0;
+        syncsearch(&mut have, &aligned[..aligned_len]);
+        (hold, bits, have)
+    };
+    let consumed = syncsearch(&mut have, input);
+    Ok(InflateSyncPlan {
+        hold,
+        bits,
+        have,
+        consumed,
+    })
+}
+
 fn inflate_sync_point(
     mode: crate::src::inflate::inflate_mode,
     bits: ::core::ffi::c_uint,
@@ -3143,65 +3189,65 @@ pub unsafe extern "C" fn inflateSync_ffi(mut strm: crate::zlib_h::z_streamp) -> 
     if strm.is_null() {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    let len = (*strm).avail_in as usize;
-    let input = if len == 0 {
-        &[]
-    } else if (*strm).next_in.is_null() {
-        return crate::zlib_h::Z_STREAM_ERROR;
-    } else {
-        ::core::slice::from_raw_parts((*strm).next_in as *const u8, len)
-    };
-    let mut len: ::core::ffi::c_uint = 0;
-    let mut flags: ::core::ffi::c_int = 0;
-    let mut in_0: ::core::ffi::c_ulong = 0;
-    let mut out: ::core::ffi::c_ulong = 0;
-    let mut buf: [::core::ffi::c_uchar; 4] = [0; 4];
     if crate::src::inflate::inflate_state_check_at_boundary!(strm) != 0 {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    let state = (*strm).state as *mut crate::src::inflate::inflate_state;
-    if (*strm).avail_in == 0 && (*state).bits < 8 {
-        return crate::zlib_h::Z_BUF_ERROR;
-    }
-    if (*state).mode as ::core::ffi::c_uint
-        != crate::src::inflate::SYNC as ::core::ffi::c_int as ::core::ffi::c_uint
-    {
-        (*state).mode = crate::src::inflate::SYNC;
-        let Some((hold, bits, aligned, aligned_len)) =
-            inflate_sync_aligned_bytes((*state).hold, (*state).bits)
-        else {
+    let (flags, in_0, out) = {
+        let strm_ref = &mut *strm;
+        let state = &mut *(strm_ref.state as *mut crate::src::inflate::inflate_state);
+        let input_len = strm_ref.avail_in as usize;
+        let input = if input_len == 0 {
+            &[]
+        } else if strm_ref.next_in.is_null() {
             return crate::zlib_h::Z_STREAM_ERROR;
+        } else {
+            ::core::slice::from_raw_parts(strm_ref.next_in as *const u8, input_len)
         };
-        (*state).hold = hold;
-        (*state).bits = bits;
-        buf = aligned;
-        len = aligned_len as ::core::ffi::c_uint;
-        (*state).have = 0;
-        syncsearch(&mut (*state).have, &buf[..len as usize]);
-    }
-    len = syncsearch(&mut (*state).have, input);
-    (*strm).avail_in = (*strm).avail_in.wrapping_sub(len);
-    // `len` was consumed from the validated input view.  Keep the ABI cursor
-    // update pointer-safe; later boundary code remains responsible for any
-    // dereference.
-    (*strm).next_in = (*strm).next_in.wrapping_add(len as usize);
-    (*strm).total_in = (*strm).total_in.wrapping_add(len as crate::stdlib::uLong);
-    if (*state).have != 4 {
-        return crate::zlib_h::Z_DATA_ERROR;
-    }
-    if (*state).flags == -1 {
-        (*state).wrap = 0;
-    } else {
-        (*state).wrap &= !4;
-    }
-    flags = (*state).flags;
-    in_0 = (*strm).total_in as ::core::ffi::c_ulong;
-    out = (*strm).total_out as ::core::ffi::c_ulong;
+        // zlib reports this no-progress condition before entering SYNC.  Do
+        // it at the boundary before publishing the mode transition below.
+        if input.is_empty() && state.bits < 8 {
+            return crate::zlib_h::Z_BUF_ERROR;
+        }
+        let was_sync = state.mode == crate::src::inflate::SYNC;
+        if !was_sync {
+            // Preserve zlib's transition even if `inflate_sync_plan()` finds
+            // an incoherent bit count and reports a stream error.
+            state.mode = crate::src::inflate::SYNC;
+        }
+        let plan = match inflate_sync_plan(input, was_sync, state.hold, state.bits, state.have) {
+            Ok(plan) => plan,
+            Err(status) => return status,
+        };
+        state.hold = plan.hold;
+        state.bits = plan.bits;
+        state.have = plan.have;
+        strm_ref.avail_in = strm_ref.avail_in.wrapping_sub(plan.consumed);
+        // `consumed` was bounded by the call-scoped input slice above.
+        strm_ref.next_in = strm_ref.next_in.wrapping_add(plan.consumed as usize);
+        strm_ref.total_in = strm_ref
+            .total_in
+            .wrapping_add(plan.consumed as crate::stdlib::uLong);
+        if state.have != 4 {
+            return crate::zlib_h::Z_DATA_ERROR;
+        }
+        if state.flags == -1 {
+            state.wrap = 0;
+        } else {
+            state.wrap &= !4;
+        }
+        (
+            state.flags,
+            strm_ref.total_in as ::core::ffi::c_ulong,
+            strm_ref.total_out as ::core::ffi::c_ulong,
+        )
+    };
     inflate_reset_at_boundary!(strm);
-    (*strm).total_in = in_0 as crate::stdlib::uLong;
-    (*strm).total_out = out as crate::stdlib::uLong;
-    (*state).flags = flags;
-    (*state).mode = crate::src::inflate::TYPE;
+    let strm_ref = &mut *strm;
+    let state = &mut *(strm_ref.state as *mut crate::src::inflate::inflate_state);
+    strm_ref.total_in = in_0 as crate::stdlib::uLong;
+    strm_ref.total_out = out as crate::stdlib::uLong;
+    state.flags = flags;
+    state.mode = crate::src::inflate::TYPE;
     crate::zlib_h::Z_OK
 }
 #[export_name = "inflateSyncPoint"]
