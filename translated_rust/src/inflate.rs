@@ -2926,6 +2926,27 @@ fn inflate_copy_plan(state: &crate::src::inflate::inflate_state) -> InflateCopyP
     }
 }
 
+// Decode-table cursors in a live inflater either refer to its fixed tables or
+// to an aligned element in its owned `codes` workspace. `next` may also be
+// the one-past-workspace construction cursor. Derive those positions as
+// indices before copying the state, so publishing the corresponding cursor in
+// the new workspace only needs a checked slice tail instead of raw pointer
+// arithmetic.
+fn inflate_codes_cursor_index(
+    codes_len: usize,
+    code_size: usize,
+    codes_base: usize,
+    cursor: usize,
+    allow_end: bool,
+) -> Option<usize> {
+    let bytes = codes_len.checked_mul(code_size)?;
+    let offset = cursor.checked_sub(codes_base)?;
+    if offset > bytes || (!allow_end && offset == bytes) || offset % code_size != 0 {
+        return None;
+    }
+    Some(offset / code_size)
+}
+
 fn inflate_copy_state(
     dest: &mut crate::zlib_h::z_stream,
     source: &crate::zlib_h::z_stream,
@@ -2939,24 +2960,33 @@ fn inflate_copy_state(
 
     let code_size = ::core::mem::size_of::<crate::src::inftrees::code>();
     let source_codes = state.codes.as_ptr().addr();
-    let source_end = source_codes.wrapping_add(state.codes.len().wrapping_mul(code_size));
-    let lencode = state.lencode.addr();
-    if lencode >= source_codes && lencode < source_end {
-        let lencode_index = lencode.wrapping_sub(source_codes).wrapping_div(code_size);
-        let distcode_index = state
-            .distcode
-            .addr()
-            .wrapping_sub(source_codes)
-            .wrapping_div(code_size);
-        copy.lencode = copy.codes.as_ptr().wrapping_add(lencode_index);
-        copy.distcode = copy.codes.as_ptr().wrapping_add(distcode_index);
+    let lencode_index = inflate_codes_cursor_index(
+        state.codes.len(),
+        code_size,
+        source_codes,
+        state.lencode.addr(),
+        false,
+    );
+    let distcode_index = inflate_codes_cursor_index(
+        state.codes.len(),
+        code_size,
+        source_codes,
+        state.distcode.addr(),
+        false,
+    );
+    if let (Some(lencode_index), Some(distcode_index)) = (lencode_index, distcode_index) {
+        copy.lencode = copy.codes[lencode_index..].as_ptr();
+        copy.distcode = copy.codes[distcode_index..].as_ptr();
     }
-    let next_index = state
-        .next
-        .addr()
-        .wrapping_sub(source_codes)
-        .wrapping_div(code_size);
-    copy.next = copy.codes.as_mut_ptr().wrapping_add(next_index);
+    let next_index = inflate_codes_cursor_index(
+        state.codes.len(),
+        code_size,
+        source_codes,
+        state.next.addr(),
+        true,
+    )
+    .expect("live inflater next cursor is in its codes workspace");
+    copy.next = copy.codes[next_index..].as_mut_ptr();
 
     if let Some((source_window, dest_window)) = window {
         dest_window[..source_window.len()].copy_from_slice(source_window);
