@@ -2371,9 +2371,23 @@ pub fn inflate(
                                                 strm.avail_in = have as crate::stdlib::uInt;
                                                 state.hold = hold;
                                                 state.bits = bits;
-                                                let history = if state.window.is_none()
-                                                    || state.wsize == 0
-                                                {
+                                                // Default-allocator streams own this window in a
+                                                // Vec. Temporarily take that owner so the fast
+                                                // path can borrow its history without rebuilding a
+                                                // raw slice from the compatibility handle. The
+                                                // callback-backed branch remains the one explicit
+                                                // raw storage boundary until allocator ownership is
+                                                // represented safely.
+                                                let mut owned_history = state.window_storage.take_owned();
+                                                let history = if let Some(window) = owned_history.as_ref() {
+                                                    if !window.matches_state(state) {
+                                                        state.window_storage.install_owned(
+                                                            owned_history.take().expect("checked owner"),
+                                                        );
+                                                        return crate::zlib_h::Z_STREAM_ERROR;
+                                                    }
+                                                    Some(window.bytes.as_slice())
+                                                } else if state.window.is_none() || state.wsize == 0 {
                                                     None
                                                 } else {
                                                     Some(::core::slice::from_raw_parts(
@@ -2403,6 +2417,9 @@ pub fn inflate(
                                                     fast_input,
                                                     output,
                                                 );
+                                                if let Some(window) = owned_history {
+                                                    state.window_storage.install_owned(window);
+                                                }
                                                 let Some(next_put_index) = output
                                                     .len()
                                                     .checked_sub(strm.avail_out as usize)
