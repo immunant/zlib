@@ -2250,12 +2250,15 @@ pub fn inflate(
                                                 if state.flags & 0x200 as ::core::ffi::c_int != 0
                                                     && state.wrap & 4 as ::core::ffi::c_int != 0
                                                 {
+                                                    let Some(extra_input) = input.slice_at(
+                                                        next.addr(),
+                                                        copy as usize,
+                                                    ) else {
+                                                        return crate::zlib_h::Z_STREAM_ERROR;
+                                                    };
                                                     state.check = crate::src::crc32::crc32(
                                                         state.check as crate::stdlib::uLong,
-                                                        Some(::core::slice::from_raw_parts(
-                                                            next,
-                                                            copy as usize,
-                                                        )),
+                                                        Some(extra_input),
                                                     )
                                                         as ::core::ffi::c_ulong;
                                                 }
@@ -2305,14 +2308,15 @@ pub fn inflate(
                                         break '_inf_leave;
                                     }
                                     // `have` bounds the current input cursor for this
-                                    // NAME phase. Borrow it once so byte reads and the
-                                    // optional header checksum use the same checked span.
+                                    // NAME phase. Borrow it once from the call's checked
+                                    // input view so byte reads and the optional header
+                                    // checksum use the same span.
                                     // The caller-owned header output remains a raw boundary:
                                     // its advertised capacity is not a Rust slice length.
-                                    let name_input = ::core::slice::from_raw_parts(
-                                        next,
-                                        have as usize,
-                                    );
+                                    let Some(name_input) = input.slice_at(next.addr(), have as usize)
+                                    else {
+                                        return crate::zlib_h::Z_STREAM_ERROR;
+                                    };
                                     copy = 0 as ::core::ffi::c_uint;
                                     loop {
                                         let c2rust_fresh5 = copy;
@@ -2442,10 +2446,10 @@ pub fn inflate(
                             // span. Keep COMMENT decoding/checksum reads in one safe
                             // view without constructing a slice for the caller's header
                             // output buffer.
-                            let comment_input = ::core::slice::from_raw_parts(
-                                next,
-                                have as usize,
-                            );
+                            let Some(comment_input) = input.slice_at(next.addr(), have as usize)
+                            else {
+                                return crate::zlib_h::Z_STREAM_ERROR;
+                            };
                             copy = 0 as ::core::ffi::c_uint;
                             loop {
                                 let c2rust_fresh7 = copy;
