@@ -1172,6 +1172,35 @@ struct InflateDecoderResult {
     publication: Option<HeaderPublication>,
 }
 
+// One normal-inflate dispatch owns every value the decoder is allowed to
+// observe: the resumable Rust state, bounded caller cursors, the scoped
+// header-output facade, and scalar stream accounting.  It deliberately does
+// not retain the ABI stream, the opaque state handle, or the registered
+// header pointer.  The stream adapter constructs this request only after all
+// three foreign projections have been checked, and consumes its completion
+// before publishing any ABI cursor or header changes.
+struct InflateDecoderRequest<'normal, 'input, 'output, 'header, 'stream> {
+    normal: &'normal mut InflateNormalState,
+    input: &'input [u8],
+    output: &'output mut [u8],
+    header: Option<InflateHeaderOutput<'header>>,
+    stream: &'stream mut InflateDecoderStream,
+    flush: ::core::ffi::c_int,
+}
+
+impl InflateDecoderRequest<'_, '_, '_, '_, '_> {
+    fn run(self) -> InflateDecoderResult {
+        inflate_decoder(
+            self.normal,
+            self.input,
+            self.output,
+            self.header,
+            self.stream,
+            self.flush,
+        )
+    }
+}
+
 #[inline]
 fn inflate_pull_byte(
     input: &[u8],
@@ -2927,7 +2956,15 @@ pub unsafe fn inflate(
         data_type: strm.data_type,
         message: None,
     };
-    let result = inflate_decoder(&mut state.normal, input, output, header, &mut stream, flush);
+    let result = InflateDecoderRequest {
+        normal: &mut state.normal,
+        input,
+        output,
+        header,
+        stream: &mut stream,
+        flush,
+    }
+    .run();
     strm.next_out = strm.next_out.wrapping_add(result.cursor.output_used);
     strm.avail_out = result.cursor.output_remaining;
     strm.next_in = strm.next_in.wrapping_add(result.cursor.input_used);
