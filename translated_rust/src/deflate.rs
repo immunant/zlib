@@ -1693,7 +1693,11 @@ struct DictionaryState {
     high_water: crate::zutil_h::ulg,
 }
 
-fn set_dictionary_core(
+// This is the pointer-free dictionary transaction.  The stream adapter below
+// is responsible for projecting callback-owned storage; this operation owns
+// only the bounded views and scalar state needed to preserve zlib's dictionary
+// admission, hash construction, and checksum rules.
+fn deflateSetDictionary(
     state: &mut DictionaryState,
     window: &mut [crate::stdlib::Bytef],
     head: &mut [crate::src::deflate::Posf],
@@ -1763,7 +1767,7 @@ fn set_dictionary_core(
 // Dictionary bytes are scoped by the FFI wrapper before this state adapter is
 // entered.  Keep the callback-backed state allocation views here with the
 // stream borrow, but let the dictionary kernel receive only a bounded slice.
-pub unsafe fn deflateSetDictionary(
+pub unsafe fn deflate_set_dictionary_from_stream(
     strm: &mut crate::zlib_h::z_stream_s,
     dictionary: &[crate::stdlib::Bytef],
 ) -> ::core::ffi::c_int {
@@ -1800,7 +1804,7 @@ pub unsafe fn deflateSetDictionary(
         match_available: s.match_available,
         high_water: s.high_water,
     };
-    let Ok(checksum) = set_dictionary_core(&mut state, window, head, prev, dictionary, strm.adler)
+    let Ok(checksum) = deflateSetDictionary(&mut state, window, head, prev, dictionary, strm.adler)
     else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
@@ -1835,7 +1839,7 @@ pub unsafe extern "C" fn deflateSetDictionary_ffi(
     };
     let dictionary =
         ::core::slice::from_raw_parts(dictionary.as_ptr().cast_const(), dictLength as usize);
-    deflateSetDictionary(strm, dictionary)
+    deflate_set_dictionary_from_stream(strm, dictionary)
 }
 pub unsafe extern "C" fn deflateGetDictionary(
     mut strm: crate::zlib_h::z_streamp,
