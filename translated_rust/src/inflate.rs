@@ -266,22 +266,6 @@ pub use crate::zlib_h::Z_TREES;
 pub use crate::zlib_h::Z_VERSION_ERROR;
 pub use crate::zutil_h::DEF_WBITS;
 
-/// Validate a raw stream only for callers that do not already hold the
-/// borrowed stream and state.  The regular inflate and header paths validate
-/// their existing borrows directly, avoiding this raw-pointer dispatch.
-unsafe extern "C" fn inflateStateCheck(mut strm: crate::zlib_h::z_streamp) -> ::core::ffi::c_int {
-    if strm.is_null() {
-        return 1 as ::core::ffi::c_int;
-    }
-    let strm = &*strm;
-    let state = strm.state as *const crate::src::inflate::inflate_state;
-    if state.is_null() {
-        return 1 as ::core::ffi::c_int;
-    }
-    let state = &*state;
-    (!inflate_state_valid(strm, state)) as ::core::ffi::c_int
-}
-
 fn inflate_state_valid(
     strm: &crate::zlib_h::z_stream_s,
     state: &crate::src::inflate::inflate_state,
@@ -2755,7 +2739,10 @@ pub unsafe extern "C" fn inflateSync(mut strm: crate::zlib_h::z_streamp) -> ::co
     let mut buf: [::core::ffi::c_uchar; 4] = [0; 4];
     let mut state: *mut crate::src::inflate::inflate_state =
         ::core::ptr::null_mut::<crate::src::inflate::inflate_state>();
-    if inflateStateCheck(strm) != 0 {
+    let Some(stream) = strm.as_mut() else {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    };
+    if inflate_validate_state(stream).is_none() {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
     state = (*strm).state as *mut crate::src::inflate::inflate_state;
