@@ -710,104 +710,168 @@ enum GzSeekDescriptorAction {
     },
 }
 
-pub unsafe extern "C" fn gzseek64(
-    mut file: crate::zlib_h::gzFile,
+/// The boundary work required after the safe seek state machine has selected
+/// a descriptor action.  `advance` is deliberately a byte count rather than
+/// an adjusted pointer: the exported wrapper alone advances the public ABI
+/// cursor after validating the opaque handle.
+#[derive(Clone, Copy)]
+struct GzSeekResult {
+    position: crate::stdlib::off64_t,
+    advance: crate::stdlib::uInt,
+    clear_error: bool,
+}
+
+#[derive(Clone, Copy)]
+struct GzSeekPending {
+    action: GzSeekDescriptorAction,
+    offset: crate::stdlib::off64_t,
+}
+
+/// Complete the logical seek after any direct descriptor operation has
+/// succeeded.  This updates only scalar ABI-mirror fields; pointer movement
+/// remains in the exported wrapper.
+fn gzseek_finish(
+    state: &mut crate::gzguts_h::gz_state,
     mut offset: crate::stdlib::off64_t,
-    mut whence: ::core::ffi::c_int,
-) -> crate::stdlib::off64_t {
-    let mut ret: crate::stdlib::off64_t = 0;
-    let mut state: crate::gzguts_h::gz_statep =
-        ::core::ptr::null_mut::<crate::gzguts_h::gz_state>();
-    if file.is_null() {
-        return -1 as crate::stdlib::off64_t;
+    clear_error: bool,
+) -> Option<GzSeekResult> {
+    let mut advance = 0;
+    if state.mode == crate::gzguts_h::GZ_READ {
+        let (consume, remaining_offset) = gzseek_read_buffer_plan(state.x.have, offset)?;
+        if !gzseek_read_buffer_commit_state(state, consume) {
+            return None;
+        }
+        advance = consume;
+        offset = remaining_offset;
     }
-    state = file as crate::gzguts_h::gz_statep;
-    let state_ref = &mut *state;
+    Some(GzSeekResult {
+        position: gzseek_schedule_state(state, offset),
+        advance,
+        clear_error,
+    })
+}
+
+/// Apply the scalar changes following a successful direct descriptor seek.
+/// The caller performs the descriptor call at the FFI boundary and then uses
+/// this safe helper to commit the corresponding gzip state transition.
+fn gzseek_after_descriptor(
+    state: &mut crate::gzguts_h::gz_state,
+    action: GzSeekDescriptorAction,
+    offset: crate::stdlib::off64_t,
+) -> Option<GzSeekResult> {
+    match action {
+        GzSeekDescriptorAction::Copy { next_pos, .. } => {
+            gzseek_copy_commit_state(state, next_pos);
+            Some(GzSeekResult {
+                position: next_pos,
+                advance: 0,
+                clear_error: true,
+            })
+        }
+        GzSeekDescriptorAction::Rewind { .. } => {
+            if !gzrewind_state(state) {
+                return None;
+            }
+            gzseek_finish(state, offset, true)
+        }
+    }
+}
+
+/// Validate and prepare a gzip seek without dereferencing its opaque handle,
+/// moving its ABI cursor, or invoking the descriptor.  The returned action,
+/// if any, is issued only by the exported boundary adapter.
+fn gzseek64(
+    state: &mut crate::gzguts_h::gz_state,
+    mut offset: crate::stdlib::off64_t,
+    whence: ::core::ffi::c_int,
+) -> Option<Result<GzSeekResult, GzSeekPending>> {
     let Some((normalized_offset, clear_skip)) = gzseek_offset_state(
-        state_ref.mode,
-        state_ref.err,
+        state.mode,
+        state.err,
         whence,
-        state_ref.x.pos,
-        state_ref.past,
-        state_ref.skip,
+        state.x.pos,
+        state.past,
+        state.skip,
         offset,
     ) else {
-        return -1 as crate::stdlib::off64_t;
+        return None;
     };
     offset = normalized_offset;
     if clear_skip {
-        state_ref.skip = 0;
+        state.skip = 0;
     }
-    let descriptor_action = if let Some((descriptor_offset, next_pos)) = gzseek_copy_plan(
-        state_ref.mode,
-        state_ref.how,
-        state_ref.x.pos,
-        state_ref.x.have,
-        offset,
-    ) {
+    let descriptor_action = if let Some((descriptor_offset, next_pos)) =
+        gzseek_copy_plan(state.mode, state.how, state.x.pos, state.x.have, offset)
+    {
         Some(GzSeekDescriptorAction::Copy {
             offset: descriptor_offset,
             next_pos,
         })
     } else if offset < 0 {
-        let Some(rewind_offset) =
-            gzseek_rewind_offset_state(state_ref.mode, state_ref.x.pos, offset)
+        let Some(rewind_offset) = gzseek_rewind_offset_state(state.mode, state.x.pos, offset)
         else {
-            return -1 as crate::stdlib::off64_t;
+            return None;
         };
         offset = rewind_offset;
-        Some(GzSeekDescriptorAction::Rewind {
-            start: state_ref.start,
-        })
+        Some(GzSeekDescriptorAction::Rewind { start: state.start })
     } else {
         None
     };
-    if let Some(action) = descriptor_action {
-        let (descriptor_offset, whence) = match action {
-            GzSeekDescriptorAction::Copy { offset, .. } => (offset, crate::stdlib::SEEK_CUR),
-            GzSeekDescriptorAction::Rewind { start } => (start, crate::stdlib::SEEK_SET),
-        };
-        ret = crate::stdlib::lseek64(
-            state_ref.fd,
-            descriptor_offset as crate::stdlib::__off64_t,
-            whence,
-        ) as crate::stdlib::off64_t;
-        if ret == -1 {
-            return -1 as crate::stdlib::off64_t;
-        }
-        let copied_to = match action {
-            GzSeekDescriptorAction::Copy { next_pos, .. } => {
-                gzseek_copy_commit_state(state_ref, next_pos);
-                Some(next_pos)
-            }
-            GzSeekDescriptorAction::Rewind { .. } => {
-                if !gzrewind_state(state_ref) {
-                    return -1 as crate::stdlib::off64_t;
+    match descriptor_action {
+        Some(action) => Some(Err(GzSeekPending { action, offset })),
+        None => gzseek_finish(state, offset, false).map(Ok),
+    }
+}
+
+// This expands only in the exported seek entry points.  Pointer conversion,
+// cursor adjustment, descriptor access, and raw error storage consequently
+// remain at the boundary while `gzseek64` owns the safe state machine.
+macro_rules! gzseek_at_boundary {
+    ($file:expr, $offset:expr, $whence:expr) => {{
+        let file = $file;
+        if file.is_null() {
+            -1
+        } else {
+            let state = &mut *(file as crate::gzguts_h::gz_statep);
+            let result = match gzseek64(state, $offset, $whence) {
+                Some(Ok(result)) => result,
+                Some(Err(pending)) => {
+                    let (descriptor_offset, descriptor_whence) = match pending.action {
+                        GzSeekDescriptorAction::Copy { offset, .. } => {
+                            (offset, crate::stdlib::SEEK_CUR)
+                        }
+                        GzSeekDescriptorAction::Rewind { start } => {
+                            (start, crate::stdlib::SEEK_SET)
+                        }
+                    };
+                    if crate::stdlib::lseek64(
+                        state.fd,
+                        descriptor_offset as crate::stdlib::__off64_t,
+                        descriptor_whence,
+                    ) == -1
+                    {
+                        return -1;
+                    }
+                    match gzseek_after_descriptor(state, pending.action, pending.offset) {
+                        Some(result) => result,
+                        None => return -1,
+                    }
                 }
-                None
+                None => return -1,
+            };
+            if result.advance != 0 {
+                state.x.next = state.x.next.offset(result.advance as isize);
             }
-        };
-        gz_error(
-            state,
-            crate::zlib_h::Z_OK,
-            ::core::ptr::null::<::core::ffi::c_char>(),
-        );
-        if let Some(next_pos) = copied_to {
-            return next_pos;
+            if result.clear_error {
+                gz_error(
+                    state,
+                    crate::zlib_h::Z_OK,
+                    ::core::ptr::null::<::core::ffi::c_char>(),
+                );
+            }
+            result.position
         }
-    }
-    if state_ref.mode == crate::gzguts_h::GZ_READ {
-        let Some((consume, remaining_offset)) = gzseek_read_buffer_plan(state_ref.x.have, offset)
-        else {
-            return -1 as crate::stdlib::off64_t;
-        };
-        state_ref.x.next = state_ref.x.next.offset(consume as isize);
-        if !gzseek_read_buffer_commit_state(state_ref, consume) {
-            return -1 as crate::stdlib::off64_t;
-        }
-        offset = remaining_offset;
-    }
-    gzseek_schedule_state(state_ref, offset)
+    }};
 }
 #[export_name = "gzseek64"]
 
@@ -816,20 +880,7 @@ pub unsafe extern "C" fn gzseek64_ffi(
     mut offset: crate::stdlib::off64_t,
     mut whence: ::core::ffi::c_int,
 ) -> crate::stdlib::off64_t {
-    gzseek64(file, offset, whence)
-}
-pub unsafe extern "C" fn gzseek(
-    mut file: crate::zlib_h::gzFile,
-    mut offset: crate::stdlib::off_t,
-    mut whence: ::core::ffi::c_int,
-) -> crate::stdlib::off_t {
-    let mut ret: crate::stdlib::off64_t = 0;
-    ret = gzseek64(file, offset, whence);
-    return if ret == ret {
-        ret
-    } else {
-        -1 as crate::stdlib::off_t
-    };
+    gzseek_at_boundary!(file, offset, whence)
 }
 #[export_name = "gzseek"]
 
@@ -838,7 +889,12 @@ pub unsafe extern "C" fn gzseek_ffi(
     mut offset: crate::stdlib::off_t,
     mut whence: ::core::ffi::c_int,
 ) -> crate::stdlib::off_t {
-    gzseek(file, offset, whence)
+    let ret = gzseek_at_boundary!(file, offset, whence);
+    if ret == ret {
+        ret
+    } else {
+        -1
+    }
 }
 /// Return the logical gzip position once the boundary has validated the
 /// opaque handle.  A read stream with `past` set deliberately ignores a
