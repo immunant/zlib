@@ -204,7 +204,7 @@ pub use crate::zutil_h::DEF_WBITS;
 // It validates the two associated allocations and then returns their bound
 // references, so small inflater operations do not need to repeat raw stream
 // and state dereferences after checking them.
-fn inflateStateCheck<'a>(
+pub(crate) fn inflateStateCheck<'a>(
     mut strm: crate::zlib_h::z_streamp,
 ) -> Option<(
     &'a mut crate::zlib_h::z_stream,

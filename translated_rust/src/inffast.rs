@@ -318,13 +318,16 @@ pub fn inflate_fast(
     mut strm: crate::zlib_h::z_streamp,
     mut start: ::core::ffi::c_uint,
 ) {
-    // SAFETY: `inflate()` invokes this adapter only after `inflateStateCheck`
-    // has validated the stream/state pair. Its input, output, window, and
-    // decode-table cursors are the bounded ranges maintained by that same
-    // inflate state machine for this call.
+    // Reuse the inflater's established raw state adapter instead of
+    // dereferencing the stream and state cursors a second time here.
+    let Some((strm, state)) = crate::src::inflate::inflateStateCheck(strm) else {
+        return;
+    };
+    // SAFETY: `inflate()` invokes this adapter only after the checked
+    // stream/state pair above has been validated. Its input, output, window,
+    // and decode-table cursors are the bounded ranges maintained by that
+    // same inflate state machine for this call.
     unsafe {
-        let strm = &mut *strm;
-        let state = &mut *(strm.state as *mut crate::src::inflate::inflate_state);
         let input = ::core::slice::from_raw_parts(strm.next_in, strm.avail_in as usize);
         let used = start.wrapping_sub(strm.avail_out) as usize;
         let output = ::core::slice::from_raw_parts_mut(
