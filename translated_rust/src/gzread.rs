@@ -58,6 +58,33 @@ fn copy_buffered_input(input: &[u8], output: &mut [u8]) {
     output[..input.len()].copy_from_slice(input);
 }
 
+fn pushback_empty(buffer: &mut [u8], byte: u8) -> Option<usize> {
+    let next = buffer.len().checked_sub(1)?;
+    buffer[next] = byte;
+    Some(next)
+}
+
+fn pushback_buffer(
+    buffer: &mut [u8],
+    next: usize,
+    have: usize,
+    byte: u8,
+) -> Option<usize> {
+    if next > buffer.len() || have >= buffer.len() {
+        return None;
+    }
+    let next = if next == 0 {
+        let shifted = buffer.len().checked_sub(have)?;
+        buffer.copy_within(0..have, shifted);
+        shifted
+    } else {
+        next
+    };
+    let next = next.checked_sub(1)?;
+    buffer[next] = byte;
+    Some(next)
+}
+
 unsafe extern "C" fn gz_load(
     mut state: crate::gzguts_h::gz_statep,
     mut buf: *mut ::core::ffi::c_uchar,
@@ -679,12 +706,19 @@ pub unsafe extern "C" fn gzungetc(
         return -1 as ::core::ffi::c_int;
     }
     if (*state).x.have == 0 as ::core::ffi::c_uint {
+        let size = (*state).size as usize;
+        let Some(capacity) = size.checked_mul(2) else {
+            return -1 as ::core::ffi::c_int;
+        };
+        if (*state).out.is_null() {
+            return -1 as ::core::ffi::c_int;
+        }
+        let buffer = ::core::slice::from_raw_parts_mut((*state).out, capacity);
+        let Some(next) = pushback_empty(buffer, c as ::core::ffi::c_uchar) else {
+            return -1 as ::core::ffi::c_int;
+        };
         (*state).x.have = 1 as ::core::ffi::c_uint;
-        (*state).x.next = (*state)
-            .out
-            .offset(((*state).size << 1 as ::core::ffi::c_int) as isize)
-            .offset(-(1 as ::core::ffi::c_int as isize));
-        *(*state).x.next.offset(0 as isize) = c as ::core::ffi::c_uchar;
+        (*state).x.next = (*state).out.add(next);
         (*state).x.pos -= 1;
         (*state).past = 0 as ::core::ffi::c_int;
         return c;
@@ -697,21 +731,24 @@ pub unsafe extern "C" fn gzungetc(
         );
         return -1 as ::core::ffi::c_int;
     }
-    if (*state).x.next == (*state).out {
-        let mut src: *mut ::core::ffi::c_uchar = (*state).out.offset((*state).x.have as isize);
-        let mut dest: *mut ::core::ffi::c_uchar = (*state)
-            .out
-            .offset(((*state).size << 1 as ::core::ffi::c_int) as isize);
-        while src > (*state).out {
-            src = src.offset(-1);
-            dest = dest.offset(-1);
-            *dest = *src;
-        }
-        (*state).x.next = dest;
+    let size = (*state).size as usize;
+    let Some(capacity) = size.checked_mul(2) else {
+        return -1 as ::core::ffi::c_int;
+    };
+    let out = (*state).out;
+    let cursor = (*state).x.next;
+    if out.is_null() || cursor.is_null() {
+        return -1 as ::core::ffi::c_int;
     }
+    let Some(next) = cursor.addr().checked_sub(out.addr()) else {
+        return -1 as ::core::ffi::c_int;
+    };
+    let buffer = ::core::slice::from_raw_parts_mut(out, capacity);
+    let Some(next) = pushback_buffer(buffer, next, (*state).x.have as usize, c as ::core::ffi::c_uchar) else {
+        return -1 as ::core::ffi::c_int;
+    };
     (*state).x.have = (*state).x.have.wrapping_add(1);
-    (*state).x.next = (*state).x.next.offset(-1);
-    *(*state).x.next.offset(0 as isize) = c as ::core::ffi::c_uchar;
+    (*state).x.next = out.add(next);
     (*state).x.pos -= 1;
     (*state).past = 0 as ::core::ffi::c_int;
     return c;
