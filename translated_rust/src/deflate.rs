@@ -4641,19 +4641,17 @@ fn longest_match_core(
     })
 }
 
-unsafe fn longest_match(
-    mut s: *mut crate::src::deflate::deflate_state,
-    mut cur_match: crate::src::deflate::IPos,
+/// Search established window and hash-chain views for the best match.
+///
+/// The caller owns the raw-to-slice boundary.  Keeping the fallback here is
+/// important: malformed callback storage must retain zlib's old match length
+/// and must not change `match_start`.
+fn longest_match_with_views(
+    state: &mut crate::src::deflate::deflate_state,
+    window: &[crate::stdlib::Bytef],
+    prev: &[crate::src::deflate::Posf],
+    cur_match: crate::src::deflate::IPos,
 ) -> crate::stdlib::uInt {
-    let state = &mut *s;
-    if state.window.is_null() || state.prev.is_null() {
-        return longest_match_clamp_length(
-            state.prev_length as ::core::ffi::c_int,
-            state.lookahead,
-        );
-    }
-    let window = core::slice::from_raw_parts(state.window, state.window_size as usize);
-    let prev = core::slice::from_raw_parts(state.prev, state.w_size as usize);
     let Some(result) = longest_match_core(
         window,
         prev,
@@ -4674,6 +4672,24 @@ unsafe fn longest_match(
     };
     state.match_start = result.match_start as crate::stdlib::uInt;
     result.length
+}
+
+/// Establish the callback-backed views at the legacy state boundary, then
+/// dispatch the search itself through the safe slice-based core.
+unsafe fn longest_match(
+    s: *mut crate::src::deflate::deflate_state,
+    cur_match: crate::src::deflate::IPos,
+) -> crate::stdlib::uInt {
+    let state = &mut *s;
+    if state.window.is_null() || state.prev.is_null() {
+        return longest_match_clamp_length(
+            state.prev_length as ::core::ffi::c_int,
+            state.lookahead,
+        );
+    }
+    let window = core::slice::from_raw_parts(state.window, state.window_size as usize);
+    let prev = core::slice::from_raw_parts(state.prev, state.w_size as usize);
+    longest_match_with_views(state, window, prev, cur_match)
 }
 
 pub const MAX_STORED: ::core::ffi::c_int = 65535 as ::core::ffi::c_int;
@@ -7981,6 +7997,22 @@ mod tests {
             longest_match_core(&[0; 16], &[0; 1], 0, 1, 3, 4, 8, 8, 0, 1, 0),
             None
         );
+    }
+
+    #[test]
+    fn longest_match_views_keeps_prior_match_start_when_storage_is_invalid() {
+        let mut state = super::internal_state::newly_allocated();
+        state.prev_length = 7;
+        state.lookahead = 5;
+        state.match_start = 23;
+        state.w_size = 8;
+        state.w_mask = 7;
+
+        assert_eq!(
+            super::longest_match_with_views(&mut state, &[0; 4], &[0; 1], 0),
+            5
+        );
+        assert_eq!(state.match_start, 23);
     }
 
     #[test]
