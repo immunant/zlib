@@ -2809,15 +2809,13 @@ fn deflate_stored(
         let (post_loop_avail_in, post_loop_next_in) = (strm.avail_in, strm.next_in);
         used = used.wrapping_sub(post_loop_avail_in as ::core::ffi::c_uint);
         if used != 0 {
+            let copy_len = if used >= s.w_size { s.w_size } else { used } as usize;
+            let input_tail =
+                ::core::slice::from_raw_parts(post_loop_next_in.wrapping_sub(copy_len), copy_len);
             if used >= s.w_size {
                 s.matches = 2 as crate::stdlib::uInt;
                 let state = &mut *s;
-                let copy_len = state.w_size as usize;
-                let input = ::core::slice::from_raw_parts(
-                    post_loop_next_in.wrapping_sub(copy_len),
-                    copy_len,
-                );
-                copy_deflate_bytes(&mut window[..copy_len], input);
+                copy_deflate_bytes(&mut window[..copy_len], input_tail);
                 state.strstart = state.w_size;
                 state.insert = state.strstart;
             } else {
@@ -2836,14 +2834,9 @@ fn deflate_stored(
                         s.insert = s.strstart;
                     }
                 }
-                let copy_len = used as usize;
                 let output_start = s.strstart as usize;
                 let output = &mut window[output_start..output_start + copy_len];
-                let input = ::core::slice::from_raw_parts(
-                    post_loop_next_in.wrapping_sub(copy_len),
-                    copy_len,
-                );
-                copy_deflate_bytes(output, input);
+                copy_deflate_bytes(output, input_tail);
                 s.strstart = s.strstart.wrapping_add(used);
                 s.insert = deflate_stored_advance_insert(s.insert, s.w_size, used);
             }
