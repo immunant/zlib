@@ -4095,6 +4095,17 @@ fn canonical_codes_for_lengths(
         .collect()
 }
 
+fn canonical_code_assignments(
+    lengths: &[crate::zutil_h::ush],
+    bl_count: &[crate::zutil_h::ush; 16],
+) -> Vec<(usize, crate::zutil_h::ush)> {
+    canonical_codes_for_lengths(lengths, bl_count)
+        .into_iter()
+        .enumerate()
+        .filter_map(|(index, code)| code.map(|code| (index, code)))
+        .collect()
+}
+
 unsafe fn gen_codes(
     tree: *mut crate::src::deflate::ct_data,
     max_code: ::core::ffi::c_int,
@@ -4106,13 +4117,8 @@ unsafe fn gen_codes(
         lengths.push((*tree.wrapping_add(n as usize)).dl.len);
         n += 1;
     }
-    for (index, code) in canonical_codes_for_lengths(&lengths, bl_count)
-        .into_iter()
-        .enumerate()
-    {
-        if let Some(code) = code {
-            (*tree.wrapping_add(index)).fc.value = code;
-        }
+    for (index, code) in canonical_code_assignments(&lengths, bl_count) {
+        (*tree.wrapping_add(index)).fc.value = code;
     }
 }
 
@@ -5615,22 +5621,22 @@ mod tests {
     use super::{
         bi_flush_core, bi_reverse, bi_windup_core, bit_buffer_would_overflow,
         bit_length_correction, bl_order, bl_tree_header_bit_length, block_bit_length_bytes,
-        block_header_bits, canonical_codes_for_lengths, clamped_tree_bit_length, classify_tree_run,
-        combined_tree_frequency, detect_data_type_from_ltree, dist_code_index,
-        dynamic_tree_header_counts, gen_bitlen_node_plan, gen_bitlen_overflow_reassignment,
-        heap_node_precedes, last_nonzero_bl_code_rank, length_extra_bits,
-        mark_bl_code_nonzero_at_rank, match_tree_codes, next_code_for_len, next_codes,
-        pending_cursor_after_bytes, pqdownheap_child_to_promote, rebalance_overflowed_bit_lengths,
-        reset_bit_length_counts, reset_block_trees, select_block_encoding, static_bl_desc,
-        static_d_desc, static_l_desc, supplemental_tree_node, supplemental_tree_opt_len,
-        supplemental_tree_static_len, symbol_buffer_has_entries, symbol_buffer_is_full,
-        symbol_triplet_cursors, decode_symbol_triplet, tally_match_tree_indices, tally_scan_tree_action,
-        tally_symbol_bytes, tally_tree_update, tree_bit_length_cost,
-        tree_bit_length_totals_after_node, tree_heap_has_pair, tree_next_cursor, tree_parent_depth,
-        tree_run_continues, tree_run_extra_bits, tree_run_limits, tree_run_step, BlockEncoding,
-        GenBitlenOverflowNode, GenBitlenOverflowReassignment, HeapChild, ScanTreeAction,
-        TallyTreeUpdate, TreeRunStep, BL_CODE_ORDER_LEN, END_BLOCK, MAX_BITS, REPZ_11_138,
-        REPZ_3_10, REP_3_6,
+        block_header_bits, canonical_code_assignments, canonical_codes_for_lengths,
+        clamped_tree_bit_length, classify_tree_run, combined_tree_frequency, decode_symbol_triplet,
+        detect_data_type_from_ltree, dist_code_index, dynamic_tree_header_counts,
+        gen_bitlen_node_plan, gen_bitlen_overflow_reassignment, heap_node_precedes,
+        last_nonzero_bl_code_rank, length_extra_bits, mark_bl_code_nonzero_at_rank,
+        match_tree_codes, next_code_for_len, next_codes, pending_cursor_after_bytes,
+        pqdownheap_child_to_promote, rebalance_overflowed_bit_lengths, reset_bit_length_counts,
+        reset_block_trees, select_block_encoding, static_bl_desc, static_d_desc, static_l_desc,
+        supplemental_tree_node, supplemental_tree_opt_len, supplemental_tree_static_len,
+        symbol_buffer_has_entries, symbol_buffer_is_full, symbol_triplet_cursors,
+        tally_match_tree_indices, tally_scan_tree_action, tally_symbol_bytes, tally_tree_update,
+        tree_bit_length_cost, tree_bit_length_totals_after_node, tree_heap_has_pair,
+        tree_next_cursor, tree_parent_depth, tree_run_continues, tree_run_extra_bits,
+        tree_run_limits, tree_run_step, BlockEncoding, GenBitlenOverflowNode,
+        GenBitlenOverflowReassignment, HeapChild, ScanTreeAction, TallyTreeUpdate, TreeRunStep,
+        BL_CODE_ORDER_LEN, END_BLOCK, MAX_BITS, REPZ_11_138, REPZ_3_10, REP_3_6,
     };
 
     fn ltree_with_frequency(
@@ -6018,6 +6024,17 @@ mod tests {
         let codes = canonical_codes_for_lengths(&[0, 1, 2, 2, 0], &counts);
 
         assert_eq!(codes, vec![None, Some(0), Some(1), Some(3), None]);
+    }
+
+    #[test]
+    fn canonical_code_assignments_preserve_sparse_tree_indices() {
+        let mut counts = [0; 16];
+        counts[1] = 1;
+        counts[2] = 2;
+
+        let assignments = canonical_code_assignments(&[0, 1, 2, 2, 0], &counts);
+
+        assert_eq!(assignments, vec![(1, 0), (2, 1), (3, 3)]);
     }
 
     #[test]

@@ -1122,10 +1122,12 @@ unsafe fn updatewindow(
         Some(produced_len) => Some(core::slice::from_raw_parts(produced_start, produced_len)),
         None => None,
     };
-    update_window_history(
-        window,
+    update_window_core(
+        state.wbits,
+        &mut state.wsize,
         &mut state.wnext,
         &mut state.whave,
+        window,
         update_window_produced_slice(produced),
     );
     0
@@ -4552,6 +4554,19 @@ mod tests {
 
         assert_eq!((wsize, wnext, whave), (8, 3, 5));
         assert_eq!(window, *b"abcdefgh");
+    }
+
+    #[test]
+    fn window_update_core_preserves_metadata_while_wrapping_output() {
+        let mut window = *b"abcdefgh";
+        let mut wsize = 8;
+        let mut wnext = 6;
+        let mut whave = 8;
+
+        update_window_core(3, &mut wsize, &mut wnext, &mut whave, &mut window, b"WXYZ");
+
+        assert_eq!((wsize, wnext, whave), (8, 2, 8));
+        assert_eq!(window, *b"YZcdefWX");
     }
 
     #[test]

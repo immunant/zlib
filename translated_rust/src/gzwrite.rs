@@ -481,6 +481,19 @@ fn gz_zero_progress(
     }
 }
 
+fn gz_zero_apply_comp_progress(
+    pos: &mut crate::stdlib::off64_t,
+    skip: &mut crate::stdlib::off64_t,
+    chunk_len: ::core::ffi::c_uint,
+    remaining_avail_in: crate::stdlib::uInt,
+    ret: ::core::ffi::c_int,
+) -> GzZeroAction {
+    let progress = gz_zero_progress(*pos, *skip, chunk_len, remaining_avail_in, ret);
+    *pos = progress.pos;
+    *skip = progress.skip;
+    progress.action
+}
+
 fn gzputs_result(
     requested: crate::stdlib::z_size_t,
     written: crate::stdlib::z_size_t,
@@ -1029,10 +1042,13 @@ unsafe fn gz_zero(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
         state.strm.avail_in = n as crate::stdlib::uInt;
         state.strm.next_in = state.in_0;
         ret = gz_comp(state, crate::zlib_h::Z_NO_FLUSH);
-        let progress = gz_zero_progress(state.x.pos, state.skip, n, state.strm.avail_in, ret);
-        state.x.pos = progress.pos;
-        state.skip = progress.skip;
-        match progress.action {
+        match gz_zero_apply_comp_progress(
+            &mut state.x.pos,
+            &mut state.skip,
+            n,
+            state.strm.avail_in,
+            ret,
+        ) {
             GzZeroAction::Error => return -1 as ::core::ffi::c_int,
             GzZeroAction::Done => break,
             GzZeroAction::Continue => {}
@@ -1532,8 +1548,9 @@ mod tests {
         gz_write_errno_is_retryable, gz_write_error_result, gz_write_is_empty,
         gz_write_preparation, gz_write_progress, gz_write_remaining_after_consumption,
         gz_write_state_is_usable, gz_write_uses_buffered_path, gz_zero_action,
-        gz_zero_apply_progress, gz_zero_chunk_len, gz_zero_chunk_limits, gz_zero_chunk_step,
-        gz_zero_initial_step, gz_zero_needs_initialization, gz_zero_pending_step, gz_zero_progress,
+        gz_zero_apply_comp_progress, gz_zero_apply_progress, gz_zero_chunk_len,
+        gz_zero_chunk_limits, gz_zero_chunk_step, gz_zero_initial_step,
+        gz_zero_needs_initialization, gz_zero_pending_step, gz_zero_progress,
         gzclose_buffer_action, gzclose_mode_is_writable, gzclose_w_result, gzflush_action,
         gzflush_mode_is_valid, gzfwrite_result, gzputc_result, gzputc_write_action,
         gzputs_len_fits_int, gzputs_result, gzsetparams_action, gzsetparams_buffer_action,
@@ -2745,6 +2762,45 @@ mod tests {
         assert_eq!(failed.pos, 90);
         assert_eq!(failed.skip, 0);
         assert!(matches!(failed.action, GzZeroAction::Error));
+    }
+
+    #[test]
+    fn gz_zero_apply_comp_progress_updates_state_and_continues() {
+        let mut pos = 10;
+        let mut skip = 100;
+
+        assert!(matches!(
+            gz_zero_apply_comp_progress(&mut pos, &mut skip, 80, 20, 0),
+            GzZeroAction::Continue
+        ));
+        assert_eq!(pos, 70);
+        assert_eq!(skip, 40);
+    }
+
+    #[test]
+    fn gz_zero_apply_comp_progress_reports_completion_after_updating_state() {
+        let mut pos = 10;
+        let mut skip = 80;
+
+        assert!(matches!(
+            gz_zero_apply_comp_progress(&mut pos, &mut skip, 80, 0, 0),
+            GzZeroAction::Done
+        ));
+        assert_eq!(pos, 90);
+        assert_eq!(skip, 0);
+    }
+
+    #[test]
+    fn gz_zero_apply_comp_progress_prioritizes_errors_after_updating_state() {
+        let mut pos = 10;
+        let mut skip = 80;
+
+        assert!(matches!(
+            gz_zero_apply_comp_progress(&mut pos, &mut skip, 80, 0, -1),
+            GzZeroAction::Error
+        ));
+        assert_eq!(pos, 90);
+        assert_eq!(skip, 0);
     }
 
     #[test]
