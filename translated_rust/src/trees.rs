@@ -3748,6 +3748,12 @@ fn rebalance_overflowed_bit_lengths(
     }
 }
 
+fn reset_bit_length_counts(bl_count: &mut [crate::zutil_h::ush; 16]) {
+    for count in bl_count {
+        *count = 0;
+    }
+}
+
 fn clamped_tree_bit_length(
     parent_length: ::core::ffi::c_int,
     max_length: ::core::ffi::c_int,
@@ -4160,11 +4166,7 @@ unsafe fn gen_bitlen(
     let mut m: ::core::ffi::c_int = 0;
     let mut bits: ::core::ffi::c_int = 0;
     let mut overflow: ::core::ffi::c_int = 0 as ::core::ffi::c_int;
-    bits = 0 as ::core::ffi::c_int;
-    while bits <= crate::src::deflate::MAX_BITS {
-        (*s).bl_count[bits as usize] = 0 as crate::zutil_h::ush;
-        bits += 1;
-    }
+    reset_bit_length_counts(&mut (*s).bl_count);
     (*tree.offset((*s).heap[(*s).heap_max as usize] as isize))
         .dl
         .len = 0 as crate::zutil_h::ush;
@@ -5501,13 +5503,14 @@ mod tests {
         gen_bitlen_node_plan, gen_bitlen_overflow_reassignment, heap_node_precedes,
         last_nonzero_bl_code_rank, mark_bl_code_nonzero_at_rank, next_code_for_len, next_codes,
         pending_cursor_after_bytes, pqdownheap_child_to_promote, rebalance_overflowed_bit_lengths,
-        reset_block_trees, select_block_encoding, static_bl_desc, static_d_desc, static_l_desc,
-        supplemental_tree_node, supplemental_tree_opt_len, symbol_buffer_is_full,
-        symbol_triplet_cursors, tally_match_tree_indices, tally_symbol_bytes, tally_tree_update,
-        tree_bit_length_cost, tree_bit_length_totals_after_node, tree_next_cursor,
-        tree_parent_depth, tree_run_continues, tree_run_extra_bits, tree_run_limits, BlockEncoding,
-        GenBitlenOverflowNode, GenBitlenOverflowReassignment, HeapChild, ScanTreeAction,
-        TallyTreeUpdate, BL_CODE_ORDER_LEN, END_BLOCK, MAX_BITS,
+        reset_bit_length_counts, reset_block_trees, select_block_encoding, static_bl_desc,
+        static_d_desc, static_l_desc, supplemental_tree_node, supplemental_tree_opt_len,
+        symbol_buffer_is_full, symbol_triplet_cursors, tally_match_tree_indices,
+        tally_symbol_bytes, tally_tree_update, tree_bit_length_cost,
+        tree_bit_length_totals_after_node, tree_next_cursor, tree_parent_depth, tree_run_continues,
+        tree_run_extra_bits, tree_run_limits, BlockEncoding, GenBitlenOverflowNode,
+        GenBitlenOverflowReassignment, HeapChild, ScanTreeAction, TallyTreeUpdate,
+        BL_CODE_ORDER_LEN, END_BLOCK, MAX_BITS,
     };
 
     fn ltree_with_frequency(
@@ -6057,6 +6060,17 @@ mod tests {
 
         assert_eq!(counts[4], 0);
         assert_eq!(counts[5], 0);
+    }
+
+    #[test]
+    fn bit_length_count_reset_clears_every_bucket() {
+        let mut counts = [crate::zutil_h::ush::MAX; 16];
+        counts[0] = 3;
+        counts[crate::src::deflate::MAX_BITS as usize] = 7;
+
+        reset_bit_length_counts(&mut counts);
+
+        assert_eq!(counts, [0; 16]);
     }
 
     #[test]

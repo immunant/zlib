@@ -765,6 +765,17 @@ fn gz_look_gzip_state(source: GzLookGzipSource) -> GzLookGzipState {
     }
 }
 
+fn gz_look_apply_gzip_state(
+    how: &mut ::core::ffi::c_int,
+    junk: &mut ::core::ffi::c_int,
+    direct: &mut ::core::ffi::c_int,
+    gzip_state: GzLookGzipState,
+) {
+    *how = gzip_state.how;
+    *junk = gzip_state.junk;
+    *direct = gzip_state.direct;
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum GzLookAction {
     NeedMoreInput,
@@ -836,9 +847,13 @@ unsafe fn gz_look(mut state: crate::gzguts_h::gz_statep) -> ::core::ffi::c_int {
         let gzip_state = gz_look_gzip_state(GzLookGzipSource::Forced {
             junk_is_known: junk != -1 as ::core::ffi::c_int,
         });
-        (*state).how = gzip_state.how;
-        (*state).junk = gzip_state.junk;
-        (*state).direct = gzip_state.direct;
+        let state_ref = &mut *state;
+        gz_look_apply_gzip_state(
+            &mut state_ref.how,
+            &mut state_ref.junk,
+            &mut state_ref.direct,
+            gzip_state,
+        );
         return 0 as ::core::ffi::c_int;
     }
     if gz_avail(state) == -1 as ::core::ffi::c_int {
@@ -860,9 +875,13 @@ unsafe fn gz_look(mut state: crate::gzguts_h::gz_statep) -> ::core::ffi::c_int {
         GzLookAction::Gzip => {
             crate::src::inflate::inflateReset(strm as *mut crate::zlib_h::z_stream_s);
             let gzip_state = gz_look_gzip_state(GzLookGzipSource::Header);
-            (*state).how = gzip_state.how;
-            (*state).junk = gzip_state.junk;
-            (*state).direct = gzip_state.direct;
+            let state_ref = &mut *state;
+            gz_look_apply_gzip_state(
+                &mut state_ref.how,
+                &mut state_ref.junk,
+                &mut state_ref.direct,
+                gzip_state,
+            );
             return 0 as ::core::ffi::c_int;
         }
         GzLookAction::TransparentCopy => {}
@@ -2408,6 +2427,26 @@ mod tests {
             gz_output_buffer_len(::core::ffi::c_uint::MAX),
             ::core::ffi::c_uint::MAX - 1
         );
+    }
+
+    #[test]
+    fn gz_look_apply_gzip_state_updates_all_gzip_fields() {
+        let mut how = crate::gzguts_h::LOOK;
+        let mut junk = -1;
+        let mut direct = -1;
+
+        gz_look_apply_gzip_state(
+            &mut how,
+            &mut junk,
+            &mut direct,
+            gz_look_gzip_state(GzLookGzipSource::Forced {
+                junk_is_known: false,
+            }),
+        );
+
+        assert_eq!(how, crate::gzguts_h::GZIP);
+        assert_eq!(junk, 0);
+        assert_eq!(direct, 0);
     }
 
     #[test]
