@@ -365,6 +365,7 @@ enum GzWriteFlavor {
     Text,
 }
 
+#[derive(Clone, Copy)]
 enum GzWriteResult {
     Bytes,
     Items { size: crate::stdlib::z_size_t },
@@ -407,7 +408,10 @@ enum GzWritePlan<'a> {
 // no input cursor, while a write retains its bounded caller slice until the
 // adapter has accounted for it.
 enum GzWriteOperation<'a> {
-    Write(GzWriteTransaction<'a>),
+    Write {
+        input: &'a [u8],
+        flavor: GzWriteFlavor,
+    },
     Flush {
         flush: ::core::ffi::c_int,
     },
@@ -1097,7 +1101,7 @@ unsafe fn gzip_write_state_adapter(
     state: &mut crate::gzguts_h::gz_state,
     operation: GzWriteOperation<'_>,
 ) -> crate::stdlib::z_size_t {
-    let transaction = match operation {
+    let (transaction, result) = match operation {
         GzWriteOperation::Flush { flush } => {
             let policy = GzWritePolicy {
                 mode: state.mode,
@@ -1190,13 +1194,43 @@ unsafe fn gzip_write_state_adapter(
             state.strategy = strategy;
             return crate::zlib_h::Z_OK as crate::stdlib::z_size_t;
         }
-        GzWriteOperation::Write(transaction) => transaction,
+        GzWriteOperation::Write { input, flavor } => {
+            let policy = GzWritePolicy {
+                mode: state.mode,
+                err: state.err,
+                again: state.again,
+                direct: state.direct,
+            };
+            let plan = gzwrite_plan(
+                input,
+                flavor,
+                policy,
+                crate::src::gzlib::GzErrorState {
+                    message: &mut state.msg,
+                    error: &mut state.err,
+                    buffered: &mut state.x.have,
+                    again: state.again,
+                    path: state.path.as_deref(),
+                },
+            );
+            let GzWritePlan::Dispatch {
+                transaction,
+                result,
+            } = plan
+            else {
+                let GzWritePlan::Return(result) = plan else {
+                    unreachable!("write plan must dispatch or return");
+                };
+                return result;
+            };
+            (transaction, result)
+        }
     };
     let mut request = transaction.request;
     let mut ret: ::core::ffi::c_int = 0;
     if state.buffers.size == 0 as ::core::ffi::c_uint && gz_init(state) == -1 as ::core::ffi::c_int
     {
-        return 0 as crate::stdlib::z_size_t;
+        return result.finish(0);
     }
     if state.skip != 0
         && gz_comp(
@@ -1208,7 +1242,7 @@ unsafe fn gzip_write_state_adapter(
             GzSkipMaterialization::Only,
         ) == -1 as ::core::ffi::c_int
     {
-        return 0 as crate::stdlib::z_size_t;
+        return result.finish(0);
     }
     if request.len() < state.buffers.size as crate::stdlib::z_size_t {
         loop {
@@ -1226,15 +1260,15 @@ unsafe fn gzip_write_state_adapter(
                     cursor.cursor(),
                     cursor.available(),
                 ) else {
-                    return 0 as crate::stdlib::z_size_t;
+                    return result.finish(0);
                 };
                 let copy = buffered.append(request.remaining());
                 let Some((start, have)) = buffered.cursor() else {
-                    return 0 as crate::stdlib::z_size_t;
+                    return result.finish(0);
                 };
                 let Some(cursor) = crate::src::gzlib::GzCodecInput::from_index(buffer, start, have)
                 else {
-                    return 0 as crate::stdlib::z_size_t;
+                    return result.finish(0);
                 };
                 (copy, cursor)
             };
@@ -1247,7 +1281,7 @@ unsafe fn gzip_write_state_adapter(
                 .set_input(cursor);
             state.x.pos += copy as crate::stdlib::off64_t;
             if request.advance(copy).is_none() {
-                return 0;
+                return result.finish(0);
             }
             if request.is_empty() {
                 break;
@@ -1261,7 +1295,7 @@ unsafe fn gzip_write_state_adapter(
                 GzSkipMaterialization::None,
             ) == -1 as ::core::ffi::c_int
             {
-                return request.partial_or_zero(state.again);
+                return result.finish(request.partial_or_zero(state.again));
             }
         }
     } else {
@@ -1279,7 +1313,7 @@ unsafe fn gzip_write_state_adapter(
                 GzSkipMaterialization::None,
             ) == -1 as ::core::ffi::c_int
         {
-            return 0 as crate::stdlib::z_size_t;
+            return result.finish(0);
         }
         if state.direct != 0 {
             while !request.is_empty() {
@@ -1291,7 +1325,7 @@ unsafe fn gzip_write_state_adapter(
                     Ok(written) => {
                         state.x.pos += written as crate::stdlib::off64_t;
                         if request.advance(written).is_none() {
-                            return 0;
+                            return result.finish(0);
                         }
                     }
                     Err(failure) => {
@@ -1307,11 +1341,11 @@ unsafe fn gzip_write_state_adapter(
                             path: state.path.as_deref(),
                         }
                         .set(crate::zlib_h::Z_ERRNO, Some(message.as_bytes()));
-                        return request.partial_or_zero(state.again);
+                        return result.finish(request.partial_or_zero(state.again));
                     }
                 }
             }
-            return request.total;
+            return result.finish(request.total);
         }
         loop {
             let chunk = GzCompressionChunk::next(request.len());
@@ -1327,51 +1361,17 @@ unsafe fn gzip_write_state_adapter(
             let consumed = chunk.consumed(state.strm.avail_in);
             state.x.pos += consumed as crate::stdlib::off64_t;
             if request.advance(consumed as usize).is_none() {
-                return 0;
+                return result.finish(0);
             }
             if ret == -1 as ::core::ffi::c_int {
-                return request.partial_or_zero(state.again);
+                return result.finish(request.partial_or_zero(state.again));
             }
             if request.is_empty() {
                 break;
             }
         }
     }
-    return request.total;
-}
-unsafe fn gzwrite(
-    state: &mut crate::gzguts_h::gz_state,
-    input: &[u8],
-    flavor: GzWriteFlavor,
-) -> crate::stdlib::z_size_t {
-    let policy = GzWritePolicy {
-        mode: state.mode,
-        err: state.err,
-        again: state.again,
-        direct: state.direct,
-    };
-    let plan = gzwrite_plan(
-        input,
-        flavor,
-        policy,
-        crate::src::gzlib::GzErrorState {
-            message: &mut state.msg,
-            error: &mut state.err,
-            buffered: &mut state.x.have,
-            again: state.again,
-            path: state.path.as_deref(),
-        },
-    );
-    match plan {
-        GzWritePlan::Return(result) => result,
-        GzWritePlan::Dispatch {
-            transaction,
-            result,
-        } => result.finish(gzip_write_state_adapter(
-            state,
-            GzWriteOperation::Write(transaction),
-        )),
-    }
+    result.finish(request.total)
 }
 #[export_name = "gzwrite"]
 
@@ -1391,7 +1391,13 @@ pub unsafe extern "C" fn gzwrite_ffi(
     } else {
         ::core::slice::from_raw_parts(buf.cast::<u8>(), len as usize)
     };
-    gzwrite(state, input, GzWriteFlavor::Bytes) as ::core::ffi::c_int
+    gzip_write_state_adapter(
+        state,
+        GzWriteOperation::Write {
+            input,
+            flavor: GzWriteFlavor::Bytes,
+        },
+    ) as ::core::ffi::c_int
 }
 #[export_name = "gzfwrite"]
 
@@ -1410,7 +1416,13 @@ pub unsafe extern "C" fn gzfwrite_ffi(
         Some(0) | None => &[],
         Some(len) => ::core::slice::from_raw_parts(buf.cast::<u8>(), len),
     };
-    gzwrite(state, input, GzWriteFlavor::Items { size, nitems })
+    gzip_write_state_adapter(
+        state,
+        GzWriteOperation::Write {
+            input,
+            flavor: GzWriteFlavor::Items { size, nitems },
+        },
+    )
 }
 #[export_name = "gzputc"]
 
@@ -1422,7 +1434,13 @@ pub unsafe extern "C" fn gzputc_ffi(
         return -1 as ::core::ffi::c_int;
     };
     let byte = [c as ::core::ffi::c_uchar];
-    gzwrite(state, &byte, GzWriteFlavor::Byte { value: c }) as ::core::ffi::c_int
+    gzip_write_state_adapter(
+        state,
+        GzWriteOperation::Write {
+            input: &byte,
+            flavor: GzWriteFlavor::Byte { value: c },
+        },
+    ) as ::core::ffi::c_int
 }
 #[export_name = "gzputs"]
 
@@ -1437,7 +1455,13 @@ pub unsafe extern "C" fn gzputs_ffi(
     let Some(state) = (file as crate::gzguts_h::gz_statep).as_mut() else {
         return -1 as ::core::ffi::c_int;
     };
-    gzwrite(state, text, GzWriteFlavor::Text) as ::core::ffi::c_int
+    gzip_write_state_adapter(
+        state,
+        GzWriteOperation::Write {
+            input: text,
+            flavor: GzWriteFlavor::Text,
+        },
+    ) as ::core::ffi::c_int
 }
 #[export_name = "gzflush"]
 
