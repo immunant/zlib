@@ -254,22 +254,17 @@ fn gz_look_reset_junk(junk: ::core::ffi::c_int) -> ::core::ffi::c_int {
     (junk != -1) as ::core::ffi::c_int
 }
 
+/// Allocate the paired owned buffers used by the read-side lookahead state.
+/// The transitional codec adapter only installs these buffers and initializes
+/// its ABI stream cursors after this checked allocation succeeds.
+fn gz_look_buffers(want: ::core::ffi::c_uint) -> Option<crate::gzguts_h::gz_buffers> {
+    let output_len = (want as usize).checked_mul(2)?;
+    crate::gzguts_h::gz_buffers::new(want as usize, Some(output_len))
+}
+
 unsafe fn gz_look(state_ref: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
     if state_ref.size == 0 as ::core::ffi::c_uint {
-        let output_len = match (state_ref.want as usize).checked_mul(2) {
-            Some(len) => len,
-            None => {
-                crate::src::gzlib::gz_error_static(
-                    state_ref,
-                    crate::zlib_h::Z_MEM_ERROR,
-                    b"out of memory\0",
-                );
-                return -1;
-            }
-        };
-        let Some(buffers) =
-            crate::gzguts_h::gz_buffers::new(state_ref.want as usize, Some(output_len))
-        else {
+        let Some(buffers) = gz_look_buffers(state_ref.want) else {
             crate::src::gzlib::gz_error_static(
                 state_ref,
                 crate::zlib_h::Z_MEM_ERROR,
