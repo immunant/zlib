@@ -411,9 +411,12 @@ fn read_buf_bytes(
 }
 
 // This private adapter binds the allocations owned by a validated deflater
-// before passing them to a bounded operation.
+// before passing them to a bounded operation.  Callers that only need the
+// owned allocations pass `false` for `bind_input`, avoiding an unnecessary
+// bind of the unrelated caller input cursor.
 fn fill_window<T>(
     s: *mut crate::src::deflate::deflate_state,
+    bind_input: bool,
     operation: impl FnOnce(
         &mut crate::src::deflate::deflate_state,
         &mut crate::zlib_h::z_stream,
@@ -438,7 +441,7 @@ fn fill_window<T>(
     // deflater initialization.
     let head = unsafe { ::core::slice::from_raw_parts_mut(state.head, state.hash_size as usize) };
     let prev = unsafe { ::core::slice::from_raw_parts_mut(state.prev, state.w_size as usize) };
-    let input = if stream.avail_in == 0 {
+    let input = if !bind_input || stream.avail_in == 0 {
         &[]
     } else {
         // SAFETY: a nonempty input cursor has `avail_in` readable bytes.
@@ -844,7 +847,7 @@ pub unsafe extern "C" fn deflateSetDictionary(
     let next_in = (*strm).next_in;
     (*strm).avail_in = dictLength;
     (*strm).next_in = dictionary as *mut crate::stdlib::Bytef;
-    let result = fill_window(state, |state, stream, window, head, prev, dictionary| {
+    let result = fill_window(state, true, |state, stream, window, head, prev, dictionary| {
         deflate_set_dictionary(state, stream, window, head, prev, dictionary)
     });
     (*strm).next_in = next_in;
@@ -1048,7 +1051,9 @@ pub unsafe extern "C" fn deflateResetKeep(
     let result = deflate_reset_keep(strm, state);
     crate::src::trees::_tr_init(state);
     if result == crate::zlib_h::Z_OK && initialize_matcher {
-        lm_init(state);
+        fill_window(state, false, |state, _stream, _window, head, _prev, _input| {
+            lm_init_state(state, head)
+        });
     }
     result
 }
@@ -1086,16 +1091,6 @@ pub unsafe extern "C" fn deflateResetKeep_ffi(
 ) -> ::core::ffi::c_int {
     deflateResetKeep(strm, false)
 }
-// This private reset helper receives the validated state reference that its
-// deflater caller already owns. The hash binding stays scoped here.
-fn lm_init(state: &mut crate::src::deflate::deflate_state) {
-    // SAFETY: the validated deflater owns a `hash_size`-entry head allocation.
-    let head = unsafe {
-        ::core::slice::from_raw_parts_mut(state.head, state.hash_size as usize)
-    };
-    lm_init_state(state, head);
-}
-
 fn lm_init_state(
     state: &mut crate::src::deflate::deflate_state,
     head: &mut [crate::src::deflate::Posf],
