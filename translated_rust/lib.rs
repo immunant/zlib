@@ -10,6 +10,16 @@
 #![feature(register_tool)]
 #![register_tool(c2rust)]
 
+pub const fn c_char_bytes<const N: usize>(bytes: [u8; N]) -> [::core::ffi::c_char; N] {
+    let mut chars = [0; N];
+    let mut index = 0;
+    while index < N {
+        chars[index] = bytes[index] as ::core::ffi::c_char;
+        index += 1;
+    }
+    chars
+}
+
 pub mod __stddef_size_t_h {
     pub type size_t = usize;
 }
@@ -91,9 +101,8 @@ pub mod __stddef_null_h {
     pub const NULL: *mut ::core::ffi::c_void = ::core::ptr::null_mut::<::core::ffi::c_void>();
 }
 pub mod zlib_h {
-    pub const ZLIB_VERSION: [::core::ffi::c_char; 15] = unsafe {
-        ::core::mem::transmute::<[u8; 15], [::core::ffi::c_char; 15]>(*b"1.3.2.1-motley\0")
-    };
+    pub const ZLIB_VERSION: [::core::ffi::c_char; 15] =
+        crate::c_char_bytes(*b"1.3.2.1-motley\0");
 
     pub type alloc_func = Option<
         unsafe extern "C" fn(

@@ -2808,11 +2808,9 @@ pub use crate::zlib_h::z_streamp;
 pub const MAXBITS: ::core::ffi::c_int = 15 as ::core::ffi::c_int;
 #[no_mangle]
 
-pub static inflate_copyright: [::core::ffi::c_char; 49] = unsafe {
-    ::core::mem::transmute::<[u8; 49], [::core::ffi::c_char; 49]>(
-        *b" inflate 1.3.2.1 Copyright 1995-2026 Mark Adler \0",
-    )
-};
+pub static inflate_copyright: [::core::ffi::c_char; 49] = crate::c_char_bytes(
+    *b" inflate 1.3.2.1 Copyright 1995-2026 Mark Adler \0",
+);
 
 enum InflateTableBounds {
     Empty,
