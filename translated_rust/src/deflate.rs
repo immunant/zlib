@@ -253,9 +253,8 @@ pub const NIL: ::core::ffi::c_int = 0 as ::core::ffi::c_int;
 
 pub const TOO_FAR: ::core::ffi::c_int = 4096 as ::core::ffi::c_int;
 
-static mut configuration_table: [config; 10] = unsafe {
-    [
-        config_s {
+static configuration_table: [config; 10] = [
+    config_s {
             good_length: 0 as crate::zutil_h::ush,
             max_lazy: 0 as crate::zutil_h::ush,
             nice_length: 0 as crate::zutil_h::ush,
@@ -385,8 +384,7 @@ static mut configuration_table: [config; 10] = unsafe {
                     ) -> block_state,
             ),
         },
-    ]
-};
+];
 
 unsafe extern "C" fn slide_hash(mut s: *mut crate::src::deflate::deflate_state) {
     let mut n: ::core::ffi::c_uint = 0;
@@ -1918,12 +1916,9 @@ pub unsafe extern "C" fn deflate(
         } else if (*s).strategy == crate::zlib_h::Z_RLE {
             deflate_rle(s, flush) as ::core::ffi::c_uint
         } else {
-            Some(
-                (*(&raw const configuration_table as *const config).offset((*s).level as isize))
-                    .func
-                    .expect("non-null function pointer"),
-            )
-            .expect("non-null function pointer")(s, flush) as ::core::ffi::c_uint
+            configuration_table[(*s).level as usize]
+                .func
+                .expect("non-null function pointer")(s, flush) as ::core::ffi::c_uint
         }) as block_state;
         if bstate as ::core::ffi::c_uint
             == finish_started as ::core::ffi::c_int as ::core::ffi::c_uint
