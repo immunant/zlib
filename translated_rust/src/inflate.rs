@@ -242,16 +242,42 @@ unsafe extern "C" fn inflateStateCheck(mut strm: crate::zlib_h::z_streamp) -> ::
     }
     return 0 as ::core::ffi::c_int;
 }
+
+// Keep the state projection tied to the exclusive stream borrow.  Callers
+// first validate the raw ABI pointer with `as_mut()` and then use this helper
+// for the association check, so no projected state reference can outlive the
+// stream it belongs to.
+unsafe fn inflate_stream_and_state<'stream>(
+    stream: &'stream mut crate::zlib_h::z_stream_s,
+) -> Option<(
+    &'stream mut crate::zlib_h::z_stream_s,
+    &'stream mut crate::src::inflate::inflate_state,
+)> {
+    if stream.zalloc.is_none() || stream.zfree.is_none() {
+        return None;
+    }
+    let identity = ::core::ptr::from_mut(stream).addr();
+    let state = (stream.state as *mut crate::src::inflate::inflate_state).as_mut()?;
+    if state.stream_identity != identity
+        || (state.mode as ::core::ffi::c_uint)
+            < crate::src::inflate::HEAD as ::core::ffi::c_int as ::core::ffi::c_uint
+        || state.mode as ::core::ffi::c_uint
+            > crate::src::inflate::SYNC as ::core::ffi::c_int as ::core::ffi::c_uint
+    {
+        return None;
+    }
+    Some((stream, state))
+}
+
 pub unsafe extern "C" fn inflateResetKeep(
     mut strm: crate::zlib_h::z_streamp,
 ) -> ::core::ffi::c_int {
-    if inflateStateCheck(strm) != 0 {
+    let Some(strm) = strm.as_mut() else {
         return crate::zlib_h::Z_STREAM_ERROR;
-    }
-    // The state association was validated above.  Keep the ABI pointer
-    // projections scoped here so reset itself only mutates Rust references.
-    let strm = &mut *strm;
-    let state = &mut *(strm.state as *mut crate::src::inflate::inflate_state);
+    };
+    let Some((strm, state)) = inflate_stream_and_state(strm) else {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    };
     state.total = 0 as ::core::ffi::c_ulong;
     strm.total_out = state.total as crate::stdlib::uLong;
     strm.total_in = strm.total_out;
@@ -283,10 +309,12 @@ pub unsafe extern "C" fn inflateResetKeep_ffi(
     inflateResetKeep(strm)
 }
 pub unsafe extern "C" fn inflateReset(mut strm: crate::zlib_h::z_streamp) -> ::core::ffi::c_int {
-    if inflateStateCheck(strm) != 0 {
+    let Some(strm) = strm.as_mut() else {
         return crate::zlib_h::Z_STREAM_ERROR;
-    }
-    let state = &mut *((*strm).state as *mut crate::src::inflate::inflate_state);
+    };
+    let Some((strm, state)) = inflate_stream_and_state(strm) else {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    };
     state.wsize = 0 as ::core::ffi::c_uint;
     state.whave = 0 as ::core::ffi::c_uint;
     state.wnext = 0 as ::core::ffi::c_uint;
@@ -304,14 +332,12 @@ pub unsafe extern "C" fn inflateReset2(
     mut windowBits: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
     let mut wrap: ::core::ffi::c_int = 0;
-    if inflateStateCheck(strm) != 0 {
+    let Some(strm) = strm.as_mut() else {
         return crate::zlib_h::Z_STREAM_ERROR;
-    }
-    // `inflateStateCheck()` established the ABI association.  Project it
-    // once so the reset policy below works on Rust references rather than
-    // repeatedly dereferencing the raw stream and state pointers.
-    let strm = &mut *strm;
-    let state = &mut *(strm.state as *mut crate::src::inflate::inflate_state);
+    };
+    let Some((strm, state)) = inflate_stream_and_state(strm) else {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    };
     if windowBits < 0 as ::core::ffi::c_int {
         if windowBits < -15 as ::core::ffi::c_int {
             return crate::zlib_h::Z_STREAM_ERROR;
@@ -475,13 +501,15 @@ pub unsafe extern "C" fn inflatePrime(
     mut bits: ::core::ffi::c_int,
     mut value: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
-    if inflateStateCheck(strm) != 0 {
+    let Some(strm) = strm.as_mut() else {
         return crate::zlib_h::Z_STREAM_ERROR;
-    }
+    };
+    let Some((_strm, state)) = inflate_stream_and_state(strm) else {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    };
     if bits == 0 as ::core::ffi::c_int {
         return crate::zlib_h::Z_OK;
     }
-    let state = &mut *((*strm).state as *mut crate::src::inflate::inflate_state);
     if bits < 0 as ::core::ffi::c_int {
         state.hold = 0 as ::core::ffi::c_ulong;
         state.bits = 0 as ::core::ffi::c_uint;
@@ -2440,16 +2468,17 @@ pub unsafe extern "C" fn inflate_ffi(
     inflate(strm, flush)
 }
 pub unsafe extern "C" fn inflateEnd(mut strm: crate::zlib_h::z_streamp) -> ::core::ffi::c_int {
-    if inflateStateCheck(strm) != 0 {
+    let Some(stream) = strm.as_mut() else {
         return crate::zlib_h::Z_STREAM_ERROR;
-    }
+    };
     // Keep the ABI projections at the callback-release boundary.  The
     // window must be dropped before the caller-owned state allocation is
     // released, and the stream must continue to point at that state during
     // the callback just as it did in the C implementation.
-    let stream = &mut *strm;
-    let state_ptr = stream.state as *mut crate::src::inflate::inflate_state;
-    let state = &mut *state_ptr;
+    let Some((stream, state)) = inflate_stream_and_state(stream) else {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    };
+    let state_ptr = ::core::ptr::from_mut(state);
     drop(state.owned_window.take());
     let zfree = stream.zfree.expect("non-null function pointer");
     let opaque = stream.opaque;
@@ -2723,10 +2752,12 @@ fn inflate_sync_point(
 pub unsafe extern "C" fn inflateSyncPoint(
     mut strm: crate::zlib_h::z_streamp,
 ) -> ::core::ffi::c_int {
-    if inflateStateCheck(strm) != 0 {
+    let Some(strm) = strm.as_mut() else {
         return crate::zlib_h::Z_STREAM_ERROR;
-    }
-    let state = &*((*strm).state as *const crate::src::inflate::inflate_state);
+    };
+    let Some((_strm, state)) = inflate_stream_and_state(strm) else {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    };
     inflate_sync_point(state.mode, state.bits)
 }
 #[export_name = "inflateSyncPoint"]
