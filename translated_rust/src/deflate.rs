@@ -2442,7 +2442,10 @@ pub unsafe extern "C" fn deflateEnd(mut strm: crate::zlib_h::z_streamp) -> ::cor
         zfree(opaque, window as crate::stdlib::voidpf);
     }
     zfree(opaque, state_ptr as crate::stdlib::voidpf);
-    deflate_end_complete(&mut *strm, status)
+    // `deflateStateCheck()` returned this same bound stream.  Complete the
+    // teardown through that reference rather than re-binding the raw ABI
+    // pointer after the release callbacks have run.
+    deflate_end_complete(stream, status)
 }
 
 // Gzip creates its private deflater with the default zlib callbacks.  For
