@@ -803,7 +803,18 @@ unsafe fn gzgets(
                 } else {
                     state.x.have as usize
                 };
-                let input = ::core::slice::from_raw_parts(state.x.next, n);
+                // `x.next` is a cursor in the owned output buffer whenever
+                // `x.have` is nonzero.  Rebuild that view with a checked
+                // range, so a corrupt cursor cannot extend a raw slice past
+                // the allocation's remaining capacity.
+                let cursor = state.x.next;
+                let Some(input) = state.out.as_deref().and_then(|buffer| {
+                    let start = cursor.addr().checked_sub(buffer.as_ptr().addr())?;
+                    let end = start.checked_add(n)?;
+                    buffer.get(start..end)
+                }) else {
+                    return ::core::ptr::null_mut::<::core::ffi::c_char>();
+                };
                 let (copied, found_newline) =
                     copy_through_newline(input, &mut output[written..written + n]);
                 n = copied;
