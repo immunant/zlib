@@ -1106,6 +1106,18 @@ fn deflate_fast_match_progress(
     }
 }
 
+/// Translate a match length offset to its dynamic literal/length tree slot.
+///
+/// Match offsets are stored as a byte in the deflate symbol stream, so the
+/// immutable zlib lookup table can be indexed directly.  Keeping this lookup
+/// safe removes the old raw address-plus-offset reads from both compressor
+/// strategies.
+fn deflate_length_tree_index(length_offset: crate::zutil_h::uch) -> usize {
+    crate::src::trees::_length_code[length_offset as usize] as usize
+        + crate::src::deflate::LITERALS as usize
+        + 1
+}
+
 fn deflate_insert_after_block(strstart: crate::stdlib::uInt) -> crate::stdlib::uInt {
     strstart.min((crate::zutil_h::MIN_MATCH - 1) as crate::stdlib::uInt)
 }
@@ -4762,21 +4774,9 @@ unsafe extern "C" fn deflate_fast(
             (*s).sym_next = (*s).sym_next.wrapping_add(1);
             *symbol_base.wrapping_add(c2rust_fresh49 as usize) = len as crate::zutil_h::uchf;
             dist = dist.wrapping_sub(1);
-            (*s).dyn_ltree[(*(&raw const crate::src::trees::_length_code
-                as *const crate::zutil_h::uch)
-                .offset(len as isize) as ::core::ffi::c_int
-                + crate::src::deflate::LITERALS
-                + 1 as ::core::ffi::c_int) as usize]
-                .fc
-                .value = (*s).dyn_ltree[(*(&raw const crate::src::trees::_length_code
-                as *const crate::zutil_h::uch)
-                .offset(len as isize)
-                as ::core::ffi::c_int
-                + crate::src::deflate::LITERALS
-                + 1 as ::core::ffi::c_int) as usize]
-                .fc
-                .value
-                .wrapping_add(1);
+            let length_tree_index = deflate_length_tree_index(len);
+            (*s).dyn_ltree[length_tree_index].fc.value =
+                (*s).dyn_ltree[length_tree_index].fc.value.wrapping_add(1);
             let distance_code = deflate_distance_tree_code(dist) as usize;
             (*s).dyn_dtree[distance_code].fc.value =
                 (*s).dyn_dtree[distance_code].fc.value.wrapping_add(1);
@@ -5010,21 +5010,9 @@ unsafe extern "C" fn deflate_slow(
             (*s).sym_next = (*s).sym_next.wrapping_add(1);
             *symbol_base.wrapping_add(c2rust_fresh38 as usize) = len as crate::zutil_h::uchf;
             dist = dist.wrapping_sub(1);
-            (*s).dyn_ltree[(*(&raw const crate::src::trees::_length_code
-                as *const crate::zutil_h::uch)
-                .offset(len as isize) as ::core::ffi::c_int
-                + crate::src::deflate::LITERALS
-                + 1 as ::core::ffi::c_int) as usize]
-                .fc
-                .value = (*s).dyn_ltree[(*(&raw const crate::src::trees::_length_code
-                as *const crate::zutil_h::uch)
-                .offset(len as isize)
-                as ::core::ffi::c_int
-                + crate::src::deflate::LITERALS
-                + 1 as ::core::ffi::c_int) as usize]
-                .fc
-                .value
-                .wrapping_add(1);
+            let length_tree_index = deflate_length_tree_index(len);
+            (*s).dyn_ltree[length_tree_index].fc.value =
+                (*s).dyn_ltree[length_tree_index].fc.value.wrapping_add(1);
             let distance_code = deflate_distance_tree_code(dist) as usize;
             (*s).dyn_dtree[distance_code].fc.value =
                 (*s).dyn_dtree[distance_code].fc.value.wrapping_add(1);
@@ -5205,76 +5193,90 @@ unsafe fn deflate_rle(
                 DeflateRleRefillAction::Done => break,
             }
         }
-        (*s).match_length = 0 as crate::stdlib::uInt;
-        if !(*s).window.is_null() {
-            let window = &*core::ptr::slice_from_raw_parts((*s).window, (*s).window_size as usize);
+        let state = &mut *s;
+        let window = if state.window.is_null() {
+            None
+        } else {
+            Some(&*core::ptr::slice_from_raw_parts(
+                state.window,
+                state.window_size as usize,
+            ))
+        };
+        state.match_length = 0 as crate::stdlib::uInt;
+        if let Some(window) = window {
             if let Some(match_length) =
-                deflate_rle_scan_match(window, (*s).lookahead, (*s).strstart)
+                deflate_rle_scan_match(window, state.lookahead, state.strstart)
             {
-                (*s).match_length = match_length;
+                state.match_length = match_length;
             }
         }
         let layout =
-            pending_storage_layout_for_state(&*s).expect("validated pending storage layout");
+            pending_storage_layout_for_state(state).expect("validated pending storage layout");
         let pending = &mut *core::ptr::slice_from_raw_parts_mut(
-            (*s).pending_buf
+            state
+                .pending_buf
                 .expect("validated pending storage")
                 .as_ptr(),
             layout.total_len,
         );
         let mut storage = PendingStorageView::new(pending, layout)
             .expect("pending storage layout matches its allocation");
-        match deflate_rle_tally_plan((*s).match_length) {
+        match deflate_rle_tally_plan(state.match_length) {
             DeflateRleTallyPlan::MatchWithoutCount => {
-                let tally = deflate_rle_match_tally_plan((*s).match_length, (*s).sym_next);
-                (*s).sym_next = tally.next_sym;
+                let tally = deflate_rle_match_tally_plan(state.match_length, state.sym_next);
+                state.sym_next = tally.next_sym;
                 assert!(storage.write_symbol_triplet(tally.cursors, tally.symbol_bytes));
-                (*s).dyn_ltree[tally.length_tree_index].fc.value = (*s).dyn_ltree
+                state.dyn_ltree[tally.length_tree_index].fc.value = state.dyn_ltree
                     [tally.length_tree_index]
                     .fc
                     .value
                     .wrapping_add(1);
-                (*s).dyn_dtree[tally.distance_tree_index].fc.value = (*s).dyn_dtree
+                state.dyn_dtree[tally.distance_tree_index].fc.value = state.dyn_dtree
                     [tally.distance_tree_index]
                     .fc
                     .value
                     .wrapping_add(1);
-                bflush = symbol_buffer_is_full((*s).sym_next, (*s).sym_end) as ::core::ffi::c_int;
-                ((*s).lookahead, (*s).strstart, (*s).match_length) =
+                bflush = symbol_buffer_is_full(state.sym_next, state.sym_end) as ::core::ffi::c_int;
+                (state.lookahead, state.strstart, state.match_length) =
                     deflate_rle_match_state_after_emit(
-                        (*s).lookahead,
-                        (*s).strstart,
-                        (*s).match_length,
+                        state.lookahead,
+                        state.strstart,
+                        state.match_length,
                     );
             }
             DeflateRleTallyPlan::Literal => {
-                let literal: crate::zutil_h::uch =
-                    *(*s).window.offset((*s).strstart as isize) as crate::zutil_h::uch;
-                let tally = deflate_literal_tally_plan(literal, (*s).sym_next);
-                (*s).sym_next = tally.next_sym;
+                let Some(&literal) = window.and_then(|bytes| bytes.get(state.strstart as usize))
+                else {
+                    return need_more;
+                };
+                let tally =
+                    deflate_literal_tally_plan(literal as crate::zutil_h::uch, state.sym_next);
+                state.sym_next = tally.next_sym;
                 assert!(storage.write_symbol_triplet(tally.cursors, tally.symbol_bytes));
-                (*s).dyn_ltree[tally.literal_tree_index].fc.value = (*s).dyn_ltree
+                state.dyn_ltree[tally.literal_tree_index].fc.value = state.dyn_ltree
                     [tally.literal_tree_index]
                     .fc
                     .value
                     .wrapping_add(1);
-                bflush = symbol_buffer_is_full((*s).sym_next, (*s).sym_end) as ::core::ffi::c_int;
-                ((*s).lookahead, (*s).strstart) =
-                    deflate_literal_state_after_emit((*s).lookahead, (*s).strstart);
+                bflush = symbol_buffer_is_full(state.sym_next, state.sym_end) as ::core::ffi::c_int;
+                (state.lookahead, state.strstart) =
+                    deflate_literal_state_after_emit(state.lookahead, state.strstart);
             }
         }
         if bflush != 0 {
-            let stored_len = deflate_block_len((*s).strstart, (*s).block_start);
-            let stored_data = if (*s).block_start >= 0 as ::core::ffi::c_long {
-                Some(core::slice::from_raw_parts(
-                    (*s).window
-                        .add((*s).block_start as ::core::ffi::c_uint as usize),
-                    stored_len as usize,
-                ))
+            let stored_len = deflate_block_len(state.strstart, state.block_start);
+            let stored_data = if state.block_start >= 0 as ::core::ffi::c_long {
+                let start = state.block_start as ::core::ffi::c_uint as usize;
+                let Some(end) = start.checked_add(stored_len as usize) else {
+                    return need_more;
+                };
+                let Some(data) = window.and_then(|bytes| bytes.get(start..end)) else {
+                    return need_more;
+                };
+                Some(data)
             } else {
                 None
             };
-            let state = &mut *s;
             let stream = &mut *state.strm;
             crate::src::trees::tr_flush_block_core(
                 &mut storage,
@@ -5285,10 +5287,9 @@ unsafe fn deflate_rle(
                 0 as ::core::ffi::c_int,
             );
             drop(storage);
-            (*s).block_start = (*s).strstart as ::core::ffi::c_long;
-            flush_pending((*s).strm);
-            if let Some(state) =
-                deflate_flush_block_state_after_output((*(*s).strm).avail_out, false)
+            state.block_start = state.strstart as ::core::ffi::c_long;
+            flush_pending(state.strm);
+            if let Some(state) = deflate_flush_block_state_after_output((*stream).avail_out, false)
             {
                 return state;
             }
@@ -5474,7 +5475,7 @@ mod tests {
         deflate_dictionary_len, deflate_dictionary_state_after_load, deflate_distance_tree_code,
         deflate_fast_match_codes, deflate_fast_match_progress, deflate_fast_should_insert_match,
         deflate_final_flush_action, deflate_flush_block_state_after_output, deflate_flush_rank,
-        deflate_huff_literal_progress, deflate_insert_after_block,
+        deflate_huff_literal_progress, deflate_insert_after_block, deflate_length_tree_index,
         deflate_literal_state_after_emit, deflate_literal_tally_plan, deflate_match_refill_action,
         deflate_pending_value, deflate_preflight, deflate_prime_bits_valid,
         deflate_prime_has_pending_space, deflate_prime_insert_bits, deflate_request_is_invalid,
@@ -7528,6 +7529,18 @@ mod tests {
             assert_eq!(
                 deflate_distance_tree_code(distance_minus_one),
                 crate::src::trees::_dist_code[table_index]
+            );
+        }
+    }
+
+    #[test]
+    fn deflate_length_tree_index_uses_the_immutable_lookup_table() {
+        for length_offset in [0, 1, 127, 255] {
+            assert_eq!(
+                deflate_length_tree_index(length_offset),
+                crate::src::trees::_length_code[length_offset as usize] as usize
+                    + crate::src::deflate::LITERALS as usize
+                    + 1,
             );
         }
     }
