@@ -565,6 +565,24 @@ impl DeflateStorageLayout {
     }
 }
 
+// Keep the callback ordering and failure observation separate from the raw
+// handles used to publish each allocation.  In particular, this must visit
+// every request even if an earlier callback returned null: the C allocation
+// path invokes all four callbacks before its common cleanup path.  The
+// callback itself remains at the ABI boundary, while a future owner-backed
+// transaction can reuse this pointer-free schedule unchanged.
+fn request_deflate_storage(
+    storage: &DeflateStorageLayout,
+    mut request: impl FnMut(DeflateStorageSlot, &DeflateAllocation) -> bool,
+) -> bool {
+    let mut complete = true;
+    for (slot, allocation) in storage.callback_requests() {
+        let allocated = request(slot, allocation);
+        complete &= allocated;
+    }
+    complete
+}
+
 fn deflate_layout(
     level: ::core::ffi::c_int,
     method: ::core::ffi::c_int,
@@ -990,15 +1008,15 @@ pub unsafe extern "C" fn deflateInit2_(
     // callback: a caller allocator may observe the stream re-entrantly.
     // Each callback result is instead published through a short projection,
     // and all work after the final callback uses an ordinary Rust borrow.
-    for (slot, request) in storage.callback_requests() {
+    let storage_complete = request_deflate_storage(&storage, |slot, request| {
         let allocation = Some(stream.zalloc.expect("non-null function pointer"))
             .expect("non-null function pointer")(
-                stream.opaque,
-                request.items,
-                request.size,
-            );
+            stream.opaque, request.items, request.size
+        );
+        let allocated = !allocation.is_null();
         publish_deflate_storage(s, slot, allocation);
-    }
+        allocated
+    });
     let state = &mut *s;
     state.high_water = 0 as crate::zutil_h::ulg;
     state.lit_bufsize = layout.lit_bufsize;
@@ -1007,7 +1025,8 @@ pub unsafe extern "C" fn deflateInit2_(
         .byte_len()
         .expect("validated pending allocation geometry")
         as crate::zutil_h::ulg;
-    if state.window.is_none()
+    if !storage_complete
+        || state.window.is_none()
         || state.prev.is_none()
         || state.head.is_none()
         || state.pending_buf.is_none()
@@ -3678,13 +3697,11 @@ pub unsafe extern "C" fn deflateCopy(
     // Preserve the source implementation's callback-visible order.  Reload
     // the callback and opaque value for every request: a re-entrant custom
     // allocator is allowed to inspect or update the stream between calls.
-    for (slot, request) in storage.callback_requests() {
+    let storage_complete = request_deflate_storage(&storage, |slot, request| {
         let allocation = Some(dest.zalloc.expect("non-null function pointer"))
             .expect("non-null function pointer")(
-                dest.opaque,
-                request.items,
-                request.size,
-            );
+            dest.opaque, request.items, request.size
+        );
         match slot {
             DeflateStorageSlot::Window => {
                 ds.window = ::core::ptr::NonNull::new(allocation.cast());
@@ -3699,8 +3716,14 @@ pub unsafe extern "C" fn deflateCopy(
                 ds.pending_buf = ::core::ptr::NonNull::new(allocation.cast());
             }
         }
-    }
-    if ds.window.is_none() || ds.prev.is_none() || ds.head.is_none() || ds.pending_buf.is_none() {
+        !allocation.is_null()
+    });
+    if !storage_complete
+        || ds.window.is_none()
+        || ds.prev.is_none()
+        || ds.head.is_none()
+        || ds.pending_buf.is_none()
+    {
         deflateEnd(dest as *mut crate::zlib_h::z_stream_s);
         return crate::zlib_h::Z_MEM_ERROR;
     }
