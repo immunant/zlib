@@ -763,6 +763,40 @@ struct DeflateInitialState {
     hash_shift: crate::stdlib::uInt,
 }
 
+// Keep the complete, pointer-free portion of a stream initialization together
+// before the callback allocation transaction begins.  In particular, the
+// callback boundary must not independently recompute layout, allocation
+// geometry, and initial scalar state: a future C4 owner needs this one plan to
+// preserve the callback request order and the post-allocation reset values.
+struct DeflateInitializationPlan {
+    layout: DeflateLayout,
+    allocation: DeflateAllocationPlan,
+    initial_state: DeflateInitialState,
+    method: ::core::ffi::c_int,
+    strategy: ::core::ffi::c_int,
+}
+
+impl DeflateInitializationPlan {
+    fn new(
+        level: ::core::ffi::c_int,
+        method: ::core::ffi::c_int,
+        window_bits: ::core::ffi::c_int,
+        mem_level: ::core::ffi::c_int,
+        strategy: ::core::ffi::c_int,
+    ) -> Option<Self> {
+        let layout = deflate_layout(level, method, window_bits, mem_level, strategy)?;
+        let allocation = layout.allocation_plan();
+        let initial_state = layout.initial_state();
+        Some(Self {
+            layout,
+            allocation,
+            initial_state,
+            method,
+            strategy,
+        })
+    }
+}
+
 // The one-shot APIs never expose their temporary stream.  Keep their bounded
 // input and output borrows, along with the uInt-sized request accounting, in
 // a pointer-free owner.  The small ABI adapter below is then the only place
@@ -1382,17 +1416,17 @@ pub unsafe fn deflateInit2_(
                 as unsafe extern "C" fn(crate::stdlib::voidpf, crate::stdlib::voidpf) -> (),
         ) as crate::zlib_h::free_func;
     }
-    let Some(layout) = deflate_layout(level, method, windowBits, memLevel, strategy) else {
+    let Some(initialization) =
+        DeflateInitializationPlan::new(level, method, windowBits, memLevel, strategy)
+    else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
-    let allocation_plan = layout.allocation_plan();
-    let initial_state = layout.initial_state();
-    let storage = allocation_plan.storage;
+    let storage = initialization.allocation.storage;
     let s = Some(stream.zalloc.expect("non-null function pointer"))
         .expect("non-null function pointer")(
         stream.opaque,
-        allocation_plan.state.items,
-        allocation_plan.state.size,
+        initialization.allocation.state.items,
+        initialization.allocation.state.size,
     ) as *mut crate::src::deflate::deflate_state;
     if s.is_null() {
         return crate::zlib_h::Z_MEM_ERROR;
@@ -1403,29 +1437,29 @@ pub unsafe fn deflateInit2_(
     // all-zero bytes into Rust enum fields.
     s.write(crate::src::deflate::internal_state {
         data_type: stream.data_type,
-        status: initial_state.status,
+        status: initialization.initial_state.status,
         pending_buf: None,
-        pending_buf_size: initial_state.pending_buf_size,
-        pending_out: initial_state.pending_out,
-        pending: initial_state.pending,
+        pending_buf_size: initialization.initial_state.pending_buf_size,
+        pending_out: initialization.initial_state.pending_out,
+        pending: initialization.initial_state.pending,
         callback_storage: DeflateCallbackStorageOwner::new_state(storage),
-        wrap: initial_state.wrap,
+        wrap: initialization.initial_state.wrap,
         gzhead: None,
-        gzindex: initial_state.gzindex,
-        method: initial_state.method,
-        last_flush: initial_state.last_flush,
-        w_size: initial_state.w_size,
-        w_bits: initial_state.w_bits,
-        w_mask: initial_state.w_mask,
+        gzindex: initialization.initial_state.gzindex,
+        method: initialization.initial_state.method,
+        last_flush: initialization.initial_state.last_flush,
+        w_size: initialization.initial_state.w_size,
+        w_bits: initialization.initial_state.w_bits,
+        w_mask: initialization.initial_state.w_mask,
         window: None,
-        window_size: initial_state.window_size,
+        window_size: initialization.initial_state.window_size,
         prev: None,
         head: None,
-        ins_h: initial_state.ins_h,
-        hash_size: initial_state.hash_size,
-        hash_bits: initial_state.hash_bits,
-        hash_mask: initial_state.hash_mask,
-        hash_shift: initial_state.hash_shift,
+        ins_h: initialization.initial_state.ins_h,
+        hash_size: initialization.initial_state.hash_size,
+        hash_bits: initialization.initial_state.hash_bits,
+        hash_mask: initialization.initial_state.hash_mask,
+        hash_shift: initialization.initial_state.hash_shift,
         block_start: 0,
         match_length: 0,
         prev_match: 0,
@@ -1514,7 +1548,7 @@ pub unsafe fn deflateInit2_(
     let state = &mut *s;
     state.data_type = crate::zlib_h::Z_UNKNOWN;
     state.high_water = 0 as crate::zutil_h::ulg;
-    state.lit_bufsize = layout.lit_bufsize;
+    state.lit_bufsize = initialization.layout.lit_bufsize;
     state.pending_buf_size = storage
         .pending
         .byte_len()
@@ -1544,9 +1578,9 @@ pub unsafe fn deflateInit2_(
         .lit_bufsize
         .wrapping_sub(1 as crate::stdlib::uInt)
         .wrapping_mul(3 as crate::stdlib::uInt);
-    state.level = layout.level;
-    state.strategy = strategy;
-    state.method = method as crate::stdlib::Byte;
+    state.level = initialization.layout.level;
+    state.strategy = initialization.strategy;
+    state.method = initialization.method as crate::stdlib::Byte;
     // The state is already installed and all four callback allocations have
     // succeeded.  Apply the ordinary reset policy directly through the
     // pointer-free reset core instead of re-entering the raw stream API.
