@@ -1923,35 +1923,45 @@ pub unsafe extern "C" fn deflateParams_ffi(
 ) -> ::core::ffi::c_int {
     deflateParams(strm, level, strategy)
 }
-pub unsafe extern "C" fn deflateTune(
-    mut strm: crate::zlib_h::z_streamp,
-    mut good_length: ::core::ffi::c_int,
-    mut max_lazy: ::core::ffi::c_int,
-    mut nice_length: ::core::ffi::c_int,
-    mut max_chain: ::core::ffi::c_int,
+fn deflate_tune_core(
+    good_match: &mut crate::stdlib::uInt,
+    max_lazy_match: &mut crate::stdlib::uInt,
+    nice_match: &mut ::core::ffi::c_int,
+    max_chain_length: &mut crate::stdlib::uInt,
+    good_length: ::core::ffi::c_int,
+    max_lazy: ::core::ffi::c_int,
+    nice_length: ::core::ffi::c_int,
+    max_chain: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
-    let mut s: *mut crate::src::deflate::deflate_state =
-        ::core::ptr::null_mut::<crate::src::deflate::deflate_state>();
-    if deflateStateCheck(strm) != 0 {
-        return crate::zlib_h::Z_STREAM_ERROR;
-    }
-    s = (*strm).state as *mut crate::src::deflate::deflate_state;
-    (*s).good_match = good_length as crate::stdlib::uInt;
-    (*s).max_lazy_match = max_lazy as crate::stdlib::uInt;
-    (*s).nice_match = nice_length;
-    (*s).max_chain_length = max_chain as crate::stdlib::uInt;
-    return crate::zlib_h::Z_OK;
+    *good_match = good_length as crate::stdlib::uInt;
+    *max_lazy_match = max_lazy as crate::stdlib::uInt;
+    *nice_match = nice_length;
+    *max_chain_length = max_chain as crate::stdlib::uInt;
+    crate::zlib_h::Z_OK
 }
 #[export_name = "deflateTune"]
 
 pub unsafe extern "C" fn deflateTune_ffi(
-    mut strm: crate::zlib_h::z_streamp,
-    mut good_length: ::core::ffi::c_int,
-    mut max_lazy: ::core::ffi::c_int,
-    mut nice_length: ::core::ffi::c_int,
-    mut max_chain: ::core::ffi::c_int,
+    strm: crate::zlib_h::z_streamp,
+    good_length: ::core::ffi::c_int,
+    max_lazy: ::core::ffi::c_int,
+    nice_length: ::core::ffi::c_int,
+    max_chain: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
-    deflateTune(strm, good_length, max_lazy, nice_length, max_chain)
+    if deflate_state_check_at_ffi_boundary!(strm) {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    }
+    let state = &mut *((*strm).state as *mut crate::src::deflate::deflate_state);
+    deflate_tune_core(
+        &mut state.good_match,
+        &mut state.max_lazy_match,
+        &mut state.nice_match,
+        &mut state.max_chain_length,
+        good_length,
+        max_lazy,
+        nice_length,
+        max_chain,
+    )
 }
 fn deflate_bound_lengths(
     source_len: crate::stdlib::z_size_t,
@@ -4411,6 +4421,56 @@ mod tests {
         DeflateFastMatchProgress, DeflateFinalFlushAction, DeflateMatchRefillAction,
         DeflatePreflight, DeflateRleRefillAction, DeflateRleTallyPlan, ReadBufChecksum,
     };
+
+    #[test]
+    fn deflate_tune_core_updates_all_tuning_fields() {
+        let mut good_match = 0;
+        let mut max_lazy_match = 0;
+        let mut nice_match = 0;
+        let mut max_chain_length = 0;
+
+        assert_eq!(
+            super::deflate_tune_core(
+                &mut good_match,
+                &mut max_lazy_match,
+                &mut nice_match,
+                &mut max_chain_length,
+                4,
+                5,
+                6,
+                7,
+            ),
+            crate::zlib_h::Z_OK
+        );
+        assert_eq!(good_match, 4);
+        assert_eq!(max_lazy_match, 5);
+        assert_eq!(nice_match, 6);
+        assert_eq!(max_chain_length, 7);
+    }
+
+    #[test]
+    fn deflate_tune_core_preserves_c_cast_and_signed_value_behavior() {
+        let mut good_match = 0;
+        let mut max_lazy_match = 0;
+        let mut nice_match = 0;
+        let mut max_chain_length = 0;
+
+        super::deflate_tune_core(
+            &mut good_match,
+            &mut max_lazy_match,
+            &mut nice_match,
+            &mut max_chain_length,
+            ::core::ffi::c_int::MIN,
+            -1,
+            ::core::ffi::c_int::MIN,
+            ::core::ffi::c_int::MAX,
+        );
+
+        assert_eq!(good_match, ::core::ffi::c_int::MIN as crate::stdlib::uInt);
+        assert_eq!(max_lazy_match, (-1 as ::core::ffi::c_int) as crate::stdlib::uInt);
+        assert_eq!(nice_match, ::core::ffi::c_int::MIN);
+        assert_eq!(max_chain_length, ::core::ffi::c_int::MAX as crate::stdlib::uInt);
+    }
 
     #[test]
     fn deflate_block_state_actions_preserve_finish_and_return_semantics() {
