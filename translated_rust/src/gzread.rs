@@ -655,7 +655,7 @@ pub unsafe extern "C" fn gzgetc__ffi(mut file: crate::zlib_h::gzFile) -> ::core:
     }
     gzgetc_(&mut *(file as crate::gzguts_h::gz_statep))
 }
-pub unsafe extern "C" fn gzungetc(
+pub fn gzungetc(
     mut c: ::core::ffi::c_int,
     state: &mut crate::gzguts_h::gz_state,
 ) -> ::core::ffi::c_int {
@@ -673,37 +673,51 @@ pub unsafe extern "C" fn gzungetc(
     }
     match crate::src::gzlib::gz_ungetc_plan(state) {
         crate::src::gzlib::GzUngetcPlan::First { buffer_end } => {
-            state.x.next = state
-                .out
-                .wrapping_add(buffer_end as usize)
-                .wrapping_sub(1);
-            *state.x.next = c as ::core::ffi::c_uchar;
+            // SAFETY: the ungetc plan reserves the final byte of the
+            // initialized output buffer for this first pushed-back byte.
+            unsafe {
+                state.x.next = state
+                    .out
+                    .wrapping_add(buffer_end as usize)
+                    .wrapping_sub(1);
+                *state.x.next = c as ::core::ffi::c_uchar;
+            }
             crate::src::gzlib::gz_ungetc_progress(state, true);
         }
         crate::src::gzlib::GzUngetcPlan::Full => {
-            crate::src::gzlib::gz_error(
-                state,
-                crate::zlib_h::Z_DATA_ERROR,
-                b"out of room to push characters\0".as_ptr() as *const ::core::ffi::c_char,
-            );
+            // SAFETY: this updates the bound gzip state's owned error record
+            // with a static message.
+            unsafe {
+                crate::src::gzlib::gz_error(
+                    state,
+                    crate::zlib_h::Z_DATA_ERROR,
+                    b"out of room to push characters\0".as_ptr()
+                        as *const ::core::ffi::c_char,
+                );
+            }
             return -1 as ::core::ffi::c_int;
         }
         crate::src::gzlib::GzUngetcPlan::Prepend { move_to_end } => {
-            if move_to_end {
-                let mut src: *mut ::core::ffi::c_uchar =
-                    state.out.wrapping_add(state.x.have as usize);
-                let mut dest: *mut ::core::ffi::c_uchar = state
-                    .out
-                    .wrapping_add((state.size << 1 as ::core::ffi::c_int) as usize);
-                while src > state.out {
-                    src = src.wrapping_sub(1);
-                    dest = dest.wrapping_sub(1);
-                    *dest = *src;
+            // SAFETY: this plan is derived from the initialized output
+            // buffer's available capacity. The backwards copy stays within
+            // that buffer and preserves the translated overlapping move.
+            unsafe {
+                if move_to_end {
+                    let mut src: *mut ::core::ffi::c_uchar =
+                        state.out.wrapping_add(state.x.have as usize);
+                    let mut dest: *mut ::core::ffi::c_uchar = state
+                        .out
+                        .wrapping_add((state.size << 1 as ::core::ffi::c_int) as usize);
+                    while src > state.out {
+                        src = src.wrapping_sub(1);
+                        dest = dest.wrapping_sub(1);
+                        *dest = *src;
+                    }
+                    state.x.next = dest;
                 }
-                state.x.next = dest;
+                state.x.next = state.x.next.wrapping_sub(1);
+                *state.x.next = c as ::core::ffi::c_uchar;
             }
-            state.x.next = state.x.next.wrapping_sub(1);
-            *state.x.next = c as ::core::ffi::c_uchar;
             crate::src::gzlib::gz_ungetc_progress(state, false);
         }
     }
