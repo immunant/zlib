@@ -1785,15 +1785,12 @@ fn pending_copy_len(
     }
 }
 
-fn flush_pending_progress(
-    avail_out: &mut crate::stdlib::uInt,
-    total_out: &mut crate::stdlib::uLong,
-    pending: &mut crate::zutil_h::ulg,
-    len: ::core::ffi::c_uint,
-) {
-    *total_out = total_out.wrapping_add(len as crate::stdlib::uLong);
-    *avail_out = avail_out.wrapping_sub(len);
-    *pending = pending.wrapping_sub(len as crate::zutil_h::ulg);
+// Both pending flushes and direct stored-block copies publish output through
+// the same stream counters. Keep that state transition reference-bound so
+// their bounded copy paths cannot diverge on counter order or wrapping.
+fn deflate_output_progress(stream: &mut crate::zlib_h::z_stream, len: ::core::ffi::c_uint) {
+    stream.total_out = stream.total_out.wrapping_add(len as crate::stdlib::uLong);
+    stream.avail_out = stream.avail_out.wrapping_sub(len);
 }
 
 // Once the pending allocation has been bound by the raw adapter, bit draining
@@ -1812,12 +1809,8 @@ fn flush_pending_account(
     stream: &mut crate::zlib_h::z_stream,
     len: ::core::ffi::c_uint,
 ) {
-    flush_pending_progress(
-        &mut stream.avail_out,
-        &mut stream.total_out,
-        &mut state.pending,
-        len,
-    );
+    deflate_output_progress(stream, len);
+    state.pending = state.pending.wrapping_sub(len as crate::zutil_h::ulg);
 }
 
 // Once the stream, deflater, and pending allocation are bound, copying one
@@ -2867,11 +2860,6 @@ fn stored_block_length_bytes(output: &mut [crate::stdlib::Bytef], len: ::core::f
     output[3] = (!len >> 8 as ::core::ffi::c_int) as crate::stdlib::Bytef;
 }
 
-fn stored_output_progress(stream: &mut crate::zlib_h::z_stream, len: ::core::ffi::c_uint) {
-    stream.avail_out = stream.avail_out.wrapping_sub(len);
-    stream.total_out = stream.total_out.wrapping_add(len as crate::stdlib::uLong);
-}
-
 fn stored_window_bytes(
     window: &[crate::stdlib::Bytef],
     block_start: ::core::ffi::c_long,
@@ -3042,7 +3030,7 @@ fn read_stored_input(
     *output_used += copied as usize;
     stream.next_in = stream.next_in.wrapping_add(copied as usize);
     stream.next_out = stream.next_out.wrapping_add(copied as usize);
-    stored_output_progress(stream, copied);
+    deflate_output_progress(stream, copied);
     copied
 }
 
@@ -3105,7 +3093,7 @@ fn deflate_stored_impl(
                 // arithmetic keeps the valid zero-length null cursor case
                 // without requiring `offset`'s in-bounds unsafe operation.
                 stream.next_out = stream.next_out.wrapping_add(copied as usize);
-                stored_output_progress(stream, copied);
+                deflate_output_progress(stream, copied);
                 output_used += copied as usize;
                 state.block_start += copied as ::core::ffi::c_long;
                 len = len.wrapping_sub(copied);
