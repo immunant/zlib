@@ -380,8 +380,6 @@ pub unsafe extern "C" fn inflate_fast(
     mut strm: crate::zlib_h::z_streamp,
     mut start: ::core::ffi::c_uint,
 ) {
-    let mut state: *mut crate::src::inflate::inflate_state =
-        ::core::ptr::null_mut::<crate::src::inflate::inflate_state>();
     let mut in_0: *mut ::core::ffi::c_uchar = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
     let mut input_remaining: crate::stdlib::uInt = 0;
     let mut out: *mut ::core::ffi::c_uchar = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
@@ -405,22 +403,22 @@ pub unsafe extern "C" fn inflate_fast(
     let mut len: ::core::ffi::c_uint = 0;
     let mut dist: ::core::ffi::c_uint = 0;
     let mut from: *mut ::core::ffi::c_uchar = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
-    state = (*strm).state as *mut crate::src::inflate::inflate_state;
+    let state = &mut *((*strm).state as *mut crate::src::inflate::inflate_state);
     in_0 = (*strm).next_in as *mut ::core::ffi::c_uchar;
     input_remaining = (*strm).avail_in;
     out = (*strm).next_out as *mut ::core::ffi::c_uchar;
     output_produced = (start as crate::stdlib::uInt).wrapping_sub((*strm).avail_out);
     output_remaining = (*strm).avail_out;
-    wsize = (*state).wsize;
-    whave = (*state).whave;
-    wnext = (*state).wnext;
-    window = (*state).window;
-    hold = (*state).hold;
-    bits = (*state).bits;
-    lcode = (*state).lencode;
-    dcode = (*state).distcode;
-    lmask = bit_mask((*state).lenbits);
-    dmask = bit_mask((*state).distbits);
+    wsize = state.wsize;
+    whave = state.whave;
+    wnext = state.wnext;
+    window = state.window;
+    hold = state.hold;
+    bits = state.bits;
+    lcode = state.lencode;
+    dcode = state.distcode;
+    lmask = bit_mask(state.lenbits);
+    dmask = bit_mask(state.distbits);
     let mut c2rust_current_block_141: u64;
     's_94: loop {
         for _ in 0..fast_decode_prefetch_byte_count(bits) {
@@ -513,7 +511,7 @@ pub unsafe extern "C" fn inflate_fast(
                             (*strm).msg = b"invalid distance code\0".as_ptr()
                                 as *const ::core::ffi::c_char
                                 as *mut ::core::ffi::c_char;
-                            (*state).mode = crate::src::inflate::BAD;
+                            state.mode = crate::src::inflate::BAD;
                             break 's_94;
                         }
                     }
@@ -569,14 +567,14 @@ pub unsafe extern "C" fn inflate_fast(
                             dist,
                             output_produced,
                             whave,
-                            (*state).sane != 0,
+                            state.sane != 0,
                         ) {
                             FastWindowDistance::Valid { distance_back } => distance_back,
                             FastWindowDistance::Invalid => {
                                 (*strm).msg = b"invalid distance too far back\0".as_ptr()
                                     as *const ::core::ffi::c_char
                                     as *mut ::core::ffi::c_char;
-                                (*state).mode = crate::src::inflate::BAD;
+                                state.mode = crate::src::inflate::BAD;
                                 break;
                             }
                         };
@@ -672,11 +670,11 @@ pub unsafe extern "C" fn inflate_fast(
                 (*strm).msg = b"invalid literal/length code\0".as_ptr()
                     as *const ::core::ffi::c_char
                     as *mut ::core::ffi::c_char;
-                (*state).mode = crate::src::inflate::BAD;
+                state.mode = crate::src::inflate::BAD;
                 break;
             }
             13505557363059842426 => {
-                (*state).mode = crate::src::inflate::TYPE;
+                state.mode = crate::src::inflate::TYPE;
                 break;
             }
             _ => {}
@@ -691,8 +689,8 @@ pub unsafe extern "C" fn inflate_fast(
     (*strm).next_out = out as *mut crate::stdlib::Bytef;
     (*strm).avail_in = input_remaining;
     (*strm).avail_out = output_remaining;
-    (*state).hold = hold;
-    (*state).bits = bits;
+    state.hold = hold;
+    state.bits = bits;
 }
 #[export_name = "inflate_fast"]
 

@@ -1095,21 +1095,18 @@ fn gz_decomp_trailing_junk_plan() -> GzDecompTrailingJunkPlan {
     }
 }
 
-unsafe fn gz_decomp(mut state: crate::gzguts_h::gz_statep) -> ::core::ffi::c_int {
+unsafe fn gz_decomp(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
     let mut ret: ::core::ffi::c_int = crate::zlib_h::Z_OK;
     let mut had: ::core::ffi::c_uint = 0;
-    let mut strm: crate::zlib_h::z_streamp = &raw mut (*state).strm;
+    let mut strm: crate::zlib_h::z_streamp = &raw mut state.strm;
     had = (*strm).avail_out as ::core::ffi::c_uint;
     loop {
-        let (load_failed, state_err, again) = {
-            let state_ref = &mut *state;
-            (
-                gz_decomp_needs_input_load((*strm).avail_in)
-                    && gz_avail(state_ref) == -1 as ::core::ffi::c_int,
-                state_ref.err,
-                state_ref.again,
-            )
-        };
+        let (load_failed, state_err, again) = (
+            gz_decomp_needs_input_load((*strm).avail_in)
+                && gz_avail(state) == -1 as ::core::ffi::c_int,
+            state.err,
+            state.again,
+        );
         match gz_decomp_input_action(load_failed, (*strm).avail_in) {
             GzDecompInputAction::InputError => {
                 ret = state_err;
@@ -1134,11 +1131,11 @@ unsafe fn gz_decomp(mut state: crate::gzguts_h::gz_statep) -> ::core::ffi::c_int
         let decision = gz_decomp_decision(
             ret,
             gz_decomp_produced_output(had, (*strm).avail_out),
-            (*state).junk,
+            state.junk,
             (*strm).avail_out,
         );
         if decision.clear_junk {
-            (*state).junk = 0 as ::core::ffi::c_int;
+            state.junk = 0 as ::core::ffi::c_int;
         }
         match decision.action {
             GzDecompAction::InternalError => {
@@ -1161,8 +1158,8 @@ unsafe fn gz_decomp(mut state: crate::gzguts_h::gz_statep) -> ::core::ffi::c_int
             GzDecompAction::TrailingJunk => {
                 let plan = gz_decomp_trailing_junk_plan();
                 (*strm).avail_in = plan.avail_in;
-                (*state).eof = plan.eof;
-                (*state).how = plan.how;
+                state.eof = plan.eof;
+                state.how = plan.how;
                 ret = crate::zlib_h::Z_OK;
                 break;
             }
@@ -1185,14 +1182,10 @@ unsafe fn gz_decomp(mut state: crate::gzguts_h::gz_statep) -> ::core::ffi::c_int
         }
     }
     let (avail_out, next_out) = ((*strm).avail_out, (*strm).next_out);
-    {
-        let state_ref = &mut *state;
-        let progress = gz_decomp_output_progress(had, avail_out);
-        state_ref.x.have = progress.have;
-        state_ref.x.next = next_out.wrapping_sub(progress.rewind_len);
-    }
-    let state_ref = &mut *state;
-    gz_decomp_apply_result(&mut state_ref.how, &mut state_ref.junk, ret)
+    let progress = gz_decomp_output_progress(had, avail_out);
+    state.x.have = progress.have;
+    state.x.next = next_out.wrapping_sub(progress.rewind_len);
+    gz_decomp_apply_result(&mut state.how, &mut state.junk, ret)
 }
 
 unsafe fn gz_fetch(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
@@ -1221,7 +1214,7 @@ unsafe fn gz_fetch(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int 
             GzFetchAction::Gzip => {
                 state.strm.avail_out = gz_output_buffer_len(state.size) as crate::stdlib::uInt;
                 state.strm.next_out = state.out as *mut crate::stdlib::Bytef;
-                if gz_decomp(state as *mut crate::gzguts_h::gz_state) == -1 as ::core::ffi::c_int {
+                if gz_decomp(state) == -1 as ::core::ffi::c_int {
                     return -1 as ::core::ffi::c_int;
                 }
             }
@@ -3131,7 +3124,7 @@ unsafe fn gz_read(
                 state_ref.strm.avail_out = n as crate::stdlib::uInt;
                 state_ref.strm.next_out =
                     buf as *mut ::core::ffi::c_uchar as *mut crate::stdlib::Bytef;
-                err = gz_decomp(state_ref as *mut crate::gzguts_h::gz_state);
+                err = gz_decomp(state_ref);
                 (n, state_ref.x.have) = gz_read_take_decompressed(state_ref.x.have);
                 true
             }
