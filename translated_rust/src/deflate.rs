@@ -450,21 +450,24 @@ fn fill_window<T>(
         &[crate::stdlib::Bytef],
     ) -> T,
 ) -> T {
-    let window = if state.window_size == 0 {
-        &mut []
-    } else {
-        // SAFETY: `window_size` describes the allocation made for `window`.
-        unsafe { ::core::slice::from_raw_parts_mut(state.window, state.window_size as usize) }
-    };
-    // SAFETY: these table sizes are the allocation lengths established during
-    // deflater initialization.
-    let head = unsafe { ::core::slice::from_raw_parts_mut(state.head, state.hash_size as usize) };
-    let prev = unsafe { ::core::slice::from_raw_parts_mut(state.prev, state.w_size as usize) };
-    let input = if !bind_input || stream.avail_in == 0 {
-        &[]
-    } else {
-        // SAFETY: a nonempty input cursor has `avail_in` readable bytes.
-        unsafe { ::core::slice::from_raw_parts(stream.next_in, stream.avail_in as usize) }
+    // SAFETY: state validation establishes the three owned allocation
+    // lengths, and a nonempty input cursor has `avail_in` readable bytes.
+    // Bind these related ranges together once; all following work is safe
+    // slice/reference code.
+    let (window, head, prev, input) = unsafe {
+        let window = if state.window_size == 0 {
+            &mut []
+        } else {
+            ::core::slice::from_raw_parts_mut(state.window, state.window_size as usize)
+        };
+        let head = ::core::slice::from_raw_parts_mut(state.head, state.hash_size as usize);
+        let prev = ::core::slice::from_raw_parts_mut(state.prev, state.w_size as usize);
+        let input = if !bind_input || stream.avail_in == 0 {
+            &[]
+        } else {
+            ::core::slice::from_raw_parts(stream.next_in, stream.avail_in as usize)
+        };
+        (window, head, prev, input)
     };
     operation(state, stream, window, head, prev, input)
 }
