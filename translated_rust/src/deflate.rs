@@ -1940,11 +1940,9 @@ pub unsafe extern "C" fn deflateSetHeader(
             time: header.time,
             os: header.os,
             extra_len: header.extra_len,
-            extra: if header.extra.is_null() {
-                None
-            } else {
-                Some(::core::slice::from_raw_parts(header.extra, extra_len as usize).into())
-            },
+            extra: header.extra.map(|extra| {
+                ::core::slice::from_raw_parts(extra.as_ptr(), extra_len as usize).into()
+            }),
             name: if header.name.is_null() {
                 None
             } else {

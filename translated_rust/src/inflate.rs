@@ -1039,11 +1039,11 @@ pub unsafe fn inflate(
         // Project its selected caller buffers only for this decoder invocation.
         header = registered_header.map(|registered| {
             let header = &mut *registered.as_ptr();
-            let extra = if header.extra.is_null() || header.extra_max == 0 {
+            let extra = if header.extra.is_none() || header.extra_max == 0 {
                 None
             } else {
                 Some(::core::slice::from_raw_parts_mut(
-                    header.extra,
+                    header.extra.expect("extra was checked").as_ptr(),
                     header.extra_max as usize,
                 ))
             };
@@ -2800,7 +2800,7 @@ pub unsafe fn inflate(
             header.done = value;
         }
         if publication.clear_extra {
-            header.extra = ::core::ptr::null_mut();
+            header.extra = None;
         }
         if publication.clear_name {
             header.name = ::core::ptr::null_mut();

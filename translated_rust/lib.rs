@@ -177,7 +177,10 @@ pub mod zlib_h {
         pub time: crate::stdlib::uLong,
         pub xflags: ::core::ffi::c_int,
         pub os: ::core::ffi::c_int,
-        pub extra: *mut crate::stdlib::Bytef,
+        // `Option<NonNull<_>>` has the same nullable-pointer ABI as the C
+        // field, while retaining pointer provenance without carrying a raw
+        // pointer through the header mirror.
+        pub extra: Option<::core::ptr::NonNull<crate::stdlib::Bytef>>,
         pub extra_len: crate::stdlib::uInt,
         pub extra_max: crate::stdlib::uInt,
         pub name: *mut crate::stdlib::Bytef,
