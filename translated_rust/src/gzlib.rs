@@ -492,12 +492,25 @@ fn gzseek_read_buffer_plan(
     ))
 }
 
+/// Commit consumption of bytes already buffered by a read seek.  Advancing
+/// the ABI cursor itself remains at the boundary, since it is a raw pointer.
+fn gzseek_read_buffer_commit_state(
+    state: &mut crate::gzguts_h::gz_state,
+    consume: crate::stdlib::uInt,
+) -> bool {
+    if consume > state.x.have {
+        return false;
+    }
+    state.x.have = state.x.have.wrapping_sub(consume);
+    state.x.pos = state.x.pos.wrapping_add(consume as crate::stdlib::off64_t);
+    true
+}
+
 pub unsafe extern "C" fn gzseek64(
     mut file: crate::zlib_h::gzFile,
     mut offset: crate::stdlib::off64_t,
     mut whence: ::core::ffi::c_int,
 ) -> crate::stdlib::off64_t {
-    let mut n: ::core::ffi::c_uint = 0;
     let mut ret: crate::stdlib::off64_t = 0;
     let mut state: crate::gzguts_h::gz_statep =
         ::core::ptr::null_mut::<crate::gzguts_h::gz_state>();
@@ -561,10 +574,10 @@ pub unsafe extern "C" fn gzseek64(
         else {
             return -1 as crate::stdlib::off64_t;
         };
-        n = consume;
-        (*state).x.have = (*state).x.have.wrapping_sub(n);
-        (*state).x.next = (*state).x.next.offset(n as isize);
-        (*state).x.pos += n as crate::stdlib::off64_t;
+        (*state).x.next = (*state).x.next.offset(consume as isize);
+        if !gzseek_read_buffer_commit_state(state_ref, consume) {
+            return -1 as crate::stdlib::off64_t;
+        }
         offset = remaining_offset;
     }
     (*state).skip = offset;
