@@ -233,10 +233,10 @@ unsafe fn gz_look(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
     }
 }
 
-// The decompressor is likewise internal to the read state machine.  Its
-// inflater and output-buffer adapters remain raw, but the state itself is
-// reference-bound by every caller.
-unsafe fn gz_decomp(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
+// The decompressor is likewise internal to the read state machine. Its state
+// transition is reference-bound by every caller; keep its inflater and error
+// bridges tightly scoped to the operations that cross those raw boundaries.
+fn gz_decomp(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
     let mut ret: ::core::ffi::c_int = crate::zlib_h::Z_OK;
     let mut had: ::core::ffi::c_uint = 0;
     had = state.strm.avail_out as ::core::ffi::c_uint;
@@ -248,18 +248,23 @@ unsafe fn gz_decomp(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int
             break;
         } else if state.strm.avail_in == 0 as crate::stdlib::uInt {
             if state.again == 0 {
-                crate::src::gzlib::gz_error(
-                    state,
-                    crate::zlib_h::Z_BUF_ERROR,
-                    b"unexpected end of file\0".as_ptr() as *const ::core::ffi::c_char,
-                );
+                // SAFETY: `state` is the validated gzip state whose message
+                // ownership this error helper updates.
+                unsafe {
+                    crate::src::gzlib::gz_error(
+                        state,
+                        crate::zlib_h::Z_BUF_ERROR,
+                        b"unexpected end of file\0".as_ptr() as *const ::core::ffi::c_char,
+                    );
+                }
             }
             break;
         } else {
-            ret = crate::src::inflate::inflate(
-                &mut state.strm,
-                crate::zlib_h::Z_NO_FLUSH,
-            );
+            // SAFETY: `gz_look` initialized this stream and its input/output
+            // ranges are owned by the validated gzip state for this call.
+            ret = unsafe {
+                crate::src::inflate::inflate(&mut state.strm, crate::zlib_h::Z_NO_FLUSH)
+            };
             match crate::src::gzlib::gz_decomp_after_inflate(state, had, ret) {
                 crate::src::gzlib::GzDecompStep::Continue => {}
                 crate::src::gzlib::GzDecompStep::Stop(result) => {
@@ -267,32 +272,46 @@ unsafe fn gz_decomp(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int
                     break;
                 }
                 crate::src::gzlib::GzDecompStep::StreamError => {
-                    crate::src::gzlib::gz_error(
-                        state,
-                        crate::zlib_h::Z_STREAM_ERROR,
-                        b"internal error: inflate stream corrupt\0".as_ptr()
-                            as *const ::core::ffi::c_char,
-                    );
+                    // SAFETY: `state` is the validated gzip state whose
+                    // message ownership this error helper updates.
+                    unsafe {
+                        crate::src::gzlib::gz_error(
+                            state,
+                            crate::zlib_h::Z_STREAM_ERROR,
+                            b"internal error: inflate stream corrupt\0".as_ptr()
+                                as *const ::core::ffi::c_char,
+                        );
+                    }
                     break;
                 }
                 crate::src::gzlib::GzDecompStep::MemError => {
-                    crate::src::gzlib::gz_error(
-                        state,
-                        crate::zlib_h::Z_MEM_ERROR,
-                        b"out of memory\0".as_ptr() as *const ::core::ffi::c_char,
-                    );
+                    // SAFETY: `state` is the validated gzip state whose
+                    // message ownership this error helper updates.
+                    unsafe {
+                        crate::src::gzlib::gz_error(
+                            state,
+                            crate::zlib_h::Z_MEM_ERROR,
+                            b"out of memory\0".as_ptr() as *const ::core::ffi::c_char,
+                        );
+                    }
                     break;
                 }
                 crate::src::gzlib::GzDecompStep::DataError => {
-                    crate::src::gzlib::gz_error(
-                        state,
-                        crate::zlib_h::Z_DATA_ERROR,
-                        if state.strm.msg.is_null() {
-                            b"compressed data error\0".as_ptr() as *const ::core::ffi::c_char
-                        } else {
-                            state.strm.msg as *const ::core::ffi::c_char
-                        },
-                    );
+                    // SAFETY: `state` is the validated gzip state; its
+                    // inflater either supplies a live message or the static
+                    // fallback is used for the duration of `gz_error`.
+                    unsafe {
+                        crate::src::gzlib::gz_error(
+                            state,
+                            crate::zlib_h::Z_DATA_ERROR,
+                            if state.strm.msg.is_null() {
+                                b"compressed data error\0".as_ptr()
+                                    as *const ::core::ffi::c_char
+                            } else {
+                                state.strm.msg as *const ::core::ffi::c_char
+                            },
+                        );
+                    }
                     break;
                 }
             }
@@ -336,9 +355,7 @@ fn gz_fetch(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
             crate::src::gzlib::GzFetchPlan::Gzip { output } => {
                 state.strm.avail_out = output as crate::stdlib::uInt;
                 state.strm.next_out = state.out;
-                // SAFETY: `state` remains the validated read-state reference;
-                // `gz_decomp` owns the inflater and output-buffer boundary.
-                if unsafe { gz_decomp(state) } == -1 as ::core::ffi::c_int {
+                if gz_decomp(state) == -1 as ::core::ffi::c_int {
                     return -1 as ::core::ffi::c_int;
                 }
             }
