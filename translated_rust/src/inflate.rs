@@ -3771,14 +3771,15 @@ pub unsafe extern "C" fn inflateSyncPoint_ffi(
     let state = (*strm).state as *mut crate::src::inflate::inflate_state;
     inflate_sync_point(&*state)
 }
-pub unsafe extern "C" fn inflateCopy(
+#[export_name = "inflateCopy"]
+pub unsafe extern "C" fn inflateCopy_ffi(
     mut dest: crate::zlib_h::z_streamp,
     mut source: crate::zlib_h::z_streamp,
 ) -> ::core::ffi::c_int {
     let mut copy: *mut crate::src::inflate::inflate_state =
         ::core::ptr::null_mut::<crate::src::inflate::inflate_state>();
     let mut window: *mut ::core::ffi::c_uchar = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
-    if dest.is_null() {
+    if inflate_state_check_at_ffi_boundary!(source) || dest.is_null() {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
     let state = &mut *((*source).state as *mut crate::src::inflate::inflate_state);
@@ -3850,17 +3851,6 @@ pub unsafe extern "C" fn inflateCopy(
     (*dest).state = copy as *mut crate::src::inflate::inflate_state
         as *mut crate::src::deflate::internal_state;
     return crate::zlib_h::Z_OK;
-}
-#[export_name = "inflateCopy"]
-
-pub unsafe extern "C" fn inflateCopy_ffi(
-    mut dest: crate::zlib_h::z_streamp,
-    mut source: crate::zlib_h::z_streamp,
-) -> ::core::ffi::c_int {
-    if inflate_state_check_at_ffi_boundary!(source) {
-        return crate::zlib_h::Z_STREAM_ERROR;
-    }
-    inflateCopy(dest, source)
 }
 fn inflate_undermine_core(sane: &mut ::core::ffi::c_int) -> ::core::ffi::c_int {
     *sane = 1 as ::core::ffi::c_int;
