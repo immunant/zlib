@@ -390,6 +390,56 @@ pub fn gzwrite(
     }
     gz_write(state, source) as ::core::ffi::c_int
 }
+
+// Decide whether the ABI wrapper may bind its caller buffer.  This retains
+// `gzwrite()`'s state transition and request error behavior while keeping
+// those decisions out of the raw-pointer entry point.
+fn gzwrite_preflight(
+    state: &mut crate::gzguts_h::gz_state,
+    len: ::core::ffi::c_uint,
+) -> Result<usize, ()> {
+    if !crate::src::gzlib::gz_begin_write_operation(state) {
+        return Err(());
+    }
+    if !crate::src::gzlib::gz_uint_request_fits_int(len) {
+        crate::src::gzlib::gz_error(
+            state,
+            crate::zlib_h::Z_DATA_ERROR,
+            Some(b"requested length does not fit in int\0"),
+        );
+        return Err(());
+    }
+    let Some(slice_len) = crate::src::gzlib::gz_rust_slice_len(len as crate::stdlib::z_size_t) else {
+        crate::src::gzlib::gz_error(
+            state,
+            crate::zlib_h::Z_DATA_ERROR,
+            Some(b"request does not fit in a Rust slice\0"),
+        );
+        return Err(());
+    };
+    Ok(slice_len)
+}
+
+// The raw FFI wrapper only binds a range selected by `gzwrite_preflight()`.
+// This adapter owns the result and buffer-shape handling after that binding.
+fn gzwrite_ffi_dispatch(
+    state: &mut crate::gzguts_h::gz_state,
+    prepared: Result<usize, ()>,
+    source: Option<&[::core::ffi::c_uchar]>,
+) -> ::core::ffi::c_int {
+    match (prepared, source) {
+        (Ok(len), Some(source)) if source.len() == len => gz_write(state, source) as ::core::ffi::c_int,
+        (Ok(_), _) => {
+            crate::src::gzlib::gz_error(
+                state,
+                crate::zlib_h::Z_STREAM_ERROR,
+                Some(b"request does not match caller buffer\0"),
+            );
+            0
+        }
+        (Err(()), _) => 0,
+    }
+}
 #[export_name = "gzwrite"]
 
 pub unsafe extern "C" fn gzwrite_ffi(
@@ -401,19 +451,19 @@ pub unsafe extern "C" fn gzwrite_ffi(
         return 0 as ::core::ffi::c_int;
     }
     let state = &mut *(file as crate::gzguts_h::gz_statep);
-    // Avoid binding an unused caller buffer when the state would make
-    // `gzwrite()` return before examining it.
-    if !crate::src::gzlib::gz_write_state_is_usable(state) {
-        return 0 as ::core::ffi::c_int;
-    }
+    let prepared = gzwrite_preflight(state, len);
     // SAFETY: C's `gzwrite` contract supplies `len` readable bytes when
-    // `len` is nonzero. Bind that caller range once at this ABI boundary.
-    let source = if len == 0 {
-        &[]
-    } else {
-        ::core::slice::from_raw_parts(buf as *const ::core::ffi::c_uchar, len as usize)
+    // `len` is nonzero. The preflight has already preserved the invalid-state
+    // and rejected-request exits before this caller range is bound.
+    let source = match prepared {
+        Ok(0) => Some(&[] as &[::core::ffi::c_uchar]),
+        Ok(len) if !buf.is_null() => Some(::core::slice::from_raw_parts(
+            buf as *const ::core::ffi::c_uchar,
+            len,
+        )),
+        _ => None,
     };
-    gzwrite(state, source)
+    gzwrite_ffi_dispatch(state, prepared, source)
 }
 pub fn gzfwrite(
     source: &[::core::ffi::c_uchar],
@@ -439,6 +489,61 @@ pub fn gzfwrite(
         }
     }
 }
+
+// As for `gzwrite_preflight`, classify the write state and complete item
+// request before the FFI adapter turns a caller pointer into a Rust slice.
+fn gzfwrite_preflight(
+    state: &mut crate::gzguts_h::gz_state,
+    size: crate::stdlib::z_size_t,
+    nitems: crate::stdlib::z_size_t,
+) -> Result<usize, ()> {
+    if !crate::src::gzlib::gz_begin_write_operation(state) {
+        return Err(());
+    }
+    match crate::src::gzlib::gz_item_request(size, nitems) {
+        crate::src::gzlib::GzItemRequest::Empty => Ok(0),
+        crate::src::gzlib::GzItemRequest::TooLarge => {
+            crate::src::gzlib::gz_error(
+                state,
+                crate::zlib_h::Z_STREAM_ERROR,
+                Some(b"request does not fit in a size_t\0"),
+            );
+            Err(())
+        }
+        crate::src::gzlib::GzItemRequest::Bytes(len) => {
+            let Some(slice_len) = crate::src::gzlib::gz_rust_slice_len(len) else {
+                crate::src::gzlib::gz_error(
+                    state,
+                    crate::zlib_h::Z_STREAM_ERROR,
+                    Some(b"request does not fit in a Rust slice\0"),
+                );
+                return Err(());
+            };
+            Ok(slice_len)
+        }
+    }
+}
+
+fn gzfwrite_ffi_dispatch(
+    state: &mut crate::gzguts_h::gz_state,
+    size: crate::stdlib::z_size_t,
+    prepared: Result<usize, ()>,
+    source: Option<&[::core::ffi::c_uchar]>,
+) -> crate::stdlib::z_size_t {
+    match (prepared, source) {
+        (Ok(0), _) => 0,
+        (Ok(len), Some(source)) if source.len() == len => gz_write(state, source).wrapping_div(size),
+        (Ok(_), _) => {
+            crate::src::gzlib::gz_error(
+                state,
+                crate::zlib_h::Z_STREAM_ERROR,
+                Some(b"request does not match caller buffer\0"),
+            );
+            0
+        }
+        (Err(()), _) => 0,
+    }
+}
 #[export_name = "gzfwrite"]
 
 pub unsafe extern "C" fn gzfwrite_ffi(
@@ -451,21 +556,19 @@ pub unsafe extern "C" fn gzfwrite_ffi(
         return 0 as crate::stdlib::z_size_t;
     }
     let state = &mut *(file as crate::gzguts_h::gz_statep);
-    // As with `gzwrite_ffi`, preserve the early invalid-state return before
-    // binding a caller range that zlib would not inspect.
-    if !crate::src::gzlib::gz_write_state_is_usable(state) {
-        return 0 as crate::stdlib::z_size_t;
-    }
+    let prepared = gzfwrite_preflight(state, size, nitems);
     // SAFETY: a nonempty, representable item request requires C to provide
-    // that many readable bytes. Empty and rejected requests do not access
-    // `buf`, matching zlib's behavior for a null buffer and zero length.
-    let source = match crate::src::gzlib::gz_item_request(size, nitems) {
-        crate::src::gzlib::GzItemRequest::Bytes(len) => {
-            ::core::slice::from_raw_parts(buf as *const ::core::ffi::c_uchar, len as usize)
-        }
-        crate::src::gzlib::GzItemRequest::Empty | crate::src::gzlib::GzItemRequest::TooLarge => &[],
+    // that many readable bytes. The preflight has already preserved the
+    // invalid-state and rejected-request exits before binding `buf`.
+    let source = match prepared {
+        Ok(0) => Some(&[] as &[::core::ffi::c_uchar]),
+        Ok(len) if !buf.is_null() => Some(::core::slice::from_raw_parts(
+            buf as *const ::core::ffi::c_uchar,
+            len,
+        )),
+        _ => None,
     };
-    gzfwrite(source, size, nitems, state)
+    gzfwrite_ffi_dispatch(state, size, prepared, source)
 }
 // The one-byte request can use the same buffered/streaming adapter as larger
 // writes. Keeping the byte in a local array lets this coordinator remain
