@@ -360,6 +360,60 @@ pub(crate) fn gz_buffered_chunk(
     if chunk > available { available } else { chunk }
 }
 
+// Select the next read operation without touching either the caller's buffer
+// or gzip's raw output buffer.  The read adapter keeps those pointer-based
+// operations at its FFI boundary.
+pub(crate) enum GzReadPlan {
+    Buffered(::core::ffi::c_uint),
+    End,
+    Fetch,
+    Copy(::core::ffi::c_uint),
+    Decompress(::core::ffi::c_uint),
+}
+
+pub(crate) fn gz_read_plan(
+    state: &crate::gzguts_h::gz_state,
+    remaining: crate::stdlib::z_size_t,
+) -> GzReadPlan {
+    let chunk = gz_stream_chunk(remaining);
+    if state.x.have != 0 {
+        return GzReadPlan::Buffered(gz_buffered_chunk(remaining, state.x.have));
+    }
+    if state.eof != 0 && state.strm.avail_in == 0 {
+        return GzReadPlan::End;
+    }
+    if state.how == crate::gzguts_h::LOOK || chunk < state.size.wrapping_shl(1) {
+        return GzReadPlan::Fetch;
+    }
+    if state.how == crate::gzguts_h::COPY {
+        GzReadPlan::Copy(chunk)
+    } else {
+        GzReadPlan::Decompress(chunk)
+    }
+}
+
+// A buffered read already advances position in gz_consume().  Direct reads
+// need the same accounting, but must not update it twice.
+pub(crate) fn gz_read_progress(
+    state: &mut crate::gzguts_h::gz_state,
+    remaining: &mut crate::stdlib::z_size_t,
+    received: &mut crate::stdlib::z_size_t,
+    count: ::core::ffi::c_uint,
+    was_buffered: bool,
+) {
+    *remaining = remaining.wrapping_sub(count as crate::stdlib::z_size_t);
+    *received = received.wrapping_add(count as crate::stdlib::z_size_t);
+    if !was_buffered {
+        gz_advance_pos(state, count);
+    }
+}
+
+pub(crate) fn gz_read_mark_past(state: &mut crate::gzguts_h::gz_state, remaining: crate::stdlib::z_size_t) {
+    if remaining != 0 && state.eof != 0 {
+        state.past = 1;
+    }
+}
+
 // Return how much input fits in the gzip input buffer.  Valid gzip state has
 // `buffered <= size`; wrapping preserves the translated C arithmetic if a
 // corrupt state reaches this internal path.

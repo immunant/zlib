@@ -395,10 +395,9 @@ unsafe extern "C" fn gz_read(
     err = 0 as ::core::ffi::c_int;
     's_140: loop {
         let mut consumed_buffered = false;
-        n = crate::src::gzlib::gz_stream_chunk(len);
-        's_28: {
-            if state.x.have != 0 {
-                n = crate::src::gzlib::gz_buffered_chunk(len, state.x.have);
+        match crate::src::gzlib::gz_read_plan(state, len) {
+            crate::src::gzlib::GzReadPlan::Buffered(chunk) => {
+                n = chunk;
                 crate::stdlib::memcpy(
                     buf as *mut ::core::ffi::c_void,
                     state.x.next as *const ::core::ffi::c_void,
@@ -409,44 +408,42 @@ unsafe extern "C" fn gz_read(
                 if state.err != crate::zlib_h::Z_OK {
                     err = -1 as ::core::ffi::c_int;
                 }
-            } else {
-                if state.eof != 0 && state.strm.avail_in == 0 as crate::stdlib::uInt {
-                    break 's_140;
-                }
-                if state.how == crate::gzguts_h::LOOK
-                    || n < state.size << 1 as ::core::ffi::c_int
-                {
-                    if gz_fetch(state) == -1 as ::core::ffi::c_int
-                        && state.x.have == 0 as ::core::ffi::c_uint
-                    {
-                        err = -1 as ::core::ffi::c_int;
-                    }
-                    break 's_28;
-                } else if state.how == crate::gzguts_h::COPY {
-                    err = gz_load(state, buf as *mut ::core::ffi::c_uchar, n, &raw mut n);
-                } else {
-                    state.strm.avail_out = n as crate::stdlib::uInt;
-                    state.strm.next_out =
-                        buf as *mut ::core::ffi::c_uchar as *mut crate::stdlib::Bytef;
-                    err = gz_decomp(state);
-                    n = state.x.have;
-                    state.x.have = 0 as ::core::ffi::c_uint;
-                }
             }
-            len = len.wrapping_sub(n as crate::stdlib::z_size_t);
-            buf = (buf as *mut ::core::ffi::c_char).offset(n as isize) as crate::stdlib::voidp;
-            got = got.wrapping_add(n as crate::stdlib::z_size_t);
-            if !consumed_buffered {
-                crate::src::gzlib::gz_advance_pos(state, n);
+            crate::src::gzlib::GzReadPlan::End => break 's_140,
+            crate::src::gzlib::GzReadPlan::Fetch => {
+                if gz_fetch(state) == -1 as ::core::ffi::c_int
+                    && state.x.have == 0 as ::core::ffi::c_uint
+                {
+                    err = -1 as ::core::ffi::c_int;
+                }
+                // Fetch only fills gzip's internal output buffer.  It has not
+                // yet copied a byte to the caller, so retry before accounting.
+                if err == 0 {
+                    continue 's_140;
+                }
+                break 's_140;
+            }
+            crate::src::gzlib::GzReadPlan::Copy(chunk) => {
+                n = chunk;
+                err = gz_load(state, buf as *mut ::core::ffi::c_uchar, n, &raw mut n);
+            }
+            crate::src::gzlib::GzReadPlan::Decompress(chunk) => {
+                n = chunk;
+                state.strm.avail_out = n as crate::stdlib::uInt;
+                state.strm.next_out =
+                    buf as *mut ::core::ffi::c_uchar as *mut crate::stdlib::Bytef;
+                err = gz_decomp(state);
+                n = state.x.have;
+                state.x.have = 0 as ::core::ffi::c_uint;
             }
         }
+        crate::src::gzlib::gz_read_progress(state, &mut len, &mut got, n, consumed_buffered);
+        buf = (buf as *mut ::core::ffi::c_char).offset(n as isize) as crate::stdlib::voidp;
         if !(len != 0 && err == 0) {
             break;
         }
     }
-    if len != 0 && state.eof != 0 {
-        state.past = 1 as ::core::ffi::c_int;
-    }
+    crate::src::gzlib::gz_read_mark_past(state, len);
     return got;
 }
 pub unsafe extern "C" fn gzread(
