@@ -999,7 +999,7 @@ pub unsafe extern "C" fn deflateResetKeep_ffi(
 ) -> ::core::ffi::c_int {
     deflateResetKeep(strm)
 }
-unsafe extern "C" fn lm_init(mut state: *mut crate::src::deflate::deflate_state) {
+unsafe fn lm_init(mut state: *mut crate::src::deflate::deflate_state) {
     let state = &mut *state;
     let head = ::core::slice::from_raw_parts_mut(state.head, state.hash_size as usize);
     lm_init_state(state, head);
