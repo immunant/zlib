@@ -820,16 +820,24 @@ fn prepare_inflate_init(
     Ok(InflateInitPreparation { state, window_bits })
 }
 
-fn inflate_init2_impl(
-    mut stream: InflateStateStream<'_>,
+/// Validate initialization parameters and construct the Rust-owned decoder
+/// state before it is associated with an ABI stream.
+fn inflateInit2_(
     window_bits: ::core::ffi::c_int,
     version: Option<::core::ffi::c_char>,
     stream_size: ::core::ffi::c_int,
+) -> Result<InflateInitPreparation, ::core::ffi::c_int> {
+    prepare_inflate_init(window_bits, version, stream_size)
+}
+
+/// Install a validated Rust-owned decoder state into the supplied ABI stream.
+///
+/// Keeping the stream-bearing portion separate means callers can validate all
+/// initialization inputs without exposing ABI storage to the preparation API.
+fn install_prepared_inflate_state(
+    mut stream: InflateStateStream<'_>,
+    preparation: InflateInitPreparation,
 ) -> ::core::ffi::c_int {
-    let preparation = match prepare_inflate_init(window_bits, version, stream_size) {
-        Ok(preparation) => preparation,
-        Err(error) => return error,
-    };
     stream.stream.msg = ::core::ptr::null_mut::<::core::ffi::c_char>();
     inflate_install_state(
         stream,
@@ -838,18 +846,22 @@ fn inflate_init2_impl(
     )
 }
 
-pub unsafe fn inflateInit2_(
-    strm: &mut crate::zlib_h::z_stream_s,
-    windowBits: ::core::ffi::c_int,
+/// Initialize a stream after converting its ABI arguments at the boundary.
+///
+/// Validation and Rust-owned state construction stay in `inflateInit2_`; this
+/// stream-facing stage only maps its error to zlib's return convention before
+/// installing the prepared owner.
+fn inflate_init2_from_parts(
+    stream: InflateStateStream<'_>,
+    window_bits: ::core::ffi::c_int,
     version: Option<::core::ffi::c_char>,
     stream_size: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
-    inflate_init2_impl(
-        InflateStateStream::new(strm),
-        windowBits,
-        version,
-        stream_size,
-    )
+    let preparation = match inflateInit2_(window_bits, version, stream_size) {
+        Ok(preparation) => preparation,
+        Err(error) => return error,
+    };
+    install_prepared_inflate_state(stream, preparation)
 }
 #[export_name = "inflateInit2_"]
 
@@ -862,7 +874,7 @@ pub unsafe extern "C" fn inflateInit2__ffi(
     let Some(strm) = strm.as_mut() else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
-    inflate_init2_impl(
+    inflate_init2_from_parts(
         InflateStateStream::new(strm),
         windowBits,
         version.as_ref().copied(),
@@ -879,7 +891,7 @@ pub unsafe extern "C" fn inflateInit__ffi(
     let Some(strm) = strm.as_mut() else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
-    inflate_init2_impl(
+    inflate_init2_from_parts(
         InflateStateStream::new(strm),
         crate::zutil_h::DEF_WBITS,
         version.as_ref().copied(),
