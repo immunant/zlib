@@ -3859,23 +3859,29 @@ unsafe extern "C" fn deflate_slow(
                 }
             }
         } else if (*s).match_available != 0 {
-            let cc: crate::zutil_h::uch = *(*s)
-                .window
-                .offset((*s).strstart.wrapping_sub(1 as crate::stdlib::uInt) as isize)
-                as crate::zutil_h::uch;
             let state = &mut *s;
+            let Ok(window_len) = usize::try_from(state.window_size) else {
+                return need_more;
+            };
             let Ok(symbol_len) = usize::try_from(state.sym_end) else {
                 return need_more;
             };
-            if symbol_len != 0 && state.sym_buf.is_null() {
+            if (window_len != 0 && state.window.is_null())
+                || (symbol_len != 0 && state.sym_buf.is_null())
+            {
                 return need_more;
             }
+            let window = if window_len == 0 {
+                &[]
+            } else {
+                ::core::slice::from_raw_parts(state.window, window_len)
+            };
             let symbols = if symbol_len == 0 {
                 &mut []
             } else {
                 ::core::slice::from_raw_parts_mut(state.sym_buf, symbol_len)
             };
-            let Some(flush_now) = tally_symbol_state(state, symbols, 0, cc.into()) else {
+            let Some(flush_now) = tally_previous_literal_state(state, window, symbols) else {
                 return need_more;
             };
             bflush = flush_now as ::core::ffi::c_int;
@@ -3907,23 +3913,29 @@ unsafe extern "C" fn deflate_slow(
         }
     }
     if (*s).match_available != 0 {
-        let cc_0: crate::zutil_h::uch = *(*s)
-            .window
-            .offset((*s).strstart.wrapping_sub(1 as crate::stdlib::uInt) as isize)
-            as crate::zutil_h::uch;
         let state = &mut *s;
+        let Ok(window_len) = usize::try_from(state.window_size) else {
+            return need_more;
+        };
         let Ok(symbol_len) = usize::try_from(state.sym_end) else {
             return need_more;
         };
-        if symbol_len != 0 && state.sym_buf.is_null() {
+        if (window_len != 0 && state.window.is_null())
+            || (symbol_len != 0 && state.sym_buf.is_null())
+        {
             return need_more;
         }
+        let window = if window_len == 0 {
+            &[]
+        } else {
+            ::core::slice::from_raw_parts(state.window, window_len)
+        };
         let symbols = if symbol_len == 0 {
             &mut []
         } else {
             ::core::slice::from_raw_parts_mut(state.sym_buf, symbol_len)
         };
-        let Some(flush_now) = tally_symbol_state(state, symbols, 0, cc_0.into()) else {
+        let Some(flush_now) = tally_previous_literal_state(state, window, symbols) else {
             return need_more;
         };
         bflush = flush_now as ::core::ffi::c_int;
@@ -4078,6 +4090,19 @@ fn tally_current_literal_state(
     s.lookahead = s.lookahead.wrapping_sub(1);
     s.strstart = s.strstart.wrapping_add(1);
     Some(flush_now)
+}
+
+/// Tally the literal deferred by the lazy parser.  The caller retains the
+/// callback-owned buffer lends; this helper keeps the `strstart - 1` lookup
+/// and symbol update checked and in their original order.
+fn tally_previous_literal_state(
+    s: &mut crate::src::deflate::deflate_state,
+    window: &[crate::stdlib::Byte],
+    symbols: &mut [crate::zutil_h::uch],
+) -> Option<bool> {
+    let index = usize::try_from(s.strstart.checked_sub(1)?).ok()?;
+    let literal = (*window.get(index)?).into();
+    tally_symbol_state(s, symbols, 0, literal)
 }
 
 /// Record the current fast-mode match and apply the corresponding input
