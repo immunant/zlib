@@ -93,6 +93,7 @@ pub struct internal_state {
     pub match_length: crate::stdlib::uInt,
     pub prev_match: crate::src::deflate::IPos,
     pub match_available: ::core::ffi::c_int,
+    pub match_literal: crate::zutil_h::uch,
     pub strstart: crate::stdlib::uInt,
     pub match_start: crate::stdlib::uInt,
     pub lookahead: crate::stdlib::uInt,
@@ -3197,15 +3198,14 @@ fn deflate_slow(
                     }
                 }
             } else if state.match_available != 0 {
-                let cc: crate::zutil_h::uch = window
-                    [state.strstart.wrapping_sub(1 as crate::stdlib::uInt) as usize]
-                    as crate::zutil_h::uch;
+                let cc: crate::zutil_h::uch = state.match_literal;
                 append_deflate_sym_bytes(
                     sym_buf,
                     &mut state.sym_next,
                     crate::src::trees::tr_tally_literal_update(&mut state.dyn_ltree, cc),
                 );
                 bflush = (state.sym_next == state.sym_end) as ::core::ffi::c_int;
+                state.match_literal = window[state.strstart as usize] as crate::zutil_h::uch;
                 if bflush != 0 {
                     crate::src::trees::_tr_flush_block_ffi(
                         state,
@@ -3231,17 +3231,14 @@ fn deflate_slow(
                     return need_more;
                 }
             } else {
+                state.match_literal = window[state.strstart as usize] as crate::zutil_h::uch;
                 state.match_available = 1 as ::core::ffi::c_int;
                 state.strstart = state.strstart.wrapping_add(1);
                 state.lookahead = state.lookahead.wrapping_sub(1);
             }
         }
         if state.match_available != 0 {
-            let window =
-                &*::core::ptr::slice_from_raw_parts(state.window, state.window_size as usize);
-            let cc_0: crate::zutil_h::uch = window
-                [state.strstart.wrapping_sub(1 as crate::stdlib::uInt) as usize]
-                as crate::zutil_h::uch;
+            let cc_0: crate::zutil_h::uch = state.match_literal;
             append_deflate_sym_bytes(
                 sym_buf,
                 &mut state.sym_next,
