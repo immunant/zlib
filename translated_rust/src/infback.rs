@@ -961,7 +961,7 @@ pub unsafe extern "C" fn inflateBack(
             (*strm).avail_in = have as crate::stdlib::uInt;
             (*state).hold = hold;
             (*state).bits = bits;
-            crate::src::inffast::inflate_fast(
+            crate::src::inffast::inflate_fast_ffi(
                 strm as *mut crate::zlib_h::z_stream_s,
                 (*state).wsize,
             );

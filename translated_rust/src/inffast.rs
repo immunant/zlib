@@ -565,7 +565,8 @@ fn finish_fast_distance(
     }
 }
 
-pub unsafe extern "C" fn inflate_fast(
+#[export_name = "inflate_fast"]
+pub unsafe extern "C" fn inflate_fast_ffi(
     mut strm: crate::zlib_h::z_streamp,
     mut start: ::core::ffi::c_uint,
 ) {
@@ -890,14 +891,6 @@ pub unsafe extern "C" fn inflate_fast(
     (*strm).avail_out = output_remaining;
     state.hold = commit.hold;
     state.bits = commit.bits;
-}
-#[export_name = "inflate_fast"]
-
-pub unsafe extern "C" fn inflate_fast_ffi(
-    mut strm: crate::zlib_h::z_streamp,
-    mut start: ::core::ffi::c_uint,
-) {
-    inflate_fast(strm, start)
 }
 #[cfg(test)]
 mod tests {

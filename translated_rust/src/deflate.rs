@@ -4020,7 +4020,7 @@ pub unsafe extern "C" fn deflate_ffi(
         bstate = (if (*s).level == 0 as ::core::ffi::c_int {
             deflate_stored(s, flush) as ::core::ffi::c_uint
         } else if (*s).strategy == crate::zlib_h::Z_HUFFMAN_ONLY {
-            deflate_huff(s, flush) as ::core::ffi::c_uint
+            crate::deflate_huff_at_ffi_boundary!(s, flush) as ::core::ffi::c_uint
         } else if (*s).strategy == crate::zlib_h::Z_RLE {
             crate::deflate_rle_at_ffi_boundary!(s, flush) as ::core::ffi::c_uint
         } else {
@@ -5693,133 +5693,145 @@ macro_rules! deflate_rle_at_ffi_boundary {
     }};
 }
 
-unsafe fn deflate_huff(
-    mut s: *mut crate::src::deflate::deflate_state,
-    mut flush: ::core::ffi::c_int,
-) -> block_state {
-    let mut bflush: ::core::ffi::c_int = 0;
-    loop {
-        if (*s).lookahead == 0 as crate::stdlib::uInt {
-            fill_window(s);
-            match deflate_huff_refill_action((*s).lookahead, flush) {
-                DeflateHuffRefillAction::Continue => {}
-                DeflateHuffRefillAction::NeedMore => return need_more,
-                DeflateHuffRefillAction::Done => break,
-            }
-        }
-        let state = &mut *s;
-        state.match_length = 0 as crate::stdlib::uInt;
-        // The Huffman-only path reads both the literal and, on a full symbol
-        // buffer, the block payload from this same callback-backed window.
-        // Establish the short-lived view once instead of doing a separate raw
-        // literal dereference before the checked range reads below.
-        if state.window.is_null() {
-            return need_more;
-        }
-        let window = core::slice::from_raw_parts(state.window, state.window_size as usize);
-        let Some(&literal) = window.get(state.strstart as usize) else {
-            return need_more;
-        };
-        let layout =
-            pending_storage_layout_for_state(state).expect("validated pending storage layout");
-        let pending = &mut *core::ptr::slice_from_raw_parts_mut(
-            state
-                .pending_buf
-                .expect("validated pending storage")
-                .as_ptr(),
-            layout.total_len,
-        );
-        let mut storage = PendingStorageView::new(pending, layout)
-            .expect("pending storage layout matches its allocation");
-        if !deflate_tally_literal(&mut storage, state, literal) {
-            return need_more;
-        }
-        bflush = symbol_buffer_is_full(state.sym_next, state.sym_end) as ::core::ffi::c_int;
-        (state.lookahead, state.strstart) =
-            deflate_literal_state_after_emit(state.lookahead, state.strstart);
-        if bflush != 0 {
-            let stored_len = deflate_block_len(state.strstart, state.block_start);
-            let stored_data = if state.block_start >= 0 as ::core::ffi::c_long {
-                let start = state.block_start as ::core::ffi::c_uint as usize;
-                let Some(end) = start.checked_add(stored_len as usize) else {
-                    return need_more;
+// As with RLE, this strategy's remaining raw state and callback-storage
+// crossings stay directly at the exported `deflate_ffi` boundary until the
+// full per-call working-set owner can replace them.
+#[macro_export]
+macro_rules! deflate_huff_at_ffi_boundary {
+    ($s:expr, $flush:expr) => {{
+        let s = $s;
+        let flush = $flush;
+        'huff: {
+            let mut bflush: ::core::ffi::c_int = 0;
+            loop {
+                if (*s).lookahead == 0 as crate::stdlib::uInt {
+                    fill_window(s);
+                    match deflate_huff_refill_action((*s).lookahead, flush) {
+                        DeflateHuffRefillAction::Continue => {}
+                        DeflateHuffRefillAction::NeedMore => break 'huff need_more,
+                        DeflateHuffRefillAction::Done => break,
+                    }
+                }
+                let state = &mut *s;
+                state.match_length = 0 as crate::stdlib::uInt;
+                // The Huffman-only path reads both the literal and, on a full symbol
+                // buffer, the block payload from this same callback-backed window.
+                // Establish the short-lived view once instead of doing a separate raw
+                // literal dereference before the checked range reads below.
+                if state.window.is_null() {
+                    break 'huff need_more;
+                }
+                let window = core::slice::from_raw_parts(state.window, state.window_size as usize);
+                let Some(&literal) = window.get(state.strstart as usize) else {
+                    break 'huff need_more;
                 };
-                let Some(data) = window.get(start..end) else {
-                    return need_more;
-                };
-                Some(data)
-            } else {
-                None
-            };
-            let stream = &mut *state.strm;
-            crate::src::trees::tr_flush_block_core(
-                &mut storage,
-                state,
-                Some(stream),
-                stored_data,
-                stored_len,
-                0 as ::core::ffi::c_int,
-            );
-            drop(storage);
-            state.block_start = state.strstart as ::core::ffi::c_long;
-            flush_pending(state.strm);
-            if let Some(state) = deflate_flush_block_state_after_output((*stream).avail_out, false)
-            {
-                return state;
+                let layout = pending_storage_layout_for_state(state)
+                    .expect("validated pending storage layout");
+                let pending = &mut *core::ptr::slice_from_raw_parts_mut(
+                    state
+                        .pending_buf
+                        .expect("validated pending storage")
+                        .as_ptr(),
+                    layout.total_len,
+                );
+                let mut storage = PendingStorageView::new(pending, layout)
+                    .expect("pending storage layout matches its allocation");
+                if !deflate_tally_literal(&mut storage, state, literal) {
+                    break 'huff need_more;
+                }
+                bflush = symbol_buffer_is_full(state.sym_next, state.sym_end) as ::core::ffi::c_int;
+                (state.lookahead, state.strstart) =
+                    deflate_literal_state_after_emit(state.lookahead, state.strstart);
+                if bflush != 0 {
+                    let stored_len = deflate_block_len(state.strstart, state.block_start);
+                    let stored_data = if state.block_start >= 0 as ::core::ffi::c_long {
+                        let start = state.block_start as ::core::ffi::c_uint as usize;
+                        let Some(end) = start.checked_add(stored_len as usize) else {
+                            break 'huff need_more;
+                        };
+                        let Some(data) = window.get(start..end) else {
+                            break 'huff need_more;
+                        };
+                        Some(data)
+                    } else {
+                        None
+                    };
+                    let stream = &mut *state.strm;
+                    crate::src::trees::tr_flush_block_core(
+                        &mut storage,
+                        state,
+                        Some(stream),
+                        stored_data,
+                        stored_len,
+                        0 as ::core::ffi::c_int,
+                    );
+                    drop(storage);
+                    state.block_start = state.strstart as ::core::ffi::c_long;
+                    flush_pending(state.strm);
+                    if let Some(state) =
+                        deflate_flush_block_state_after_output((*stream).avail_out, false)
+                    {
+                        break 'huff state;
+                    }
+                }
             }
+            let state = &mut *s;
+            state.insert = 0 as crate::stdlib::uInt;
+            let final_flush_action = deflate_final_flush_action(flush, state.sym_next);
+            if final_flush_action == DeflateFinalFlushAction::Finish {
+                crate::src::trees::_tr_flush_block(
+                    s as *mut crate::src::deflate::internal_state,
+                    if state.block_start >= 0 as ::core::ffi::c_long {
+                        state
+                            .window
+                            .offset(state.block_start as ::core::ffi::c_uint as isize)
+                            as *mut crate::stdlib::Bytef
+                            as *mut crate::stdlib::charf
+                    } else {
+                        ::core::ptr::null_mut::<crate::stdlib::charf>()
+                    },
+                    deflate_block_len(state.strstart, state.block_start),
+                    1 as ::core::ffi::c_int,
+                );
+                state.block_start = state.strstart as ::core::ffi::c_long;
+                flush_pending(state.strm);
+                let stream = &mut *state.strm;
+                if let Some(state) =
+                    deflate_flush_block_state_after_output((*stream).avail_out, true)
+                {
+                    break 'huff state;
+                }
+                break 'huff finish_done;
+            }
+            if final_flush_action == DeflateFinalFlushAction::FlushPendingSymbols {
+                crate::src::trees::_tr_flush_block(
+                    s as *mut crate::src::deflate::internal_state,
+                    if state.block_start >= 0 as ::core::ffi::c_long {
+                        state
+                            .window
+                            .offset(state.block_start as ::core::ffi::c_uint as isize)
+                            as *mut crate::stdlib::Bytef
+                            as *mut crate::stdlib::charf
+                    } else {
+                        ::core::ptr::null_mut::<crate::stdlib::charf>()
+                    },
+                    deflate_block_len(state.strstart, state.block_start),
+                    0 as ::core::ffi::c_int,
+                );
+                state.block_start = state.strstart as ::core::ffi::c_long;
+                flush_pending(state.strm);
+                let stream = &mut *state.strm;
+                if (*stream).avail_out == 0 as crate::stdlib::uInt {
+                    break 'huff (if false {
+                        finish_started as ::core::ffi::c_int
+                    } else {
+                        need_more as ::core::ffi::c_int
+                    }) as block_state;
+                }
+            }
+            break 'huff block_done;
         }
-    }
-    let state = &mut *s;
-    state.insert = 0 as crate::stdlib::uInt;
-    let final_flush_action = deflate_final_flush_action(flush, state.sym_next);
-    if final_flush_action == DeflateFinalFlushAction::Finish {
-        crate::src::trees::_tr_flush_block(
-            s as *mut crate::src::deflate::internal_state,
-            if state.block_start >= 0 as ::core::ffi::c_long {
-                state
-                    .window
-                    .offset(state.block_start as ::core::ffi::c_uint as isize)
-                    as *mut crate::stdlib::Bytef as *mut crate::stdlib::charf
-            } else {
-                ::core::ptr::null_mut::<crate::stdlib::charf>()
-            },
-            deflate_block_len(state.strstart, state.block_start),
-            1 as ::core::ffi::c_int,
-        );
-        state.block_start = state.strstart as ::core::ffi::c_long;
-        flush_pending(state.strm);
-        let stream = &mut *state.strm;
-        if let Some(state) = deflate_flush_block_state_after_output((*stream).avail_out, true) {
-            return state;
-        }
-        return finish_done;
-    }
-    if final_flush_action == DeflateFinalFlushAction::FlushPendingSymbols {
-        crate::src::trees::_tr_flush_block(
-            s as *mut crate::src::deflate::internal_state,
-            if state.block_start >= 0 as ::core::ffi::c_long {
-                state
-                    .window
-                    .offset(state.block_start as ::core::ffi::c_uint as isize)
-                    as *mut crate::stdlib::Bytef as *mut crate::stdlib::charf
-            } else {
-                ::core::ptr::null_mut::<crate::stdlib::charf>()
-            },
-            deflate_block_len(state.strstart, state.block_start),
-            0 as ::core::ffi::c_int,
-        );
-        state.block_start = state.strstart as ::core::ffi::c_long;
-        flush_pending(state.strm);
-        let stream = &mut *state.strm;
-        if (*stream).avail_out == 0 as crate::stdlib::uInt {
-            return (if false {
-                finish_started as ::core::ffi::c_int
-            } else {
-                need_more as ::core::ffi::c_int
-            }) as block_state;
-        }
-    }
-    return block_done;
+    }};
 }
 
 #[cfg(test)]
