@@ -41,7 +41,10 @@ pub mod gzguts_h {
     pub struct gz_state {
         pub x: crate::zlib_h::gzFile_s,
         pub mode: ::core::ffi::c_int,
-        pub fd: ::core::ffi::c_int,
+        // The handle owns its file descriptor.  This keeps gzdopen()'s
+        // ownership transfer explicit and prevents the close paths from
+        // accidentally double-closing a reused descriptor.
+        pub fd: Option<rustix::fd::OwnedFd>,
         // `gz_state` is opaque at the C boundary.  Keep the path owned by the
         // handle rather than retaining a separately allocated C pointer.
         pub path: Option<Box<[u8]>>,

@@ -117,11 +117,16 @@ unsafe fn gz_load(
         if get > max {
             get = max;
         }
-        ret = crate::stdlib::read(
-            state.fd,
-            output.as_mut_ptr().cast::<::core::ffi::c_void>(),
-            get as crate::__stddef_size_t_h::size_t,
-        ) as ::core::ffi::c_int;
+        ret = match rustix::io::read(
+            state.fd.as_ref().unwrap(),
+            &mut output[..get as usize],
+        ) {
+            Ok(read) => read as ::core::ffi::c_int,
+            Err(error) => {
+                *errno = error.raw_os_error();
+                -1 as ::core::ffi::c_int
+            }
+        };
         if ret <= 0 as ::core::ffi::c_int {
             break;
         }
@@ -931,7 +936,14 @@ pub unsafe extern "C" fn gzclose_r(mut file: crate::zlib_h::gzFile) -> ::core::f
     crate::src::gzlib::gz_clear_error(&mut state.msg, &mut state.err);
     state.path = None;
     state.msg = None;
-    ret = crate::stdlib::close(state.fd);
+    ret = match state.fd.take() {
+        Some(fd) => unsafe {
+            rustix::io::try_close(<rustix::fd::OwnedFd as rustix::fd::IntoRawFd>::into_raw_fd(fd))
+        }
+        .map(|()| 0 as ::core::ffi::c_int)
+        .unwrap_or(-1 as ::core::ffi::c_int),
+        None => -1 as ::core::ffi::c_int,
+    };
     drop(Vec::from_raw_parts(state_ptr, 1, 1));
     return if ret != 0 {
         crate::zlib_h::Z_ERRNO

@@ -437,7 +437,7 @@ unsafe extern "C" fn gz_open(
             pos: 0,
         },
         mode: crate::gzguts_h::GZ_NONE,
-        fd: -1,
+        fd: None,
         path: None,
         size: 0,
         want: crate::gzguts_h::GZBUFSIZE as ::core::ffi::c_uint,
@@ -490,17 +490,18 @@ unsafe extern "C" fn gz_open(
         state_ref.strategy = parsed_mode.strategy;
         state_ref.direct = parsed_mode.direct;
     }
-    if (*state).mode == crate::gzguts_h::GZ_NONE {
+    let state_ref = &mut *state;
+    if state_ref.mode == crate::gzguts_h::GZ_NONE {
         return ::core::ptr::null_mut::<crate::zlib_h::gzFile_s>();
     }
-    if (*state).mode == crate::gzguts_h::GZ_READ {
-        if (*state).direct == 1 as ::core::ffi::c_int {
+    if state_ref.mode == crate::gzguts_h::GZ_READ {
+        if state_ref.direct == 1 as ::core::ffi::c_int {
             return ::core::ptr::null_mut::<crate::zlib_h::gzFile_s>();
         }
-        if (*state).direct == 0 as ::core::ffi::c_int {
-            (*state).direct = 1 as ::core::ffi::c_int;
+        if state_ref.direct == 0 as ::core::ffi::c_int {
+            state_ref.direct = 1 as ::core::ffi::c_int;
         }
-    } else if (*state).direct == -1 as ::core::ffi::c_int {
+    } else if state_ref.direct == -1 as ::core::ffi::c_int {
         return ::core::ptr::null_mut::<crate::zlib_h::gzFile_s>();
     }
     let path_cstr = ::core::ffi::CStr::from_ptr(path.cast::<::core::ffi::c_char>());
@@ -510,9 +511,9 @@ unsafe extern "C" fn gz_open(
         return ::core::ptr::null_mut::<crate::zlib_h::gzFile_s>();
     }
     path_bytes.extend_from_slice(path_input);
-    (*state).path = Some(path_bytes.into_boxed_slice());
+    state_ref.path = Some(path_bytes.into_boxed_slice());
     oflag |= crate::stdlib::O_LARGEFILE
-        | (if (*state).mode == crate::gzguts_h::GZ_READ {
+        | (if state_ref.mode == crate::gzguts_h::GZ_READ {
             crate::stdlib::O_RDONLY
         } else {
             crate::stdlib::O_WRONLY
@@ -522,57 +523,56 @@ unsafe extern "C" fn gz_open(
                 } else {
                     0 as ::core::ffi::c_int
                 })
-                | (if (*state).mode == crate::gzguts_h::GZ_WRITE {
+                | (if state_ref.mode == crate::gzguts_h::GZ_WRITE {
                     crate::stdlib::O_TRUNC
                 } else {
                     crate::stdlib::O_APPEND
                 })
         });
     if fd == -1 as ::core::ffi::c_int {
-        (*state).fd = crate::stdlib::open(
-            path as *const ::core::ffi::c_char,
-            oflag,
-            0o666 as ::core::ffi::c_int,
-        );
+        match rustix::fs::open(
+            path_cstr,
+            rustix::fs::OFlags::from_bits_retain(oflag as u32),
+            rustix::fs::Mode::from_raw_mode(0o666),
+        ) {
+            Ok(opened) => state_ref.fd = Some(opened),
+            Err(error) => errno::set_errno(errno::Errno(error.raw_os_error())),
+        }
     } else {
+        state_ref.fd = Some(<rustix::fd::OwnedFd as rustix::fd::FromRawFd>::from_raw_fd(fd));
         if oflag & crate::stdlib::O_NONBLOCK != 0 {
-            crate::stdlib::fcntl(
-                fd,
-                crate::stdlib::F_SETFL,
-                crate::stdlib::fcntl(fd, crate::stdlib::F_GETFL) | crate::stdlib::O_NONBLOCK,
-            );
+            if let Ok(flags) = rustix::fs::fcntl_getfl(state_ref.fd.as_ref().unwrap()) {
+                let _ = rustix::fs::fcntl_setfl(
+                    state_ref.fd.as_ref().unwrap(),
+                    flags | rustix::fs::OFlags::NONBLOCK,
+                );
+            }
         }
         if oflag & crate::stdlib::O_CLOEXEC != 0 {
-            crate::stdlib::fcntl(
-                fd,
-                crate::stdlib::F_SETFD,
-                crate::stdlib::fcntl(fd, crate::stdlib::F_GETFD) | crate::stdlib::O_CLOEXEC,
-            );
+            if let Ok(flags) = rustix::io::fcntl_getfd(state_ref.fd.as_ref().unwrap()) {
+                let _ = rustix::io::fcntl_setfd(
+                    state_ref.fd.as_ref().unwrap(),
+                    flags | rustix::io::FdFlags::CLOEXEC,
+                );
+            }
         }
-        (*state).fd = fd;
     }
-    if (*state).fd == -1 as ::core::ffi::c_int {
-        (*state).path = None;
-        (*state).msg = None;
+    if state_ref.fd.is_none() {
+        state_ref.path = None;
+        state_ref.msg = None;
         return ::core::ptr::null_mut::<crate::zlib_h::gzFile_s>();
     }
-    if (*state).mode == crate::gzguts_h::GZ_APPEND {
-        crate::stdlib::lseek64(
-            (*state).fd,
-            0 as crate::stdlib::__off64_t,
-            crate::stdlib::SEEK_END,
+    if state_ref.mode == crate::gzguts_h::GZ_APPEND {
+        let _ = rustix::fs::seek(
+            state_ref.fd.as_ref().unwrap(),
+            rustix::fs::SeekFrom::End(0),
         );
-        (*state).mode = crate::gzguts_h::GZ_WRITE;
+        state_ref.mode = crate::gzguts_h::GZ_WRITE;
     }
-    if (*state).mode == crate::gzguts_h::GZ_READ {
-        (*state).start = crate::stdlib::lseek64(
-            (*state).fd,
-            0 as crate::stdlib::__off64_t,
-            crate::stdlib::SEEK_CUR,
-        ) as crate::stdlib::off64_t;
-        if (*state).start == -1 as crate::stdlib::off64_t {
-            (*state).start = 0 as crate::stdlib::off64_t;
-        }
+    if state_ref.mode == crate::gzguts_h::GZ_READ {
+        state_ref.start = rustix::fs::tell(state_ref.fd.as_ref().unwrap())
+            .map(|position| position as crate::stdlib::off64_t)
+            .unwrap_or(0 as crate::stdlib::off64_t);
     }
     gz_reset(state);
     ::core::mem::forget(state_owner);
@@ -689,11 +689,11 @@ unsafe fn gzrewind(
     {
         return -1 as ::core::ffi::c_int;
     }
-    if crate::stdlib::lseek64(
-        state.fd,
-        state.start as crate::stdlib::__off64_t,
-        crate::stdlib::SEEK_SET,
-    ) == -1 as crate::stdlib::__off64_t
+    if rustix::fs::seek(
+        state.fd.as_ref().unwrap(),
+        rustix::fs::SeekFrom::Start(state.start as u64),
+    )
+    .is_err()
     {
         return -1 as ::core::ffi::c_int;
     }
@@ -733,11 +733,11 @@ pub unsafe extern "C" fn gzseek64(
     }
     offset = match plan.action {
         GzSeekAction::Direct { seek_by, position } => {
-            if crate::stdlib::lseek64(
-                state.fd,
-                seek_by as crate::stdlib::__off64_t,
-                crate::stdlib::SEEK_CUR,
-            ) == -1 as crate::stdlib::__off64_t
+            if rustix::fs::seek(
+                state.fd.as_ref().unwrap(),
+                rustix::fs::SeekFrom::Current(seek_by as i64),
+            )
+            .is_err()
             {
                 return -1 as crate::stdlib::off64_t;
             }
@@ -864,11 +864,10 @@ pub unsafe extern "C" fn gzoffset64(mut file: crate::zlib_h::gzFile) -> crate::s
     if !position.active() {
         return -1 as crate::stdlib::off64_t;
     }
-    let offset = crate::stdlib::lseek64(
-        state.fd,
-        0 as crate::stdlib::__off64_t,
-        crate::stdlib::SEEK_CUR,
-    ) as crate::stdlib::off64_t;
+    let Ok(offset) = rustix::fs::tell(state.fd.as_ref().unwrap()) else {
+        return -1 as crate::stdlib::off64_t;
+    };
+    let offset = offset as crate::stdlib::off64_t;
     position.offset(offset, state.strm.avail_in)
 }
 #[export_name = "gzoffset64"]

@@ -139,7 +139,9 @@ unsafe extern "C" fn gz_comp(
                 (*strm).avail_in as ::core::ffi::c_uint
             };
             writ = crate::stdlib::write(
-                (*state).fd,
+                <rustix::fd::OwnedFd as rustix::fd::AsRawFd>::as_raw_fd(
+                    (*state).fd.as_ref().unwrap(),
+                ),
                 (*strm).next_in as *const ::core::ffi::c_void,
                 put as crate::__stddef_size_t_h::size_t,
             ) as ::core::ffi::c_int;
@@ -184,7 +186,9 @@ unsafe extern "C" fn gz_comp(
                     buffered as ::core::ffi::c_uint
                 };
                 writ = crate::stdlib::write(
-                    (*state).fd,
+                    <rustix::fd::OwnedFd as rustix::fd::AsRawFd>::as_raw_fd(
+                        (*state).fd.as_ref().unwrap(),
+                    ),
                     (*state).x.next as *const ::core::ffi::c_void,
                     put as crate::__stddef_size_t_h::size_t,
                 ) as ::core::ffi::c_int;
@@ -682,7 +686,15 @@ pub unsafe extern "C" fn gzclose_w(mut file: crate::zlib_h::gzFile) -> ::core::f
     crate::src::gzlib::gz_clear_error(&mut state.msg, &mut state.err);
     state.path = None;
     state.msg = None;
-    if crate::stdlib::close(state.fd) == -1 as ::core::ffi::c_int {
+    if state
+        .fd
+        .take()
+        .map(|fd| unsafe {
+            rustix::io::try_close(<rustix::fd::OwnedFd as rustix::fd::IntoRawFd>::into_raw_fd(fd))
+        })
+        .transpose()
+        .is_err()
+    {
         ret = crate::zlib_h::Z_ERRNO;
     }
     drop(Vec::from_raw_parts(state_ptr, 1, 1));
