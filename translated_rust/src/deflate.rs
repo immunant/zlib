@@ -2080,15 +2080,15 @@ fn deflate_prime_bits(
     crate::zlib_h::Z_OK
 }
 
-pub unsafe extern "C" fn deflatePrime(
-    mut strm: crate::zlib_h::z_streamp,
+// The export wrapper owns the nullable ABI-stream conversion.  The operation
+// itself keeps the opaque-state and callback-backed pending-buffer projection
+// together, then hands only a bounded slice and scalar state to the bit core.
+pub unsafe fn deflatePrime(
+    strm: &mut crate::zlib_h::z_stream_s,
     mut bits: ::core::ffi::c_int,
     mut value: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
-    let Some((_strm, state)) = strm
-        .as_mut()
-        .and_then(|strm| deflate_stream_and_state(strm))
-    else {
+    let Some((_strm, state)) = deflate_stream_and_state(strm) else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
     let pending_buf = ::core::slice::from_raw_parts_mut(
@@ -2116,6 +2116,9 @@ pub unsafe extern "C" fn deflatePrime_ffi(
     mut bits: ::core::ffi::c_int,
     mut value: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
+    let Some(strm) = strm.as_mut() else {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    };
     deflatePrime(strm, bits, value)
 }
 
