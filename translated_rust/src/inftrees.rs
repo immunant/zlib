@@ -3026,11 +3026,8 @@ pub fn inflate_table_safe(
         let next_table_size = fill;
         loop {
             fill -= increment;
-            let Some(index) = table_index(
-                table_start,
-                next,
-                ((huff >> drop_bits) + fill) as usize,
-            ) else {
+            let Some(index) = table_index(table_start, next, ((huff >> drop_bits) + fill) as usize)
+            else {
                 return 1;
             };
             let Some(entry) = table.get_mut(index) else {

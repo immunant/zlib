@@ -3660,10 +3660,7 @@ fn tally_symbol_bytes(
     ]
 }
 
-fn tally_match_tree_indices(
-    dist: ::core::ffi::c_uint,
-    lc: ::core::ffi::c_uint,
-) -> (usize, usize) {
+fn tally_match_tree_indices(dist: ::core::ffi::c_uint, lc: ::core::ffi::c_uint) -> (usize, usize) {
     let length_code = crate::src::trees::_length_code[lc as usize] as ::core::ffi::c_int
         + crate::src::deflate::LITERALS
         + 1 as ::core::ffi::c_int;
@@ -3751,44 +3748,46 @@ unsafe extern "C" fn gen_codes(
 
 fn tr_static_init() {}
 
-unsafe extern "C" fn init_block(mut s: *mut crate::src::deflate::deflate_state) {
-    let mut n: ::core::ffi::c_int = 0;
-    n = 0 as ::core::ffi::c_int;
-    while n < crate::src::deflate::L_CODES {
-        (*s).dyn_ltree[n as usize].fc.value = 0 as crate::zutil_h::ush;
-        n += 1;
+fn reset_block_trees(
+    dyn_ltree: &mut [crate::src::deflate::ct_data],
+    dyn_dtree: &mut [crate::src::deflate::ct_data],
+    bl_tree: &mut [crate::src::deflate::ct_data],
+) {
+    for entry in &mut dyn_ltree[..crate::src::deflate::L_CODES as usize] {
+        entry.fc.value = 0;
     }
-    n = 0 as ::core::ffi::c_int;
-    while n < crate::src::deflate::D_CODES {
-        (*s).dyn_dtree[n as usize].fc.value = 0 as crate::zutil_h::ush;
-        n += 1;
+    for entry in &mut dyn_dtree[..crate::src::deflate::D_CODES as usize] {
+        entry.fc.value = 0;
     }
-    n = 0 as ::core::ffi::c_int;
-    while n < crate::src::deflate::BL_CODES {
-        (*s).bl_tree[n as usize].fc.value = 0 as crate::zutil_h::ush;
-        n += 1;
+    for entry in &mut bl_tree[..crate::src::deflate::BL_CODES as usize] {
+        entry.fc.value = 0;
     }
-    (*s).dyn_ltree[END_BLOCK as usize].fc.value = 1 as crate::zutil_h::ush;
-    (*s).static_len = 0 as crate::zutil_h::ulg;
-    (*s).opt_len = (*s).static_len;
-    (*s).matches = 0 as crate::stdlib::uInt;
-    (*s).sym_next = (*s).matches;
+    dyn_ltree[END_BLOCK as usize].fc.value = 1;
+}
+
+fn init_block(s: &mut crate::src::deflate::deflate_state) {
+    reset_block_trees(&mut s.dyn_ltree, &mut s.dyn_dtree, &mut s.bl_tree);
+    s.static_len = 0;
+    s.opt_len = s.static_len;
+    s.matches = 0;
+    s.sym_next = s.matches;
 }
 pub unsafe extern "C" fn _tr_init(mut s: *mut crate::src::deflate::deflate_state) {
     tr_static_init();
-    (*s).l_desc.dyn_tree = &raw mut (*s).dyn_ltree as *mut crate::src::deflate::ct_data_s
+    let state = &mut *s;
+    state.l_desc.dyn_tree = &raw mut state.dyn_ltree as *mut crate::src::deflate::ct_data_s
         as *mut crate::src::deflate::ct_data;
-    (*s).l_desc.stat_desc = &raw const static_l_desc;
-    (*s).d_desc.dyn_tree = &raw mut (*s).dyn_dtree as *mut crate::src::deflate::ct_data_s
+    state.l_desc.stat_desc = &raw const static_l_desc;
+    state.d_desc.dyn_tree = &raw mut state.dyn_dtree as *mut crate::src::deflate::ct_data_s
         as *mut crate::src::deflate::ct_data;
-    (*s).d_desc.stat_desc = &raw const static_d_desc;
-    (*s).bl_desc.dyn_tree = &raw mut (*s).bl_tree as *mut crate::src::deflate::ct_data_s
+    state.d_desc.stat_desc = &raw const static_d_desc;
+    state.bl_desc.dyn_tree = &raw mut state.bl_tree as *mut crate::src::deflate::ct_data_s
         as *mut crate::src::deflate::ct_data;
-    (*s).bl_desc.stat_desc = &raw const static_bl_desc;
-    (*s).bi_buf = 0 as crate::zutil_h::ush;
-    (*s).bi_valid = 0 as ::core::ffi::c_int;
-    (*s).bi_used = 0 as ::core::ffi::c_int;
-    init_block(s);
+    state.bl_desc.stat_desc = &raw const static_bl_desc;
+    state.bi_buf = 0;
+    state.bi_valid = 0;
+    state.bi_used = 0;
+    init_block(state);
 }
 #[export_name = "_tr_init"]
 
@@ -3843,9 +3842,10 @@ unsafe extern "C" fn gen_bitlen(
 ) {
     let mut tree: *mut crate::src::deflate::ct_data = (*desc).dyn_tree;
     let mut max_code: ::core::ffi::c_int = (*desc).max_code;
-    let mut stree: *const crate::src::deflate::ct_data = (*(*desc).stat_desc)
-        .static_tree
-        .map_or(::core::ptr::null(), <[crate::src::deflate::ct_data]>::as_ptr);
+    let mut stree: *const crate::src::deflate::ct_data = (*(*desc).stat_desc).static_tree.map_or(
+        ::core::ptr::null(),
+        <[crate::src::deflate::ct_data]>::as_ptr,
+    );
     let mut extra: *const crate::stdlib::intf = (*(*desc).stat_desc).extra_bits.as_ptr();
     let mut base: ::core::ffi::c_int = (*(*desc).stat_desc).extra_base;
     let mut max_length: ::core::ffi::c_int = (*(*desc).stat_desc).max_length;
@@ -3948,9 +3948,10 @@ unsafe extern "C" fn build_tree(
     mut desc: *mut crate::src::deflate::tree_desc,
 ) {
     let mut tree: *mut crate::src::deflate::ct_data = (*desc).dyn_tree;
-    let mut stree: *const crate::src::deflate::ct_data = (*(*desc).stat_desc)
-        .static_tree
-        .map_or(::core::ptr::null(), <[crate::src::deflate::ct_data]>::as_ptr);
+    let mut stree: *const crate::src::deflate::ct_data = (*(*desc).stat_desc).static_tree.map_or(
+        ::core::ptr::null(),
+        <[crate::src::deflate::ct_data]>::as_ptr,
+    );
     let mut elems: ::core::ffi::c_int = (*(*desc).stat_desc).elems;
     let mut n: ::core::ffi::c_int = 0;
     let mut m: ::core::ffi::c_int = 0;
@@ -4957,8 +4958,11 @@ pub unsafe extern "C" fn _tr_flush_block(
     let mut opt_lenb: crate::zutil_h::ulg = 0;
     let mut static_lenb: crate::zutil_h::ulg = 0;
     let mut max_blindex: ::core::ffi::c_int = 0 as ::core::ffi::c_int;
-    if (*s).level > 0 as ::core::ffi::c_int {
-        let strm = (*s).strm;
+    let (level, strm) = {
+        let state = &mut *s;
+        (state.level, state.strm)
+    };
+    if level > 0 as ::core::ffi::c_int {
         if (*strm).data_type == crate::zlib_h::Z_UNKNOWN {
             (*strm).data_type = detect_data_type_from_ltree(&(*s).dyn_ltree);
         }
@@ -5067,7 +5071,7 @@ pub unsafe extern "C" fn _tr_flush_block(
                 as *const crate::src::deflate::ct_data,
         );
     }
-    init_block(s);
+    init_block(&mut *s);
     if last != 0 {
         bi_windup(s);
     }
@@ -5099,16 +5103,10 @@ pub unsafe extern "C" fn _tr_tally(
     } else {
         (*s).matches = (*s).matches.wrapping_add(1);
         let (length_index, distance_index) = tally_match_tree_indices(dist, lc);
-        (*s).dyn_ltree[length_index].fc.value = (*s).dyn_ltree[length_index]
-            .fc
-            .value
-            .wrapping_add(1);
-        (*s).dyn_dtree[distance_index]
-            .fc
-            .value = (*s).dyn_dtree[distance_index]
-            .fc
-            .value
-            .wrapping_add(1);
+        (*s).dyn_ltree[length_index].fc.value =
+            (*s).dyn_ltree[length_index].fc.value.wrapping_add(1);
+        (*s).dyn_dtree[distance_index].fc.value =
+            (*s).dyn_dtree[distance_index].fc.value.wrapping_add(1);
     }
     return ((*s).sym_next == (*s).sym_end) as ::core::ffi::c_int;
 }
@@ -5127,8 +5125,8 @@ mod tests {
     use super::{
         bi_flush_core, bi_reverse, bi_windup_core, bl_order, detect_data_type_from_ltree,
         dist_code_index, next_code_for_len, next_codes, pending_cursor_after_bytes,
-        static_bl_desc, static_d_desc, static_l_desc, tally_match_tree_indices,
-        tally_symbol_bytes, tree_run_limits, MAX_BITS,
+        reset_block_trees, static_bl_desc, static_d_desc, static_l_desc, tally_match_tree_indices,
+        tally_symbol_bytes, tree_run_limits, END_BLOCK, MAX_BITS,
     };
 
     fn ltree_with_frequency(
@@ -5141,6 +5139,26 @@ mod tests {
         let mut ltree = [empty; crate::src::deflate::HEAP_SIZE as usize];
         ltree[index].fc.value = 1;
         ltree
+    }
+
+    #[test]
+    fn block_tree_reset_clears_frequencies_and_restores_end_marker() {
+        let populated = crate::src::deflate::ct_data {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 { value: 7 },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 { dad: 0 },
+        };
+        let mut ltree = [populated; crate::src::deflate::L_CODES as usize];
+        let mut dtree = [populated; crate::src::deflate::D_CODES as usize];
+        let mut bl_tree = [populated; crate::src::deflate::BL_CODES as usize];
+
+        reset_block_trees(&mut ltree, &mut dtree, &mut bl_tree);
+
+        assert!(ltree
+            .iter()
+            .enumerate()
+            .all(|(index, entry)| entry.fc.value == (index == END_BLOCK as usize) as u16));
+        assert!(dtree.iter().all(|entry| entry.fc.value == 0));
+        assert!(bl_tree.iter().all(|entry| entry.fc.value == 0));
     }
 
     #[test]

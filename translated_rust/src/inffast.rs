@@ -267,8 +267,7 @@ pub unsafe extern "C" fn inflate_fast(
                             }
                             dist = dist.wrapping_add(low_bits(hold, extra_bits));
                             (hold, bits) = consume_bits(hold, bits, extra_bits);
-                            op = out.offset_from(beg) as ::core::ffi::c_long
-                                as ::core::ffi::c_uint;
+                            op = out.offset_from(beg) as ::core::ffi::c_long as ::core::ffi::c_uint;
                             if dist > op {
                                 c2rust_current_block_141 = 5235537862154438448;
                                 break;
