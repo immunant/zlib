@@ -736,9 +736,6 @@ fn gzwrite_impl(compressor: &mut GzCompressor<'_>, buf: &[u8]) -> ::core::ffi::c
     compressor.write(buf) as ::core::ffi::c_int
 }
 
-unsafe fn gzwrite(state: &mut crate::gzguts_h::gz_state, buf: &[u8]) -> ::core::ffi::c_int {
-    gzwrite_impl(&mut GzCompressor { state }, buf)
-}
 #[export_name = "gzwrite"]
 
 pub unsafe extern "C" fn gzwrite_ffi(
@@ -757,7 +754,7 @@ pub unsafe extern "C" fn gzwrite_ffi(
         }
         ::core::slice::from_raw_parts(buf as *const u8, len as usize)
     };
-    gzwrite(state, buf)
+    gzwrite_impl(&mut GzCompressor { state }, buf)
 }
 fn gzfwrite_impl(
     compressor: &mut GzCompressor<'_>,
