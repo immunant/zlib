@@ -1680,17 +1680,8 @@ struct DeflateBoundState {
     level: ::core::ffi::c_int,
 }
 
-struct DeflateBoundGzipHeader {
-    has_extra: bool,
-    extra_len: crate::stdlib::uInt,
-    name_len: crate::stdlib::z_size_t,
-    comment_len: crate::stdlib::z_size_t,
-    hcrc: ::core::ffi::c_int,
-}
-
-// Once a stream has been bound, the bound calculation needs only this
-// value snapshot. Keep the state-only projection out of the raw stream and
-// optional-header adapter below.
+// Once a stream has been bound, the bound calculation needs only this value
+// snapshot. Keep the state-only projection out of the raw stream adapter.
 fn deflate_bound_state(state: &crate::src::deflate::deflate_state) -> DeflateBoundState {
     DeflateBoundState {
         wrap: state.wrap,
@@ -1704,7 +1695,6 @@ fn deflate_bound_state(state: &crate::src::deflate::deflate_state) -> DeflateBou
 fn deflate_bound_z(
     source_len: crate::stdlib::z_size_t,
     state: Option<DeflateBoundState>,
-    gzip_header: Option<DeflateBoundGzipHeader>,
 ) -> crate::stdlib::z_size_t {
     let mut fixedlen = source_len
         .wrapping_add(source_len >> 3 as ::core::ffi::c_int)
@@ -1753,19 +1743,6 @@ fn deflate_bound_z(
         }
         2 => {
             wraplen = 18 as crate::stdlib::z_size_t;
-            if let Some(gzip_header) = gzip_header {
-                if gzip_header.has_extra {
-                    wraplen = wraplen.wrapping_add(
-                        (2 as crate::stdlib::uInt).wrapping_add(gzip_header.extra_len)
-                            as crate::stdlib::z_size_t,
-                    );
-                }
-                wraplen = wraplen.wrapping_add(gzip_header.name_len);
-                wraplen = wraplen.wrapping_add(gzip_header.comment_len);
-                if gzip_header.hcrc != 0 {
-                    wraplen = wraplen.wrapping_add(2 as crate::stdlib::z_size_t);
-                }
-            }
         }
         _ => {
             wraplen = 18 as crate::stdlib::z_size_t;
@@ -1800,57 +1777,37 @@ fn deflate_bound_z(
     }
 }
 
-// The numeric bound is defined solely by a bound deflater state and its
-// already-decoded gzip-header lengths.
+// The numeric bound is defined solely by a bound deflater state. Configured
+// caller-owned gzip headers return the conservative maximum before this path.
 fn deflate_bound_from_state(
     source_len: crate::stdlib::z_size_t,
     state: Option<&crate::src::deflate::deflate_state>,
-    gzip_header: Option<DeflateBoundGzipHeader>,
 ) -> crate::stdlib::z_size_t {
-    deflate_bound_z(source_len, state.map(deflate_bound_state), gzip_header)
+    deflate_bound_z(source_len, state.map(deflate_bound_state))
 }
 
-// The raw stream and retained gzip-header cursor are inspected only while
-// producing a value snapshot for the bound calculation. A non-null name or
-// comment has no accompanying length, so traversing it would require an
-// unbounded foreign-memory read. `deflateBound()` promises an upper bound,
-// not the tightest one; use the representable maximum in that case instead.
-// The C ABI wrapper below remains a thin exported dispatcher.
+// A configured gzip header is caller-owned and its variable-length fields
+// have no Rust lifetime or fully bounded representation here.  In particular,
+// even an extra-only header would require reopening that retained raw header
+// to produce a tight bound. `deflateBound()` promises an upper bound, not the
+// tightest one, so use the representable maximum for every configured header.
+// This keeps the implementation reference-bound and the C ABI wrapper below
+// a thin exported dispatcher.
 pub fn deflateBound_z(
     strm: Option<&mut crate::zlib_h::z_stream>,
     mut sourceLen: crate::stdlib::z_size_t,
 ) -> crate::stdlib::z_size_t {
-    // SAFETY: `deflateStateCheck()` validates the stream/state association
-    // before exposing it. A configured gzip header, name, and comment remain
-    // caller-owned C strings for the duration of this synchronous bound
-    // calculation, matching zlib's stream contract.
-    unsafe {
-        let (state, gzip_header) = match strm {
-            Some(strm) => match deflateStateCheck(strm) {
-                Some((_strm, state)) => {
-                    let gzip_header = if state.gzhead.is_null() {
-                        None
-                    } else {
-                        let header = &*state.gzhead;
-                        if !header.name.is_null() || !header.comment.is_null() {
-                            return crate::stdlib::z_size_t::MAX;
-                        }
-                        Some(DeflateBoundGzipHeader {
-                            has_extra: !header.extra.is_null(),
-                            extra_len: header.extra_len,
-                            name_len: 0,
-                            comment_len: 0,
-                            hcrc: header.hcrc,
-                        })
-                    };
-                    (Some(state), gzip_header)
-                }
-                None => (None, None),
-            },
-            None => (None, None),
-        };
-        deflate_bound_from_state(sourceLen, state.as_deref(), gzip_header)
+    let state = match strm {
+        Some(strm) => deflateStateCheck(strm).map(|(_strm, state)| state),
+        None => None,
+    };
+    if state
+        .as_deref()
+        .is_some_and(|state| !state.gzhead.is_null())
+    {
+        return crate::stdlib::z_size_t::MAX;
     }
+    deflate_bound_from_state(sourceLen, state.as_deref())
 }
 #[export_name = "deflateBound_z"]
 
