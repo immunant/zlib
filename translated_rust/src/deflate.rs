@@ -2119,26 +2119,16 @@ pub unsafe extern "C" fn deflateBound_z_ffi(
     let state = stream.and_then(|strm| strm.state.as_ref());
     deflate_bound_z_impl(stream.zip(state), sourceLen)
 }
-pub unsafe fn deflateBound(
-    strm: Option<&crate::zlib_h::z_stream_s>,
-    mut sourceLen: crate::stdlib::uLong,
-) -> crate::stdlib::uLong {
-    let state = strm.and_then(|strm| unsafe { strm.state.as_ref() });
-    let mut bound: crate::stdlib::z_size_t =
-        deflate_bound_z_impl(strm.zip(state), sourceLen as crate::stdlib::z_size_t);
-    return if bound != bound {
-        -1 as ::core::ffi::c_int as crate::stdlib::uLong
-    } else {
-        bound as crate::stdlib::uLong
-    };
-}
 #[export_name = "deflateBound"]
 
 pub unsafe extern "C" fn deflateBound_ffi(
     mut strm: crate::zlib_h::z_streamp,
     mut sourceLen: crate::stdlib::uLong,
 ) -> crate::stdlib::uLong {
-    deflateBound(strm.as_ref(), sourceLen)
+    let stream = strm.as_ref();
+    let state = stream.and_then(|strm| strm.state.as_ref());
+    deflate_bound_z_impl(stream.zip(state), sourceLen as crate::stdlib::z_size_t)
+        as crate::stdlib::uLong
 }
 fn put_short_msb(
     s: &mut crate::src::deflate::deflate_state,
