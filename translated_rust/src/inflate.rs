@@ -2896,39 +2896,44 @@ pub unsafe fn inflate(
         if left == 0 as ::core::ffi::c_uint {
             break;
         }
+        // This match-copy transition does not allocate or invoke callbacks,
+        // so keep its scalar state bookkeeping on one short-lived adopted
+        // state record. The cursor copy below remains in the transitional
+        // decoder boundary.
+        let state_ref = &mut *state;
         copy = out.wrapping_sub(left);
-        if (*state).offset > copy {
-            copy = (*state).offset.wrapping_sub(copy);
-            if copy > (*state).whave {
-                if (*state).sane != 0 {
+        if state_ref.offset > copy {
+            copy = state_ref.offset.wrapping_sub(copy);
+            if copy > state_ref.whave {
+                if state_ref.sane != 0 {
                     (*strm).msg = INFLATE_ERROR_MESSAGES[17].as_ptr() as *const ::core::ffi::c_char
                         as *mut ::core::ffi::c_char;
-                    (*state).mode = crate::src::inflate::BAD;
+                    state_ref.mode = crate::src::inflate::BAD;
                     continue;
                 }
             }
-            if copy > (*state).wnext {
-                copy = copy.wrapping_sub((*state).wnext);
-                from = (*state)
+            if copy > state_ref.wnext {
+                copy = copy.wrapping_sub(state_ref.wnext);
+                from = state_ref
                     .window
-                    .wrapping_add((*state).wsize.wrapping_sub(copy) as usize);
+                    .wrapping_add(state_ref.wsize.wrapping_sub(copy) as usize);
             } else {
-                from = (*state)
+                from = state_ref
                     .window
-                    .wrapping_add((*state).wnext.wrapping_sub(copy) as usize);
+                    .wrapping_add(state_ref.wnext.wrapping_sub(copy) as usize);
             }
-            if copy > (*state).length {
-                copy = (*state).length;
+            if copy > state_ref.length {
+                copy = state_ref.length;
             }
         } else {
-            from = put.wrapping_sub((*state).offset as usize);
-            copy = (*state).length;
+            from = put.wrapping_sub(state_ref.offset as usize);
+            copy = state_ref.length;
         }
         if copy > left {
             copy = left;
         }
         left = left.wrapping_sub(copy);
-        (*state).length = (*state).length.wrapping_sub(copy);
+        state_ref.length = state_ref.length.wrapping_sub(copy);
         loop {
             let c2rust_fresh30 = from;
             from = from.wrapping_add(1);
@@ -2940,8 +2945,8 @@ pub unsafe fn inflate(
                 break;
             }
         }
-        if (*state).length == 0 as ::core::ffi::c_uint {
-            (*state).mode = crate::src::inflate::LEN;
+        if state_ref.length == 0 as ::core::ffi::c_uint {
+            state_ref.mode = crate::src::inflate::LEN;
         }
     }
     // Keep the decoder loop's raw cursors local to that loop.  The exit
