@@ -529,43 +529,26 @@ static configuration_table: [config; 10] = [
     },
 ];
 
-unsafe extern "C" fn slide_hash(mut s: *mut crate::src::deflate::deflate_state) {
-    let mut n: ::core::ffi::c_uint = 0;
-    let mut m: ::core::ffi::c_uint = 0;
-    let mut p: *mut crate::src::deflate::Posf =
-        ::core::ptr::null_mut::<crate::src::deflate::Posf>();
-    let mut wsize: crate::stdlib::uInt = (*s).w_size;
-    n = (*s).hash_size as ::core::ffi::c_uint;
-    p = (*s).head.offset(n as isize);
-    loop {
-        p = p.offset(-1);
-        m = *p as ::core::ffi::c_uint;
-        *p = (if m >= wsize {
-            m.wrapping_sub(wsize as ::core::ffi::c_uint)
+fn slide_positions(positions: &mut [crate::src::deflate::Posf], wsize: crate::stdlib::uInt) {
+    for position in positions.iter_mut().rev() {
+        let value = *position as ::core::ffi::c_uint;
+        *position = (if value >= wsize {
+            value.wrapping_sub(wsize as ::core::ffi::c_uint)
         } else {
             NIL as ::core::ffi::c_uint
         }) as crate::src::deflate::Pos as crate::src::deflate::Posf;
-        n = n.wrapping_sub(1);
-        if n == 0 {
-            break;
-        }
     }
-    n = wsize as ::core::ffi::c_uint;
-    p = (*s).prev.offset(n as isize);
-    loop {
-        p = p.offset(-1);
-        m = *p as ::core::ffi::c_uint;
-        *p = (if m >= wsize {
-            m.wrapping_sub(wsize as ::core::ffi::c_uint)
-        } else {
-            NIL as ::core::ffi::c_uint
-        }) as crate::src::deflate::Pos as crate::src::deflate::Posf;
-        n = n.wrapping_sub(1);
-        if n == 0 {
-            break;
-        }
-    }
-    (*s).slid = 1 as ::core::ffi::c_int;
+}
+
+unsafe fn slide_hash(s: *mut crate::src::deflate::deflate_state) {
+    let s = &mut *s;
+    let wsize = s.w_size;
+    let head = ::core::slice::from_raw_parts_mut(s.head, s.hash_size as usize);
+    slide_positions(head, wsize);
+
+    let prev = ::core::slice::from_raw_parts_mut(s.prev, wsize as usize);
+    slide_positions(prev, wsize);
+    s.slid = 1 as ::core::ffi::c_int;
 }
 
 fn read_buf_impl(
