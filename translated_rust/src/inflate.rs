@@ -2774,12 +2774,6 @@ pub unsafe extern "C" fn inflateCopy_ffi(
     if copy.is_null() {
         return crate::zlib_h::Z_MEM_ERROR;
     }
-    crate::stdlib::memset(
-        copy as *mut ::core::ffi::c_void,
-        0 as ::core::ffi::c_int,
-        ::core::mem::size_of::<crate::src::inflate::inflate_state>()
-            as crate::__stddef_size_t_h::size_t,
-    );
     window = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
     if !(*state).window.is_null() {
         window = Some((*source).zalloc.expect("non-null function pointer"))
@@ -2797,17 +2791,8 @@ pub unsafe extern "C" fn inflateCopy_ffi(
             return crate::zlib_h::Z_MEM_ERROR;
         }
     }
-    crate::stdlib::memcpy(
-        dest as *mut ::core::ffi::c_void,
-        source as *const ::core::ffi::c_void,
-        ::core::mem::size_of::<crate::zlib_h::z_stream>() as crate::__stddef_size_t_h::size_t,
-    );
-    crate::stdlib::memcpy(
-        copy as *mut ::core::ffi::c_void,
-        state as *const ::core::ffi::c_void,
-        ::core::mem::size_of::<crate::src::inflate::inflate_state>()
-            as crate::__stddef_size_t_h::size_t,
-    );
+    ::core::ptr::write(dest, *source);
+    ::core::ptr::write(copy, *state);
     (*copy).strm = dest;
     if (*state).lencode
         >= &raw mut (*state).codes as *mut crate::src::inftrees::code
@@ -2837,12 +2822,11 @@ pub unsafe extern "C" fn inflateCopy_ffi(
             .offset_from(&raw mut (*state).codes as *mut crate::src::inftrees::code)
             as ::core::ffi::c_long as isize,
     );
-    if !window.is_null() {
-        crate::stdlib::memcpy(
-            window as *mut ::core::ffi::c_void,
-            (*state).window as *const ::core::ffi::c_void,
-            (*state).whave as crate::__stddef_size_t_h::size_t,
-        );
+    if !window.is_null() && (*state).whave != 0 {
+        let len = (*state).whave as usize;
+        let source_window = ::core::slice::from_raw_parts((*state).window, len);
+        let dest_window = ::core::slice::from_raw_parts_mut(window, len);
+        dest_window.copy_from_slice(source_window);
     }
     (*copy).window = window;
     (*dest).state = copy as *mut crate::src::deflate::internal_state;
