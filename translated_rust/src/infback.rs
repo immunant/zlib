@@ -1191,19 +1191,15 @@ where
     }
 }
 
-pub unsafe extern "C" fn inflateBack(
-    mut strm: crate::zlib_h::z_streamp,
+unsafe fn inflateBack(
+    strm: &mut crate::zlib_h::z_stream_s,
     mut in_0: crate::zlib_h::in_func,
     mut in_desc: *mut ::core::ffi::c_void,
     mut out: crate::zlib_h::out_func,
     mut out_desc: *mut ::core::ffi::c_void,
 ) -> ::core::ffi::c_int {
-    if strm.is_null() {
-        return crate::zlib_h::Z_STREAM_ERROR;
-    }
     // This is the complete ABI projection boundary. The decoder below sees
     // only bounded input/output facades and a pointer-free state view.
-    let strm = &mut *strm;
     let state_ptr = strm.state as *mut crate::src::inflate::inflate_state;
     if state_ptr.is_null() {
         return crate::zlib_h::Z_STREAM_ERROR;
@@ -1303,6 +1299,9 @@ pub unsafe extern "C" fn inflateBack_ffi(
     mut out: crate::zlib_h::out_func,
     mut out_desc: *mut ::core::ffi::c_void,
 ) -> ::core::ffi::c_int {
+    let Some(strm) = strm.as_mut() else {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    };
     inflateBack(strm, in_0, in_desc, out, out_desc)
 }
 #[export_name = "inflateBackEnd"]
