@@ -2231,9 +2231,15 @@ pub unsafe extern "C" fn deflate(
                 );
                 crate::src::trees::tr_stored_block(state, pending, &[], 0);
                 if flush == crate::zlib_h::Z_FULL_FLUSH {
+                    // The initialized head table has `hash_size` entries, so
+                    // this is its final entry.  Keep cursor formation safe;
+                    // the existing allocation invariant still justifies the
+                    // final raw store.
                     *state
                         .head
-                        .offset(state.hash_size.wrapping_sub(1 as crate::stdlib::uInt) as isize) =
+                        .wrapping_add(
+                            state.hash_size.wrapping_sub(1 as crate::stdlib::uInt) as usize,
+                        ) =
                         NIL as crate::src::deflate::Posf;
                     crate::stdlib::memset(
                         state.head as *mut ::core::ffi::c_void,
