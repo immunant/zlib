@@ -1395,19 +1395,6 @@ pub unsafe extern "C" fn deflateParams_ffi(
 ) -> ::core::ffi::c_int {
     deflateParams(strm, level, strategy)
 }
-pub unsafe extern "C" fn deflateTune(
-    mut strm: crate::zlib_h::z_streamp,
-    mut good_length: ::core::ffi::c_int,
-    mut max_lazy: ::core::ffi::c_int,
-    mut nice_length: ::core::ffi::c_int,
-    mut max_chain: ::core::ffi::c_int,
-) -> ::core::ffi::c_int {
-    let Some((_strm, state)) = deflateStateCheck(strm) else {
-        return crate::zlib_h::Z_STREAM_ERROR;
-    };
-    deflate_tune(state, good_length, max_lazy, nice_length, max_chain)
-}
-
 fn deflate_tune(
     state: &mut crate::src::deflate::deflate_state,
     good_length: ::core::ffi::c_int,
@@ -1430,7 +1417,12 @@ pub unsafe extern "C" fn deflateTune_ffi(
     mut nice_length: ::core::ffi::c_int,
     mut max_chain: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
-    deflateTune(strm, good_length, max_lazy, nice_length, max_chain)
+    // This is the C ABI boundary: bind the validated stream/state pair once,
+    // then leave the tuning operation itself reference-bound.
+    let Some((_strm, state)) = deflateStateCheck(strm) else {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    };
+    deflate_tune(state, good_length, max_lazy, nice_length, max_chain)
 }
 struct DeflateBoundState {
     wrap: ::core::ffi::c_int,
