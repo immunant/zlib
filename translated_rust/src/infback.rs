@@ -1050,10 +1050,10 @@ fn inflate_back_prepare_stream(strm: &mut crate::zlib_h::z_stream) -> bool {
     crate::src::zutil::prepare_stream_allocator(strm)
 }
 
-// Once the allocation has been bound, initializing the rest of an
-// inflateBack state is ordinary reference-bound state setup. Keeping this
-// separate leaves the allocation callback and caller-window binding in
-// `inflateBackInit_`'s narrow implementation boundary.
+// Once the shared initializer has allocated the state, configuring it for
+// inflateBack is ordinary reference-bound setup. Keeping this separate leaves
+// the allocation callback and caller-window binding in `inflateBackInit_`'s
+// narrow implementation boundary.
 fn inflate_back_init_state(
     strm: &mut crate::zlib_h::z_stream,
     state: &mut crate::src::inflate::inflate_state,
@@ -1063,6 +1063,10 @@ fn inflate_back_init_state(
     strm.state = state as *mut crate::src::inflate::inflate_state
         as *mut crate::src::deflate::internal_state;
     state.dmax = config.dmax;
+    // `inflateInit2_()` initializes a wrapped stream. `inflateBack()` works
+    // on raw deflate input, matching the zero-initialized `wrap` field used
+    // by zlib's dedicated initializer.
+    state.wrap = 0;
     state.wbits = config.wbits;
     state.wsize = config.wsize;
     state.wnext = 0;
@@ -1097,36 +1101,29 @@ fn inflateBackInit_(
         Ok(config) => config,
         Err(error) => return error,
     };
-    let strm_ref = strm.expect("configuration preflight requires a stream");
+    let strm = strm.expect("configuration preflight requires a stream");
     let window = window.expect("configuration preflight requires a window");
-    let uses_default_allocator = inflate_back_prepare_stream(strm_ref);
-    let state = if uses_default_allocator {
-        crate::src::zutil::zcalloc(
-            strm_ref.opaque,
-            1 as crate::stdlib::uInt,
-            ::core::mem::size_of::<crate::src::inflate::inflate_state>() as crate::stdlib::uInt,
-        ) as *mut crate::src::inflate::inflate_state
-    } else {
-        Some(strm_ref.zalloc.expect("non-null function pointer"))
-            .expect("non-null function pointer")(
-            strm_ref.opaque,
-            1 as crate::stdlib::uInt,
-            ::core::mem::size_of::<crate::src::inflate::inflate_state>() as crate::stdlib::uInt,
-        ) as *mut crate::src::inflate::inflate_state
-    };
-    if state.is_null() {
-        return crate::zlib_h::Z_MEM_ERROR;
+    // Unlike `inflateInit2_()`, zlib's `inflateBackInit_()` does not reset
+    // these public accounting fields. Preserve them while reusing the common
+    // allocator and state initialization path.
+    let public_fields = (strm.total_in, strm.total_out, strm.data_type, strm.adler);
+    let ret = crate::src::inflate::inflateInit2_(
+        Some(strm),
+        windowBits,
+        version_first,
+        stream_size,
+    );
+    if ret != crate::zlib_h::Z_OK {
+        return ret;
     }
-    // SAFETY: the allocator above returned a non-null allocation large enough
-    // for one `inflate_state`. Bind it as uninitialized storage only long
-    // enough to write the complete safe zero value, then retain the
-    // initialized reference for the rest of this function.
-    let state_ref = unsafe {
-        (&mut *state.cast::<::core::mem::MaybeUninit<crate::src::inflate::inflate_state>>())
-            .write(crate::src::inflate::inflate_state_zero_value())
+    let Some((strm, state)) =
+        crate::src::inflate::inflateStateCheck(strm as *mut crate::zlib_h::z_stream)
+    else {
+        return crate::zlib_h::Z_STREAM_ERROR;
     };
-    inflate_back_init_state(strm_ref, state_ref, window, config);
-    return crate::zlib_h::Z_OK;
+    (strm.total_in, strm.total_out, strm.data_type, strm.adler) = public_fields;
+    inflate_back_init_state(strm, state, window, config);
+    crate::zlib_h::Z_OK
 }
 #[export_name = "inflateBackInit_"]
 
