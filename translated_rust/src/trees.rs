@@ -4358,13 +4358,17 @@ pub fn tr_align(
     bi_flush_state(state, pending);
 }
 
-pub unsafe extern "C" fn _tr_align(mut s: *mut crate::src::deflate::deflate_state) {
-    let state = &mut *s;
-    let pending =
-        ::core::slice::from_raw_parts_mut(state.pending_buf, state.pending_buf_size as usize);
-    let end_code = static_ltree[256].fc.freq;
-    let end_len = static_ltree[256].dl.dad as ::core::ffi::c_int;
-    tr_align(state, pending, end_code, end_len);
+pub extern "C" fn _tr_align(mut s: *mut crate::src::deflate::deflate_state) {
+    // SAFETY: this is the private raw adapter behind `_tr_align_ffi`; callers
+    // pass the initialized deflater state that owns `pending_buf`.
+    unsafe {
+        let state = &mut *s;
+        let pending =
+            ::core::slice::from_raw_parts_mut(state.pending_buf, state.pending_buf_size as usize);
+        let end_code = static_ltree[256].fc.freq;
+        let end_len = static_ltree[256].dl.dad as ::core::ffi::c_int;
+        tr_align(state, pending, end_code, end_len);
+    }
 }
 #[export_name = "_tr_align"]
 
