@@ -2564,15 +2564,51 @@ pub unsafe fn deflate(
         || flush != crate::zlib_h::Z_NO_FLUSH && (*s).status != crate::src::deflate::FINISH_STATE
     {
         let mut bstate: block_state = need_more;
-        bstate = (if (*s).level == 0 as ::core::ffi::c_int {
-            deflate_stored(&mut *s, strm, flush) as ::core::ffi::c_uint
+        bstate = (if (*s).level == 0 as ::core::ffi::c_int
+            || matches!(
+                configuration_table[(*s).level as usize].func,
+                CompressionEngine::Stored
+            )
+        {
+            let input_len = strm.avail_in as usize;
+            let output_len = strm.avail_out as usize;
+            let next_in = strm.next_in;
+            // The stream was validated above.  These short-lived views are
+            // immediately converted back into ABI cursors after the stored
+            // block engine returns.
+            let input = if input_len == 0 {
+                &[]
+            } else {
+                unsafe { core::slice::from_raw_parts(next_in, input_len) }
+            };
+            let output = unsafe { core::slice::from_raw_parts_mut(strm.next_out, output_len) };
+            let mut io = DeflateStoredIo {
+                input,
+                input_pos: 0,
+                output,
+                output_pos: 0,
+                total_in: strm.total_in,
+                total_out: strm.total_out,
+                adler: strm.adler,
+            };
+            let result = deflate_stored(s, &mut io, flush);
+            if input_len != 0 {
+                strm.next_in = io.input.as_ptr().wrapping_add(io.input_pos) as *mut crate::stdlib::Bytef;
+            }
+            strm.avail_in = io.avail_in();
+            strm.next_out = io.output.as_mut_ptr().wrapping_add(io.output_pos);
+            strm.avail_out = io.avail_out();
+            strm.total_in = io.total_in;
+            strm.total_out = io.total_out;
+            strm.adler = io.adler;
+            result as ::core::ffi::c_uint
         } else if (*s).strategy == crate::zlib_h::Z_HUFFMAN_ONLY {
             deflate_huff(&mut *s, strm, flush) as ::core::ffi::c_uint
         } else if (*s).strategy == crate::zlib_h::Z_RLE {
             deflate_rle(s, strm, flush) as ::core::ffi::c_uint
         } else {
             (match configuration_table[(*s).level as usize].func {
-                CompressionEngine::Stored => deflate_stored(&mut *s, strm, flush),
+                CompressionEngine::Stored => unreachable!("stored levels use the slice-based engine"),
                 CompressionEngine::Fast => deflate_fast(s, strm, flush),
                 CompressionEngine::Slow => deflate_slow(&mut *s, strm, flush),
             }) as ::core::ffi::c_uint
@@ -3044,9 +3080,119 @@ fn longest_match(
 
 pub const MAX_STORED: ::core::ffi::c_int = 65535 as ::core::ffi::c_int;
 
-unsafe fn deflate_stored(
+struct DeflateStoredIo<'a> {
+    input: &'a [crate::stdlib::Bytef],
+    input_pos: usize,
+    output: &'a mut [crate::stdlib::Bytef],
+    output_pos: usize,
+    total_in: crate::stdlib::uLong,
+    total_out: crate::stdlib::uLong,
+    adler: crate::stdlib::uLong,
+}
+
+impl DeflateStoredIo<'_> {
+    fn avail_in(&self) -> crate::stdlib::uInt {
+        (self.input.len() - self.input_pos) as crate::stdlib::uInt
+    }
+
+    fn avail_out(&self) -> crate::stdlib::uInt {
+        (self.output.len() - self.output_pos) as crate::stdlib::uInt
+    }
+
+    fn write(&mut self, bytes: &[crate::stdlib::Bytef]) -> bool {
+        let Some(end) = self.output_pos.checked_add(bytes.len()) else {
+            return false;
+        };
+        let Some(output) = self.output.get_mut(self.output_pos..end) else {
+            return false;
+        };
+        output.copy_from_slice(bytes);
+        self.output_pos = end;
+        self.total_out = self.total_out.wrapping_add(bytes.len() as crate::stdlib::uLong);
+        true
+    }
+
+    fn copy_input_to_output(
+        &mut self,
+        len: crate::stdlib::uInt,
+        wrap: ::core::ffi::c_int,
+    ) -> bool {
+        let len = len as usize;
+        let Some(input_end) = self.input_pos.checked_add(len) else {
+            return false;
+        };
+        let Some(output_end) = self.output_pos.checked_add(len) else {
+            return false;
+        };
+        let Some(input) = self.input.get(self.input_pos..input_end) else {
+            return false;
+        };
+        let Some(output) = self.output.get_mut(self.output_pos..output_end) else {
+            return false;
+        };
+        output.copy_from_slice(input);
+        if wrap == 1 {
+            self.adler = crate::src::adler32::adler32_z(self.adler, output);
+        } else if wrap == 2 {
+            self.adler = crate::src::crc32::crc32(self.adler, output);
+        }
+        self.input_pos = input_end;
+        self.output_pos = output_end;
+        self.total_in = self.total_in.wrapping_add(len as crate::stdlib::uLong);
+        self.total_out = self.total_out.wrapping_add(len as crate::stdlib::uLong);
+        true
+    }
+
+    fn input_prefix(&self, len: crate::stdlib::uInt) -> Option<&[crate::stdlib::Bytef]> {
+        let end = self.input_pos.checked_add(len as usize)?;
+        self.input.get(self.input_pos..end)
+    }
+
+    fn consume_input(&mut self, len: crate::stdlib::uInt) -> bool {
+        let Some(end) = self.input_pos.checked_add(len as usize) else {
+            return false;
+        };
+        if end > self.input.len() {
+            return false;
+        }
+        self.input_pos = end;
+        self.total_in = self.total_in.wrapping_add(len as crate::stdlib::uLong);
+        true
+    }
+
+    fn consumed_input(&self, len: crate::stdlib::uInt) -> Option<&[crate::stdlib::Bytef]> {
+        let start = self.input_pos.checked_sub(len as usize)?;
+        self.input.get(start..self.input_pos)
+    }
+
+    fn flush_pending(&mut self, s: &mut crate::src::deflate::deflate_state) {
+        crate::src::trees::flush_bits_impl(s);
+        let len = (s.pending as usize).min(self.avail_out() as usize);
+        if len == 0 {
+            return;
+        }
+        let start = s.pending_out;
+        let Some(end) = start.checked_add(len) else {
+            return;
+        };
+        let Some(source) = s.pending_buf.as_ref().and_then(|pending| pending.get(start..end))
+        else {
+            return;
+        };
+        if !self.write(source) {
+            return;
+        }
+        s.pending_out = end;
+        s.pending = s.pending.wrapping_sub(len as crate::zutil_h::ulg);
+        if s.pending == 0 {
+            s.pending_out = 0;
+        }
+    }
+}
+
+fn deflate_stored(
     s: &mut crate::src::deflate::deflate_state,
-    strm: &mut crate::zlib_h::z_stream_s,
+    io: &mut DeflateStoredIo<'_>,
     mut flush: ::core::ffi::c_int,
 ) -> block_state {
     let mut min_block: ::core::ffi::c_uint =
@@ -3061,20 +3207,20 @@ unsafe fn deflate_stored(
     let mut len: ::core::ffi::c_uint = 0;
     let mut left: ::core::ffi::c_uint = 0;
     let mut have: ::core::ffi::c_uint = 0;
-    let mut used: ::core::ffi::c_uint = strm.avail_in as ::core::ffi::c_uint;
+    let mut used: ::core::ffi::c_uint = io.avail_in() as ::core::ffi::c_uint;
     loop {
         len = MAX_STORED as ::core::ffi::c_uint;
         have = (s.bi_valid as ::core::ffi::c_uint).wrapping_add(42 as ::core::ffi::c_uint)
             >> 3 as ::core::ffi::c_int;
-        if strm.avail_out < have {
+        if io.avail_out() < have {
             break;
         }
-        have = (strm.avail_out as ::core::ffi::c_uint).wrapping_sub(have);
+        have = (io.avail_out() as ::core::ffi::c_uint).wrapping_sub(have);
         left = (s.strstart as ::core::ffi::c_long - s.block_start) as ::core::ffi::c_uint;
         if len as crate::zutil_h::ulg
-            > (left as crate::zutil_h::ulg).wrapping_add(strm.avail_in as crate::zutil_h::ulg)
+            > (left as crate::zutil_h::ulg).wrapping_add(io.avail_in() as crate::zutil_h::ulg)
         {
-            len = (left as crate::stdlib::uInt).wrapping_add(strm.avail_in) as ::core::ffi::c_uint;
+            len = (left as crate::stdlib::uInt).wrapping_add(io.avail_in()) as ::core::ffi::c_uint;
         }
         if len > have {
             len = have;
@@ -3082,12 +3228,12 @@ unsafe fn deflate_stored(
         if len < min_block
             && (len == 0 as ::core::ffi::c_uint && flush != crate::zlib_h::Z_FINISH
                 || flush == crate::zlib_h::Z_NO_FLUSH
-                || len != (left as crate::stdlib::uInt).wrapping_add(strm.avail_in))
+                || len != (left as crate::stdlib::uInt).wrapping_add(io.avail_in()))
         {
             break;
         }
         last = if flush == crate::zlib_h::Z_FINISH
-            && len == (left as crate::stdlib::uInt).wrapping_add(strm.avail_in)
+            && len == (left as crate::stdlib::uInt).wrapping_add(io.avail_in())
         {
             1 as ::core::ffi::c_int
         } else {
@@ -3097,7 +3243,7 @@ unsafe fn deflate_stored(
         // `_tr_stored_block()` just appended the four-byte length trailer.
         // Replace its zero length with this block's actual length.
         let _ = s.set_stored_block_length(len as crate::stdlib::uInt);
-        flush_pending_impl(s, strm);
+        io.flush_pending(s);
         if left != 0 {
             if left > len {
                 left = len;
@@ -3108,14 +3254,14 @@ unsafe fn deflate_stored(
             ) else {
                 break;
             };
-            if !write_stream_bytes(strm, &source) {
+            if !io.write(&source) {
                 break;
             }
             s.block_start += left as ::core::ffi::c_long;
             len = len.wrapping_sub(left);
         }
         if len != 0 {
-            if !read_stream_to_output(strm, len, s.wrap) {
+            if !io.copy_input_to_output(len, s.wrap) {
                 break;
             }
         }
@@ -3123,9 +3269,9 @@ unsafe fn deflate_stored(
             break;
         }
     }
-    used = used.wrapping_sub(strm.avail_in as ::core::ffi::c_uint);
+    used = used.wrapping_sub(io.avail_in() as ::core::ffi::c_uint);
     if used != 0 {
-        if let Some(input) = consumed_input(strm, used) {
+        if let Some(input) = io.consumed_input(used) {
             if s.retain_stored_history(&input) {
                 s.block_start = s.strstart as ::core::ffi::c_long;
             }
@@ -3140,7 +3286,7 @@ unsafe fn deflate_stored(
     }
     if flush != crate::zlib_h::Z_NO_FLUSH
         && flush != crate::zlib_h::Z_FINISH
-        && strm.avail_in == 0 as crate::stdlib::uInt
+        && io.avail_in() == 0 as crate::stdlib::uInt
         && s.strstart as ::core::ffi::c_long == s.block_start
     {
         return block_done;
@@ -3148,7 +3294,7 @@ unsafe fn deflate_stored(
     have = s
         .window_size
         .wrapping_sub(s.strstart as crate::zutil_h::ulg) as ::core::ffi::c_uint;
-    if strm.avail_in > have && s.block_start >= s.w_size as ::core::ffi::c_long {
+    if io.avail_in() > have && s.block_start >= s.w_size as ::core::ffi::c_long {
         s.block_start -= s.w_size as ::core::ffi::c_long;
         s.strstart = s.strstart.wrapping_sub(s.w_size);
         let Ok(copy_len) = usize::try_from(s.strstart) else {
@@ -3178,22 +3324,22 @@ unsafe fn deflate_stored(
             s.insert = s.strstart;
         }
     }
-    if have > strm.avail_in {
-        have = strm.avail_in as ::core::ffi::c_uint;
+    if have > io.avail_in() {
+        have = io.avail_in() as ::core::ffi::c_uint;
     }
     if have != 0 {
-        if let Some(input) = input_prefix(strm, have) {
+        if let Some(input) = io.input_prefix(have) {
             if !s.append_stored_input(input) {
                 return need_more;
             }
             if s.wrap == 1 {
-                strm.adler = crate::src::adler32::adler32_z(strm.adler, input);
+                io.adler = crate::src::adler32::adler32_z(io.adler, input);
             } else if s.wrap == 2 {
-                strm.adler = crate::src::crc32::crc32(strm.adler, input);
+                io.adler = crate::src::crc32::crc32(io.adler, input);
             }
-            strm.next_in = strm.next_in.wrapping_add(have as usize);
-            strm.avail_in = strm.avail_in.wrapping_sub(have);
-            strm.total_in = strm.total_in.wrapping_add(have as crate::stdlib::uLong);
+            if !io.consume_input(have) {
+                return need_more;
+            }
         } else {
             return need_more;
         }
@@ -3219,12 +3365,12 @@ unsafe fn deflate_stored(
     if left >= min_block
         || (left != 0 || flush == crate::zlib_h::Z_FINISH)
             && flush != crate::zlib_h::Z_NO_FLUSH
-            && strm.avail_in == 0 as crate::stdlib::uInt
+            && io.avail_in() == 0 as crate::stdlib::uInt
             && left <= have
     {
         len = if left > have { have } else { left };
         last = if flush == crate::zlib_h::Z_FINISH
-            && strm.avail_in == 0 as crate::stdlib::uInt
+            && io.avail_in() == 0 as crate::stdlib::uInt
             && len == left
         {
             1 as ::core::ffi::c_int
@@ -3239,7 +3385,7 @@ unsafe fn deflate_stored(
         };
         crate::src::trees::tr_stored_block(s, &source, len as crate::zutil_h::ulg, last);
         s.block_start += len as ::core::ffi::c_long;
-        flush_pending_impl(s, strm);
+        io.flush_pending(s);
     }
     if last != 0 {
         s.bi_used = 8 as ::core::ffi::c_int;
