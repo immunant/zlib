@@ -828,6 +828,19 @@ fn gzungetc_buffer_commit_state(
     true
 }
 
+/// Move the currently buffered output to the end of the output buffer before
+/// inserting an ungot byte.  `copy_within` deliberately preserves the
+/// overlap-safe backward copy performed by the original pointer loop.
+fn gzungetc_shift_to_end(buffer: &mut [u8], have: crate::stdlib::uInt) -> Option<usize> {
+    let have = have as usize;
+    if have > buffer.len() {
+        return None;
+    }
+    let start = buffer.len().checked_sub(have)?;
+    buffer.copy_within(0..have, start);
+    Some(start)
+}
+
 pub unsafe extern "C" fn gzungetc(
     mut c: ::core::ffi::c_int,
     mut file: crate::zlib_h::gzFile,
@@ -891,16 +904,12 @@ pub unsafe extern "C" fn gzungetc(
         return -1 as ::core::ffi::c_int;
     };
     if shift_to_end {
-        let mut src: *mut ::core::ffi::c_uchar = (*state).out.offset((*state).x.have as isize);
-        let mut dest: *mut ::core::ffi::c_uchar = (*state)
-            .out
-            .offset(((*state).size << 1 as ::core::ffi::c_int) as isize);
-        while src > (*state).out {
-            src = src.offset(-1);
-            dest = dest.offset(-1);
-            *dest = *src;
-        }
-        (*state).x.next = dest;
+        let capacity = (*state).size.wrapping_shl(1) as usize;
+        let buffer = ::core::slice::from_raw_parts_mut((*state).out, capacity);
+        let Some(start) = gzungetc_shift_to_end(buffer, (*state).x.have) else {
+            return -1 as ::core::ffi::c_int;
+        };
+        (*state).x.next = (*state).out.add(start);
     }
     (*state).x.next = (*state).x.next.offset(-1);
     *(*state).x.next.offset(0 as ::core::ffi::c_int as isize) = c as ::core::ffi::c_uchar;
