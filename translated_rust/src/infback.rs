@@ -118,6 +118,12 @@ enum InflateBackDistanceCode {
     },
 }
 
+#[derive(Copy, Clone)]
+enum InflateBackCodeTable {
+    Length,
+    Distance,
+}
+
 fn inflate_back_state_config(window_bits: ::core::ffi::c_int) -> InflateBackStateConfig {
     InflateBackStateConfig {
         dmax: 32768 as ::core::ffi::c_uint,
@@ -204,6 +210,39 @@ fn inflate_back_length_code_needs_subtable(code: crate::src::inftrees::code) -> 
 
 fn inflate_back_distance_code_needs_subtable(code: crate::src::inftrees::code) -> bool {
     (code.op as ::core::ffi::c_uint) & 0xf0 == 0
+}
+
+// A decode table is either one of the immutable fixed tables or a range in
+// `state.codes`.  Keep the pointer-to-index conversion here so callers only
+// select a table and an already-decoded index.
+fn inflate_back_code_table_entry(
+    state: &crate::src::inflate::inflate_state,
+    table: InflateBackCodeTable,
+    index: usize,
+) -> crate::src::inftrees::code {
+    let (code_table, fixed_table) = match table {
+        InflateBackCodeTable::Length => (
+            state.lencode,
+            crate::src::inftrees::inffixed_h::lenfix.as_ptr(),
+        ),
+        InflateBackCodeTable::Distance => (
+            state.distcode,
+            crate::src::inftrees::inffixed_h::distfix.as_ptr(),
+        ),
+    };
+    if ::core::ptr::eq(code_table, fixed_table) {
+        match table {
+            InflateBackCodeTable::Length => crate::src::inftrees::inffixed_h::lenfix[index],
+            InflateBackCodeTable::Distance => crate::src::inftrees::inffixed_h::distfix[index],
+        }
+    } else {
+        let base = state.codes.as_ptr().addr();
+        let start = code_table
+            .addr()
+            .wrapping_sub(base)
+            .wrapping_div(::core::mem::size_of::<crate::src::inftrees::code>());
+        state.codes[start.wrapping_add(index)]
+    }
 }
 
 fn inflate_back_low_bits(
@@ -674,9 +713,11 @@ pub unsafe extern "C" fn inflateBack(
                         (*state).have = 0 as ::core::ffi::c_uint;
                         while (*state).have < (*state).nlen.wrapping_add((*state).ndist) {
                             loop {
-                                here = *(*state)
-                                    .lencode
-                                    .offset(inflate_back_table_index(hold, (*state).lenbits));
+                                here = inflate_back_code_table_entry(
+                                    &*state,
+                                    InflateBackCodeTable::Length,
+                                    inflate_back_table_index(hold, (*state).lenbits) as usize,
+                                );
                                 if here.bits as ::core::ffi::c_uint <= bits {
                                     break;
                                 }
@@ -869,9 +910,11 @@ pub unsafe extern "C" fn inflateBack(
             bits = (*state).bits;
         } else {
             loop {
-                here = *(*state)
-                    .lencode
-                    .offset(inflate_back_table_index(hold, (*state).lenbits));
+                here = inflate_back_code_table_entry(
+                    &*state,
+                    InflateBackCodeTable::Length,
+                    inflate_back_table_index(hold, (*state).lenbits) as usize,
+                );
                 if here.bits as ::core::ffi::c_uint <= bits {
                     break;
                 }
@@ -892,9 +935,11 @@ pub unsafe extern "C" fn inflateBack(
             if inflate_back_length_code_needs_subtable(here) {
                 last = here;
                 loop {
-                    here = *(*state)
-                        .lencode
-                        .offset(inflate_back_subtable_index(hold, last));
+                    here = inflate_back_code_table_entry(
+                        &*state,
+                        InflateBackCodeTable::Length,
+                        inflate_back_subtable_index(hold, last) as usize,
+                    );
                     if (last.bits as ::core::ffi::c_int + here.bits as ::core::ffi::c_int)
                         as ::core::ffi::c_uint
                         <= bits
@@ -978,9 +1023,11 @@ pub unsafe extern "C" fn inflateBack(
                     ));
                 }
                 loop {
-                    here = *(*state)
-                        .distcode
-                        .offset(inflate_back_table_index(hold, (*state).distbits));
+                    here = inflate_back_code_table_entry(
+                        &*state,
+                        InflateBackCodeTable::Distance,
+                        inflate_back_table_index(hold, (*state).distbits) as usize,
+                    );
                     if here.bits as ::core::ffi::c_uint <= bits {
                         break;
                     }
@@ -1001,9 +1048,11 @@ pub unsafe extern "C" fn inflateBack(
                 if inflate_back_distance_code_needs_subtable(here) {
                     last = here;
                     loop {
-                        here = *(*state)
-                            .distcode
-                            .offset(inflate_back_subtable_index(hold, last));
+                        here = inflate_back_code_table_entry(
+                            &*state,
+                            InflateBackCodeTable::Distance,
+                            inflate_back_subtable_index(hold, last) as usize,
+                        );
                         if (last.bits as ::core::ffi::c_int + here.bits as ::core::ffi::c_int)
                             as ::core::ffi::c_uint
                             <= bits
