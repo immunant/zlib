@@ -5987,16 +5987,14 @@ fn copy_deflate_storage_regions(
 // pointers.  Keep that projection out of `deflate_copy_from_abi()`: its safe
 // typed-slice core is also the path used by the eventual allocation owner.
 unsafe fn deflate_copy_from_abi_boundary(
-    mut dest: ::core::ptr::NonNull<crate::zlib_h::z_stream_s>,
-    mut source: ::core::ptr::NonNull<crate::zlib_h::z_stream_s>,
+    dest: &mut crate::zlib_h::z_stream_s,
+    source: &mut crate::zlib_h::z_stream_s,
 ) -> ::core::ffi::c_int {
-    let source = source.as_mut();
     let Some((source, ss, source_storage)) =
         deflate_stream_and_state(source, DeflateStorageProjection::Complete)
     else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
-    let dest = dest.as_mut();
     let payload = DeflateCopyPayload {
         data_type: source.data_type,
         status: ss.status,
@@ -6228,10 +6226,10 @@ pub unsafe extern "C" fn deflateCopy_ffi(
     mut dest: crate::zlib_h::z_streamp,
     mut source: crate::zlib_h::z_streamp,
 ) -> ::core::ffi::c_int {
-    let Some(dest) = ::core::ptr::NonNull::new(dest) else {
+    let Some(dest) = dest.as_mut() else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
-    let Some(source) = ::core::ptr::NonNull::new(source) else {
+    let Some(source) = source.as_mut() else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
     deflate_copy_from_abi_boundary(dest, source)
