@@ -4480,7 +4480,7 @@ unsafe fn deflate_slow(
                 return need_more;
             };
             bflush = flush_now as ::core::ffi::c_int;
-            if bflush != 0 {
+            let avail_out = if bflush != 0 {
                 let (block_start, strstart, window) = {
                     let state = &mut *s;
                     (state.block_start, state.strstart, state.window)
@@ -4498,14 +4498,20 @@ unsafe fn deflate_slow(
                 );
                 let state = &mut *s;
                 state.block_start = strstart as ::core::ffi::c_long;
-                flush_pending(state.strm);
-            }
-            let avail_out = {
+                let strm = state.strm;
+                flush_pending(strm)
+            } else {
+                // `deflate()` rejects a zero-capacity output stream on entry,
+                // and every earlier flush in this loop returns immediately
+                // when it exhausts that capacity. Without a flush here the
+                // capacity is therefore still nonzero.
+                1
+            };
+            {
                 let state = &mut *s;
                 state.strstart = state.strstart.wrapping_add(1);
                 state.lookahead = state.lookahead.wrapping_sub(1);
-                (&mut *state.strm).avail_out
-            };
+            }
             if avail_out == 0 as crate::stdlib::uInt {
                 return need_more;
             }
