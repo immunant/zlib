@@ -105,9 +105,8 @@ unsafe fn gz_load(
         >> 2 as ::core::ffi::c_int)
         .wrapping_add(1 as ::core::ffi::c_uint);
     let state = &mut *state;
-    let errno = &mut *crate::stdlib::__errno_location();
     state.again = 0 as ::core::ffi::c_int;
-    *errno = 0 as ::core::ffi::c_int;
+    errno::set_errno(errno::Errno(0));
     *have = 0 as ::core::ffi::c_uint;
     loop {
         let Some(output) = buf.get_mut(*have as usize..) else {
@@ -123,7 +122,7 @@ unsafe fn gz_load(
         ) {
             Ok(read) => read as ::core::ffi::c_int,
             Err(error) => {
-                *errno = error.raw_os_error();
+                errno::set_errno(errno::Errno(error.raw_os_error()));
                 -1 as ::core::ffi::c_int
             }
         };
@@ -136,7 +135,7 @@ unsafe fn gz_load(
         }
     }
     if ret < 0 as ::core::ffi::c_int {
-        let errno_value = *errno;
+        let errno_value = errno::errno().0;
         if errno_value == crate::stdlib::EAGAIN
             || errno_value == crate::stdlib::EWOULDBLOCK
         {
