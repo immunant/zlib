@@ -82,15 +82,6 @@ fn gz_reset_state(state: &mut crate::gzguts_h::gz_state) {
     state.strm.avail_in = 0;
 }
 
-unsafe extern "C" fn gz_reset(mut state: crate::gzguts_h::gz_statep) {
-    gz_reset_state(&mut *state);
-    gz_error(
-        state,
-        crate::zlib_h::Z_OK,
-        ::core::ptr::null::<::core::ffi::c_char>(),
-    );
-}
-
 unsafe extern "C" fn gz_open(
     mut path: *const ::core::ffi::c_void,
     mut fd: ::core::ffi::c_int,
@@ -246,26 +237,32 @@ unsafe extern "C" fn gz_open(
         crate::stdlib::free(state as *mut ::core::ffi::c_void);
         return ::core::ptr::null_mut::<crate::zlib_h::gzFile_s>();
     }
-    if (*state).mode == crate::gzguts_h::GZ_APPEND {
+    let state = &mut *state;
+    if state.mode == crate::gzguts_h::GZ_APPEND {
         crate::stdlib::lseek64(
-            (*state).fd,
+            state.fd,
             0 as crate::stdlib::__off64_t,
             crate::stdlib::SEEK_END,
         );
-        (*state).mode = crate::gzguts_h::GZ_WRITE;
+        state.mode = crate::gzguts_h::GZ_WRITE;
     }
-    if (*state).mode == crate::gzguts_h::GZ_READ {
-        (*state).start = crate::stdlib::lseek64(
-            (*state).fd,
+    if state.mode == crate::gzguts_h::GZ_READ {
+        state.start = crate::stdlib::lseek64(
+            state.fd,
             0 as crate::stdlib::__off64_t,
             crate::stdlib::SEEK_CUR,
         ) as crate::stdlib::off64_t;
-        if (*state).start == -1 as crate::stdlib::off64_t {
-            (*state).start = 0 as crate::stdlib::off64_t;
+        if state.start == -1 as crate::stdlib::off64_t {
+            state.start = 0 as crate::stdlib::off64_t;
         }
     }
-    gz_reset(state);
-    return state as crate::zlib_h::gzFile;
+    gz_reset_state(state);
+    gz_error(
+        state as *mut crate::gzguts_h::gz_state,
+        crate::zlib_h::Z_OK,
+        ::core::ptr::null::<::core::ffi::c_char>(),
+    );
+    return state as *mut crate::gzguts_h::gz_state as crate::zlib_h::gzFile;
 }
 pub unsafe extern "C" fn gzopen(
     mut path: *const ::core::ffi::c_char,
@@ -381,24 +378,27 @@ fn gzrewind_is_valid(mode: ::core::ffi::c_int, err: ::core::ffi::c_int) -> bool 
 }
 
 pub unsafe extern "C" fn gzrewind(mut file: crate::zlib_h::gzFile) -> ::core::ffi::c_int {
-    let mut state: crate::gzguts_h::gz_statep =
-        ::core::ptr::null_mut::<crate::gzguts_h::gz_state>();
     if file.is_null() {
         return -1 as ::core::ffi::c_int;
     }
-    state = file as crate::gzguts_h::gz_statep;
-    if !gzrewind_is_valid((*state).mode, (*state).err) {
+    let state = &mut *(file as crate::gzguts_h::gz_statep);
+    if !gzrewind_is_valid(state.mode, state.err) {
         return -1 as ::core::ffi::c_int;
     }
     if crate::stdlib::lseek64(
-        (*state).fd,
-        (*state).start as crate::stdlib::__off64_t,
+        state.fd,
+        state.start as crate::stdlib::__off64_t,
         crate::stdlib::SEEK_SET,
     ) == -1 as crate::stdlib::__off64_t
     {
         return -1 as ::core::ffi::c_int;
     }
-    gz_reset(state);
+    gz_reset_state(state);
+    gz_error(
+        state as *mut crate::gzguts_h::gz_state,
+        crate::zlib_h::Z_OK,
+        ::core::ptr::null::<::core::ffi::c_char>(),
+    );
     return 0 as ::core::ffi::c_int;
 }
 #[export_name = "gzrewind"]
