@@ -750,6 +750,35 @@ unsafe extern "C" fn deflateStateCheck(mut strm: crate::zlib_h::z_streamp) -> ::
     }
     return 0 as ::core::ffi::c_int;
 }
+
+// Insert the initial dictionary strings into the hash chains.  The caller
+// supplies bounded views of the state allocations, so this kernel can keep
+// the cursor arithmetic and table updates entirely pointer-free.
+fn insert_dictionary_hashes(
+    window: &[crate::stdlib::Bytef],
+    head: &mut [crate::src::deflate::Posf],
+    prev: &mut [crate::src::deflate::Posf],
+    mut ins_h: crate::stdlib::uInt,
+    hash_shift: crate::stdlib::uInt,
+    hash_mask: crate::stdlib::uInt,
+    w_mask: crate::stdlib::uInt,
+    mut str: crate::stdlib::uInt,
+    count: crate::stdlib::uInt,
+) -> (crate::stdlib::uInt, crate::stdlib::uInt) {
+    for _ in 0..count {
+        let byte_index = str
+            .wrapping_add(crate::zutil_h::MIN_MATCH as crate::stdlib::uInt)
+            .wrapping_sub(1) as usize;
+        ins_h = ((ins_h << hash_shift) ^ window[byte_index] as crate::stdlib::uInt) & hash_mask;
+        let prev_index = (str & w_mask) as usize;
+        let head_index = ins_h as usize;
+        prev[prev_index] = head[head_index];
+        head[head_index] = str as crate::src::deflate::Pos as crate::src::deflate::Posf;
+        str = str.wrapping_add(1);
+    }
+    (str, ins_h)
+}
+
 pub unsafe extern "C" fn deflateSetDictionary(
     mut strm: crate::zlib_h::z_streamp,
     mut dictionary: *const crate::stdlib::Bytef,
@@ -804,23 +833,20 @@ pub unsafe extern "C" fn deflateSetDictionary(
         n = (*s).lookahead.wrapping_sub(
             (crate::zutil_h::MIN_MATCH - 1 as ::core::ffi::c_int) as crate::stdlib::uInt,
         );
-        loop {
-            (*s).ins_h = ((*s).ins_h << (*s).hash_shift
-                ^ *(*s).window.offset(
-                    str.wrapping_add(3 as crate::stdlib::uInt)
-                        .wrapping_sub(1 as crate::stdlib::uInt) as isize,
-                ) as crate::stdlib::uInt)
-                & (*s).hash_mask;
-            *(*s).prev.offset((str & (*s).w_mask) as isize) =
-                *(*s).head.offset((*s).ins_h as isize);
-            *(*s).head.offset((*s).ins_h as isize) =
-                str as crate::src::deflate::Pos as crate::src::deflate::Posf;
-            str = str.wrapping_add(1);
-            n = n.wrapping_sub(1);
-            if n == 0 {
-                break;
-            }
-        }
+        let window = ::core::slice::from_raw_parts((*s).window, (*s).window_size as usize);
+        let head = ::core::slice::from_raw_parts_mut((*s).head, (*s).hash_size as usize);
+        let prev = ::core::slice::from_raw_parts_mut((*s).prev, (*s).w_size as usize);
+        (str, (*s).ins_h) = insert_dictionary_hashes(
+            window,
+            head,
+            prev,
+            (*s).ins_h,
+            (*s).hash_shift,
+            (*s).hash_mask,
+            (*s).w_mask,
+            str,
+            n,
+        );
         (*s).strstart = str;
         (*s).lookahead =
             (crate::zutil_h::MIN_MATCH - 1 as ::core::ffi::c_int) as crate::stdlib::uInt;
