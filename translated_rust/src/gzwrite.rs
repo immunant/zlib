@@ -13,7 +13,6 @@ pub use crate::stdlib::ssize_t;
 pub use crate::src::deflate::deflate;
 pub use crate::src::deflate::deflateEnd;
 pub use crate::src::deflate::deflateInit2_;
-pub use crate::src::deflate::deflateParams;
 pub use crate::src::deflate::internal_state;
 pub use crate::stdlib::uInt;
 pub use crate::stdlib::uLong;
@@ -676,13 +675,18 @@ fn gzsetparams(
         {
             return state.err;
         }
-        unsafe {
-            crate::src::deflate::deflateParams(
-                &raw mut state.strm as *mut crate::zlib_h::z_stream_s,
-                level,
-                strategy,
-            );
-        }
+        let deflate_state = unsafe {
+            (state.strm.state as *mut crate::src::deflate::deflate_state).as_mut()
+        };
+        let Some(deflate_state) = deflate_state else {
+            return crate::zlib_h::Z_STREAM_ERROR;
+        };
+        let _ = crate::src::deflate::deflateParams(
+            &mut state.strm,
+            deflate_state,
+            level,
+            strategy,
+        );
     }
     state.level = level;
     state.strategy = strategy;

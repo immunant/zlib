@@ -1368,18 +1368,16 @@ pub unsafe extern "C" fn deflatePrime_ffi(
     );
     deflate_prime(Some(strm), Some(state), Some(pending_buf), bits, value)
 }
-pub unsafe extern "C" fn deflateParams(
-    mut strm: crate::zlib_h::z_streamp,
+pub(crate) fn deflateParams(
+    strm: &mut crate::zlib_h::z_stream,
+    state: &mut crate::src::deflate::deflate_state,
     mut level: ::core::ffi::c_int,
     mut strategy: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
-    let mut s: *mut crate::src::deflate::deflate_state =
-        ::core::ptr::null_mut::<crate::src::deflate::deflate_state>();
     let mut func: compress_func = None;
-    if deflateStateCheck(strm) != 0 {
+    if !deflate_state_valid(strm, state) {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    s = (*strm).state as *mut crate::src::deflate::deflate_state;
     if level == crate::zlib_h::Z_DEFAULT_COMPRESSION {
         level = 6 as ::core::ffi::c_int;
     }
@@ -1390,57 +1388,60 @@ pub unsafe extern "C" fn deflateParams(
     {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    func = configuration_table[(*s).level as usize].func;
-    if (strategy != (*s).strategy || func != configuration_table[level as usize].func)
-        && (*s).last_flush != -2 as ::core::ffi::c_int
+    func = configuration_table[state.level as usize].func;
+    if (strategy != state.strategy || func != configuration_table[level as usize].func)
+        && state.last_flush != -2 as ::core::ffi::c_int
     {
-        let mut err: ::core::ffi::c_int = deflate(strm, crate::zlib_h::Z_BLOCK);
+        let err = unsafe {
+            deflate(
+                strm as *mut crate::zlib_h::z_stream,
+                crate::zlib_h::Z_BLOCK,
+            )
+        };
         if err == crate::zlib_h::Z_STREAM_ERROR {
             return err;
         }
-        if (*strm).avail_in != 0
-            || (*s).strstart as ::core::ffi::c_long - (*s).block_start
-                + (*s).lookahead as ::core::ffi::c_long
+        if strm.avail_in != 0
+            || state.strstart as ::core::ffi::c_long - state.block_start
+                + state.lookahead as ::core::ffi::c_long
                 != 0
         {
             return crate::zlib_h::Z_BUF_ERROR;
         }
     }
-    if (*s).level != level {
-        if (*s).level == 0 as ::core::ffi::c_int && (*s).matches != 0 as crate::stdlib::uInt {
-            if (*s).matches == 1 as crate::stdlib::uInt {
-                let head = ::core::slice::from_raw_parts_mut(
-                    (*s).head,
-                    (*s).hash_size as usize,
-                );
-                let prev = ::core::slice::from_raw_parts_mut((*s).prev, (*s).w_size as usize);
-                if !slide_hash(&mut *s, head, prev) {
+    if state.level != level {
+        if state.level == 0 as ::core::ffi::c_int && state.matches != 0 as crate::stdlib::uInt {
+            if state.matches == 1 as crate::stdlib::uInt {
+                let head = unsafe {
+                    ::core::slice::from_raw_parts_mut(state.head, state.hash_size as usize)
+                };
+                let prev = unsafe {
+                    ::core::slice::from_raw_parts_mut(state.prev, state.w_size as usize)
+                };
+                if !slide_hash(state, head, prev) {
                     return crate::zlib_h::Z_STREAM_ERROR;
                 }
             } else {
-                *(*s)
-                    .head
-                    .offset((*s).hash_size.wrapping_sub(1 as crate::stdlib::uInt) as isize) =
-                    NIL as crate::src::deflate::Posf;
-                crate::stdlib::memset(
-                    (*s).head as *mut ::core::ffi::c_void,
-                    0 as ::core::ffi::c_int,
-                    ((*s).hash_size.wrapping_sub(1 as crate::stdlib::uInt)
-                        as crate::__stddef_size_t_h::size_t)
-                        .wrapping_mul(::core::mem::size_of::<crate::src::deflate::Posf>()),
-                );
-                (*s).slid = 0 as ::core::ffi::c_int;
+                let head = unsafe {
+                    ::core::slice::from_raw_parts_mut(state.head, state.hash_size as usize)
+                };
+                let Some((last, rest)) = head.split_last_mut() else {
+                    return crate::zlib_h::Z_STREAM_ERROR;
+                };
+                rest.fill(0);
+                *last = NIL as crate::src::deflate::Posf;
+                state.slid = 0 as ::core::ffi::c_int;
             }
-            (*s).matches = 0 as crate::stdlib::uInt;
+            state.matches = 0 as crate::stdlib::uInt;
         }
-        (*s).level = level;
-        (*s).max_lazy_match = configuration_table[level as usize].max_lazy as crate::stdlib::uInt;
-        (*s).good_match = configuration_table[level as usize].good_length as crate::stdlib::uInt;
-        (*s).nice_match = configuration_table[level as usize].nice_length as ::core::ffi::c_int;
-        (*s).max_chain_length =
+        state.level = level;
+        state.max_lazy_match = configuration_table[level as usize].max_lazy as crate::stdlib::uInt;
+        state.good_match = configuration_table[level as usize].good_length as crate::stdlib::uInt;
+        state.nice_match = configuration_table[level as usize].nice_length as ::core::ffi::c_int;
+        state.max_chain_length =
             configuration_table[level as usize].max_chain as crate::stdlib::uInt;
     }
-    (*s).strategy = strategy;
+    state.strategy = strategy;
     return crate::zlib_h::Z_OK;
 }
 #[export_name = "deflateParams"]
@@ -1450,7 +1451,18 @@ pub unsafe extern "C" fn deflateParams_ffi(
     mut level: ::core::ffi::c_int,
     mut strategy: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
-    deflateParams(strm, level, strategy)
+    let Some(strm) = strm.as_mut() else {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    };
+    // A missing allocator pair makes `state` untrustworthy; reject it before
+    // borrowing the state handle.
+    if strm.zalloc.is_none() || strm.zfree.is_none() {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    }
+    let Some(state) = (strm.state as *mut crate::src::deflate::deflate_state).as_mut() else {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    };
+    deflateParams(strm, state, level, strategy)
 }
 fn deflate_tune(
     state: &mut crate::src::deflate::deflate_state,
