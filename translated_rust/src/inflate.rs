@@ -172,8 +172,9 @@ struct InflateWindowLayout {
     len: usize,
 }
 
-/// Safe owner for a default-allocator inflate history window. Custom and
-/// mixed allocator streams keep their callback-provided allocation.
+/// Safe working storage for an inflate history window. Callback streams keep
+/// their allocator-provided handle separately in `inflate_state::window`, but
+/// perform all history work in this checked byte owner as well.
 #[derive(Clone)]
 struct InflateOwnedWindow {
     bytes: Vec<crate::stdlib::Bytef>,
@@ -185,7 +186,7 @@ struct InflateOwnedWindow {
 enum InflateWindowStorage {
     Absent,
     Owned(InflateOwnedWindow),
-    CallbackAllocation,
+    CallbackAllocation(InflateOwnedWindow),
     CallerBorrowed,
 }
 
@@ -197,7 +198,7 @@ impl InflateWindowStorage {
     fn matches_handle(&self, has_window: bool) -> bool {
         match self {
             Self::Absent => !has_window,
-            Self::Owned(_) | Self::CallbackAllocation | Self::CallerBorrowed => has_window,
+            Self::Owned(_) | Self::CallbackAllocation(_) | Self::CallerBorrowed => has_window,
         }
     }
 
@@ -205,7 +206,7 @@ impl InflateWindowStorage {
         match self {
             Self::Absent => None,
             Self::Owned(window) => Some(window),
-            Self::CallbackAllocation | Self::CallerBorrowed => None,
+            Self::CallbackAllocation(_) | Self::CallerBorrowed => None,
         }
     }
 
@@ -223,8 +224,18 @@ impl InflateWindowStorage {
         *self = Self::Owned(window);
     }
 
-    fn install_callback_allocation(&mut self) {
-        *self = Self::CallbackAllocation;
+    fn take_callback_allocation(&mut self) -> Option<InflateOwnedWindow> {
+        match ::core::mem::replace(self, Self::Absent) {
+            Self::CallbackAllocation(window) => Some(window),
+            storage => {
+                *self = storage;
+                None
+            }
+        }
+    }
+
+    fn install_callback_allocation(&mut self, window: InflateOwnedWindow) {
+        *self = Self::CallbackAllocation(window);
     }
 
     fn install_caller_borrowed(&mut self) {
@@ -993,17 +1004,22 @@ fn updatewindow(
             let Some(zalloc) = strm.zalloc else {
                 return 1 as ::core::ffi::c_int;
             };
-            state.window = ::core::ptr::NonNull::new(
+            let window = ::core::ptr::NonNull::new(
                 zalloc(
                     strm.opaque,
                     layout.allocation_items,
                     ::core::mem::size_of::<::core::ffi::c_uchar>() as crate::stdlib::uInt,
-                ) as *mut ::core::ffi::c_uchar
+                ) as *mut ::core::ffi::c_uchar,
             );
-            if state.window.is_none() {
+            let Some(window) = window else {
                 return 1 as ::core::ffi::c_int;
-            }
-            state.window_storage.install_callback_allocation();
+            };
+            let Some(working_window) = layout.try_owned() else {
+                strm.zfree.expect("checked allocator")(strm.opaque, window.as_ptr().cast());
+                return 1 as ::core::ffi::c_int;
+            };
+            state.window = Some(window);
+            state.window_storage.install_callback_allocation(working_window);
         }
     }
     if state.wsize == 0 as ::core::ffi::c_uint {
@@ -1017,9 +1033,8 @@ fn updatewindow(
     let result = if state.window_storage.is_owned() {
         update_owned_inflate_window(state, input)
     } else {
-        // The callback allocation establishes the window's `wsize` bytes for
-        // this initialized stream state. Keep its raw handle behind the named
-        // borrowing boundary; callers use only references and slices.
+        // Callback streams retain their allocator allocation as a lifetime
+        // token, while their history bytes stay in checked Rust storage.
         update_callback_owned_inflate_window(state, layout.len, input)
     };
     result.is_err() as ::core::ffi::c_int
@@ -1054,11 +1069,9 @@ fn update_owned_inflate_window(
     result
 }
 
-/// Borrow exactly one callback-owned inflate window for a typed operation.
-///
-/// The ABI allocator owns this buffer, so its handle stays at this
-/// type-specific boundary. Callers receive ordinary slices, which keeps the
-/// history updater, decoder, and copy path safe.
+/// Borrow exactly one callback-backed working window for a typed operation.
+/// The ABI allocation remains a compatibility lifetime token, while this
+/// helper exposes only the independent checked working bytes to callers.
 fn use_callback_inflate_window<R>(
     state: &mut crate::src::inflate::inflate_state,
     len: usize,
@@ -1067,9 +1080,14 @@ fn use_callback_inflate_window<R>(
         &mut [crate::stdlib::Bytef],
     ) -> R,
 ) -> Result<R, ()> {
-    let window = state.window.ok_or(())?;
-    let window = unsafe { ::core::slice::from_raw_parts_mut(window.as_ptr(), len) };
-    Ok(action(state, window))
+    let mut window = state.window_storage.take_callback_allocation().ok_or(())?;
+    if window.bytes.len() != len {
+        state.window_storage.install_callback_allocation(window);
+        return Err(());
+    }
+    let result = action(state, window.bytes.as_mut_slice());
+    state.window_storage.install_callback_allocation(window);
+    Ok(result)
 }
 
 /// Copy a match from the history window without exposing the callback-owned
@@ -3634,12 +3652,19 @@ fn initialize_inflate_copy(
                 return crate::zlib_h::Z_MEM_ERROR;
             }
             if !window.is_null() {
-                // Publish the callback destination only to the existing typed
-                // window boundary. It can then copy the validated live history
-                // from the source through ordinary slices, without another raw
-                // conversion in this copy setup path.
+                // Keep the callback allocation for matching teardown, but
+                // duplicate history through independent checked storage.
+                let Some(working_window) = layout.try_owned() else {
+                    let zfree = Some(allocation_stream.zfree.expect("validated allocator"))
+                        .expect("validated allocator");
+                    zfree(allocation_stream.opaque, window.cast());
+                    zfree(allocation_stream.opaque, allocation_stream.state.cast());
+                    return crate::zlib_h::Z_MEM_ERROR;
+                };
                 copy_ref.window = ::core::ptr::NonNull::new(window);
-                copy_ref.window_storage.install_callback_allocation();
+                copy_ref
+                    .window_storage
+                    .install_callback_allocation(working_window);
                 let history_len = source_state.whave as usize;
                 let copied = use_callback_inflate_window(source_state, layout.len, |_, source| {
                     use_callback_inflate_window(copy_ref, layout.len, |_, destination| {
