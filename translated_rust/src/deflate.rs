@@ -729,22 +729,27 @@ pub unsafe extern "C" fn deflateInit2__ffi(
     )
 }
 unsafe extern "C" fn deflateStateCheck(mut strm: crate::zlib_h::z_streamp) -> ::core::ffi::c_int {
-    let mut s: *mut crate::src::deflate::deflate_state =
-        ::core::ptr::null_mut::<crate::src::deflate::deflate_state>();
-    if strm.is_null() || (*strm).zalloc.is_none() || (*strm).zfree.is_none() {
+    if strm.is_null() {
         return 1 as ::core::ffi::c_int;
     }
-    s = (*strm).state as *mut crate::src::deflate::deflate_state;
-    if s.is_null()
-        || (*s).strm != strm
-        || (*s).status != crate::src::deflate::INIT_STATE
-            && (*s).status != crate::src::deflate::GZIP_STATE
-            && (*s).status != crate::src::deflate::EXTRA_STATE
-            && (*s).status != crate::src::deflate::NAME_STATE
-            && (*s).status != crate::src::deflate::COMMENT_STATE
-            && (*s).status != crate::src::deflate::HCRC_STATE
-            && (*s).status != crate::src::deflate::BUSY_STATE
-            && (*s).status != crate::src::deflate::FINISH_STATE
+    let strm_ref = &*strm;
+    if strm_ref.zalloc.is_none() || strm_ref.zfree.is_none() {
+        return 1 as ::core::ffi::c_int;
+    }
+    let s = strm_ref.state as *mut crate::src::deflate::deflate_state;
+    if s.is_null() {
+        return 1 as ::core::ffi::c_int;
+    }
+    let state = &*s;
+    if state.strm != strm
+        || state.status != crate::src::deflate::INIT_STATE
+            && state.status != crate::src::deflate::GZIP_STATE
+            && state.status != crate::src::deflate::EXTRA_STATE
+            && state.status != crate::src::deflate::NAME_STATE
+            && state.status != crate::src::deflate::COMMENT_STATE
+            && state.status != crate::src::deflate::HCRC_STATE
+            && state.status != crate::src::deflate::BUSY_STATE
+            && state.status != crate::src::deflate::FINISH_STATE
     {
         return 1 as ::core::ffi::c_int;
     }

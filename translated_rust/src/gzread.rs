@@ -652,7 +652,7 @@ pub unsafe extern "C" fn gzgetc(mut file: crate::zlib_h::gzFile) -> ::core::ffi:
         let byte = ::core::slice::from_raw_parts(state.x.next, state.x.have as usize)[0];
         state.x.have = state.x.have.wrapping_sub(1);
         state.x.pos += 1;
-        state.x.next = state.x.next.offset(1);
+        state.x.next = state.x.next.wrapping_add(1);
         return byte as ::core::ffi::c_int;
     }
     return if gz_read(

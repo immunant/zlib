@@ -473,10 +473,16 @@ unsafe fn gzputc(
         if strm.avail_in == 0 as crate::stdlib::uInt {
             strm.next_in = in_0 as *mut crate::stdlib::Bytef;
         }
-        have = strm
-            .next_in
-            .offset(strm.avail_in as isize)
-            .offset_from(in_0) as ::core::ffi::c_uint;
+        let Some(end) = strm.next_in.addr().checked_add(strm.avail_in as usize) else {
+            return -1 as ::core::ffi::c_int;
+        };
+        let Some(have_at) = end.checked_sub(in_0.addr()) else {
+            return -1 as ::core::ffi::c_int;
+        };
+        let Ok(have_value) = ::core::ffi::c_uint::try_from(have_at) else {
+            return -1 as ::core::ffi::c_int;
+        };
+        have = have_value;
         if have < size {
             let buffer = ::core::slice::from_raw_parts_mut(in_0, size as usize);
             if !write_buffered_byte(buffer, have as usize, c as ::core::ffi::c_uchar) {
