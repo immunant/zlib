@@ -722,22 +722,17 @@ pub unsafe extern "C" fn gzungetc_ffi(
     }
     gzungetc(c, &mut *(file as crate::gzguts_h::gz_statep))
 }
-pub unsafe extern "C" fn gzgets(
-    state: &mut crate::gzguts_h::gz_state,
-    mut buf: *mut ::core::ffi::c_char,
-    mut len: ::core::ffi::c_int,
-) -> *mut ::core::ffi::c_char {
+// The ABI wrapper binds the caller's writable string once.  The read loop can
+// then use a Rust slice for its cursor and terminator, leaving only the
+// already-owned gzip output buffer as a raw boundary here.
+fn gzgets(state: &mut crate::gzguts_h::gz_state, buf: &mut [::core::ffi::c_char]) -> bool {
     let mut left: ::core::ffi::c_uint = 0;
     let mut n: ::core::ffi::c_uint = 0;
-    let mut str: *mut ::core::ffi::c_char = ::core::ptr::null_mut::<::core::ffi::c_char>();
-    if buf.is_null() || len < 1 as ::core::ffi::c_int {
-        return ::core::ptr::null_mut::<::core::ffi::c_char>();
-    }
+    let mut written = 0usize;
     if !gz_prepare_read_operation(state) {
-        return ::core::ptr::null_mut::<::core::ffi::c_char>();
+        return false;
     }
-    str = buf;
-    left = crate::src::gzlib::gz_gets_remaining(len);
+    left = crate::src::gzlib::gz_gets_remaining(buf.len() as ::core::ffi::c_int);
     if left != 0 {
         while !(state.x.have == 0 as ::core::ffi::c_uint
             && gz_fetch(state) == -1 as ::core::ffi::c_int)
@@ -751,25 +746,24 @@ pub unsafe extern "C" fn gzgets(
                     n = chunk;
                     // SAFETY: `gz_gets_plan()` bounds this view by `x.have`,
                     // whose initialized bytes begin at `x.next`.
-                    let source = ::core::slice::from_raw_parts(state.x.next, n as usize);
+                    let source = unsafe {
+                        ::core::slice::from_raw_parts(state.x.next, n as usize)
+                    };
                     let found_eol = if let Some(eol) = source.iter().position(|byte| *byte == b'\n') {
                         n = (eol as ::core::ffi::c_uint).wrapping_add(1);
                         true
                     } else {
                         false
                     };
-                    // SAFETY: the caller supplied `len` writable bytes and
-                    // the plan bounds this copy by the remaining request;
-                    // as for C's `memcpy`, the distinct caller and gzip
-                    // buffers must not overlap.
-                    let destination = ::core::slice::from_raw_parts_mut(
-                        buf as *mut ::core::ffi::c_uchar,
-                        n as usize,
-                    );
-                    destination.copy_from_slice(&source[..n as usize]);
+                    for (destination, source) in buf[written..written + n as usize]
+                        .iter_mut()
+                        .zip(&source[..n as usize])
+                    {
+                        *destination = *source as ::core::ffi::c_char;
+                    }
                     gz_consume(state, n as crate::stdlib::off64_t);
                     crate::src::gzlib::gz_gets_after_copy(&mut left, n);
-                    buf = buf.wrapping_add(n as usize);
+                    written += n as usize;
                     if !crate::src::gzlib::gz_gets_should_continue(left, found_eol) {
                         break;
                     }
@@ -777,11 +771,11 @@ pub unsafe extern "C" fn gzgets(
             }
         }
     }
-    if buf == str {
-        return ::core::ptr::null_mut::<::core::ffi::c_char>();
+    if written == 0 {
+        return false;
     }
-    *buf = 0 as ::core::ffi::c_char;
-    return str;
+    buf[written] = 0 as ::core::ffi::c_char;
+    true
 }
 #[export_name = "gzgets"]
 
@@ -790,10 +784,18 @@ pub unsafe extern "C" fn gzgets_ffi(
     mut buf: *mut ::core::ffi::c_char,
     mut len: ::core::ffi::c_int,
 ) -> *mut ::core::ffi::c_char {
-    if file.is_null() {
+    if file.is_null() || buf.is_null() || len < 1 as ::core::ffi::c_int {
         return ::core::ptr::null_mut::<::core::ffi::c_char>();
     }
-    gzgets(&mut *(file as crate::gzguts_h::gz_statep), buf, len)
+    // SAFETY: C's `gzgets` contract supplies a writable `len`-byte buffer.
+    // Keep that caller-buffer conversion at this ABI boundary; the read loop
+    // itself only sees the resulting bounded Rust slice.
+    let destination = ::core::slice::from_raw_parts_mut(buf, len as usize);
+    if gzgets(&mut *(file as crate::gzguts_h::gz_statep), destination) {
+        buf
+    } else {
+        ::core::ptr::null_mut::<::core::ffi::c_char>()
+    }
 }
 // Direct-mode querying only needs a validated, bound state. `gz_look` keeps
 // its allocation and descriptor boundaries scoped inside that coordinator.
