@@ -1748,7 +1748,9 @@ pub unsafe extern "C" fn gzwrite_ffi(
 ) -> ::core::ffi::c_int {
     let mut state: crate::gzguts_h::gz_statep =
         ::core::ptr::null_mut::<crate::gzguts_h::gz_state>();
-    if file.is_null() {
+    if file.is_null()
+        || file.align_offset(::core::mem::align_of::<crate::gzguts_h::gz_state>()) != 0
+    {
         return 0 as ::core::ffi::c_int;
     }
     state = file as crate::gzguts_h::gz_statep;
@@ -1787,7 +1789,9 @@ pub unsafe extern "C" fn gzfwrite_ffi(
 ) -> crate::stdlib::z_size_t {
     let mut state: crate::gzguts_h::gz_statep =
         ::core::ptr::null_mut::<crate::gzguts_h::gz_state>();
-    if file.is_null() {
+    if file.is_null()
+        || file.align_offset(::core::mem::align_of::<crate::gzguts_h::gz_state>()) != 0
+    {
         return 0 as crate::stdlib::z_size_t;
     }
     state = file as crate::gzguts_h::gz_statep;
@@ -1828,7 +1832,9 @@ pub unsafe extern "C" fn gzputc_ffi(
     let buf = [c as ::core::ffi::c_uchar];
     let mut state: crate::gzguts_h::gz_statep =
         ::core::ptr::null_mut::<crate::gzguts_h::gz_state>();
-    if file.is_null() {
+    if file.is_null()
+        || file.align_offset(::core::mem::align_of::<crate::gzguts_h::gz_state>()) != 0
+    {
         return -1 as ::core::ffi::c_int;
     }
     state = file as crate::gzguts_h::gz_statep;
@@ -1867,7 +1873,9 @@ pub unsafe extern "C" fn gzputs_ffi(
     let mut put: crate::stdlib::z_size_t = 0;
     let mut state: crate::gzguts_h::gz_statep =
         ::core::ptr::null_mut::<crate::gzguts_h::gz_state>();
-    if file.is_null() {
+    if file.is_null()
+        || file.align_offset(::core::mem::align_of::<crate::gzguts_h::gz_state>()) != 0
+    {
         return -1 as ::core::ffi::c_int;
     }
     state = file as crate::gzguts_h::gz_statep;
@@ -1905,7 +1913,9 @@ pub unsafe extern "C" fn gzflush_ffi(
 ) -> ::core::ffi::c_int {
     let mut state: crate::gzguts_h::gz_statep =
         ::core::ptr::null_mut::<crate::gzguts_h::gz_state>();
-    if file.is_null() {
+    if file.is_null()
+        || file.align_offset(::core::mem::align_of::<crate::gzguts_h::gz_state>()) != 0
+    {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
     state = file as crate::gzguts_h::gz_statep;
@@ -1940,7 +1950,9 @@ pub unsafe extern "C" fn gzsetparams_ffi(
 ) -> ::core::ffi::c_int {
     let mut state: crate::gzguts_h::gz_statep =
         ::core::ptr::null_mut::<crate::gzguts_h::gz_state>();
-    if file.is_null() {
+    if file.is_null()
+        || file.align_offset(::core::mem::align_of::<crate::gzguts_h::gz_state>()) != 0
+    {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
     state = file as crate::gzguts_h::gz_statep;
@@ -1991,7 +2003,9 @@ pub unsafe extern "C" fn gzsetparams_ffi(
 pub unsafe extern "C" fn gzclose_w_ffi(mut file: crate::zlib_h::gzFile) -> ::core::ffi::c_int {
     let mut state: crate::gzguts_h::gz_statep =
         ::core::ptr::null_mut::<crate::gzguts_h::gz_state>();
-    if file.is_null() {
+    if file.is_null()
+        || file.align_offset(::core::mem::align_of::<crate::gzguts_h::gz_state>()) != 0
+    {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
     state = file as crate::gzguts_h::gz_statep;
@@ -2058,18 +2072,19 @@ mod tests {
         gz_zero_initial_step, gz_zero_initialize_buffer, gz_zero_initialize_chunk_buffer,
         gz_zero_needs_initialization, gz_zero_pending_step, gz_zero_prepare_and_initialize_chunk,
         gz_zero_progress, gzclose_buffer_action, gzclose_mode_is_writable, gzclose_operation_error,
-        gzclose_w_result, gzflush_action, gzflush_mode_is_valid, gzfwrite_request, gzfwrite_result,
-        gzputc_result, gzputc_write_action, gzputs_len_fits_int, gzputs_result, gzsetparams_action,
-        gzsetparams_buffer_action, gzsetparams_requires_deflate, gzsetparams_settings_match,
-        gzsetparams_state_is_usable, gzsetparams_zero_action, gzwrite_request, GzCloseBufferAction,
-        GzCompDeflateAction, GzCompDirectLoopAction, GzCompDirectWriteProgress,
-        GzCompDirectWriteResult, GzCompOutputBufferAction, GzCompOutputBufferProgress,
-        GzCompOutputFlushStep, GzCompOutputWriteProgress, GzCompOutputWriteResult,
-        GzCompResetAction, GzCompWriteFailure, GzCompWriteResult, GzFlushAction, GzFwriteRequest,
-        GzInitMode, GzPutcWriteAction, GzSetParamsAction, GzSetParamsBufferAction,
-        GzSetParamsZeroAction, GzWriteBufferedCopyPlan, GzWriteBufferedInputAction,
-        GzWriteDirectAction, GzWriteInputStorage, GzWritePreparation, GzZeroAction,
-        GzZeroChunkLimits, GzZeroCompressionRequest, GzZeroCore, GzZeroDriveOutcome,
+        gzclose_w_ffi, gzclose_w_result, gzflush_action, gzflush_ffi, gzflush_mode_is_valid,
+        gzfwrite_ffi, gzfwrite_request, gzfwrite_result, gzputc_ffi, gzputc_result,
+        gzputc_write_action, gzputs_ffi, gzputs_len_fits_int, gzputs_result, gzsetparams_action,
+        gzsetparams_buffer_action, gzsetparams_ffi, gzsetparams_requires_deflate,
+        gzsetparams_settings_match, gzsetparams_state_is_usable, gzsetparams_zero_action,
+        gzwrite_ffi, gzwrite_request, GzCloseBufferAction, GzCompDeflateAction,
+        GzCompDirectLoopAction, GzCompDirectWriteProgress, GzCompDirectWriteResult,
+        GzCompOutputBufferAction, GzCompOutputBufferProgress, GzCompOutputFlushStep,
+        GzCompOutputWriteProgress, GzCompOutputWriteResult, GzCompResetAction, GzCompWriteFailure,
+        GzCompWriteResult, GzFlushAction, GzFwriteRequest, GzInitMode, GzPutcWriteAction,
+        GzSetParamsAction, GzSetParamsBufferAction, GzSetParamsZeroAction, GzWriteBufferedCopyPlan,
+        GzWriteBufferedInputAction, GzWriteDirectAction, GzWriteInputStorage, GzWritePreparation,
+        GzZeroAction, GzZeroChunkLimits, GzZeroCompressionRequest, GzZeroCore, GzZeroDriveOutcome,
         GzZeroDriveStatus, GzZeroInitialAction, GzZeroPreparedChunk, GzZeroStep,
     };
 
@@ -2152,6 +2167,36 @@ mod tests {
     fn gzclose_mode_is_writable_only_for_write_mode() {
         assert!(gzclose_mode_is_writable(crate::gzguts_h::GZ_WRITE));
         assert!(!gzclose_mode_is_writable(crate::gzguts_h::GZ_WRITE + 1));
+    }
+
+    #[test]
+    fn gzip_write_operations_reject_misaligned_handles_before_dereferencing() {
+        assert!(::core::mem::align_of::<crate::gzguts_h::gz_state>() > 1);
+        let mut bytes = [0_u8; ::core::mem::size_of::<crate::gzguts_h::gz_state>() + 1];
+        let alignment = ::core::mem::align_of::<crate::gzguts_h::gz_state>();
+        let offset = if bytes.as_ptr().align_offset(alignment) == 0 {
+            1
+        } else {
+            0
+        };
+        let file = bytes.as_mut_ptr().wrapping_add(offset) as crate::zlib_h::gzFile;
+
+        assert_eq!(unsafe { gzwrite_ffi(file, core::ptr::null(), 0) }, 0);
+        assert_eq!(unsafe { gzfwrite_ffi(core::ptr::null(), 1, 1, file) }, 0);
+        assert_eq!(unsafe { gzputc_ffi(file, 0) }, -1);
+        assert_eq!(unsafe { gzputs_ffi(file, core::ptr::null()) }, -1);
+        assert_eq!(
+            unsafe { gzflush_ffi(file, crate::zlib_h::Z_NO_FLUSH) },
+            crate::zlib_h::Z_STREAM_ERROR
+        );
+        assert_eq!(
+            unsafe { gzsetparams_ffi(file, 1, crate::zlib_h::Z_DEFAULT_STRATEGY) },
+            crate::zlib_h::Z_STREAM_ERROR
+        );
+        assert_eq!(
+            unsafe { gzclose_w_ffi(file) },
+            crate::zlib_h::Z_STREAM_ERROR
+        );
     }
 
     #[test]
