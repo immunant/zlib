@@ -73,7 +73,7 @@ fn gz_tell_position(
     pos + if past != 0 { 0 as crate::stdlib::off64_t } else { skip }
 }
 
-fn gz_eof_value(mode: ::core::ffi::c_int, past: ::core::ffi::c_int) -> ::core::ffi::c_int {
+fn gzeof_impl(mode: ::core::ffi::c_int, past: ::core::ffi::c_int) -> ::core::ffi::c_int {
     if mode == crate::gzguts_h::GZ_READ {
         past
     } else {
@@ -599,17 +599,14 @@ pub unsafe extern "C" fn gzoffset(mut file: crate::zlib_h::gzFile) -> crate::std
 pub unsafe extern "C" fn gzoffset_ffi(mut file: crate::zlib_h::gzFile) -> crate::stdlib::off_t {
     gzoffset(file)
 }
-pub unsafe extern "C" fn gzeof(mut file: crate::zlib_h::gzFile) -> ::core::ffi::c_int {
+#[export_name = "gzeof"]
+
+pub unsafe extern "C" fn gzeof_ffi(mut file: crate::zlib_h::gzFile) -> ::core::ffi::c_int {
     if file.is_null() {
         return 0 as ::core::ffi::c_int;
     }
     let state = &*(file as crate::gzguts_h::gz_statep);
-    return gz_eof_value(state.mode, state.past);
-}
-#[export_name = "gzeof"]
-
-pub unsafe extern "C" fn gzeof_ffi(mut file: crate::zlib_h::gzFile) -> ::core::ffi::c_int {
-    gzeof(file)
+    gzeof_impl(state.mode, state.past)
 }
 pub unsafe extern "C" fn gzerror(
     mut file: crate::zlib_h::gzFile,
