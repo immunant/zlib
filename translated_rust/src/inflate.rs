@@ -372,6 +372,37 @@ fn inflate_zlib_header_plan(
     })
 }
 
+/// The scalar state selected by a valid gzip flags word.  The ordinary
+/// decoder still owns consuming that word and, when present, writing the
+/// caller's retained header; this plan only validates the gzip-defined bits
+/// and selects the safe scalar commits.
+struct InflateGzipFlagsPlan {
+    flags: ::core::ffi::c_int,
+    text: ::core::ffi::c_int,
+    update_crc: bool,
+}
+
+/// Validate the two-byte gzip method/flags word after the cursor loop has
+/// assembled it.  Keep `hold` intact so the transitional boundary preserves
+/// its exact CRC byte order and cursor reset behavior.
+fn inflate_gzip_flags_plan(
+    wrap: ::core::ffi::c_int,
+    hold: ::core::ffi::c_ulong,
+) -> Result<InflateGzipFlagsPlan, usize> {
+    let flags = hold as ::core::ffi::c_int;
+    if flags & 0xff != crate::zlib_h::Z_DEFLATED {
+        return Err(1);
+    }
+    if flags & 0xe000 != 0 {
+        return Err(3);
+    }
+    Ok(InflateGzipFlagsPlan {
+        flags,
+        text: ((hold >> 8) & 1) as ::core::ffi::c_int,
+        update_crc: flags & 0x200 != 0 && wrap & 4 != 0,
+    })
+}
+
 /// Preserve zlib's final no-progress/finish result mapping independently of
 /// the ABI cursor commit that precedes it.
 fn inflate_exit_status(
@@ -1571,27 +1602,24 @@ pub fn inflate(
                                                                                                             );
                                                                                                         bits = bits.wrapping_add(8 as ::core::ffi::c_uint);
                                                                                                     }
-                                                                                                    state_ref.flags = hold as ::core::ffi::c_int;
-                                                                                                    if state_ref.flags & 0xff as ::core::ffi::c_int != crate::zlib_h::Z_DEFLATED
-                                                                                                    {
-                                                                                                        strm_ref.msg = INFLATE_ERROR_MESSAGES[1].as_ptr()
-                                                                                                            as *const ::core::ffi::c_char as *mut ::core::ffi::c_char;
-                                                                                                        state_ref.mode = crate::src::inflate::BAD;
-                                                                                                        continue '_inf_leave;
-                                                                                                    } else if state_ref.flags & 0xe000 as ::core::ffi::c_int != 0
-                                                                                                    {
-                                                                                                        strm_ref.msg = INFLATE_ERROR_MESSAGES[3].as_ptr()
-                                                                                                            as *const ::core::ffi::c_char as *mut ::core::ffi::c_char;
-                                                                                                        state_ref.mode = crate::src::inflate::BAD;
-                                                                                                        continue '_inf_leave;
-                                                                                                    } else {
-                                                                                                        if !state_ref.head.is_null() {
-                                                                                                            (*state_ref.head).text = (hold >> 8 as ::core::ffi::c_int
-                                                                                                                & 1 as ::core::ffi::c_ulong) as ::core::ffi::c_int;
+                                                                                                    let flags_plan = match inflate_gzip_flags_plan(
+                                                                                                        state_ref.wrap,
+                                                                                                        hold,
+                                                                                                    ) {
+                                                                                                        Ok(plan) => plan,
+                                                                                                        Err(error) => {
+                                                                                                            strm_ref.msg = INFLATE_ERROR_MESSAGES[error].as_ptr()
+                                                                                                                as *const ::core::ffi::c_char as *mut ::core::ffi::c_char;
+                                                                                                            state_ref.mode = crate::src::inflate::BAD;
+                                                                                                            continue '_inf_leave;
                                                                                                         }
-                                                                                                        if state_ref.flags & 0x200 as ::core::ffi::c_int != 0
-                                                                                                            && state_ref.wrap & 4 as ::core::ffi::c_int != 0
-                                                                                                        {
+                                                                                                    };
+                                                                                                    state_ref.flags = flags_plan.flags;
+                                                                                                    {
+                                                                                                       if !state_ref.head.is_null() {
+                                                                                                            (*state_ref.head).text = flags_plan.text;
+                                                                                                       }
+                                                                                                        if flags_plan.update_crc {
                                                                                                             hbuf[0 as ::core::ffi::c_int as usize] = hold
                                                                                                                 as ::core::ffi::c_uchar;
                                                                                                             hbuf[1 as ::core::ffi::c_int as usize] = (hold
