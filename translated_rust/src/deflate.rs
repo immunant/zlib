@@ -2511,9 +2511,8 @@ pub unsafe extern "C" fn deflate(
     {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    // Keep the ABI projections at this boundary.  The rest of this dispatcher
-    // only uses the scoped stream/state borrows, while the lower-level block
-    // routines continue to receive their existing opaque state pointer.
+    // Keep the ABI projections at this boundary. The lower-level block
+    // routines receive these scoped stream/state borrows directly.
     let strm = &mut *strm;
     let s = &mut *(strm.state as *mut crate::src::deflate::deflate_state);
     if strm.next_out.is_null()
@@ -2905,7 +2904,7 @@ pub unsafe extern "C" fn deflate(
     {
         let mut bstate: block_state = need_more;
         bstate = (if s.level == 0 as ::core::ffi::c_int {
-            deflate_stored(s, flush) as ::core::ffi::c_uint
+            deflate_stored(s, strm, flush) as ::core::ffi::c_uint
         } else if s.strategy == crate::zlib_h::Z_HUFFMAN_ONLY {
             deflate_huff(s, strm, flush) as ::core::ffi::c_uint
         } else if s.strategy == crate::zlib_h::Z_RLE {
@@ -2916,7 +2915,7 @@ pub unsafe extern "C" fn deflate(
                 DeflateAlgorithm::Fast => deflate_fast,
                 DeflateAlgorithm::Slow => deflate_slow,
             };
-            func(s, flush) as ::core::ffi::c_uint
+            func(s, strm, flush) as ::core::ffi::c_uint
         }) as block_state;
         if bstate as ::core::ffi::c_uint
             == finish_started as ::core::ffi::c_int as ::core::ffi::c_uint
@@ -3300,18 +3299,13 @@ fn longest_match_core(
 pub const MAX_STORED: ::core::ffi::c_int = 65535 as ::core::ffi::c_int;
 
 unsafe extern "C" fn deflate_stored(
-    mut s: *mut crate::src::deflate::deflate_state,
+    state: &mut crate::src::deflate::deflate_state,
+    stream: &mut crate::zlib_h::z_stream_s,
     mut flush: ::core::ffi::c_int,
 ) -> block_state {
-    // Keep the opaque-state projection at this implementation boundary.  The
-    // stored-mode policy below can then operate on fields through the scoped
-    // Rust view instead of repeatedly dereferencing the ABI cursor.
-    let state = &mut *s;
-    // The state keeps a validated backlink to its caller stream for the
-    // lifetime of this deflate invocation.  Project it once, so stored-mode
-    // accounting below uses the scoped stream rather than repeatedly
-    // dereferencing that external cursor.
-    let stream = &mut *state.strm.as_ptr();
+    // The dispatcher has already validated and projected the ABI stream and
+    // opaque state. Stored-mode therefore receives those scoped borrows
+    // directly rather than rebuilding either from the legacy backlink.
     // The backing window has the exact `window_size` established by
     // `deflateInit2_()` and retained by `deflateCopy()`. Retain this one
     // bounded view while stored blocks copy or slide its contents.
@@ -3586,12 +3580,11 @@ unsafe extern "C" fn deflate_stored(
 }
 
 unsafe extern "C" fn deflate_fast(
-    mut s: *mut crate::src::deflate::deflate_state,
+    state: &mut crate::src::deflate::deflate_state,
+    stream: &mut crate::zlib_h::z_stream_s,
     mut flush: ::core::ffi::c_int,
 ) -> block_state {
     let mut hash_head: crate::src::deflate::IPos = 0;
-    let state = &mut *s;
-    let stream = &mut *state.strm.as_ptr();
     let mut bflush: ::core::ffi::c_int = 0;
     let sym_buf_start = state.sym_buf_start;
     // `pending_buf` is the full allocation; symbols occupy its suffix after
@@ -3605,7 +3598,7 @@ unsafe extern "C" fn deflate_fast(
     );
     loop {
         if state.lookahead < crate::src::deflate::MIN_LOOKAHEAD as crate::stdlib::uInt {
-            fill_window(s);
+            fill_window(state as *mut crate::src::deflate::deflate_state);
             if state.lookahead < crate::src::deflate::MIN_LOOKAHEAD as crate::stdlib::uInt
                 && flush == crate::zlib_h::Z_NO_FLUSH
             {
@@ -3925,16 +3918,14 @@ unsafe extern "C" fn deflate_fast(
 }
 
 unsafe extern "C" fn deflate_slow(
-    mut s: *mut crate::src::deflate::deflate_state,
+    state: &mut crate::src::deflate::deflate_state,
+    stream: &mut crate::zlib_h::z_stream_s,
     mut flush: ::core::ffi::c_int,
 ) -> block_state {
     let mut hash_head: crate::src::deflate::IPos = 0;
     let mut bflush: ::core::ffi::c_int = 0;
-    // The legacy dispatcher still owns the ABI cursor.  Project it once so
-    // the lazy-match state machine below only works through this scoped
-    // state view and bounded allocation slices.
-    let state = &mut *s;
-    let stream = &mut *state.strm.as_ptr();
+    // The dispatcher supplies the scoped ABI stream and state borrows, so
+    // the lazy-match loop need not rebuild either from raw pointers.
     let sym_buf_start = state.sym_buf_start;
     // `pending_buf` is the full allocation; symbols occupy its suffix after
     // the literal area. Keeping one full-capacity view avoids a raw cursor.
@@ -3947,7 +3938,7 @@ unsafe extern "C" fn deflate_slow(
     );
     loop {
         if state.lookahead < crate::src::deflate::MIN_LOOKAHEAD as crate::stdlib::uInt {
-            fill_window(s);
+            fill_window(state as *mut crate::src::deflate::deflate_state);
             if state.lookahead < crate::src::deflate::MIN_LOOKAHEAD as crate::stdlib::uInt
                 && flush == crate::zlib_h::Z_NO_FLUSH
             {
@@ -4386,12 +4377,11 @@ fn rle_match_length(
 }
 
 unsafe extern "C" fn deflate_rle(
-    mut s: *mut crate::src::deflate::deflate_state,
+    state: &mut crate::src::deflate::deflate_state,
     stream: &mut crate::zlib_h::z_stream_s,
     mut flush: ::core::ffi::c_int,
 ) -> block_state {
     let mut bflush: ::core::ffi::c_int = 0;
-    let state = &mut *s;
     let sym_buf_start = state.sym_buf_start;
     // `pending_buf` is the full allocation; symbols occupy its suffix after
     // the literal area. Keeping one full-capacity view avoids a raw cursor.
@@ -4535,12 +4525,11 @@ unsafe extern "C" fn deflate_rle(
 }
 
 unsafe extern "C" fn deflate_huff(
-    mut s: *mut crate::src::deflate::deflate_state,
+    state: &mut crate::src::deflate::deflate_state,
     stream: &mut crate::zlib_h::z_stream_s,
     mut flush: ::core::ffi::c_int,
 ) -> block_state {
     let mut bflush: ::core::ffi::c_int = 0;
-    let state = &mut *s;
     let sym_buf_start = state.sym_buf_start;
     // `pending_buf` is the full allocation; symbols occupy its suffix after
     // the literal area. Keeping one full-capacity view avoids a raw cursor.
