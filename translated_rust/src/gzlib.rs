@@ -192,6 +192,40 @@ pub(crate) fn gz_set_copy_input(
     state.how = crate::gzguts_h::COPY;
 }
 
+// `gz_fetch` owns the raw output pointer used by inflate and the raw buffer
+// passed to a transparent-copy read.  Keep its mode dispatch and scalar state
+// transitions here so that boundary only performs those raw operations.
+pub(crate) enum GzFetchPlan {
+    Look,
+    Copy { requested: ::core::ffi::c_uint },
+    Gzip { output: ::core::ffi::c_uint },
+    Corrupt,
+}
+
+pub(crate) fn gz_fetch_plan(state: &crate::gzguts_h::gz_state) -> GzFetchPlan {
+    match state.how {
+        crate::gzguts_h::LOOK => GzFetchPlan::Look,
+        crate::gzguts_h::COPY => GzFetchPlan::Copy {
+            requested: state.size << 1 as ::core::ffi::c_int,
+        },
+        crate::gzguts_h::GZIP => GzFetchPlan::Gzip {
+            output: state.size << 1 as ::core::ffi::c_int,
+        },
+        _ => GzFetchPlan::Corrupt,
+    }
+}
+
+pub(crate) fn gz_fetch_copy_loaded(
+    state: &mut crate::gzguts_h::gz_state,
+    received: ::core::ffi::c_uint,
+) {
+    state.x.have = received;
+}
+
+pub(crate) fn gz_fetch_needs_more(state: &crate::gzguts_h::gz_state) -> bool {
+    state.x.have == 0 && (state.eof == 0 || state.strm.avail_in != 0)
+}
+
 // Once gzip input is available, the look adapter either waits for a complete
 // signature, starts a gzip member, or retains the input as a transparent
 // copy.  Signature access remains at the raw input-buffer adapter; this

@@ -299,8 +299,8 @@ unsafe extern "C" fn gz_decomp(mut state: crate::gzguts_h::gz_statep) -> ::core:
 unsafe extern "C" fn gz_fetch(mut state: crate::gzguts_h::gz_statep) -> ::core::ffi::c_int {
     let state = &mut *state;
     loop {
-        match state.how {
-            crate::gzguts_h::LOOK => {
+        match crate::src::gzlib::gz_fetch_plan(state) {
+            crate::src::gzlib::GzFetchPlan::Look => {
                 if gz_look(state) == -1 as ::core::ffi::c_int {
                     return -1 as ::core::ffi::c_int;
                 }
@@ -308,24 +308,23 @@ unsafe extern "C" fn gz_fetch(mut state: crate::gzguts_h::gz_statep) -> ::core::
                     return 0 as ::core::ffi::c_int;
                 }
             }
-            crate::gzguts_h::COPY => {
-                let result = gz_load(state, state.out, state.size << 1 as ::core::ffi::c_int);
-                state.x.have = result.received;
+            crate::src::gzlib::GzFetchPlan::Copy { requested } => {
+                let result = gz_load(state, state.out, requested);
+                crate::src::gzlib::gz_fetch_copy_loaded(state, result.received);
                 if result.status == -1 as ::core::ffi::c_int {
                     return -1 as ::core::ffi::c_int;
                 }
                 state.x.next = state.out;
                 return 0 as ::core::ffi::c_int;
             }
-            crate::gzguts_h::GZIP => {
-                state.strm.avail_out =
-                    (state.size << 1 as ::core::ffi::c_int) as crate::stdlib::uInt;
+            crate::src::gzlib::GzFetchPlan::Gzip { output } => {
+                state.strm.avail_out = output as crate::stdlib::uInt;
                 state.strm.next_out = state.out as *mut crate::stdlib::Bytef;
                 if gz_decomp(state) == -1 as ::core::ffi::c_int {
                     return -1 as ::core::ffi::c_int;
                 }
             }
-            _ => {
+            crate::src::gzlib::GzFetchPlan::Corrupt => {
                 crate::src::gzlib::gz_error(
                     state,
                     crate::zlib_h::Z_STREAM_ERROR,
@@ -334,9 +333,7 @@ unsafe extern "C" fn gz_fetch(mut state: crate::gzguts_h::gz_statep) -> ::core::
                 return -1 as ::core::ffi::c_int;
             }
         }
-        if !(state.x.have == 0 as ::core::ffi::c_uint
-            && (state.eof == 0 || state.strm.avail_in != 0))
-        {
+        if !crate::src::gzlib::gz_fetch_needs_more(state) {
             break;
         }
     }
