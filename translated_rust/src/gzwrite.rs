@@ -655,7 +655,8 @@ pub unsafe extern "C" fn gzfwrite_ffi(
     };
     gzfwrite_completed_items(gz_write(state, source), size)
 }
-pub unsafe extern "C" fn gzputc(
+#[export_name = "gzputc"]
+pub unsafe extern "C" fn gzputc_ffi(
     mut file: crate::zlib_h::gzFile,
     mut c: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
@@ -719,14 +720,6 @@ pub unsafe extern "C" fn gzputc(
     }
     return c & 0xff as ::core::ffi::c_int;
 }
-#[export_name = "gzputc"]
-
-pub unsafe extern "C" fn gzputc_ffi(
-    mut file: crate::zlib_h::gzFile,
-    mut c: ::core::ffi::c_int,
-) -> ::core::ffi::c_int {
-    gzputc(file, c)
-}
 #[export_name = "gzputs"]
 
 pub unsafe extern "C" fn gzputs_ffi(
@@ -758,7 +751,8 @@ pub unsafe extern "C" fn gzputs_ffi(
         put as ::core::ffi::c_int
     }
 }
-pub unsafe extern "C" fn gzflush(
+#[export_name = "gzflush"]
+pub unsafe extern "C" fn gzflush_ffi(
     mut file: crate::zlib_h::gzFile,
     mut flush: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
@@ -779,15 +773,8 @@ pub unsafe extern "C" fn gzflush(
     gz_comp(state as *mut _, flush);
     state.err
 }
-#[export_name = "gzflush"]
-
-pub unsafe extern "C" fn gzflush_ffi(
-    mut file: crate::zlib_h::gzFile,
-    mut flush: ::core::ffi::c_int,
-) -> ::core::ffi::c_int {
-    gzflush(file, flush)
-}
-pub unsafe extern "C" fn gzsetparams(
+#[export_name = "gzsetparams"]
+pub unsafe extern "C" fn gzsetparams_ffi(
     mut file: crate::zlib_h::gzFile,
     mut level: ::core::ffi::c_int,
     mut strategy: ::core::ffi::c_int,
@@ -818,15 +805,6 @@ pub unsafe extern "C" fn gzsetparams(
     state.level = level;
     state.strategy = strategy;
     return crate::zlib_h::Z_OK;
-}
-#[export_name = "gzsetparams"]
-
-pub unsafe extern "C" fn gzsetparams_ffi(
-    mut file: crate::zlib_h::gzFile,
-    mut level: ::core::ffi::c_int,
-    mut strategy: ::core::ffi::c_int,
-) -> ::core::ffi::c_int {
-    gzsetparams(file, level, strategy)
 }
 #[export_name = "gzclose_w"]
 
