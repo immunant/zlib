@@ -531,6 +531,119 @@ impl DeflateCallbackStorageOwner {
             .then_some(DeflatePendingStorage { pending_buf })
     }
 
+    // The ABI/state boundary lends scoped slices, but it does not decide how
+    // those slices become a C4 operation.  Keep that admission here with the
+    // completion ledger and immutable callback geometry.  None of these
+    // request values retains a callback allocation identity.
+    fn empty_request<'storage>(self) -> DeflateCallbackStorageRequest<'storage> {
+        DeflateCallbackStorageRequest::Empty
+    }
+
+    fn hash_request<'storage>(
+        self,
+        head: Option<&'storage mut [crate::src::deflate::Posf]>,
+    ) -> DeflateCallbackStorageRequest<'storage> {
+        let Some(head) = head else {
+            return self.empty_request();
+        };
+        if !self.head
+            || head.len()
+                != self
+                    .storage
+                    .head
+                    .element_len::<crate::src::deflate::Posf>()
+                    .expect("validated head allocation geometry")
+        {
+            return self.empty_request();
+        }
+        DeflateCallbackStorageRequest::Hash { head }
+    }
+
+    fn dictionary_request<'storage>(
+        self,
+        window: Option<&'storage mut [crate::stdlib::Bytef]>,
+        prev: Option<&'storage mut [crate::src::deflate::Posf]>,
+        head: Option<&'storage mut [crate::src::deflate::Posf]>,
+    ) -> DeflateCallbackStorageRequest<'storage> {
+        let (Some(window), Some(prev), Some(head)) = (window, prev, head) else {
+            return self.empty_request();
+        };
+        if !(self.window && self.prev && self.head)
+            || window.len()
+                != self
+                    .storage
+                    .window
+                    .byte_len()
+                    .expect("validated window allocation geometry")
+            || prev.len()
+                != self
+                    .storage
+                    .prev
+                    .element_len::<crate::src::deflate::Posf>()
+                    .expect("validated prev allocation geometry")
+            || head.len()
+                != self
+                    .storage
+                    .head
+                    .element_len::<crate::src::deflate::Posf>()
+                    .expect("validated head allocation geometry")
+        {
+            return self.empty_request();
+        }
+        DeflateCallbackStorageRequest::Dictionary(DeflateDictionaryStorage { window, prev, head })
+    }
+
+    fn complete_request<'storage>(
+        self,
+        window: Option<&'storage mut [crate::stdlib::Bytef]>,
+        prev: Option<&'storage mut [crate::src::deflate::Posf]>,
+        head: Option<&'storage mut [crate::src::deflate::Posf]>,
+        pending_buf: Option<&'storage mut [crate::stdlib::Bytef]>,
+    ) -> DeflateCallbackStorageRequest<'storage> {
+        let (Some(window), Some(prev), Some(head), Some(pending_buf)) =
+            (window, prev, head, pending_buf)
+        else {
+            return self.empty_request();
+        };
+        if !self.is_complete()
+            || window.len()
+                != self
+                    .storage
+                    .window
+                    .byte_len()
+                    .expect("validated window allocation geometry")
+            || prev.len()
+                != self
+                    .storage
+                    .prev
+                    .element_len::<crate::src::deflate::Posf>()
+                    .expect("validated prev allocation geometry")
+            || head.len()
+                != self
+                    .storage
+                    .head
+                    .element_len::<crate::src::deflate::Posf>()
+                    .expect("validated head allocation geometry")
+            || pending_buf.len()
+                != self
+                    .storage
+                    .pending
+                    .byte_len()
+                    .expect("validated pending allocation geometry")
+        {
+            return self.empty_request();
+        }
+        DeflateCallbackStorageRequest::Complete {
+            storage: DeflateDispatchStorage {
+                pending_buf,
+                window,
+                prev,
+                head,
+            },
+            cursors: None,
+        }
+    }
+
     // A deflate copy crosses two independently callback-paired allocation
     // lifecycles.  Verify their immutable request geometry before the ABI
     // boundary performs its bounded raw copies.  The pointer-free copy facade
@@ -1746,51 +1859,32 @@ fn deflate_state_status_is_valid(status: ::core::ffi::c_int) -> bool {
         || status == crate::src::deflate::FINISH_STATE
 }
 
-// The callback allocations remain owned by `internal_state` and are released
-// through its recorded zfree transaction.  This view only borrows them for a
-// single stream operation; in particular, it never extends their lifetime to
-// `'static` or replaces their callback provenance with a Rust allocation.
-struct DeflateCallbackStorage<'stream> {
-    window: Option<&'stream mut [crate::stdlib::Bytef]>,
-    prev: Option<&'stream mut [crate::src::deflate::Posf]>,
-    head: Option<&'stream mut [crate::src::deflate::Posf]>,
-    pending: Option<&'stream mut [crate::stdlib::Bytef]>,
-    cursors: Option<DeflateAbiCursors<'stream>>,
-}
-
 // This per-request owner joins the persistent, pointer-free lifecycle ledger
 // with the bounded views formed by the ABI/state boundary.  It deliberately
 // owns no callback identity and cannot outlive those views.  All C4 consumers
 // therefore receive checked ordinary slices instead of reopening opaque state
 // or recovering geometry from mutable codec fields.
-struct DeflateCallbackStorageRequest<'stream> {
-    lifecycle: DeflateCallbackStorageOwner,
-    storage: DeflateCallbackStorage<'stream>,
+enum DeflateCallbackStorageRequest<'stream> {
+    Empty,
+    Hash {
+        head: &'stream mut [crate::src::deflate::Posf],
+    },
+    Dictionary(DeflateDictionaryStorage<'stream>),
+    Complete {
+        storage: DeflateDispatchStorage<'stream>,
+        cursors: Option<DeflateAbiCursors<'stream>>,
+    },
 }
 
 impl<'stream> DeflateCallbackStorageRequest<'stream> {
-    fn new(
-        lifecycle: DeflateCallbackStorageOwner,
-        storage: DeflateCallbackStorage<'stream>,
-    ) -> Self {
-        Self { lifecycle, storage }
-    }
-
-    fn empty(lifecycle: DeflateCallbackStorageOwner) -> Self {
-        Self::new(
-            lifecycle,
-            DeflateCallbackStorage {
-                window: None,
-                prev: None,
-                head: None,
-                pending: None,
-                cursors: None,
-            },
-        )
-    }
-
     fn has_cursors(&self) -> bool {
-        self.storage.cursors.is_some()
+        matches!(
+            self,
+            Self::Complete {
+                cursors: Some(_),
+                ..
+            }
+        )
     }
 
     // Cursor views belong to the same call-scoped owner as callback storage.
@@ -1798,126 +1892,76 @@ impl<'stream> DeflateCallbackStorageRequest<'stream> {
     // observations and ensures that the owner is the sole handoff point to
     // the pointer-free compressor state machine.
     fn with_cursors(mut self, cursors: DeflateAbiCursors<'stream>) -> Self {
-        self.storage.cursors = Some(cursors);
+        if let Self::Complete {
+            cursors: request_cursors,
+            ..
+        } = &mut self
+        {
+            *request_cursors = Some(cursors);
+        }
         self
     }
 
     fn window(&self) -> Option<&[crate::stdlib::Bytef]> {
-        self.storage.window.as_deref()
+        match self {
+            Self::Dictionary(storage) => Some(&storage.window),
+            Self::Empty | Self::Hash { .. } | Self::Complete { .. } => None,
+        }
     }
 
     fn into_head(self) -> Option<&'stream mut [crate::src::deflate::Posf]> {
-        if !self.lifecycle.head {
-            return None;
+        match self {
+            Self::Hash { head } => Some(head),
+            Self::Empty | Self::Dictionary(_) | Self::Complete { .. } => None,
         }
-        let head = self.storage.head?;
-        (head.len()
-            == self
-                .lifecycle
-                .storage
-                .head
-                .element_len::<crate::src::deflate::Posf>()?)
-        .then_some(head)
     }
 
     // The dictionary path needs the three history regions but not pending
     // output or caller cursors.  Check lifecycle completion and immutable
     // allocation geometry before handing those slices to the safe kernel.
     fn into_dictionary_storage(self) -> Option<DeflateDictionaryStorage<'stream>> {
-        if !(self.lifecycle.window && self.lifecycle.prev && self.lifecycle.head) {
-            return None;
+        match self {
+            Self::Dictionary(storage) => Some(storage),
+            Self::Empty | Self::Hash { .. } | Self::Complete { .. } => None,
         }
-        let layout = self.lifecycle.storage;
-        let window = self.storage.window?;
-        let prev = self.storage.prev?;
-        let head = self.storage.head?;
-        if window.len() != layout.window.byte_len()?
-            || prev.len() != layout.prev.element_len::<crate::src::deflate::Posf>()?
-            || head.len() != layout.head.element_len::<crate::src::deflate::Posf>()?
-        {
-            return None;
-        }
-        Some(DeflateDictionaryStorage { window, prev, head })
     }
 
     // Dispatch is the one C4 operation that needs every callback-backed
     // region.  Consuming the request into this complete pointer-free view
     // prevents the state machine from requesting a lone callback buffer.
     fn into_dispatch_storage(self) -> Option<DeflateDispatchStorage<'stream>> {
-        if !(self.lifecycle.window
-            && self.lifecycle.prev
-            && self.lifecycle.head
-            && self.lifecycle.pending)
-        {
-            return None;
+        match self {
+            Self::Complete { storage, .. } => Some(storage),
+            Self::Empty | Self::Hash { .. } | Self::Dictionary(_) => None,
         }
-        let layout = self.lifecycle.storage;
-        let pending_buf = self.storage.pending?;
-        let window = self.storage.window?;
-        let prev = self.storage.prev?;
-        let head = self.storage.head?;
-        if pending_buf.len() != layout.pending.byte_len()?
-            || window.len() != layout.window.byte_len()?
-            || prev.len() != layout.prev.element_len::<crate::src::deflate::Posf>()?
-            || head.len() != layout.head.element_len::<crate::src::deflate::Posf>()?
-        {
-            return None;
-        }
-        Some(DeflateDispatchStorage {
-            pending_buf,
-            window,
-            prev,
-            head,
-        })
     }
 
     fn into_dispatch_request(
         self,
     ) -> Option<(DeflateDispatchStorage<'stream>, DeflateAbiCursors<'stream>)> {
-        let DeflateCallbackStorage {
-            window,
-            prev,
-            head,
-            pending,
-            cursors,
-        } = self.storage;
-        let cursors = cursors?;
-        let storage = Self {
-            lifecycle: self.lifecycle,
-            storage: DeflateCallbackStorage {
-                window,
-                prev,
-                head,
-                pending,
-                cursors: None,
-            },
+        match self {
+            Self::Complete {
+                storage,
+                cursors: Some(cursors),
+            } => Some((storage, cursors)),
+            Self::Empty
+            | Self::Hash { .. }
+            | Self::Dictionary(_)
+            | Self::Complete { cursors: None, .. } => None,
         }
-        .into_dispatch_storage()?;
-        Some((storage, cursors))
     }
 
     fn into_parameter_tables(
         self,
         needs_previous: bool,
     ) -> Option<DeflateCallbackHashStorage<'stream>> {
-        if !(self.lifecycle.head && (!needs_previous || self.lifecycle.prev)) {
+        let Self::Dictionary(DeflateDictionaryStorage { prev, head, .. }) = self else {
             return None;
-        }
-        let layout = self.lifecycle.storage;
-        let head = self.storage.head?;
-        if head.len() != layout.head.element_len::<crate::src::deflate::Posf>()? {
-            return None;
-        }
-        let prev = if needs_previous {
-            let prev = self.storage.prev?;
-            if prev.len() != layout.prev.element_len::<crate::src::deflate::Posf>()? {
-                return None;
-            }
-            Some(prev)
-        } else {
-            None
         };
-        Some(DeflateCallbackHashStorage { head, prev })
+        Some(DeflateCallbackHashStorage {
+            head,
+            prev: needs_previous.then_some(prev),
+        })
     }
 }
 
@@ -2060,23 +2104,16 @@ unsafe fn deflate_stream_and_state<'stream, 'request>(
     let storage_layout = admission.storage_layout;
     let complete_storage = admission.complete_storage;
     let dispatch_cursors = admission.dispatch_cursors;
+    let lifecycle = state.callback_storage;
     let mut storage = match projection {
-        DeflateStorageProjection::None => DeflateCallbackStorage {
-            window: None,
-            prev: None,
-            head: None,
-            pending: None,
-            cursors: None,
-        },
-        DeflateStorageProjection::Hash => DeflateCallbackStorage {
-            window: None,
-            prev: None,
+        DeflateStorageProjection::None => lifecycle.empty_request(),
+        DeflateStorageProjection::Hash => {
             // A stream can be observed by an allocator callback while its
             // initializer has published the state record but not every
             // backing allocation.  Keep that incomplete lifecycle as an
-            // absent bounded view; normal full-reset callers still require
-            // the view below their completed-state boundary.
-            head: state.callback_storage.is_complete().then(|| {
+            // absent bounded view; the C4 owner admits the completed hash
+            // view using its immutable geometry.
+            let head = lifecycle.is_complete().then(|| {
                 ::core::slice::from_raw_parts_mut(
                     state
                         .head
@@ -2087,38 +2124,37 @@ unsafe fn deflate_stream_and_state<'stream, 'request>(
                         .element_len::<crate::src::deflate::Posf>()
                         .expect("validated head allocation geometry"),
                 )
-            }),
-            pending: None,
-            cursors: None,
-        },
+            });
+            lifecycle.hash_request(head)
+        }
         DeflateStorageProjection::Dictionary
         | DeflateStorageProjection::Complete
         | DeflateStorageProjection::Dispatch
         | DeflateStorageProjection::ParameterDispatch(_)
         | DeflateStorageProjection::DictionaryInstall { .. }
-        | DeflateStorageProjection::DictionaryQuery { .. } => DeflateCallbackStorage {
-            window: Some(::core::slice::from_raw_parts_mut(
+        | DeflateStorageProjection::DictionaryQuery { .. } => {
+            let window = Some(::core::slice::from_raw_parts_mut(
                 state.window.expect("initialized window").as_ptr(),
                 storage_layout
                     .window
                     .byte_len()
                     .expect("validated window allocation geometry"),
-            )),
-            prev: Some(::core::slice::from_raw_parts_mut(
+            ));
+            let prev = Some(::core::slice::from_raw_parts_mut(
                 state.prev.expect("initialized prev table").as_ptr(),
                 storage_layout
                     .prev
                     .element_len::<crate::src::deflate::Posf>()
                     .expect("validated prev allocation geometry"),
-            )),
-            head: Some(::core::slice::from_raw_parts_mut(
+            ));
+            let head = Some(::core::slice::from_raw_parts_mut(
                 state.head.expect("initialized head table").as_ptr(),
                 storage_layout
                     .head
                     .element_len::<crate::src::deflate::Posf>()
                     .expect("validated head allocation geometry"),
-            )),
-            pending: if complete_storage {
+            ));
+            let pending = if complete_storage {
                 Some(::core::slice::from_raw_parts_mut(
                     state
                         .pending_buf
@@ -2131,12 +2167,14 @@ unsafe fn deflate_stream_and_state<'stream, 'request>(
                 ))
             } else {
                 None
-            },
-            cursors: None,
-        },
+            };
+            if complete_storage {
+                lifecycle.complete_request(window, prev, head, pending)
+            } else {
+                lifecycle.dictionary_request(window, prev, head)
+            }
+        }
     };
-    let lifecycle = state.callback_storage;
-    let mut storage = DeflateCallbackStorageRequest::new(lifecycle, storage);
     if dispatch_cursors {
         if strm.next_out.is_null() || (strm.avail_in != 0 && strm.next_in.is_null()) {
             strm.msg = crate::src::zutil::zError(crate::zlib_h::Z_STREAM_ERROR)
@@ -2154,7 +2192,7 @@ unsafe fn deflate_stream_and_state<'stream, 'request>(
     }
     if let DeflateStorageProjection::DictionaryInstall { dictionary, result } = projection {
         let Some(storage) = storage.into_dictionary_storage() else {
-            return Some((strm, state, DeflateCallbackStorageRequest::empty(lifecycle)));
+            return Some((strm, state, lifecycle.empty_request()));
         };
         let mut dictionary_state = DictionaryState {
             wrap: state.wrap,
@@ -2182,7 +2220,7 @@ unsafe fn deflate_stream_and_state<'stream, 'request>(
             dictionary,
             strm.adler,
         ) else {
-            return Some((strm, state, DeflateCallbackStorageRequest::empty(lifecycle)));
+            return Some((strm, state, lifecycle.empty_request()));
         };
         state.wrap = dictionary_state.wrap;
         state.slid = dictionary_state.slid;
@@ -2199,7 +2237,7 @@ unsafe fn deflate_stream_and_state<'stream, 'request>(
             strm.adler = checksum;
         }
         *result = crate::zlib_h::Z_OK;
-        return Some((strm, state, DeflateCallbackStorageRequest::empty(lifecycle)));
+        return Some((strm, state, lifecycle.empty_request()));
     }
     if let DeflateStorageProjection::DictionaryQuery {
         dictionary,
