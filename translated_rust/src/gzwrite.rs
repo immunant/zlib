@@ -632,9 +632,7 @@ pub unsafe extern "C" fn gzfwrite(
         return 0 as crate::stdlib::z_size_t;
     }
     state = file as crate::gzguts_h::gz_statep;
-    if (*state).mode != crate::gzguts_h::GZ_WRITE
-        || (*state).err != crate::zlib_h::Z_OK && (*state).again == 0
-    {
+    if !gz_write_state_is_usable((*state).mode, (*state).err, (*state).again) {
         return 0 as crate::stdlib::z_size_t;
     }
     crate::src::gzlib::gz_error(

@@ -904,9 +904,9 @@ pub unsafe extern "C" fn gzoffset(mut file: crate::zlib_h::gzFile) -> crate::std
 pub unsafe extern "C" fn gzoffset_ffi(mut file: crate::zlib_h::gzFile) -> crate::stdlib::off_t {
     gzoffset(file)
 }
-fn gzeof_core(state: &crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
-    if state.mode == crate::gzguts_h::GZ_READ {
-        state.past
+fn gzeof_result(mode: ::core::ffi::c_int, past: ::core::ffi::c_int) -> ::core::ffi::c_int {
+    if mode == crate::gzguts_h::GZ_READ {
+        past
     } else {
         0 as ::core::ffi::c_int
     }
@@ -918,12 +918,13 @@ pub unsafe extern "C" fn gzeof_ffi(file: crate::zlib_h::gzFile) -> ::core::ffi::
         return 0 as ::core::ffi::c_int;
     }
 
-    let state = &*(file as crate::gzguts_h::gz_statep);
-    if !gz_is_read_or_write_mode(state.mode) {
+    let state = file as crate::gzguts_h::gz_statep;
+    let mode = (*state).mode;
+    if !gz_is_read_or_write_mode(mode) {
         return 0 as ::core::ffi::c_int;
     }
 
-    gzeof_core(state)
+    gzeof_result(mode, (*state).past)
 }
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum GzErrorMessage {
@@ -1058,7 +1059,7 @@ mod tests {
         gz_is_read_or_write_mode, gz_legacy_offset_result, gz_open_needs_open, gz_open_offset_plan,
         gz_open_recorded_offset, gz_open_should_set_close_on_exec, gz_open_should_set_nonblocking,
         gz_parse_open_mode, gz_post_open_metadata, gz_prepare_open, gz_reset_core,
-        gzbuffer_normalized_want, gzclearerr_core, gzerror_core,
+        gzbuffer_normalized_want, gzclearerr_core, gzerror_core, gzeof_result,
         gzoffset64_adjust_for_buffered_read, gzrewind_request_is_valid, gzseek_adjust_offset,
         gzseek_can_fast_forward, gzseek_clears_pending_skip, gzseek_error_allows_positioning,
         gzseek_fast_forward_lseek_offset, gzseek_fast_forward_reset,
@@ -1361,6 +1362,14 @@ mod tests {
                 remaining_offset: 0,
             }
         );
+    }
+
+    #[test]
+    fn gzeof_result_returns_past_only_for_read_mode() {
+        assert_eq!(gzeof_result(crate::gzguts_h::GZ_READ, 1), 1);
+        assert_eq!(gzeof_result(crate::gzguts_h::GZ_READ, 0), 0);
+        assert_eq!(gzeof_result(crate::gzguts_h::GZ_WRITE, 1), 0);
+        assert_eq!(gzeof_result(crate::gzguts_h::GZ_NONE, 1), 0);
     }
 
     #[test]

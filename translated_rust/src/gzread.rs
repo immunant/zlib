@@ -267,7 +267,7 @@ fn gz_read_marks_past_eof(len: crate::stdlib::z_size_t, eof: ::core::ffi::c_int)
     len != 0 && eof != 0
 }
 
-fn gz_direct_needs_look(
+fn gz_read_needs_look(
     mode: ::core::ffi::c_int,
     how: ::core::ffi::c_int,
     have: ::core::ffi::c_uint,
@@ -1467,23 +1467,23 @@ mod tests {
     }
 
     #[test]
-    fn gz_direct_needs_look_only_for_empty_read_look_state() {
-        assert!(gz_direct_needs_look(
+    fn gz_read_needs_look_only_for_empty_read_look_state() {
+        assert!(gz_read_needs_look(
             crate::gzguts_h::GZ_READ,
             crate::gzguts_h::LOOK,
             0
         ));
-        assert!(!gz_direct_needs_look(
+        assert!(!gz_read_needs_look(
             crate::gzguts_h::GZ_READ,
             crate::gzguts_h::COPY,
             0
         ));
-        assert!(!gz_direct_needs_look(
+        assert!(!gz_read_needs_look(
             crate::gzguts_h::GZ_READ,
             crate::gzguts_h::LOOK,
             1
         ));
-        assert!(!gz_direct_needs_look(
+        assert!(!gz_read_needs_look(
             crate::gzguts_h::GZ_WRITE,
             crate::gzguts_h::LOOK,
             0
@@ -1750,7 +1750,7 @@ pub unsafe extern "C" fn gzungetc(
     if (*state).mode != crate::gzguts_h::GZ_READ {
         return -1 as ::core::ffi::c_int;
     }
-    if (*state).how == crate::gzguts_h::LOOK && (*state).x.have == 0 as ::core::ffi::c_uint {
+    if gz_read_needs_look(crate::gzguts_h::GZ_READ, (*state).how, (*state).x.have) {
         gz_look(state);
     }
     if !gz_read_error_is_recoverable((*state).err, (*state).again) {
@@ -1902,7 +1902,7 @@ pub unsafe extern "C" fn gzdirect(mut file: crate::zlib_h::gzFile) -> ::core::ff
         return 0 as ::core::ffi::c_int;
     }
     state = file as crate::gzguts_h::gz_statep;
-    if gz_direct_needs_look((*state).mode, (*state).how, (*state).x.have) {
+    if gz_read_needs_look((*state).mode, (*state).how, (*state).x.have) {
         gz_look(state);
     }
     return ((*state).direct == 1 as ::core::ffi::c_int) as ::core::ffi::c_int;
