@@ -94,6 +94,30 @@ fn copy_match_bytes(
     true
 }
 
+/// Fetch one byte from an `inflateBack()` input callback.
+///
+/// The callback's buffer remains foreign memory, so its lifetime and cursor
+/// advance must stay together.  Keeping that operation here lets the decoder
+/// operate on byte values instead of repeatedly dereferencing its raw cursor.
+unsafe fn pull_back_byte(
+    input: crate::zlib_h::in_func,
+    input_desc: *mut ::core::ffi::c_void,
+    next: &mut *mut ::core::ffi::c_uchar,
+    have: &mut ::core::ffi::c_uint,
+) -> Option<::core::ffi::c_uchar> {
+    if *have == 0 {
+        *have = input.expect("non-null function pointer")(input_desc, next);
+        if *have == 0 {
+            *next = ::core::ptr::null_mut();
+            return None;
+        }
+    }
+    *have = have.wrapping_sub(1);
+    let byte = **next;
+    *next = next.offset(1);
+    Some(byte)
+}
+
 pub unsafe extern "C" fn inflateBackInit_(
     mut strm: crate::zlib_h::z_streamp,
     mut windowBits: ::core::ffi::c_int,
@@ -237,18 +261,12 @@ pub unsafe fn inflateBack(
                     continue;
                 } else {
                     while bits < 3 as ::core::ffi::c_int as ::core::ffi::c_uint {
-                        if have == 0 as ::core::ffi::c_uint {
-                            have = in_0.expect("non-null function pointer")(in_desc, &raw mut next);
-                            if have == 0 as ::core::ffi::c_uint {
-                                next = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
-                                ret = crate::zlib_h::Z_BUF_ERROR;
-                                break '_inf_leave;
-                            }
-                        }
-                        have = have.wrapping_sub(1);
-                        let c2rust_fresh0 = next;
-                        next = next.offset(1);
-                        hold = hold.wrapping_add((*c2rust_fresh0 as ::core::ffi::c_ulong) << bits);
+                        let Some(byte) = pull_back_byte(in_0, in_desc, &mut next, &mut have)
+                        else {
+                            ret = crate::zlib_h::Z_BUF_ERROR;
+                            break '_inf_leave;
+                        };
+                        hold = hold.wrapping_add((byte as ::core::ffi::c_ulong) << bits);
                         bits = bits.wrapping_add(8 as ::core::ffi::c_uint);
                     }
                     state.last = (hold as ::core::ffi::c_uint
@@ -285,18 +303,11 @@ pub unsafe fn inflateBack(
                 hold >>= bits & 7 as ::core::ffi::c_uint;
                 bits = bits.wrapping_sub(bits & 7 as ::core::ffi::c_uint);
                 while bits < 32 as ::core::ffi::c_int as ::core::ffi::c_uint {
-                    if have == 0 as ::core::ffi::c_uint {
-                        have = in_0.expect("non-null function pointer")(in_desc, &raw mut next);
-                        if have == 0 as ::core::ffi::c_uint {
-                            next = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
-                            ret = crate::zlib_h::Z_BUF_ERROR;
-                            break '_inf_leave;
-                        }
-                    }
-                    have = have.wrapping_sub(1);
-                    let c2rust_fresh1 = next;
-                    next = next.offset(1);
-                    hold = hold.wrapping_add((*c2rust_fresh1 as ::core::ffi::c_ulong) << bits);
+                    let Some(byte) = pull_back_byte(in_0, in_desc, &mut next, &mut have) else {
+                        ret = crate::zlib_h::Z_BUF_ERROR;
+                        break '_inf_leave;
+                    };
+                    hold = hold.wrapping_add((byte as ::core::ffi::c_ulong) << bits);
                     bits = bits.wrapping_add(8 as ::core::ffi::c_uint);
                 }
                 if hold & 0xffff as ::core::ffi::c_ulong
@@ -351,18 +362,11 @@ pub unsafe fn inflateBack(
             }
             16196 => {
                 while bits < 14 as ::core::ffi::c_int as ::core::ffi::c_uint {
-                    if have == 0 as ::core::ffi::c_uint {
-                        have = in_0.expect("non-null function pointer")(in_desc, &raw mut next);
-                        if have == 0 as ::core::ffi::c_uint {
-                            next = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
-                            ret = crate::zlib_h::Z_BUF_ERROR;
-                            break '_inf_leave;
-                        }
-                    }
-                    have = have.wrapping_sub(1);
-                    let c2rust_fresh2 = next;
-                    next = next.offset(1);
-                    hold = hold.wrapping_add((*c2rust_fresh2 as ::core::ffi::c_ulong) << bits);
+                    let Some(byte) = pull_back_byte(in_0, in_desc, &mut next, &mut have) else {
+                        ret = crate::zlib_h::Z_BUF_ERROR;
+                        break '_inf_leave;
+                    };
+                    hold = hold.wrapping_add((byte as ::core::ffi::c_ulong) << bits);
                     bits = bits.wrapping_add(8 as ::core::ffi::c_uint);
                 }
                 state.nlen = (hold as ::core::ffi::c_uint
@@ -393,22 +397,12 @@ pub unsafe fn inflateBack(
                     state.have = 0 as ::core::ffi::c_uint;
                     while state.have < state.ncode {
                         while bits < 3 as ::core::ffi::c_int as ::core::ffi::c_uint {
-                            if have == 0 as ::core::ffi::c_uint {
-                                have = in_0.expect("non-null function pointer")(
-                                    in_desc,
-                                    &raw mut next,
-                                );
-                                if have == 0 as ::core::ffi::c_uint {
-                                    next = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
-                                    ret = crate::zlib_h::Z_BUF_ERROR;
-                                    break '_inf_leave;
-                                }
-                            }
-                            have = have.wrapping_sub(1);
-                            let c2rust_fresh3 = next;
-                            next = next.offset(1);
-                            hold =
-                                hold.wrapping_add((*c2rust_fresh3 as ::core::ffi::c_ulong) << bits);
+                            let Some(byte) = pull_back_byte(in_0, in_desc, &mut next, &mut have)
+                            else {
+                                ret = crate::zlib_h::Z_BUF_ERROR;
+                                break '_inf_leave;
+                            };
+                            hold = hold.wrapping_add((byte as ::core::ffi::c_ulong) << bits);
                             bits = bits.wrapping_add(8 as ::core::ffi::c_uint);
                         }
                         let c2rust_fresh4 = state.have;
@@ -460,22 +454,13 @@ pub unsafe fn inflateBack(
                                 if here.bits as ::core::ffi::c_uint <= bits {
                                     break;
                                 }
-                                if have == 0 as ::core::ffi::c_uint {
-                                    have = in_0.expect("non-null function pointer")(
-                                        in_desc,
-                                        &raw mut next,
-                                    );
-                                    if have == 0 as ::core::ffi::c_uint {
-                                        next = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
-                                        ret = crate::zlib_h::Z_BUF_ERROR;
-                                        break '_inf_leave;
-                                    }
-                                }
-                                have = have.wrapping_sub(1);
-                                let c2rust_fresh6 = next;
-                                next = next.offset(1);
-                                hold = hold
-                                    .wrapping_add((*c2rust_fresh6 as ::core::ffi::c_ulong) << bits);
+                                let Some(byte) =
+                                    pull_back_byte(in_0, in_desc, &mut next, &mut have)
+                                else {
+                                    ret = crate::zlib_h::Z_BUF_ERROR;
+                                    break '_inf_leave;
+                                };
+                                hold = hold.wrapping_add((byte as ::core::ffi::c_ulong) << bits);
                                 bits = bits.wrapping_add(8 as ::core::ffi::c_uint);
                             }
                             if (here.val as ::core::ffi::c_int) < 16 as ::core::ffi::c_int {
@@ -491,23 +476,14 @@ pub unsafe fn inflateBack(
                                             + 2 as ::core::ffi::c_int)
                                             as ::core::ffi::c_uint
                                     {
-                                        if have == 0 as ::core::ffi::c_uint {
-                                            have = in_0.expect("non-null function pointer")(
-                                                in_desc,
-                                                &raw mut next,
-                                            );
-                                            if have == 0 as ::core::ffi::c_uint {
-                                                next =
-                                                    ::core::ptr::null_mut::<::core::ffi::c_uchar>();
-                                                ret = crate::zlib_h::Z_BUF_ERROR;
-                                                break '_inf_leave;
-                                            }
-                                        }
-                                        have = have.wrapping_sub(1);
-                                        let c2rust_fresh8 = next;
-                                        next = next.offset(1);
+                                        let Some(byte) =
+                                            pull_back_byte(in_0, in_desc, &mut next, &mut have)
+                                        else {
+                                            ret = crate::zlib_h::Z_BUF_ERROR;
+                                            break '_inf_leave;
+                                        };
                                         hold = hold.wrapping_add(
-                                            (*c2rust_fresh8 as ::core::ffi::c_ulong) << bits,
+                                            (byte as ::core::ffi::c_ulong) << bits,
                                         );
                                         bits = bits.wrapping_add(8 as ::core::ffi::c_uint);
                                     }
@@ -541,23 +517,14 @@ pub unsafe fn inflateBack(
                                             + 3 as ::core::ffi::c_int)
                                             as ::core::ffi::c_uint
                                     {
-                                        if have == 0 as ::core::ffi::c_uint {
-                                            have = in_0.expect("non-null function pointer")(
-                                                in_desc,
-                                                &raw mut next,
-                                            );
-                                            if have == 0 as ::core::ffi::c_uint {
-                                                next =
-                                                    ::core::ptr::null_mut::<::core::ffi::c_uchar>();
-                                                ret = crate::zlib_h::Z_BUF_ERROR;
-                                                break '_inf_leave;
-                                            }
-                                        }
-                                        have = have.wrapping_sub(1);
-                                        let c2rust_fresh9 = next;
-                                        next = next.offset(1);
+                                        let Some(byte) =
+                                            pull_back_byte(in_0, in_desc, &mut next, &mut have)
+                                        else {
+                                            ret = crate::zlib_h::Z_BUF_ERROR;
+                                            break '_inf_leave;
+                                        };
                                         hold = hold.wrapping_add(
-                                            (*c2rust_fresh9 as ::core::ffi::c_ulong) << bits,
+                                            (byte as ::core::ffi::c_ulong) << bits,
                                         );
                                         bits = bits.wrapping_add(8 as ::core::ffi::c_uint);
                                     }
@@ -580,23 +547,14 @@ pub unsafe fn inflateBack(
                                             + 7 as ::core::ffi::c_int)
                                             as ::core::ffi::c_uint
                                     {
-                                        if have == 0 as ::core::ffi::c_uint {
-                                            have = in_0.expect("non-null function pointer")(
-                                                in_desc,
-                                                &raw mut next,
-                                            );
-                                            if have == 0 as ::core::ffi::c_uint {
-                                                next =
-                                                    ::core::ptr::null_mut::<::core::ffi::c_uchar>();
-                                                ret = crate::zlib_h::Z_BUF_ERROR;
-                                                break '_inf_leave;
-                                            }
-                                        }
-                                        have = have.wrapping_sub(1);
-                                        let c2rust_fresh10 = next;
-                                        next = next.offset(1);
+                                        let Some(byte) =
+                                            pull_back_byte(in_0, in_desc, &mut next, &mut have)
+                                        else {
+                                            ret = crate::zlib_h::Z_BUF_ERROR;
+                                            break '_inf_leave;
+                                        };
                                         hold = hold.wrapping_add(
-                                            (*c2rust_fresh10 as ::core::ffi::c_ulong) << bits,
+                                            (byte as ::core::ffi::c_ulong) << bits,
                                         );
                                         bits = bits.wrapping_add(8 as ::core::ffi::c_uint);
                                     }
@@ -714,22 +672,10 @@ pub unsafe fn inflateBack(
                 break;
             }
         }
-        if have >= 6 as ::core::ffi::c_uint && left >= 258 as ::core::ffi::c_uint {
-            strm.next_out = put as *mut crate::stdlib::Bytef;
-            strm.avail_out = left as crate::stdlib::uInt;
-            strm.next_in = next as *mut crate::stdlib::Bytef;
-            strm.avail_in = have as crate::stdlib::uInt;
-            state.hold = hold;
-            state.bits = bits;
-            crate::src::inffast::inflate_fast(strm as *mut crate::zlib_h::z_stream_s, state.wsize);
-            put = strm.next_out as *mut ::core::ffi::c_uchar;
-            left = strm.avail_out as ::core::ffi::c_uint;
-            next = strm.next_in as *mut ::core::ffi::c_uchar;
-            have = strm.avail_in as ::core::ffi::c_uint;
-            hold = state.hold;
-            bits = state.bits;
-        } else {
-            loop {
+        // The ordinary decoder below implements the same transition sequence as
+        // the optional fast path.  Keeping this path local avoids borrowing the
+        // stream through the raw-pointer fast decoder in back-streaming mode.
+        loop {
                 here = state.lencode.entry(
                     &state.codes,
                     (hold as ::core::ffi::c_uint
@@ -739,18 +685,11 @@ pub unsafe fn inflateBack(
                 if here.bits as ::core::ffi::c_uint <= bits {
                     break;
                 }
-                if have == 0 as ::core::ffi::c_uint {
-                    have = in_0.expect("non-null function pointer")(in_desc, &raw mut next);
-                    if have == 0 as ::core::ffi::c_uint {
-                        next = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
-                        ret = crate::zlib_h::Z_BUF_ERROR;
-                        break '_inf_leave;
-                    }
-                }
-                have = have.wrapping_sub(1);
-                let c2rust_fresh13 = next;
-                next = next.offset(1);
-                hold = hold.wrapping_add((*c2rust_fresh13 as ::core::ffi::c_ulong) << bits);
+                let Some(byte) = pull_back_byte(in_0, in_desc, &mut next, &mut have) else {
+                    ret = crate::zlib_h::Z_BUF_ERROR;
+                    break '_inf_leave;
+                };
+                hold = hold.wrapping_add((byte as ::core::ffi::c_ulong) << bits);
                 bits = bits.wrapping_add(8 as ::core::ffi::c_uint);
             }
             if here.op as ::core::ffi::c_int != 0
@@ -776,18 +715,12 @@ pub unsafe fn inflateBack(
                     {
                         break;
                     }
-                    if have == 0 as ::core::ffi::c_uint {
-                        have = in_0.expect("non-null function pointer")(in_desc, &raw mut next);
-                        if have == 0 as ::core::ffi::c_uint {
-                            next = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
-                            ret = crate::zlib_h::Z_BUF_ERROR;
-                            break '_inf_leave;
-                        }
-                    }
-                    have = have.wrapping_sub(1);
-                    let c2rust_fresh14 = next;
-                    next = next.offset(1);
-                    hold = hold.wrapping_add((*c2rust_fresh14 as ::core::ffi::c_ulong) << bits);
+                    let Some(byte) = pull_back_byte(in_0, in_desc, &mut next, &mut have)
+                    else {
+                        ret = crate::zlib_h::Z_BUF_ERROR;
+                        break '_inf_leave;
+                    };
+                    hold = hold.wrapping_add((byte as ::core::ffi::c_ulong) << bits);
                     bits = bits.wrapping_add(8 as ::core::ffi::c_uint);
                 }
                 hold >>= last.bits as ::core::ffi::c_int;
@@ -820,18 +753,12 @@ pub unsafe fn inflateBack(
                 state.extra = here.op as ::core::ffi::c_uint & 15 as ::core::ffi::c_uint;
                 if state.extra != 0 as ::core::ffi::c_uint {
                     while bits < state.extra {
-                        if have == 0 as ::core::ffi::c_uint {
-                            have = in_0.expect("non-null function pointer")(in_desc, &raw mut next);
-                            if have == 0 as ::core::ffi::c_uint {
-                                next = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
-                                ret = crate::zlib_h::Z_BUF_ERROR;
-                                break '_inf_leave;
-                            }
-                        }
-                        have = have.wrapping_sub(1);
-                        let c2rust_fresh16 = next;
-                        next = next.offset(1);
-                        hold = hold.wrapping_add((*c2rust_fresh16 as ::core::ffi::c_ulong) << bits);
+                        let Some(byte) = pull_back_byte(in_0, in_desc, &mut next, &mut have)
+                        else {
+                            ret = crate::zlib_h::Z_BUF_ERROR;
+                            break '_inf_leave;
+                        };
+                        hold = hold.wrapping_add((byte as ::core::ffi::c_ulong) << bits);
                         bits = bits.wrapping_add(8 as ::core::ffi::c_uint);
                     }
                     state.length = state.length.wrapping_add(
@@ -853,18 +780,11 @@ pub unsafe fn inflateBack(
                     if here.bits as ::core::ffi::c_uint <= bits {
                         break;
                     }
-                    if have == 0 as ::core::ffi::c_uint {
-                        have = in_0.expect("non-null function pointer")(in_desc, &raw mut next);
-                        if have == 0 as ::core::ffi::c_uint {
-                            next = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
-                            ret = crate::zlib_h::Z_BUF_ERROR;
-                            break '_inf_leave;
-                        }
-                    }
-                    have = have.wrapping_sub(1);
-                    let c2rust_fresh17 = next;
-                    next = next.offset(1);
-                    hold = hold.wrapping_add((*c2rust_fresh17 as ::core::ffi::c_ulong) << bits);
+                    let Some(byte) = pull_back_byte(in_0, in_desc, &mut next, &mut have) else {
+                        ret = crate::zlib_h::Z_BUF_ERROR;
+                        break '_inf_leave;
+                    };
+                    hold = hold.wrapping_add((byte as ::core::ffi::c_ulong) << bits);
                     bits = bits.wrapping_add(8 as ::core::ffi::c_uint);
                 }
                 if here.op as ::core::ffi::c_int & 0xf0 as ::core::ffi::c_int
@@ -889,18 +809,12 @@ pub unsafe fn inflateBack(
                         {
                             break;
                         }
-                        if have == 0 as ::core::ffi::c_uint {
-                            have = in_0.expect("non-null function pointer")(in_desc, &raw mut next);
-                            if have == 0 as ::core::ffi::c_uint {
-                                next = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
-                                ret = crate::zlib_h::Z_BUF_ERROR;
-                                break '_inf_leave;
-                            }
-                        }
-                        have = have.wrapping_sub(1);
-                        let c2rust_fresh18 = next;
-                        next = next.offset(1);
-                        hold = hold.wrapping_add((*c2rust_fresh18 as ::core::ffi::c_ulong) << bits);
+                        let Some(byte) = pull_back_byte(in_0, in_desc, &mut next, &mut have)
+                        else {
+                            ret = crate::zlib_h::Z_BUF_ERROR;
+                            break '_inf_leave;
+                        };
+                        hold = hold.wrapping_add((byte as ::core::ffi::c_ulong) << bits);
                         bits = bits.wrapping_add(8 as ::core::ffi::c_uint);
                     }
                     hold >>= last.bits as ::core::ffi::c_int;
@@ -916,22 +830,12 @@ pub unsafe fn inflateBack(
                     state.extra = here.op as ::core::ffi::c_uint & 15 as ::core::ffi::c_uint;
                     if state.extra != 0 as ::core::ffi::c_uint {
                         while bits < state.extra {
-                            if have == 0 as ::core::ffi::c_uint {
-                                have = in_0.expect("non-null function pointer")(
-                                    in_desc,
-                                    &raw mut next,
-                                );
-                                if have == 0 as ::core::ffi::c_uint {
-                                    next = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
-                                    ret = crate::zlib_h::Z_BUF_ERROR;
-                                    break '_inf_leave;
-                                }
-                            }
-                            have = have.wrapping_sub(1);
-                            let c2rust_fresh19 = next;
-                            next = next.offset(1);
-                            hold = hold
-                                .wrapping_add((*c2rust_fresh19 as ::core::ffi::c_ulong) << bits);
+                            let Some(byte) = pull_back_byte(in_0, in_desc, &mut next, &mut have)
+                            else {
+                                ret = crate::zlib_h::Z_BUF_ERROR;
+                                break '_inf_leave;
+                            };
+                            hold = hold.wrapping_add((byte as ::core::ffi::c_ulong) << bits);
                             bits = bits.wrapping_add(8 as ::core::ffi::c_uint);
                         }
                         state.offset = state.offset.wrapping_add(
@@ -993,7 +897,6 @@ pub unsafe fn inflateBack(
                         }
                     }
                 }
-            }
         }
     }
     if left < state.wsize {
