@@ -98,14 +98,6 @@ fn gz_write_failure(errno_value: ::core::ffi::c_int) -> GzWriteFailure {
     }
 }
 
-fn write_buffered_byte(buffer: &mut [u8], index: usize, byte: u8) -> bool {
-    let Some(slot) = buffer.get_mut(index) else {
-        return false;
-    };
-    *slot = byte;
-    true
-}
-
 fn clear_buffered_input(buffer: &mut [u8]) {
     buffer.fill(0);
 }
@@ -506,7 +498,6 @@ unsafe fn gzputc(
     state: &mut crate::gzguts_h::gz_state,
     mut c: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
-    let mut have: ::core::ffi::c_uint = 0;
     let mut buf: [::core::ffi::c_uchar; 1] = [0; 1];
     let policy = GzWritePolicy {
         mode: state.mode,
@@ -522,35 +513,33 @@ unsafe fn gzputc(
         return -1 as ::core::ffi::c_int;
     }
     if state.size != 0 {
-        let size = state.size;
-        let Some(in_0) = state.in_0.as_deref().map(|buffer| buffer.as_ptr()) else {
-            return -1 as ::core::ffi::c_int;
-        };
-        let (next_in, avail_in) = {
+        let size = state.size as usize;
+        let (copy, available) = {
             let strm = &mut state.strm;
-            if strm.avail_in == 0 as crate::stdlib::uInt {
-                strm.next_in = in_0 as *mut crate::stdlib::Bytef;
-            }
-            (strm.next_in, strm.avail_in)
-        };
-        let Some(end) = next_in.addr().checked_add(avail_in as usize) else {
-            return -1 as ::core::ffi::c_int;
-        };
-        let Some(have_at) = end.checked_sub(in_0.addr()) else {
-            return -1 as ::core::ffi::c_int;
-        };
-        let Ok(have_value) = ::core::ffi::c_uint::try_from(have_at) else {
-            return -1 as ::core::ffi::c_int;
-        };
-        have = have_value;
-        if have < size {
             let Some(buffer) = state.in_0.as_deref_mut() else {
                 return -1 as ::core::ffi::c_int;
             };
-            if !write_buffered_byte(buffer, have as usize, c as ::core::ffi::c_uchar) {
+            let Some(buffer) = buffer.get_mut(..size) else {
                 return -1 as ::core::ffi::c_int;
+            };
+            if strm.avail_in == 0 as crate::stdlib::uInt {
+                strm.next_in = buffer.as_mut_ptr();
             }
-            state.strm.avail_in = state.strm.avail_in.wrapping_add(1);
+            let Some(mut buffered) = crate::src::gzlib::GzBufferedInput::from_owned_buffer(
+                buffer,
+                strm.next_in.addr(),
+                strm.avail_in,
+            ) else {
+                return -1 as ::core::ffi::c_int;
+            };
+            let copy = buffered.append(&[c as ::core::ffi::c_uchar]);
+            let Some(available) = buffered.have() else {
+                return -1 as ::core::ffi::c_int;
+            };
+            (copy, available)
+        };
+        if copy != 0 {
+            state.strm.avail_in = available;
             state.x.pos += 1;
             return c & 0xff as ::core::ffi::c_int;
         }
