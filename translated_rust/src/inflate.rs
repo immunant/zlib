@@ -1794,9 +1794,9 @@ pub unsafe extern "C" fn inflate_ffi(
                     let output = ::core::slice::from_raw_parts_mut(put, copy as usize);
                     output.copy_from_slice(input);
                     have = have.wrapping_sub(copy);
-                    next = next.offset(copy as isize);
+                    next = next.wrapping_add(copy as usize);
                     left = left.wrapping_sub(copy);
-                    put = put.offset(copy as isize);
+                    put = put.wrapping_add(copy as usize);
                     (*state).length = (*state).length.wrapping_sub(copy);
                     continue;
                 } else {
@@ -2924,6 +2924,6 @@ pub unsafe extern "C" fn inflateCodesUsed_ffi(
     }
     let strm_ref = &*strm;
     let state = &*(strm_ref.state as *mut crate::src::inflate::inflate_state);
-    return state.next.offset_from(state.codes.as_ptr()) as ::core::ffi::c_long
-        as ::core::ffi::c_ulong;
+    return ((state.next as usize).wrapping_sub(state.codes.as_ptr() as usize)
+        / ::core::mem::size_of::<crate::src::inftrees::code>()) as ::core::ffi::c_ulong;
 }

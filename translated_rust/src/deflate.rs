@@ -2517,7 +2517,7 @@ fn longest_match(
                     }
                 }
                 len = crate::zutil_h::MAX_MATCH
-                    - strend.offset_from(scan) as ::core::ffi::c_long as ::core::ffi::c_int;
+                    - (strend as usize).wrapping_sub(scan as usize) as ::core::ffi::c_int;
                 scan = strend.wrapping_offset(-(crate::zutil_h::MAX_MATCH as isize));
                 if len > best_len {
                     s.match_start = cur_match as crate::stdlib::uInt;
@@ -3442,7 +3442,7 @@ fn deflate_rle(
                             }
                         }
                         state.match_length = (crate::zutil_h::MAX_MATCH as crate::stdlib::uInt)
-                            .wrapping_sub(strend.offset_from(scan) as ::core::ffi::c_long
+                            .wrapping_sub((strend as usize).wrapping_sub(scan as usize)
                                 as crate::stdlib::uInt);
                         if state.match_length > state.lookahead {
                             state.match_length = state.lookahead;

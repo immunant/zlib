@@ -289,15 +289,13 @@ pub unsafe extern "C" fn inflateBack_ffi(
                     if copy > left {
                         copy = left;
                     }
-                    crate::stdlib::memcpy(
-                        put as *mut ::core::ffi::c_void,
-                        next as *const ::core::ffi::c_void,
-                        copy as crate::__stddef_size_t_h::size_t,
-                    );
+                    let input = ::core::slice::from_raw_parts(next, copy as usize);
+                    let output = ::core::slice::from_raw_parts_mut(put, copy as usize);
+                    output.copy_from_slice(input);
                     have = have.wrapping_sub(copy);
-                    next = next.offset(copy as isize);
+                    next = next.wrapping_add(copy as usize);
                     left = left.wrapping_sub(copy);
-                    put = put.offset(copy as isize);
+                    put = put.wrapping_add(copy as usize);
                     (*state).length = (*state).length.wrapping_sub(copy);
                 }
                 (*state).mode = crate::src::inflate::TYPE;

@@ -81,10 +81,10 @@ pub unsafe extern "C" fn inflate_fast_ffi(
     let mut from: *mut ::core::ffi::c_uchar = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
     state = (*strm).state as *mut crate::src::inflate::inflate_state;
     in_0 = (*strm).next_in as *mut ::core::ffi::c_uchar;
-    last = in_0.offset((*strm).avail_in.wrapping_sub(5 as crate::stdlib::uInt) as isize);
+    last = in_0.wrapping_add((*strm).avail_in.wrapping_sub(5 as crate::stdlib::uInt) as usize);
     out = (*strm).next_out as *mut ::core::ffi::c_uchar;
-    beg = out.offset(-((start as crate::stdlib::uInt).wrapping_sub((*strm).avail_out) as isize));
-    end = out.offset((*strm).avail_out.wrapping_sub(257 as crate::stdlib::uInt) as isize);
+    beg = out.wrapping_sub((start as crate::stdlib::uInt).wrapping_sub((*strm).avail_out) as usize);
+    end = out.wrapping_add((*strm).avail_out.wrapping_sub(257 as crate::stdlib::uInt) as usize);
     wsize = (*state).wsize;
     whave = (*state).whave;
     wnext = (*state).wnext;
@@ -199,7 +199,7 @@ pub unsafe extern "C" fn inflate_fast_ffi(
                         );
                         hold >>= op;
                         bits = bits.wrapping_sub(op);
-                        op = out.offset_from(beg) as ::core::ffi::c_long as ::core::ffi::c_uint;
+                        op = (out as usize).wrapping_sub(beg as usize) as ::core::ffi::c_uint;
                         if dist > op {
                             c2rust_current_block_141 = 5235537862154438448;
                             break;
@@ -398,22 +398,22 @@ pub unsafe extern "C" fn inflate_fast_ffi(
         }
     }
     len = bits >> 3 as ::core::ffi::c_int;
-    in_0 = in_0.offset(-(len as isize));
+    in_0 = in_0.wrapping_sub(len as usize);
     bits = bits.wrapping_sub(len << 3 as ::core::ffi::c_int);
     hold &= ((1 as ::core::ffi::c_uint) << bits).wrapping_sub(1 as ::core::ffi::c_uint)
         as ::core::ffi::c_ulong;
     (*strm).next_in = in_0 as *mut crate::stdlib::Bytef;
     (*strm).next_out = out as *mut crate::stdlib::Bytef;
     (*strm).avail_in = (if in_0 < last {
-        5 as ::core::ffi::c_long + last.offset_from(in_0) as ::core::ffi::c_long
+        5 as usize + (last as usize).wrapping_sub(in_0 as usize)
     } else {
-        5 as ::core::ffi::c_long - in_0.offset_from(last) as ::core::ffi::c_long
-    }) as ::core::ffi::c_uint as crate::stdlib::uInt;
+        (5 as usize).wrapping_sub((in_0 as usize).wrapping_sub(last as usize))
+    }) as crate::stdlib::uInt;
     (*strm).avail_out = (if out < end {
-        257 as ::core::ffi::c_long + end.offset_from(out) as ::core::ffi::c_long
+        257 as usize + (end as usize).wrapping_sub(out as usize)
     } else {
-        257 as ::core::ffi::c_long - out.offset_from(end) as ::core::ffi::c_long
-    }) as ::core::ffi::c_uint as crate::stdlib::uInt;
+        (257 as usize).wrapping_sub((out as usize).wrapping_sub(end as usize))
+    }) as crate::stdlib::uInt;
     (*state).hold = hold;
     (*state).bits = bits;
 }
