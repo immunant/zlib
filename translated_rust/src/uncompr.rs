@@ -160,22 +160,7 @@ pub unsafe extern "C" fn uncompress2_z_ffi(
         &mut *sourceLen
     })
 }
-pub unsafe extern "C" fn uncompress2(
-    mut dest: *mut crate::stdlib::Bytef,
-    destLen: &mut crate::stdlib::uLongf,
-    mut source: *const crate::stdlib::Bytef,
-    sourceLen: &mut crate::stdlib::uLong,
-) -> ::core::ffi::c_int {
-    let mut ret: ::core::ffi::c_int = 0;
-    let mut got: crate::stdlib::z_size_t = *destLen as crate::stdlib::z_size_t;
-    let mut used: crate::stdlib::z_size_t = *sourceLen as crate::stdlib::z_size_t;
-    ret = uncompress2_z(dest, &mut got, source, &mut used);
-    *sourceLen = used as crate::stdlib::uLong;
-    *destLen = got as crate::stdlib::uLong as crate::stdlib::uLongf;
-    return ret;
-}
 #[export_name = "uncompress2"]
-
 pub unsafe extern "C" fn uncompress2_ffi(
     mut dest: *mut crate::stdlib::Bytef,
     mut destLen: *mut crate::stdlib::uLongf,
@@ -185,20 +170,16 @@ pub unsafe extern "C" fn uncompress2_ffi(
     if destLen.is_null() || sourceLen.is_null() {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    // SAFETY: the foreign caller supplied both required length pointers.
-    // `uncompress2` validates the associated byte buffers.
-    uncompress2(dest, unsafe { &mut *destLen }, source, unsafe {
-        &mut *sourceLen
-    })
-}
-pub unsafe extern "C" fn uncompress_z(
-    mut dest: *mut crate::stdlib::Bytef,
-    destLen: &mut crate::stdlib::z_size_t,
-    mut source: *const crate::stdlib::Bytef,
-    mut sourceLen: crate::stdlib::z_size_t,
-) -> ::core::ffi::c_int {
-    let mut used: crate::stdlib::z_size_t = sourceLen;
-    return uncompress2_z(dest, destLen, source, &mut used);
+    // Bind the legacy length outputs once, then dispatch directly to the
+    // named size_t implementation that owns the one-shot stream state.
+    let dest_len = unsafe { &mut *destLen };
+    let source_len = unsafe { &mut *sourceLen };
+    let mut got = *dest_len as crate::stdlib::z_size_t;
+    let mut used = *source_len as crate::stdlib::z_size_t;
+    let ret = uncompress2_z(dest, &mut got, source, &mut used);
+    *source_len = used as crate::stdlib::uLong;
+    *dest_len = got as crate::stdlib::uLong as crate::stdlib::uLongf;
+    ret
 }
 #[export_name = "uncompress_z"]
 
@@ -211,18 +192,10 @@ pub unsafe extern "C" fn uncompress_z_ffi(
     if destLen.is_null() {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    // SAFETY: the foreign caller supplied the required destination-length
-    // output pointer. `uncompress_z` preserves the zero-capacity null rule.
-    uncompress_z(dest, unsafe { &mut *destLen }, source, sourceLen)
-}
-pub unsafe extern "C" fn uncompress(
-    mut dest: *mut crate::stdlib::Bytef,
-    destLen: &mut crate::stdlib::uLongf,
-    mut source: *const crate::stdlib::Bytef,
-    mut sourceLen: crate::stdlib::uLong,
-) -> ::core::ffi::c_int {
-    let mut used: crate::stdlib::uLong = sourceLen;
-    return uncompress2(dest, destLen, source, &mut used);
+    // This ABI wrapper only binds the required output length and supplies the
+    // one-shot implementation's local consumed-input counter.
+    let mut used: crate::stdlib::z_size_t = sourceLen;
+    uncompress2_z(dest, unsafe { &mut *destLen }, source, &mut used)
 }
 #[export_name = "uncompress"]
 
@@ -235,7 +208,12 @@ pub unsafe extern "C" fn uncompress_ffi(
     if destLen.is_null() {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    // SAFETY: the foreign caller supplied the required destination-length
-    // output pointer. `uncompress` preserves the zero-capacity null rule.
-    uncompress(dest, unsafe { &mut *destLen }, source, sourceLen)
+    // Preserve the legacy result conversion while the implementation keeps
+    // all raw buffer handling and inflater lifecycle work.
+    let dest_len = unsafe { &mut *destLen };
+    let mut got = *dest_len as crate::stdlib::z_size_t;
+    let mut used = sourceLen as crate::stdlib::z_size_t;
+    let ret = uncompress2_z(dest, &mut got, source, &mut used);
+    *dest_len = got as crate::stdlib::uLong as crate::stdlib::uLongf;
+    ret
 }

@@ -162,27 +162,7 @@ pub unsafe extern "C" fn compress2_z_ffi(
     // output pointer. `compress2_z` validates the associated byte buffers.
     compress2_z(dest, unsafe { &mut *destLen }, source, sourceLen, level)
 }
-pub unsafe extern "C" fn compress2(
-    mut dest: *mut crate::stdlib::Bytef,
-    destLen: &mut crate::stdlib::uLongf,
-    mut source: *const crate::stdlib::Bytef,
-    mut sourceLen: crate::stdlib::uLong,
-    mut level: ::core::ffi::c_int,
-) -> ::core::ffi::c_int {
-    let mut ret: ::core::ffi::c_int = 0;
-    let mut got: crate::stdlib::z_size_t = *destLen as crate::stdlib::z_size_t;
-    ret = compress2_z(
-        dest,
-        &mut got,
-        source,
-        sourceLen as crate::stdlib::z_size_t,
-        level,
-    );
-    *destLen = got as crate::stdlib::uLong as crate::stdlib::uLongf;
-    return ret;
-}
 #[export_name = "compress2"]
-
 pub unsafe extern "C" fn compress2_ffi(
     mut dest: *mut crate::stdlib::Bytef,
     mut destLen: *mut crate::stdlib::uLongf,
@@ -193,23 +173,19 @@ pub unsafe extern "C" fn compress2_ffi(
     if destLen.is_null() {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    // SAFETY: the foreign caller supplied the required destination-length
-    // output pointer. `compress2` validates the associated byte buffers.
-    compress2(dest, unsafe { &mut *destLen }, source, sourceLen, level)
-}
-pub unsafe extern "C" fn compress_z(
-    mut dest: *mut crate::stdlib::Bytef,
-    destLen: &mut crate::stdlib::z_size_t,
-    mut source: *const crate::stdlib::Bytef,
-    mut sourceLen: crate::stdlib::z_size_t,
-) -> ::core::ffi::c_int {
-    return compress2_z(
+    // The ABI boundary binds the length output and performs the legacy-width
+    // conversion; the named size_t implementation retains buffer handling.
+    let dest_len = unsafe { &mut *destLen };
+    let mut got = *dest_len as crate::stdlib::z_size_t;
+    let ret = compress2_z(
         dest,
-        destLen,
+        &mut got,
         source,
-        sourceLen,
-        crate::zlib_h::Z_DEFAULT_COMPRESSION,
+        sourceLen as crate::stdlib::z_size_t,
+        level,
     );
+    *dest_len = got as crate::stdlib::uLong as crate::stdlib::uLongf;
+    ret
 }
 #[export_name = "compress_z"]
 
@@ -222,23 +198,15 @@ pub unsafe extern "C" fn compress_z_ffi(
     if destLen.is_null() {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    // SAFETY: the foreign caller supplied the required destination-length
-    // output pointer. `compress_z` validates the associated byte buffers.
-    compress_z(dest, unsafe { &mut *destLen }, source, sourceLen)
-}
-pub unsafe extern "C" fn compress(
-    mut dest: *mut crate::stdlib::Bytef,
-    destLen: &mut crate::stdlib::uLongf,
-    mut source: *const crate::stdlib::Bytef,
-    mut sourceLen: crate::stdlib::uLong,
-) -> ::core::ffi::c_int {
-    return compress2(
+    // The only ABI work is binding the length output before dispatching to
+    // the size_t implementation with zlib's default level.
+    compress2_z(
         dest,
-        destLen,
+        unsafe { &mut *destLen },
         source,
         sourceLen,
         crate::zlib_h::Z_DEFAULT_COMPRESSION,
-    );
+    )
 }
 #[export_name = "compress"]
 
@@ -251,9 +219,19 @@ pub unsafe extern "C" fn compress_ffi(
     if destLen.is_null() {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    // SAFETY: the foreign caller supplied the required destination-length
-    // output pointer. `compress` validates the associated byte buffers.
-    compress(dest, unsafe { &mut *destLen }, source, sourceLen)
+    // As with `compress2_ffi`, retain legacy-width conversion at the ABI
+    // edge and keep the raw buffers in the named size_t implementation.
+    let dest_len = unsafe { &mut *destLen };
+    let mut got = *dest_len as crate::stdlib::z_size_t;
+    let ret = compress2_z(
+        dest,
+        &mut got,
+        source,
+        sourceLen as crate::stdlib::z_size_t,
+        crate::zlib_h::Z_DEFAULT_COMPRESSION,
+    );
+    *dest_len = got as crate::stdlib::uLong as crate::stdlib::uLongf;
+    ret
 }
 // Keep the bound calculation value-only so the exported ABI functions only
 // select their public integer width.  The wrapping arithmetic and overflow
