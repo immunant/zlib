@@ -668,19 +668,27 @@ fn gz_skip_buffer_plan(
     )
 }
 
-/// Commit a preflighted buffered-seek consumption after the boundary has
-/// reconciled and advanced the owned-output cursor.
-fn gz_skip_buffer_commit_state(
-    state: &mut crate::gzguts_h::gz_state,
+/// Plan the scalar effects of consuming buffered bytes for a pending seek.
+/// The ABI cursor is committed separately at the export boundary after it
+/// has been reconciled with the owned output allocation.
+fn gz_skip_commit(
+    have: crate::stdlib::uInt,
+    pos: crate::stdlib::off64_t,
+    skip: crate::stdlib::off64_t,
     consume: ::core::ffi::c_uint,
-) -> bool {
-    if consume > state.x.have || state.skip < consume as crate::stdlib::off64_t {
-        return false;
+) -> Option<(
+    crate::stdlib::uInt,
+    crate::stdlib::off64_t,
+    crate::stdlib::off64_t,
+)> {
+    if consume > have || skip < consume as crate::stdlib::off64_t {
+        return None;
     }
-    state.x.have = state.x.have.wrapping_sub(consume);
-    state.x.pos = state.x.pos.wrapping_add(consume as crate::stdlib::off64_t);
-    state.skip = state.skip.wrapping_sub(consume as crate::stdlib::off64_t);
-    true
+    Some((
+        have.wrapping_sub(consume),
+        pos.wrapping_add(consume as crate::stdlib::off64_t),
+        skip.wrapping_sub(consume as crate::stdlib::off64_t),
+    ))
 }
 
 /// Advance a buffered-seek cursor using only owned-buffer indices.  The
@@ -938,17 +946,22 @@ enum GzSkipStep {
     },
 }
 
-fn gz_skip(state: &mut crate::gzguts_h::gz_state) -> Result<GzSkipStep, ()> {
-    if state.x.have != 0 {
-        let Some(consume) = gz_skip_buffer_plan(state.x.have, state.skip) else {
+fn gz_skip_step(
+    have: crate::stdlib::uInt,
+    skip: crate::stdlib::off64_t,
+    eof: ::core::ffi::c_int,
+    avail_in: crate::stdlib::uInt,
+) -> Result<GzSkipStep, ()> {
+    if have != 0 {
+        let Some(consume) = gz_skip_buffer_plan(have, skip) else {
             return Err(());
         };
         return Ok(GzSkipStep::Advance {
             consumed: consume,
-            complete: state.skip == consume as crate::stdlib::off64_t,
+            complete: skip == consume as crate::stdlib::off64_t,
         });
     }
-    if state.eof != 0 && state.strm.avail_in == 0 as crate::stdlib::uInt {
+    if eof != 0 && avail_in == 0 as crate::stdlib::uInt {
         Ok(GzSkipStep::Complete)
     } else {
         Ok(GzSkipStep::NeedFetch)
@@ -971,7 +984,12 @@ macro_rules! gz_read_at_boundary {
                 break 'gz_read_result 0 as crate::stdlib::z_size_t;
             }
             while state_ref.skip != 0 {
-                match gz_skip(state_ref) {
+                match gz_skip_step(
+                    state_ref.x.have,
+                    state_ref.skip,
+                    state_ref.eof,
+                    state_ref.strm.avail_in,
+                ) {
                     Ok(GzSkipStep::Complete) => break,
                     Ok(GzSkipStep::NeedFetch) => {
                         if gz_fetch_at_boundary!(state_ref) == -1 as ::core::ffi::c_int {
@@ -1004,9 +1022,14 @@ macro_rules! gz_read_at_boundary {
                             };
                             next_index
                         };
-                        if !gz_skip_buffer_commit_state(state_ref, consumed) {
+                        let Some((have, pos, skip)) = gz_skip_commit(
+                            state_ref.x.have,
+                            state_ref.x.pos,
+                            state_ref.skip,
+                            consumed,
+                        ) else {
                             break 'gz_read_result 0;
-                        }
+                        };
                         let Some(output) = state_ref
                             .buffers
                             .as_mut()
@@ -1015,6 +1038,9 @@ macro_rules! gz_read_at_boundary {
                             break 'gz_read_result 0;
                         };
                         state_ref.x.next = output.as_mut_ptr().wrapping_add(next_index);
+                        state_ref.x.have = have;
+                        state_ref.x.pos = pos;
+                        state_ref.skip = skip;
                         if complete {
                             break;
                         }
@@ -1419,7 +1445,7 @@ pub unsafe extern "C" fn gzungetc_ffi(
     }
     crate::src::gzlib::gz_error_clear(state);
     while state.skip != 0 {
-        match gz_skip(state) {
+        match gz_skip_step(state.x.have, state.skip, state.eof, state.strm.avail_in) {
             Ok(GzSkipStep::Complete) => break,
             Ok(GzSkipStep::NeedFetch) => {
                 if gz_fetch_at_boundary!(state) == -1 {
@@ -1427,7 +1453,44 @@ pub unsafe extern "C" fn gzungetc_ffi(
                 }
             }
             Ok(GzSkipStep::Advance { consumed, complete }) => {
-                state.x.next = state.x.next.wrapping_add(consumed as usize);
+                let next_index = {
+                    let Some(output) = state
+                        .buffers
+                        .as_ref()
+                        .and_then(|buffers| buffers.output.as_ref())
+                    else {
+                        return -1;
+                    };
+                    let Some(next_index) = gz_owned_buffer_index(
+                        output.as_ptr() as usize,
+                        output.len(),
+                        state.x.next as usize,
+                    ) else {
+                        return -1;
+                    };
+                    let Some(next_index) =
+                        gz_skip_buffer_next_index(output.len(), next_index, state.x.have, consumed)
+                    else {
+                        return -1;
+                    };
+                    next_index
+                };
+                let Some((have, pos, skip)) =
+                    gz_skip_commit(state.x.have, state.x.pos, state.skip, consumed)
+                else {
+                    return -1;
+                };
+                let Some(output) = state
+                    .buffers
+                    .as_mut()
+                    .and_then(|buffers| buffers.output.as_mut())
+                else {
+                    return -1;
+                };
+                state.x.next = output.as_mut_ptr().wrapping_add(next_index);
+                state.x.have = have;
+                state.x.pos = pos;
+                state.skip = skip;
                 if complete {
                     break;
                 }
@@ -1509,7 +1572,7 @@ pub unsafe extern "C" fn gzgets_ffi(
     let destination = ::core::slice::from_raw_parts_mut(buf as *mut u8, len as usize);
     crate::src::gzlib::gz_error_clear(state);
     while state.skip != 0 {
-        match gz_skip(state) {
+        match gz_skip_step(state.x.have, state.skip, state.eof, state.strm.avail_in) {
             Ok(GzSkipStep::Complete) => break,
             Ok(GzSkipStep::NeedFetch) => {
                 if gz_fetch_at_boundary!(state) == -1 {
@@ -1517,7 +1580,44 @@ pub unsafe extern "C" fn gzgets_ffi(
                 }
             }
             Ok(GzSkipStep::Advance { consumed, complete }) => {
-                state.x.next = state.x.next.wrapping_add(consumed as usize);
+                let next_index = {
+                    let Some(output) = state
+                        .buffers
+                        .as_ref()
+                        .and_then(|buffers| buffers.output.as_ref())
+                    else {
+                        return ::core::ptr::null_mut();
+                    };
+                    let Some(next_index) = gz_owned_buffer_index(
+                        output.as_ptr() as usize,
+                        output.len(),
+                        state.x.next as usize,
+                    ) else {
+                        return ::core::ptr::null_mut();
+                    };
+                    let Some(next_index) =
+                        gz_skip_buffer_next_index(output.len(), next_index, state.x.have, consumed)
+                    else {
+                        return ::core::ptr::null_mut();
+                    };
+                    next_index
+                };
+                let Some((have, pos, skip)) =
+                    gz_skip_commit(state.x.have, state.x.pos, state.skip, consumed)
+                else {
+                    return ::core::ptr::null_mut();
+                };
+                let Some(output) = state
+                    .buffers
+                    .as_mut()
+                    .and_then(|buffers| buffers.output.as_mut())
+                else {
+                    return ::core::ptr::null_mut();
+                };
+                state.x.next = output.as_mut_ptr().wrapping_add(next_index);
+                state.x.have = have;
+                state.x.pos = pos;
+                state.skip = skip;
                 if complete {
                     break;
                 }
