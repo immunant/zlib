@@ -48,6 +48,20 @@ pub struct ct_data_s {
     pub fc: crate::src::deflate::C2Rust_Unnamed_1,
     pub dl: crate::src::deflate::C2Rust_Unnamed_0,
 }
+
+impl ct_data_s {
+    /// Both union members are `ush`, so every possible bit pattern is valid
+    /// when a tree entry is read as either a code/frequency or a length/dad.
+    #[inline]
+    pub fn code(&self) -> crate::zutil_h::ush {
+        unsafe { self.fc.code }
+    }
+
+    #[inline]
+    pub fn len(&self) -> crate::zutil_h::ush {
+        unsafe { self.dl.len }
+    }
+}
 #[derive(Copy, Clone)]
 #[repr(C)]
 
@@ -152,6 +166,28 @@ pub struct internal_state {
     pub bi_used: ::core::ffi::c_int,
     pub high_water: crate::zutil_h::ulg,
     pub slid: ::core::ffi::c_int,
+}
+
+impl internal_state {
+    /// Append one byte to the pending allocation.  The allocation's size is
+    /// retained with the pointer, so the temporary slice is bounded by the
+    /// allocation rather than by a caller-provided length.
+    #[inline]
+    pub fn put_pending_byte(&mut self, byte: crate::stdlib::Bytef) {
+        let Ok(len) = usize::try_from(self.pending_buf_size) else {
+            return;
+        };
+        let Ok(index) = usize::try_from(self.pending) else {
+            return;
+        };
+        if self.pending_buf.is_null() || index >= len {
+            return;
+        }
+
+        let pending = unsafe { core::slice::from_raw_parts_mut(self.pending_buf, len) };
+        pending[index] = byte;
+        self.pending = self.pending.wrapping_add(1);
+    }
 }
 
 #[derive(Clone)]
