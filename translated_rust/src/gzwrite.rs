@@ -138,7 +138,10 @@ unsafe extern "C" fn gz_comp(
                 );
                 return -1 as ::core::ffi::c_int;
             }
-            (*strm).avail_in = (*strm).avail_in.wrapping_sub(writ as ::core::ffi::c_uint);
+            (*strm).avail_in = crate::src::gzlib::gz_remaining_after_write(
+                (*strm).avail_in,
+                writ as ::core::ffi::c_uint,
+            );
             (*strm).next_in = (*strm).next_in.offset(writ as isize);
         }
         return 0 as ::core::ffi::c_int;
@@ -194,7 +197,7 @@ unsafe extern "C" fn gz_comp(
             );
             return -1 as ::core::ffi::c_int;
         }
-        have = have.wrapping_sub((*strm).avail_out as ::core::ffi::c_uint);
+        have = crate::src::gzlib::gz_produced(have, (*strm).avail_out);
         if have == 0 {
             break;
         }
@@ -300,7 +303,7 @@ unsafe extern "C" fn gz_write(
             let mut n: ::core::ffi::c_uint = crate::src::gzlib::gz_stream_chunk(len);
             state.strm.avail_in = n as crate::stdlib::uInt;
             ret = gz_comp(state, crate::zlib_h::Z_NO_FLUSH);
-            n = n.wrapping_sub(state.strm.avail_in as ::core::ffi::c_uint);
+            n = crate::src::gzlib::gz_produced(n, state.strm.avail_in);
             crate::src::gzlib::gz_advance_pos(state, n);
             len = len.wrapping_sub(n as crate::stdlib::z_size_t);
             if ret == -1 as ::core::ffi::c_int {

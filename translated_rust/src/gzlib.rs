@@ -78,6 +78,36 @@ pub fn gz_syscall_chunk(len: ::core::ffi::c_uint) -> ::core::ffi::c_uint {
     if len > max { max } else { len }
 }
 
+// Keep byte-count arithmetic out of the raw read/write adapters.  These use
+// wrapping operations to retain the translated C behavior for corrupt state.
+pub(crate) fn gz_load_request(
+    len: ::core::ffi::c_uint,
+    have: ::core::ffi::c_uint,
+) -> ::core::ffi::c_uint {
+    gz_syscall_chunk(len.wrapping_sub(have))
+}
+
+pub(crate) fn gz_add_received(
+    have: ::core::ffi::c_uint,
+    received: ::core::ffi::c_uint,
+) -> ::core::ffi::c_uint {
+    have.wrapping_add(received)
+}
+
+pub(crate) fn gz_remaining_after_write(
+    available: crate::stdlib::uInt,
+    written: ::core::ffi::c_uint,
+) -> crate::stdlib::uInt {
+    available.wrapping_sub(written)
+}
+
+pub(crate) fn gz_produced(
+    available_before: ::core::ffi::c_uint,
+    available_after: crate::stdlib::uInt,
+) -> ::core::ffi::c_uint {
+    available_before.wrapping_sub(available_after as ::core::ffi::c_uint)
+}
+
 // Classify a POSIX I/O result without coupling the decision to the raw
 // descriptor and buffer adapters.  A non-negative result is a byte count;
 // a negative result preserves whether a non-blocking operation stalled.

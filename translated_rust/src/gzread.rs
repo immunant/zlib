@@ -81,7 +81,7 @@ unsafe extern "C" fn gz_load(
     *crate::stdlib::__errno_location() = 0;
     *have = 0;
     loop {
-        get = crate::src::gzlib::gz_syscall_chunk(len.wrapping_sub(*have));
+        get = crate::src::gzlib::gz_load_request(len, *have);
         ret = crate::stdlib::read(
             state.fd,
             buf.wrapping_add(*have as usize) as *mut ::core::ffi::c_void,
@@ -90,7 +90,7 @@ unsafe extern "C" fn gz_load(
         if ret <= 0 {
             break;
         }
-        *have = have.wrapping_add(ret as ::core::ffi::c_uint);
+        *have = crate::src::gzlib::gz_add_received(*have, ret as ::core::ffi::c_uint);
         if *have >= len {
             break;
         }
