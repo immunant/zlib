@@ -47,22 +47,21 @@ pub use crate::zlib_h::Z_OK;
 pub use crate::zlib_h::Z_STREAM_END;
 pub use crate::zlib_h::Z_STREAM_ERROR;
 
+/// Allocate the writer's owned input and optional output storage.  This
+/// decision is independent of stream cursors and the deflate state.
+fn gz_init_buffers(
+    want: ::core::ffi::c_uint,
+    direct: ::core::ffi::c_int,
+) -> Option<crate::gzguts_h::gz_buffers> {
+    let input_len = (want as usize).checked_mul(2)?;
+    let output_len = (direct == 0).then_some(want as usize);
+    crate::gzguts_h::gz_buffers::new(input_len, output_len)
+}
+
 unsafe fn gz_init(state_ref: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
     let mut ret: ::core::ffi::c_int = 0;
     let mut strm: crate::zlib_h::z_streamp = &raw mut state_ref.strm;
-    let input_len = match (state_ref.want as usize).checked_mul(2) {
-        Some(len) => len,
-        None => {
-            crate::src::gzlib::gz_error_static(
-                state_ref,
-                crate::zlib_h::Z_MEM_ERROR,
-                b"out of memory\0",
-            );
-            return -1;
-        }
-    };
-    let output_len = (state_ref.direct == 0).then_some(state_ref.want as usize);
-    let Some(buffers) = crate::gzguts_h::gz_buffers::new(input_len, output_len) else {
+    let Some(buffers) = gz_init_buffers(state_ref.want, state_ref.direct) else {
         crate::src::gzlib::gz_error_static(
             state_ref,
             crate::zlib_h::Z_MEM_ERROR,
