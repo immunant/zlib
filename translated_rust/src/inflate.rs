@@ -1054,74 +1054,22 @@ fn update_owned_inflate_window(
     result
 }
 
-/// The typed operations that can borrow a callback-owned inflate window.
-///
-/// Keeping this enum pointer-free lets a single monomorphic boundary service
-/// the history update and the fast decoder without spreading raw slice
-/// construction into either algorithm.
-enum CallbackInflateWindowOperation<'a> {
-    Update(&'a [crate::stdlib::Bytef]),
-    CopyMatch {
-        source_index: usize,
-        output: &'a mut [crate::stdlib::Bytef],
-        output_index: usize,
-        len: usize,
-    },
-    Fast {
-        strm: &'a mut crate::zlib_h::z_stream,
-        out: crate::stdlib::uInt,
-        input: &'a [crate::stdlib::Bytef],
-        output: &'a mut [crate::stdlib::Bytef],
-    },
-}
-
 /// Borrow exactly one callback-owned inflate window for a typed operation.
 ///
 /// The ABI allocator owns this buffer, so its handle stays at this
-/// type-specific boundary. Both the history updater and fast decoder receive
-/// ordinary slices, which keeps the rest of their work safe.
-fn use_callback_inflate_window(
+/// type-specific boundary. Callers receive ordinary slices, which keeps the
+/// history updater, decoder, and copy path safe.
+fn use_callback_inflate_window<R>(
     state: &mut crate::src::inflate::inflate_state,
     len: usize,
-    operation: CallbackInflateWindowOperation<'_>,
-) -> Result<(), ()> {
+    action: impl FnOnce(
+        &mut crate::src::inflate::inflate_state,
+        &mut [crate::stdlib::Bytef],
+    ) -> R,
+) -> Result<R, ()> {
     let window = state.window.ok_or(())?;
     let window = unsafe { ::core::slice::from_raw_parts_mut(window.as_ptr(), len) };
-    match operation {
-        CallbackInflateWindowOperation::Update(input) => {
-            InflateWindow::borrowed(window).update(state, input)
-        }
-        CallbackInflateWindowOperation::CopyMatch {
-            source_index,
-            output,
-            output_index,
-            len,
-        } => {
-            let source_end = source_index.checked_add(len).ok_or(())?;
-            let output_end = output_index.checked_add(len).ok_or(())?;
-            let source = window.get(source_index..source_end).ok_or(())?;
-            let destination = output.get_mut(output_index..output_end).ok_or(())?;
-            destination.copy_from_slice(source);
-            Ok(())
-        }
-        CallbackInflateWindowOperation::Fast {
-            strm,
-            out,
-            input,
-            output,
-        } => {
-            crate::src::inffast::inflate_fast(
-                strm,
-                state,
-                out,
-                Some(&*window),
-                false,
-                input,
-                output,
-            );
-            Ok(())
-        }
-    }
+    Ok(action(state, window))
 }
 
 /// Copy a match from the history window without exposing the callback-owned
@@ -1148,16 +1096,19 @@ fn copy_from_inflate_window(
         state.window_storage.install_owned(owned_window);
         result
     } else {
+        let window_len = state.wsize as usize;
         use_callback_inflate_window(
             state,
-            state.wsize as usize,
-            CallbackInflateWindowOperation::CopyMatch {
-                source_index,
-                output,
-                output_index,
-                len,
+            window_len,
+            |_, window| {
+                let source_end = source_index.checked_add(len).ok_or(())?;
+                let output_end = output_index.checked_add(len).ok_or(())?;
+                let source = window.get(source_index..source_end).ok_or(())?;
+                let destination = output.get_mut(output_index..output_end).ok_or(())?;
+                destination.copy_from_slice(source);
+                Ok(())
             },
-        )
+        )?
     }
 }
 
@@ -1171,7 +1122,9 @@ fn update_callback_owned_inflate_window(
     len: usize,
     input: &[crate::stdlib::Bytef],
 ) -> Result<(), ()> {
-    use_callback_inflate_window(state, len, CallbackInflateWindowOperation::Update(input))
+    use_callback_inflate_window(state, len, |state, window| {
+        InflateWindow::borrowed(window).update(state, input)
+    })?
 }
 
 fn copy_literal_block(input: &[crate::stdlib::Bytef], output: &mut [crate::stdlib::Bytef]) {
@@ -2531,19 +2484,27 @@ pub fn inflate(
                                                         fast_input,
                                                         output,
                                                     );
-                                                } else if use_callback_inflate_window(
-                                                    state,
-                                                    state.wsize as usize,
-                                                    CallbackInflateWindowOperation::Fast {
-                                                        strm,
-                                                        out,
-                                                        input: fast_input,
-                                                        output,
-                                                    },
-                                                )
-                                                .is_err()
-                                                {
-                                                    return crate::zlib_h::Z_STREAM_ERROR;
+                                                } else {
+                                                    let window_len = state.wsize as usize;
+                                                    if use_callback_inflate_window(
+                                                        state,
+                                                        window_len,
+                                                        |state, window| {
+                                                            crate::src::inffast::inflate_fast(
+                                                                strm,
+                                                                state,
+                                                                out,
+                                                                Some(&*window),
+                                                                false,
+                                                                fast_input,
+                                                                output,
+                                                            );
+                                                        },
+                                                    )
+                                                    .is_err()
+                                                    {
+                                                        return crate::zlib_h::Z_STREAM_ERROR;
+                                                    }
                                                 }
                                                 if let Some(window) = owned_history {
                                                     state.window_storage.install_owned(window);
@@ -3609,7 +3570,7 @@ pub unsafe extern "C" fn inflateSyncPoint_ffi(
 fn initialize_inflate_copy(
     dest: &mut crate::zlib_h::z_stream,
     source: &crate::zlib_h::z_stream,
-    source_state: &crate::src::inflate::inflate_state,
+    source_state: &mut crate::src::inflate::inflate_state,
 ) -> ::core::ffi::c_int {
     // Keep allocation callbacks on a local stream copy until every fallible
     // allocation succeeds. This preserves C's observable rule that a failed
@@ -3647,9 +3608,9 @@ fn initialize_inflate_copy(
                 owned_window_failed = owned_window.is_none();
             }
             let mut window = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
+            let layout = InflateWindowLayout::from_state(source_state)
+                .expect("inflateCopy validated the source window layout");
             if source_state.window.is_some() && owned_window.is_none() && !owned_window_failed {
-                let layout = InflateWindowLayout::from_state(source_state)
-                    .expect("inflateCopy validated the source window layout");
                 window = Some(allocation_stream.zalloc.expect("validated allocator"))
                     .expect("validated allocator")(
                     allocation_stream.opaque,
@@ -3668,20 +3629,33 @@ fn initialize_inflate_copy(
                 return crate::zlib_h::Z_MEM_ERROR;
             }
             if !window.is_null() {
-                unsafe {
-                    ::core::ptr::copy_nonoverlapping(
-                        source_state.window.expect("checked non-null window").as_ptr(),
-                        window,
-                        source_state.whave as usize,
-                    );
+                // Publish the callback destination only to the existing typed
+                // window boundary. It can then copy the validated live history
+                // from the source through ordinary slices, without another raw
+                // conversion in this copy setup path.
+                copy_ref.window = ::core::ptr::NonNull::new(window);
+                copy_ref.window_storage.install_callback_allocation();
+                let history_len = source_state.whave as usize;
+                let copied = use_callback_inflate_window(source_state, layout.len, |_, source| {
+                    use_callback_inflate_window(copy_ref, layout.len, |_, destination| {
+                        let history = source.get(..history_len).ok_or(())?;
+                        let destination = destination.get_mut(..history.len()).ok_or(())?;
+                        destination.copy_from_slice(history);
+                        Ok::<(), ()>(())
+                    })?
+                })
+                .is_ok();
+                if !copied {
+                    let zfree = Some(allocation_stream.zfree.expect("validated allocator"))
+                        .expect("validated allocator");
+                    zfree(allocation_stream.opaque, window.cast());
+                    zfree(allocation_stream.opaque, allocation_stream.state.cast());
+                    return crate::zlib_h::Z_MEM_ERROR;
                 }
             }
             copy_ref.strm = stream_identity(dest);
             if let Some(owned_window) = owned_window {
                 install_owned_inflate_window(copy_ref, owned_window);
-            } else {
-                copy_ref.window = ::core::ptr::NonNull::new(window);
-                copy_ref.window_storage.install_callback_allocation();
             }
             crate::zlib_h::copy_z_stream(dest, source);
             dest.state = allocation_stream.state;
@@ -3698,8 +3672,8 @@ fn initialize_inflate_copy(
 /// from needing to follow an ABI raw pointer itself.
 fn inflate_copy(
     dest: Option<&mut crate::zlib_h::z_stream>,
-    source: Option<&crate::zlib_h::z_stream>,
-    source_state: Option<&crate::src::inflate::inflate_state>,
+    source: Option<&mut crate::zlib_h::z_stream>,
+    source_state: Option<&mut crate::src::inflate::inflate_state>,
 ) -> ::core::ffi::c_int {
     let Some(source_ref) = source else {
         return crate::zlib_h::Z_STREAM_ERROR;
@@ -3735,15 +3709,16 @@ pub unsafe extern "C" fn inflateCopy_ffi(
     mut dest: crate::zlib_h::z_streamp,
     mut source: crate::zlib_h::z_streamp,
 ) -> ::core::ffi::c_int {
-    let source = source.as_ref();
     let dest = dest.as_mut();
-    let source_state = source.and_then(|source| {
-        if !inflate_stream_has_allocators(source) {
-            return None;
-        }
-        (source.state as *const crate::src::inflate::inflate_state).as_ref()
-    });
-    inflate_copy(dest, source, source_state)
+    let Some(source) = source.as_mut() else {
+        return inflate_copy(dest, None, None);
+    };
+    let source_state = if inflate_stream_has_allocators(source) {
+        (source.state as *mut crate::src::inflate::inflate_state).as_mut()
+    } else {
+        None
+    };
+    inflate_copy(dest, Some(source), source_state)
 }
 fn inflate_undermine(
     state: Option<&mut crate::src::inflate::inflate_state>,
