@@ -646,9 +646,9 @@ pub unsafe extern "C" fn gzungetc(
         crate::src::gzlib::GzUngetcPlan::First { buffer_end } => {
             state.x.next = state
                 .out
-                .offset(buffer_end as isize)
-                .offset(-(1 as ::core::ffi::c_int as isize));
-            *state.x.next.offset(0 as ::core::ffi::c_int as isize) = c as ::core::ffi::c_uchar;
+                .wrapping_add(buffer_end as usize)
+                .wrapping_sub(1);
+            *state.x.next = c as ::core::ffi::c_uchar;
             crate::src::gzlib::gz_ungetc_progress(state, true);
         }
         crate::src::gzlib::GzUngetcPlan::Full => {
@@ -661,19 +661,20 @@ pub unsafe extern "C" fn gzungetc(
         }
         crate::src::gzlib::GzUngetcPlan::Prepend { move_to_end } => {
             if move_to_end {
-                let mut src: *mut ::core::ffi::c_uchar = state.out.offset(state.x.have as isize);
+                let mut src: *mut ::core::ffi::c_uchar =
+                    state.out.wrapping_add(state.x.have as usize);
                 let mut dest: *mut ::core::ffi::c_uchar = state
                     .out
-                    .offset((state.size << 1 as ::core::ffi::c_int) as isize);
+                    .wrapping_add((state.size << 1 as ::core::ffi::c_int) as usize);
                 while src > state.out {
-                    src = src.offset(-1);
-                    dest = dest.offset(-1);
+                    src = src.wrapping_sub(1);
+                    dest = dest.wrapping_sub(1);
                     *dest = *src;
                 }
                 state.x.next = dest;
             }
-            state.x.next = state.x.next.offset(-1);
-            *state.x.next.offset(0 as ::core::ffi::c_int as isize) = c as ::core::ffi::c_uchar;
+            state.x.next = state.x.next.wrapping_sub(1);
+            *state.x.next = c as ::core::ffi::c_uchar;
             crate::src::gzlib::gz_ungetc_progress(state, false);
         }
     }
@@ -750,7 +751,7 @@ pub unsafe extern "C" fn gzgets(
                 );
                 gz_consume(state, n as crate::stdlib::off64_t);
                 left = left.wrapping_sub(n);
-                buf = buf.offset(n as isize);
+                buf = buf.wrapping_add(n as usize);
                 if !(left != 0 && eol.is_null()) {
                     break;
                 }
@@ -760,7 +761,7 @@ pub unsafe extern "C" fn gzgets(
     if buf == str {
         return ::core::ptr::null_mut::<::core::ffi::c_char>();
     }
-    *buf.offset(0 as ::core::ffi::c_int as isize) = 0 as ::core::ffi::c_char;
+    *buf = 0 as ::core::ffi::c_char;
     return str;
 }
 #[export_name = "gzgets"]
