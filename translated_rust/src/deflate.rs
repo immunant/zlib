@@ -96,11 +96,11 @@ fn copy_gzip_header(header: &GzipHeader) -> GzipHeader {
 #[repr(C)]
 
 pub struct internal_state {
-    // A deflate state is only installed after its ABI stream has been
-    // validated, and `deflateCopy()` rejects a null destination.  Preserve
-    // that invariant in the opaque state instead of retaining a nullable raw
-    // backlink.
-    pub strm: ::core::ptr::NonNull<crate::zlib_h::z_stream_s>,
+    // The legacy `_tr_flush_block` FFI adapter receives only this opaque
+    // state, yet must update the ABI stream's `data_type`.  Retain that one
+    // scalar slot rather than the entire caller-owned stream backlink.
+    // State validation compares this slot's address with the current stream.
+    pub strm: ::core::ptr::NonNull<::core::ffi::c_int>,
     pub status: ::core::ffi::c_int,
     // This allocation is released through the stream's zfree callback, so it
     // cannot yet become a Box. NonNull makes the initialized-owner invariant
@@ -932,7 +932,7 @@ pub unsafe extern "C" fn deflateInit2_(
     // observe the same installed stream state without first writing invalid
     // all-zero bytes into Rust enum fields.
     s.write(crate::src::deflate::internal_state {
-        strm: ::core::ptr::NonNull::from(&mut *stream),
+        strm: ::core::ptr::NonNull::from(&mut stream.data_type),
         status: initial_state.status,
         pending_buf: None,
         pending_buf_size: initial_state.pending_buf_size,
@@ -1153,7 +1153,9 @@ unsafe extern "C" fn deflateStateCheck(mut strm: crate::zlib_h::z_streamp) -> ::
         return 1 as ::core::ffi::c_int;
     }
     let state = &*s;
-    if state.strm.as_ptr() != strm || !deflate_state_status_is_valid(state.status) {
+    if state.strm != ::core::ptr::NonNull::from(&strm_ref.data_type)
+        || !deflate_state_status_is_valid(state.status)
+    {
         return 1 as ::core::ffi::c_int;
     }
     return 0 as ::core::ffi::c_int;
@@ -2238,13 +2240,13 @@ fn deflate_bound_impl(
 
 unsafe fn deflate_bound_state_for_stream(
     stream: &crate::zlib_h::z_stream_s,
-    stream_ptr: crate::zlib_h::z_streamp,
+    _stream_ptr: crate::zlib_h::z_streamp,
 ) -> Option<DeflateBoundState> {
     if stream.zalloc.is_none() || stream.zfree.is_none() {
         return None;
     }
     let state = (stream.state as *const crate::src::deflate::deflate_state).as_ref()?;
-    if state.strm.as_ptr() != stream_ptr
+    if state.strm != ::core::ptr::NonNull::from(&stream.data_type)
         || state.status != crate::src::deflate::INIT_STATE
             && state.status != crate::src::deflate::GZIP_STATE
             && state.status != crate::src::deflate::EXTRA_STATE
@@ -3609,7 +3611,7 @@ pub unsafe extern "C" fn deflateCopy(
         return crate::zlib_h::Z_STREAM_ERROR;
     }
     let ss = &*source_state;
-    if ss.strm.as_ptr() != source as *const crate::zlib_h::z_stream_s as crate::zlib_h::z_streamp
+    if ss.strm != ::core::ptr::NonNull::from(&source.data_type)
         || !deflate_state_status_is_valid(ss.status)
     {
         return crate::zlib_h::Z_STREAM_ERROR;
@@ -3715,7 +3717,7 @@ pub unsafe extern "C" fn deflateCopy(
     ::core::ptr::write(
         ds,
         crate::src::deflate::internal_state {
-            strm: ::core::ptr::NonNull::from(&mut *dest),
+            strm: ::core::ptr::NonNull::from(&mut dest.data_type),
             status: payload.status,
             pending_buf: ss.pending_buf,
             pending_buf_size: payload.pending_buf_size,

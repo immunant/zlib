@@ -3701,7 +3701,7 @@ pub unsafe extern "C" fn _tr_flush_block(
 ) {
     let state = &mut *s;
     let data_type = if state.level > 0 {
-        Some(&mut (*state.strm.as_ptr()).data_type)
+        Some(&mut *state.strm.as_ptr())
     } else {
         None
     };
