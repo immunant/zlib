@@ -686,13 +686,9 @@ pub unsafe extern "C" fn gzdopen_ffi(
     gzdopen(fd, ::core::ffi::CStr::from_ptr(mode).to_bytes())
 }
 unsafe fn gzbuffer(
-    mut state: Option<::core::ptr::NonNull<crate::gzguts_h::gz_state>>,
+    state: &mut crate::gzguts_h::gz_state,
     mut size: ::core::ffi::c_uint,
 ) -> ::core::ffi::c_int {
-    let Some(mut state) = state else {
-        return -1 as ::core::ffi::c_int;
-    };
-    let state = state.as_mut();
     match gzbuffer_want(state.mode, state.size, size) {
         Some(want) => {
             state.want = want;
@@ -707,10 +703,10 @@ pub unsafe extern "C" fn gzbuffer_ffi(
     mut file: crate::zlib_h::gzFile,
     mut size: ::core::ffi::c_uint,
 ) -> ::core::ffi::c_int {
-    gzbuffer(
-        ::core::ptr::NonNull::new(file as crate::gzguts_h::gz_statep),
-        size,
-    )
+    let Some(state) = (file as crate::gzguts_h::gz_statep).as_mut() else {
+        return -1 as ::core::ffi::c_int;
+    };
+    gzbuffer(state, size)
 }
 unsafe fn gzrewind(
     mut state: Option<::core::ptr::NonNull<crate::gzguts_h::gz_state>>,
