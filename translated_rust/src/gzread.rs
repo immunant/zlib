@@ -118,7 +118,10 @@ unsafe extern "C" fn gz_avail(mut state: crate::gzguts_h::gz_statep) -> ::core::
     {
         if buffered != 0 {
             let input = state.strm.next_in as *const ::core::ffi::c_uchar;
-            if input != state.in_0 as *const ::core::ffi::c_uchar {
+            if crate::src::gzlib::gz_avail_needs_compaction(
+                buffered,
+                input == state.in_0 as *const ::core::ffi::c_uchar,
+            ) {
                 // `next_in` points into the input buffer, so the source and
                 // destination may overlap.  `copy` preserves the translated
                 // forward-copy behavior for that compaction.

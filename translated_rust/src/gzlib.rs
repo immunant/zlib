@@ -172,6 +172,16 @@ pub(crate) fn gz_avail_after_load(
     state.strm.next_in = state.in_0 as *mut crate::stdlib::Bytef;
 }
 
+// The input-buffer adapter supplies whether its cursor is already at the
+// buffer start.  Keep the compaction decision scalar so the adapter alone
+// retains the raw pointers and overlapping copy.
+pub(crate) fn gz_avail_needs_compaction(
+    buffered: ::core::ffi::c_uint,
+    cursor_at_start: bool,
+) -> bool {
+    buffered != 0 && !cursor_at_start
+}
+
 pub(crate) fn gz_set_copy_input(
     state: &mut crate::gzguts_h::gz_state,
     copied: ::core::ffi::c_uint,
