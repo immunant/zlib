@@ -842,8 +842,7 @@ unsafe extern "C" fn gz_fetch(mut state: crate::gzguts_h::gz_statep) -> ::core::
                 return 0 as ::core::ffi::c_int;
             }
             GzFetchAction::Gzip => {
-                (*strm).avail_out =
-                    gz_output_buffer_len((*state).size) as crate::stdlib::uInt;
+                (*strm).avail_out = gz_output_buffer_len((*state).size) as crate::stdlib::uInt;
                 (*strm).next_out = (*state).out as *mut crate::stdlib::Bytef;
                 if gz_decomp(state) == -1 as ::core::ffi::c_int {
                     return -1 as ::core::ffi::c_int;
@@ -2188,15 +2187,15 @@ pub unsafe extern "C" fn gzungetc(
             .out
             .offset(gz_output_buffer_len((*state).size) as isize);
         while src > (*state).out {
-            src = src.offset(-1);
-            dest = dest.offset(-1);
+            src = src.wrapping_sub(1);
+            dest = dest.wrapping_sub(1);
             *dest = *src;
         }
         (*state).x.next = dest;
     }
     let (have, pos, past) = gz_ungetc_progress((*state).x.have, (*state).x.pos);
     (*state).x.have = have;
-    (*state).x.next = (*state).x.next.offset(-1);
+    (*state).x.next = (*state).x.next.wrapping_sub(1);
     *(*state).x.next.offset(0 as ::core::ffi::c_int as isize) = c as ::core::ffi::c_uchar;
     (*state).x.pos = pos;
     (*state).past = past;

@@ -1005,7 +1005,7 @@ pub unsafe extern "C" fn inflate(
                     }
                     have = have.wrapping_sub(1);
                     let c2rust_fresh12 = next;
-                    next = next.offset(1);
+                    next = next.wrapping_add(1);
                     hold = hold.wrapping_add((*c2rust_fresh12 as ::core::ffi::c_ulong) << bits);
                     bits = bits.wrapping_add(8 as ::core::ffi::c_uint);
                 }
@@ -1038,7 +1038,7 @@ pub unsafe extern "C" fn inflate(
                     }
                     have = have.wrapping_sub(1);
                     let c2rust_fresh13 = next;
-                    next = next.offset(1);
+                    next = next.wrapping_add(1);
                     hold = hold.wrapping_add((*c2rust_fresh13 as ::core::ffi::c_ulong) << bits);
                     bits = bits.wrapping_add(8 as ::core::ffi::c_uint);
                 }
@@ -2719,18 +2719,19 @@ pub unsafe extern "C" fn inflateCodesUsed_ffi(
 mod tests {
     use super::{
         apply_window_update, copy_dictionary_from_window, dynamic_code_length_repeat_fits,
-        dynamic_header_counts, inflateSyncPoint_ffi, inflate_block_header, inflate_copy_progress,
-        inflate_data_type_value, inflate_dictionary_is_allowed, inflate_header_crc_enabled,
+        dynamic_header_counts, inflateSyncPoint_ffi, inflate_block_header,
+        inflate_codes_used_offset_value, inflate_copy_progress, inflate_data_type_value,
+        inflate_dictionary_is_allowed, inflate_header_crc_enabled,
         inflate_header_wrap_allows_capture, inflate_mark_progress, inflate_mark_value,
         inflate_mode_data_type_flags, inflate_mode_is_valid, inflate_needs_buffer_error,
         inflate_prime_update, inflate_reset2_params, inflate_should_update_window,
         inflate_state_metadata_is_valid, inflate_stream_has_allocator_callbacks,
         inflate_sync_input_progress, inflate_sync_normalized_wrap, inflate_sync_point_value,
         inflate_sync_remaining_input, inflate_sync_search_core, inflate_undermine_core,
-        inflate_validate_wrap, inflate_codes_used_offset_value, initial_window_metadata,
-        stored_block_length, syncsearch_safe, window_needs_allocation, window_update_plan,
-        InflateBlockKind, InflateCopyProgress, InflatePrimeUpdate, InflateSyncSearch, BAD, CHECK,
-        CODE_LENGTH_ORDER, COPY_, COPY_1, DICT, HEAD, LEN_, MATCH, STORED, SYNC, TYPE,
+        inflate_validate_wrap, initial_window_metadata, stored_block_length, syncsearch_safe,
+        window_needs_allocation, window_update_plan, InflateBlockKind, InflateCopyProgress,
+        InflatePrimeUpdate, InflateSyncSearch, BAD, CHECK, CODE_LENGTH_ORDER, COPY_, COPY_1, DICT,
+        HEAD, LEN_, MATCH, STORED, SYNC, TYPE,
     };
 
     #[test]
