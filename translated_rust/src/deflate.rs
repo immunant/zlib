@@ -3383,11 +3383,12 @@ unsafe extern "C" fn deflate_huff(
     mut flush: ::core::ffi::c_int,
 ) -> block_state {
     let mut bflush: ::core::ffi::c_int = 0;
-    let sym_buf_start = (*s).sym_buf_start;
+    let state = &mut *s;
+    let sym_buf_start = state.sym_buf_start;
     // `pending_buf` is the full allocation; symbols occupy its suffix after
     // the literal area. Keeping one full-capacity view avoids a raw cursor.
     let pending_buf =
-        ::core::slice::from_raw_parts_mut((*s).pending_buf, (*s).pending_buf_size as usize);
+        ::core::slice::from_raw_parts_mut(state.pending_buf, state.pending_buf_size as usize);
     let sym_buf = &mut pending_buf[sym_buf_start..];
     loop {
         if (*s).lookahead == 0 as crate::stdlib::uInt {
@@ -3399,20 +3400,19 @@ unsafe extern "C" fn deflate_huff(
                 break;
             }
         }
-        (*s).match_length = 0 as crate::stdlib::uInt;
-        let mut cc: crate::zutil_h::uch =
-            *(*s).window.offset((*s).strstart as isize) as crate::zutil_h::uch;
-        let c2rust_fresh56 = (*s).sym_next;
-        (*s).sym_next = (*s).sym_next.wrapping_add(1);
-        sym_buf[c2rust_fresh56 as usize] = 0 as crate::zutil_h::uchf;
-        let c2rust_fresh57 = (*s).sym_next;
-        (*s).sym_next = (*s).sym_next.wrapping_add(1);
-        sym_buf[c2rust_fresh57 as usize] = 0 as crate::zutil_h::uchf;
-        let c2rust_fresh58 = (*s).sym_next;
-        (*s).sym_next = (*s).sym_next.wrapping_add(1);
-        sym_buf[c2rust_fresh58 as usize] = cc as crate::zutil_h::uchf;
-        (*s).dyn_ltree[cc as usize].fc = (*s).dyn_ltree[cc as usize].fc.wrapping_add(1);
-        bflush = ((*s).sym_next == (*s).sym_end) as ::core::ffi::c_int;
+        state.match_length = 0 as crate::stdlib::uInt;
+        let window = ::core::slice::from_raw_parts(state.window, state.window_size as usize);
+        let cc = window[state.strstart as usize] as crate::zutil_h::uch;
+        bflush = crate::src::trees::tally_symbol(
+            sym_buf,
+            &mut state.sym_next,
+            state.sym_end,
+            &mut state.dyn_ltree,
+            &mut state.dyn_dtree,
+            &mut state.matches,
+            0,
+            cc as ::core::ffi::c_uint,
+        );
         (*s).lookahead = (*s).lookahead.wrapping_sub(1);
         (*s).strstart = (*s).strstart.wrapping_add(1);
         if bflush != 0 {
