@@ -106,6 +106,29 @@ fn clear_buffered_input(buffer: &mut [u8]) {
     buffer.fill(0);
 }
 
+// Keep the temporary write-buffer transition independent of `gz_state`.
+// The caller owns the buffer and replaces its cursor only after this borrow
+// ends, so a later `gz_write()` observes the same complete pending prefix as
+// the original direct state update.
+fn gzputc_buffer_byte(
+    buffer: Option<&mut [u8]>,
+    size: usize,
+    cursor: Option<crate::src::gzlib::GzCodecInput>,
+    byte: u8,
+) -> Option<(usize, crate::src::gzlib::GzCodecInput)> {
+    let buffer = buffer?.get_mut(..size)?;
+    let cursor = cursor.unwrap_or_else(crate::src::gzlib::GzCodecInput::empty);
+    let mut buffered = crate::src::gzlib::GzBufferedInput::from_index(
+        buffer,
+        cursor.cursor(),
+        cursor.available(),
+    )?;
+    let copied = buffered.append(&[byte]);
+    let (start, available) = buffered.cursor()?;
+    let cursor = crate::src::gzlib::GzCodecInput::from_index(buffer, start, available)?;
+    Some((copied, cursor))
+}
+
 // A forward seek on a write handle is materialized as zero-filled input fed
 // through the normal compression path.  Keep the byte-range proof and the
 // scalar accounting outside the ABI-shaped gzip state so the eventual owned
@@ -824,35 +847,22 @@ unsafe fn gzputc(
     }
     if state.buffers.size != 0 {
         let size = state.buffers.size as usize;
-        let (copy, cursor) = {
-            let Some(buffer) = state.buffers.input.as_deref_mut() else {
-                return -1 as ::core::ffi::c_int;
-            };
-            let Some(buffer) = buffer.get_mut(..size) else {
-                return -1 as ::core::ffi::c_int;
-            };
-            let cursor = state
-                .buffers
-                .input_cursor
-                .take()
-                .unwrap_or_else(crate::src::gzlib::GzCodecInput::empty);
-            let Some(mut buffered) = crate::src::gzlib::GzBufferedInput::from_index(
-                buffer,
-                cursor.cursor(),
-                cursor.available(),
-            ) else {
-                return -1 as ::core::ffi::c_int;
-            };
-            let copy = buffered.append(&[c as ::core::ffi::c_uchar]);
-            let Some((start, available)) = buffered.cursor() else {
-                return -1 as ::core::ffi::c_int;
-            };
-            let Some(cursor) =
-                crate::src::gzlib::GzCodecInput::from_index(buffer, start, available)
-            else {
-                return -1 as ::core::ffi::c_int;
-            };
-            (copy, cursor)
+        if state
+            .buffers
+            .input
+            .as_deref()
+            .is_none_or(|buffer| buffer.get(..size).is_none())
+        {
+            return -1 as ::core::ffi::c_int;
+        }
+        let cursor = state.buffers.input_cursor.take();
+        let Some((copy, cursor)) = gzputc_buffer_byte(
+            state.buffers.input.as_deref_mut(),
+            size,
+            cursor,
+            c as ::core::ffi::c_uchar,
+        ) else {
+            return -1 as ::core::ffi::c_int;
         };
         // Keep a full owned buffer's cursor as well: the fallback through
         // `gz_write()` must flush those bytes before it appends this byte.
