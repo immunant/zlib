@@ -610,7 +610,7 @@ pub unsafe extern "C" fn inflate(
     let mut len: ::core::ffi::c_uint = 0;
     let mut ret: ::core::ffi::c_int = 0;
     let mut hbuf: [::core::ffi::c_uchar; 4] = [0; 4];
-    static mut order: [::core::ffi::c_ushort; 19] = [
+    const ORDER: [::core::ffi::c_ushort; 19] = [
         16 as ::core::ffi::c_ushort,
         17 as ::core::ffi::c_ushort,
         18 as ::core::ffi::c_ushort,
@@ -1161,7 +1161,7 @@ pub unsafe extern "C" fn inflate(
                                                                                             }
                                                                                             let c2rust_fresh15 = (*state).have;
                                                                                             (*state).have = (*state).have.wrapping_add(1);
-                                                                                            (*state).lens[order[c2rust_fresh15 as usize] as usize] = (hold
+                                                                                            (*state).lens[ORDER[c2rust_fresh15 as usize] as usize] = (hold
                                                                                                 as ::core::ffi::c_uint
                                                                                                 & ((1 as ::core::ffi::c_uint) << 3 as ::core::ffi::c_int)
                                                                                                     .wrapping_sub(1 as ::core::ffi::c_uint))
@@ -1175,7 +1175,7 @@ pub unsafe extern "C" fn inflate(
                                                                                         while (*state).have < 19 as ::core::ffi::c_uint {
                                                                                             let c2rust_fresh16 = (*state).have;
                                                                                             (*state).have = (*state).have.wrapping_add(1);
-                                                                                            (*state).lens[order[c2rust_fresh16 as usize] as usize] = 0
+                                                                                            (*state).lens[ORDER[c2rust_fresh16 as usize] as usize] = 0
                                                                                                 as ::core::ffi::c_ushort;
                                                                                         }
                                                                                         (*state).next = 0;

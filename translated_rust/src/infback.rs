@@ -151,7 +151,7 @@ pub unsafe extern "C" fn inflateBack(
     };
     let mut len: ::core::ffi::c_uint = 0;
     let mut ret: ::core::ffi::c_int = 0;
-    static mut order: [::core::ffi::c_ushort; 19] = [
+    const ORDER: [::core::ffi::c_ushort; 19] = [
         16 as ::core::ffi::c_ushort,
         17 as ::core::ffi::c_ushort,
         18 as ::core::ffi::c_ushort,
@@ -394,7 +394,7 @@ pub unsafe extern "C" fn inflateBack(
                         }
                         let c2rust_fresh4 = (*state).have;
                         (*state).have = (*state).have.wrapping_add(1);
-                        (*state).lens[order[c2rust_fresh4 as usize] as usize] = (hold
+                        (*state).lens[ORDER[c2rust_fresh4 as usize] as usize] = (hold
                             as ::core::ffi::c_uint
                             & ((1 as ::core::ffi::c_uint) << 3 as ::core::ffi::c_int)
                                 .wrapping_sub(1 as ::core::ffi::c_uint))
@@ -405,7 +405,7 @@ pub unsafe extern "C" fn inflateBack(
                     while (*state).have < 19 as ::core::ffi::c_uint {
                         let c2rust_fresh5 = (*state).have;
                         (*state).have = (*state).have.wrapping_add(1);
-                        (*state).lens[order[c2rust_fresh5 as usize] as usize] =
+                        (*state).lens[ORDER[c2rust_fresh5 as usize] as usize] =
                             0 as ::core::ffi::c_ushort;
                     }
                     (*state).next = 0;
