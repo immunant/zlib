@@ -3327,53 +3327,53 @@ fn deflate_rle(
                 {
                     scan = state
                         .window
-                        .offset(state.strstart as isize)
-                        .offset(-(1 as ::core::ffi::c_int as isize));
+                        .wrapping_offset(state.strstart as isize)
+                        .wrapping_offset(-(1 as ::core::ffi::c_int as isize));
                     prev = *scan as crate::stdlib::uInt;
-                    scan = scan.offset(1);
+                    scan = scan.wrapping_offset(1);
                     if prev == *scan as crate::stdlib::uInt
                         && {
-                            scan = scan.offset(1);
+                            scan = scan.wrapping_offset(1);
                             prev == *scan as crate::stdlib::uInt
                         }
                         && {
-                            scan = scan.offset(1);
+                            scan = scan.wrapping_offset(1);
                             prev == *scan as crate::stdlib::uInt
                         }
                     {
                         strend = state
                             .window
-                            .offset(state.strstart as isize)
-                            .offset(crate::zutil_h::MAX_MATCH as isize);
+                            .wrapping_offset(state.strstart as isize)
+                            .wrapping_offset(crate::zutil_h::MAX_MATCH as isize);
                         loop {
-                            scan = scan.offset(1);
+                            scan = scan.wrapping_offset(1);
                             if !(prev == *scan as crate::stdlib::uInt
                                 && {
-                                    scan = scan.offset(1);
+                                    scan = scan.wrapping_offset(1);
                                     prev == *scan as crate::stdlib::uInt
                                 }
                                 && {
-                                    scan = scan.offset(1);
+                                    scan = scan.wrapping_offset(1);
                                     prev == *scan as crate::stdlib::uInt
                                 }
                                 && {
-                                    scan = scan.offset(1);
+                                    scan = scan.wrapping_offset(1);
                                     prev == *scan as crate::stdlib::uInt
                                 }
                                 && {
-                                    scan = scan.offset(1);
+                                    scan = scan.wrapping_offset(1);
                                     prev == *scan as crate::stdlib::uInt
                                 }
                                 && {
-                                    scan = scan.offset(1);
+                                    scan = scan.wrapping_offset(1);
                                     prev == *scan as crate::stdlib::uInt
                                 }
                                 && {
-                                    scan = scan.offset(1);
+                                    scan = scan.wrapping_offset(1);
                                     prev == *scan as crate::stdlib::uInt
                                 }
                                 && {
-                                    scan = scan.offset(1);
+                                    scan = scan.wrapping_offset(1);
                                     prev == *scan as crate::stdlib::uInt
                                 }
                                 && scan < strend)
