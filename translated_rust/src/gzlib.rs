@@ -13,6 +13,8 @@ pub use crate::gzguts_h::GZ_WRITE;
 pub use crate::gzguts_h::LOOK;
 pub use crate::internal::__INT_MAX__;
 pub use crate::limits_h::INT_MAX;
+pub use crate::stdlib::fcntl;
+pub use crate::stdlib::open;
 pub use crate::stdlib::__O_CLOEXEC;
 pub use crate::stdlib::F_GETFD;
 pub use crate::stdlib::F_GETFL;
@@ -30,8 +32,6 @@ pub use crate::stdlib::O_WRONLY;
 pub use crate::stdlib::SEEK_CUR;
 pub use crate::stdlib::SEEK_END;
 pub use crate::stdlib::SEEK_SET;
-pub use crate::stdlib::fcntl;
-pub use crate::stdlib::open;
 
 pub use crate::stdlib::__off64_t;
 pub use crate::stdlib::__off_t;
