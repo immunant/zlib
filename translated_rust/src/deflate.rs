@@ -2933,6 +2933,11 @@ unsafe fn deflate_fast(
     mut flush: ::core::ffi::c_int,
 ) -> block_state {
     let state = &mut *s;
+    // The compression-function dispatcher has already validated this state
+    // and its stream. Bind that stream once at this internal raw boundary so
+    // fast-loop output checks remain ordinary reference work.
+    let stream_ptr = state.strm;
+    let stream = &mut *stream_ptr;
     let mut hash_head: crate::src::deflate::IPos = 0;
     let mut bflush: ::core::ffi::c_int = 0;
     loop {
@@ -3006,8 +3011,8 @@ unsafe fn deflate_fast(
                 0 as ::core::ffi::c_int,
             );
             state.block_start = state.strstart as ::core::ffi::c_long;
-            flush_pending(state.strm);
-            if (*state.strm).avail_out == 0 as crate::stdlib::uInt {
+            flush_pending(stream_ptr);
+            if stream.avail_out == 0 as crate::stdlib::uInt {
                 return (if false {
                     finish_started as ::core::ffi::c_int
                 } else {
@@ -3037,8 +3042,8 @@ unsafe fn deflate_fast(
             1 as ::core::ffi::c_int,
         );
         state.block_start = state.strstart as ::core::ffi::c_long;
-        flush_pending(state.strm);
-        if (*state.strm).avail_out == 0 as crate::stdlib::uInt {
+        flush_pending(stream_ptr);
+        if stream.avail_out == 0 as crate::stdlib::uInt {
             return (if true {
                 finish_started as ::core::ffi::c_int
             } else {
@@ -3061,8 +3066,8 @@ unsafe fn deflate_fast(
             0 as ::core::ffi::c_int,
         );
         state.block_start = state.strstart as ::core::ffi::c_long;
-        flush_pending(state.strm);
-        if (*state.strm).avail_out == 0 as crate::stdlib::uInt {
+        flush_pending(stream_ptr);
+        if stream.avail_out == 0 as crate::stdlib::uInt {
             return (if false {
                 finish_started as ::core::ffi::c_int
             } else {
