@@ -2849,30 +2849,47 @@ fn table_capacity_for_type(type_0: crate::src::inftrees::codetype) -> Option<usi
     }
 }
 
-fn table_inputs_fit(codes: usize, work_len: usize, table_cursor: usize, table_len: usize) -> bool {
-    codes <= u16::MAX as usize && work_len >= codes && table_cursor <= table_len
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct TableCursor {
+    start: usize,
+    table_len: usize,
 }
 
-fn table_index(table_start: usize, table_offset: usize, entry_offset: usize) -> Option<usize> {
-    table_start
-        .checked_add(table_offset)?
-        .checked_add(entry_offset)
+impl TableCursor {
+    fn new(start: usize, table_len: usize) -> Option<Self> {
+        (start <= table_len).then_some(Self { start, table_len })
+    }
+
+    fn index(self, table_offset: usize, entry_offset: usize) -> Option<usize> {
+        let index = self
+            .start
+            .checked_add(table_offset)?
+            .checked_add(entry_offset)?;
+        (index < self.table_len).then_some(index)
+    }
+
+    fn end(self, table_offset: usize) -> Option<usize> {
+        let end = self.start.checked_add(table_offset)?;
+        (end <= self.table_len).then_some(end)
+    }
+
+    fn advance(self, table_offset: usize, table_size: u32) -> Option<usize> {
+        let next_offset = table_offset.checked_add(table_size as usize)?;
+        self.end(next_offset).map(|_| next_offset)
+    }
 }
 
-fn table_next_cursor(table_cursor: usize, table_size: u32) -> Option<usize> {
-    table_cursor.checked_add(table_size as usize)
+fn table_inputs_fit(codes: usize, work_len: usize) -> bool {
+    codes <= u16::MAX as usize && work_len >= codes
 }
 
-fn table_usage_fits(type_0: CodeType, used: u32, table_start: usize, table_len: usize) -> bool {
+fn table_usage_fits(type_0: CodeType, used: u32, table_cursor: TableCursor) -> bool {
     let within_type_capacity = match type_0 {
         CodeType::Codes => true,
         CodeType::Lens => used <= ENOUGH_LENS as u32,
         CodeType::Dists => used <= ENOUGH_DISTS as u32,
     };
-    within_type_capacity
-        && table_start
-            .checked_add(used as usize)
-            .map_or(false, |end| end <= table_len)
+    within_type_capacity && table_cursor.end(used as usize).is_some()
 }
 
 fn next_huffman_code(mut huff: u32, length: u32) -> u32 {
@@ -2931,14 +2948,17 @@ pub fn inflate_table_safe(
     type_0: crate::src::inftrees::codetype,
     lens: &[u16],
     table: &mut [crate::src::inftrees::code],
-    table_cursor: &mut usize,
+    table_cursor_out: &mut usize,
     bits: &mut u32,
     work: &mut [u16],
 ) -> ::core::ffi::c_int {
     let codes = lens.len();
-    if !table_inputs_fit(codes, work.len(), *table_cursor, table.len()) {
+    if !table_inputs_fit(codes, work.len()) {
         return 1;
     }
+    let Some(table_cursor) = TableCursor::new(*table_cursor_out, table.len()) else {
+        return 1;
+    };
 
     let Some(type_0) = code_type(type_0) else {
         return -1;
@@ -2961,22 +2981,19 @@ pub fn inflate_table_safe(
         root = max;
     }
     if max == 0 {
-        let Some(end) = (*table_cursor).checked_add(2) else {
+        let Some(end) = table_cursor.end(2) else {
             return 1;
         };
-        if end > table.len() {
-            return 1;
-        }
         let here = crate::src::inftrees::code {
             op: 64,
             bits: 1,
             val: 0,
         };
-        let Some(entries) = table.get_mut(*table_cursor..end) else {
+        let Some(entries) = table.get_mut(table_cursor.start..end) else {
             return 1;
         };
         entries.copy_from_slice(&[here; 2]);
-        *table_cursor = end;
+        *table_cursor_out = end;
         *bits = 1;
         return 0;
     }
@@ -3016,7 +3033,6 @@ pub fn inflate_table_safe(
         }
     }
 
-    let table_start = *table_cursor;
     let mut huff = 0u32;
     let mut symbol = 0usize;
     let mut length = min;
@@ -3026,7 +3042,7 @@ pub fn inflate_table_safe(
     let mut low = u32::MAX;
     let mut used = 1u32 << root;
     let mask = used - 1;
-    if !table_usage_fits(type_0, used, table_start, table.len()) {
+    if !table_usage_fits(type_0, used, table_cursor) {
         return 1;
     }
 
@@ -3044,7 +3060,7 @@ pub fn inflate_table_safe(
         let next_table_size = fill;
         loop {
             fill -= increment;
-            let Some(index) = table_index(table_start, next, ((huff >> drop_bits) + fill) as usize)
+            let Some(index) = table_cursor.index(next, ((huff >> drop_bits) + fill) as usize)
             else {
                 return 1;
             };
@@ -3078,7 +3094,7 @@ pub fn inflate_table_safe(
             if drop_bits == 0 {
                 drop_bits = root;
             }
-            let Some(next_cursor) = table_next_cursor(next, next_table_size) else {
+            let Some(next_cursor) = table_cursor.advance(next, next_table_size) else {
                 return 1;
             };
             next = next_cursor;
@@ -3093,11 +3109,11 @@ pub fn inflate_table_safe(
                 left <<= 1;
             }
             used += 1u32 << curr;
-            if !table_usage_fits(type_0, used, table_start, table.len()) {
+            if !table_usage_fits(type_0, used, table_cursor) {
                 return 1;
             }
             low = huff & mask;
-            let Some(index) = table_index(table_start, 0, low as usize) else {
+            let Some(index) = table_cursor.index(0, low as usize) else {
                 return 1;
             };
             let Some(entry) = table.get_mut(index) else {
@@ -3110,7 +3126,7 @@ pub fn inflate_table_safe(
     }
 
     if huff != 0 {
-        let Some(index) = table_index(table_start, next, huff as usize) else {
+        let Some(index) = table_cursor.index(next, huff as usize) else {
             return 1;
         };
         let Some(entry) = table.get_mut(index) else {
@@ -3122,10 +3138,10 @@ pub fn inflate_table_safe(
             val: 0,
         };
     }
-    let Some(table_end) = table_index(table_start, 0, used as usize) else {
+    let Some(table_end) = table_cursor.end(used as usize) else {
         return 1;
     };
-    *table_cursor = table_end;
+    *table_cursor_out = table_end;
     *bits = root;
     0
 }
@@ -3207,10 +3223,16 @@ mod tests {
     }
 
     #[test]
-    fn table_next_cursor_checks_overflow() {
-        assert_eq!(table_next_cursor(3, 8), Some(11));
-        assert_eq!(table_next_cursor(usize::MAX - 8, 8), Some(usize::MAX));
-        assert_eq!(table_next_cursor(usize::MAX - 7, 8), None);
+    fn table_cursor_enforces_table_bounds() {
+        let cursor = TableCursor::new(2, 6).expect("cursor starts within table");
+
+        assert_eq!(cursor.index(1, 2), Some(5));
+        assert_eq!(cursor.end(4), Some(6));
+        assert_eq!(cursor.advance(1, 3), Some(4));
+        assert_eq!(cursor.index(4, 0), None);
+        assert_eq!(cursor.end(5), None);
+        assert_eq!(cursor.advance(4, 1), None);
+        assert_eq!(TableCursor::new(7, 6), None);
     }
 
     #[test]
@@ -3233,52 +3255,45 @@ mod tests {
     }
 
     #[test]
-    fn table_inputs_fit_enforces_code_workspace_and_cursor_bounds() {
-        assert!(table_inputs_fit(u16::MAX as usize, u16::MAX as usize, 2, 2));
-        assert!(!table_inputs_fit(u16::MAX as usize + 1, usize::MAX, 0, 0));
-        assert!(!table_inputs_fit(2, 1, 0, 0));
-        assert!(!table_inputs_fit(0, 0, 3, 2));
-    }
-
-    #[test]
-    fn table_index_combines_offsets_without_overflow() {
-        assert_eq!(table_index(3, 4, 5), Some(12));
-        assert_eq!(table_index(usize::MAX, 1, 0), None);
-        assert_eq!(table_index(usize::MAX - 1, 1, 1), None);
+    fn table_inputs_fit_enforces_code_workspace_bounds() {
+        assert!(table_inputs_fit(u16::MAX as usize, u16::MAX as usize));
+        assert!(!table_inputs_fit(u16::MAX as usize + 1, usize::MAX));
+        assert!(!table_inputs_fit(2, 1));
     }
 
     #[test]
     fn table_usage_fits_enforces_type_and_slice_boundaries() {
-        assert!(table_usage_fits(CodeType::Codes, 129, 2, 131));
+        assert!(table_usage_fits(
+            CodeType::Codes,
+            129,
+            TableCursor::new(2, 131).expect("valid cursor"),
+        ));
         assert!(table_usage_fits(
             CodeType::Lens,
             ENOUGH_LENS as u32,
-            0,
-            ENOUGH_LENS as usize,
+            TableCursor::new(0, ENOUGH_LENS as usize).expect("valid cursor"),
         ));
         assert!(!table_usage_fits(
             CodeType::Lens,
             ENOUGH_LENS as u32 + 1,
-            0,
-            ENOUGH_LENS as usize + 1,
+            TableCursor::new(0, ENOUGH_LENS as usize + 1).expect("valid cursor"),
         ));
         assert!(table_usage_fits(
             CodeType::Dists,
             ENOUGH_DISTS as u32,
-            4,
-            ENOUGH_DISTS as usize + 4,
+            TableCursor::new(4, ENOUGH_DISTS as usize + 4).expect("valid cursor"),
         ));
-        assert!(!table_usage_fits(CodeType::Dists, 1, 4, 4));
+        assert!(!table_usage_fits(
+            CodeType::Dists,
+            1,
+            TableCursor::new(4, 4).expect("valid cursor"),
+        ));
     }
 
     #[test]
     fn table_usage_fits_rejects_cursor_overflow() {
-        assert!(!table_usage_fits(
-            CodeType::Codes,
-            1,
-            usize::MAX,
-            usize::MAX
-        ));
+        let cursor = TableCursor::new(usize::MAX, usize::MAX).expect("valid cursor");
+        assert!(!table_usage_fits(CodeType::Codes, 1, cursor));
     }
 
     #[test]

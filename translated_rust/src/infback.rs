@@ -96,6 +96,19 @@ fn inflate_back_stored_block_length(hold: ::core::ffi::c_ulong) -> Option<::core
         None
     }
 }
+fn inflate_back_distance_exceeds_window(
+    offset: ::core::ffi::c_uint,
+    window_size: ::core::ffi::c_uint,
+    window_have: ::core::ffi::c_uint,
+    window_left: ::core::ffi::c_uint,
+) -> bool {
+    offset
+        > window_size.wrapping_sub(if window_have < window_size {
+            window_left
+        } else {
+            0
+        })
+}
 
 #[derive(Debug, PartialEq, Eq)]
 enum InflateBackBlockKind {
@@ -971,15 +984,12 @@ pub unsafe extern "C" fn inflateBack(
                         hold >>= (*state).extra;
                         bits = bits.wrapping_sub((*state).extra);
                     }
-                    if (*state).offset
-                        > (*state)
-                            .wsize
-                            .wrapping_sub(if (*state).whave < (*state).wsize {
-                                left
-                            } else {
-                                0 as ::core::ffi::c_uint
-                            })
-                    {
+                    if inflate_back_distance_exceeds_window(
+                        (*state).offset,
+                        (*state).wsize,
+                        (*state).whave,
+                        left,
+                    ) {
                         (*strm).msg = b"invalid distance too far back\0".as_ptr()
                             as *const ::core::ffi::c_char
                             as *mut ::core::ffi::c_char;
@@ -1077,9 +1087,9 @@ pub unsafe extern "C" fn inflateBackEnd_ffi(
 #[cfg(test)]
 mod tests {
     use super::{
-        inflate_back_block_header, inflate_back_init_metadata_is_valid,
-        inflate_back_stored_block_length, inflate_back_window_bits_are_valid,
-        inflate_back_window_size, InflateBackBlockKind,
+        inflate_back_block_header, inflate_back_distance_exceeds_window,
+        inflate_back_init_metadata_is_valid, inflate_back_stored_block_length,
+        inflate_back_window_bits_are_valid, inflate_back_window_size, InflateBackBlockKind,
     };
 
     #[test]
@@ -1133,6 +1143,19 @@ mod tests {
         assert_eq!(inflate_back_stored_block_length(0xedcb1234), Some(0x1234));
         assert_eq!(inflate_back_stored_block_length(0xffff0000), Some(0));
         assert_eq!(inflate_back_stored_block_length(0xedca1234), None);
+    }
+
+    #[test]
+    fn inflate_back_distance_window_limit_accounts_for_available_history() {
+        assert!(!inflate_back_distance_exceeds_window(
+            32768, 32768, 32768, 64
+        ));
+        assert!(inflate_back_distance_exceeds_window(
+            32769, 32768, 32768, 64
+        ));
+
+        assert!(!inflate_back_distance_exceeds_window(32704, 32768, 32, 64));
+        assert!(inflate_back_distance_exceeds_window(32705, 32768, 32, 64));
     }
 
     #[test]
