@@ -443,16 +443,16 @@ pub unsafe extern "C" fn gzfwrite_ffi(
 ) -> crate::stdlib::z_size_t {
     gzfwrite(buf, size, nitems, file)
 }
-pub unsafe extern "C" fn gzputc(
-    mut file: crate::zlib_h::gzFile,
+unsafe fn gzputc(
+    mut state: Option<::core::ptr::NonNull<crate::gzguts_h::gz_state>>,
     mut c: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
     let mut have: ::core::ffi::c_uint = 0;
     let mut buf: [::core::ffi::c_uchar; 1] = [0; 1];
-    if file.is_null() {
+    let Some(mut state) = state else {
         return -1 as ::core::ffi::c_int;
-    }
-    let state = &mut *(file as crate::gzguts_h::gz_statep);
+    };
+    let state = state.as_mut();
     if state.mode != crate::gzguts_h::GZ_WRITE
         || state.err != crate::zlib_h::Z_OK && state.again == 0
     {
@@ -504,7 +504,10 @@ pub unsafe extern "C" fn gzputc_ffi(
     mut file: crate::zlib_h::gzFile,
     mut c: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
-    gzputc(file, c)
+    gzputc(
+        ::core::ptr::NonNull::new(file as crate::gzguts_h::gz_statep),
+        c,
+    )
 }
 pub unsafe extern "C" fn gzputs(
     mut file: crate::zlib_h::gzFile,
