@@ -143,6 +143,84 @@ pub struct internal_state {
     pub slid: ::core::ffi::c_int,
 }
 
+/// Construct the exact zeroed state that `deflateInit2_()` historically
+/// obtained from `memset`.  The callback-allocated storage is still adopted
+/// at the codec boundary; spelling the initial value out here keeps Rust
+/// state initialization independent of libc byte operations.
+fn deflate_initial_state() -> deflate_state {
+    let empty_ct_data = ct_data_s {
+        fc: C2Rust_Unnamed_1 { freq: 0, code: 0 },
+        dl: C2Rust_Unnamed_0 { dad: 0, len: 0 },
+    };
+    let empty_tree_desc = tree_desc_s {
+        max_code: 0,
+        stat_desc: None,
+    };
+    internal_state {
+        strm: ::core::ptr::null_mut(),
+        status: 0,
+        pending_buf: ::core::ptr::null_mut(),
+        pending_buf_size: 0,
+        pending_out: ::core::ptr::null_mut(),
+        pending: 0,
+        wrap: 0,
+        gzhead: ::core::ptr::null_mut(),
+        gzindex: 0,
+        method: 0,
+        last_flush: 0,
+        w_size: 0,
+        w_bits: 0,
+        w_mask: 0,
+        window: ::core::ptr::null_mut(),
+        window_size: 0,
+        prev: ::core::ptr::null_mut(),
+        head: ::core::ptr::null_mut(),
+        ins_h: 0,
+        hash_size: 0,
+        hash_bits: 0,
+        hash_mask: 0,
+        hash_shift: 0,
+        block_start: 0,
+        match_length: 0,
+        prev_match: 0,
+        match_available: 0,
+        strstart: 0,
+        match_start: 0,
+        lookahead: 0,
+        prev_length: 0,
+        max_chain_length: 0,
+        max_lazy_match: 0,
+        level: 0,
+        strategy: 0,
+        good_match: 0,
+        nice_match: 0,
+        dyn_ltree: [empty_ct_data; 573],
+        dyn_dtree: [empty_ct_data; 61],
+        bl_tree: [empty_ct_data; 39],
+        l_desc: empty_tree_desc,
+        d_desc: empty_tree_desc,
+        bl_desc: empty_tree_desc,
+        bl_count: [0; 16],
+        heap: [0; 573],
+        heap_len: 0,
+        heap_max: 0,
+        depth: [0; 573],
+        sym_buf: ::core::ptr::null_mut(),
+        lit_bufsize: 0,
+        sym_next: 0,
+        sym_end: 0,
+        opt_len: 0,
+        static_len: 0,
+        matches: 0,
+        insert: 0,
+        bi_buf: 0,
+        bi_valid: 0,
+        bi_used: 0,
+        high_water: 0,
+        slid: 0,
+    }
+}
+
 pub const MIN_LOOKAHEAD: ::core::ffi::c_int =
     crate::zutil_h::MAX_MATCH + crate::zutil_h::MIN_MATCH + 1 as ::core::ffi::c_int;
 
@@ -942,13 +1020,10 @@ pub unsafe fn deflateInit2_(
     if s.is_null() {
         return crate::zlib_h::Z_MEM_ERROR;
     }
-    crate::stdlib::memset(
-        s as *mut ::core::ffi::c_void,
-        0 as ::core::ffi::c_int,
-        ::core::mem::size_of::<crate::src::deflate::deflate_state>(),
-    );
+    let state = &mut *s;
+    *state = deflate_initial_state();
     strm_ref.state = s as *mut crate::src::deflate::internal_state;
-    (*s).strm = strm;
+    state.strm = strm;
     (*s).status = crate::src::deflate::INIT_STATE;
     (*s).wrap = wrap;
     (*s).gzhead = ::core::ptr::null_mut::<crate::zlib_h::gz_header>();
