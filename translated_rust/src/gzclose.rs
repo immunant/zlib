@@ -20,13 +20,14 @@ pub use crate::zlib_h::gzFile_s;
 pub use crate::zlib_h::z_stream;
 pub use crate::zlib_h::z_stream_s;
 pub use crate::zlib_h::Z_STREAM_ERROR;
+
+fn gz_mode(state: &crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
+    state.mode
+}
+
 pub unsafe fn gzclose(owned: Box<crate::gzguts_h::gz_state>) -> ::core::ffi::c_int {
-    let mode = {
-        let state: &crate::gzguts_h::gz_state = &owned;
-        state.mode
-    };
     let close: unsafe fn(Box<crate::gzguts_h::gz_state>) -> ::core::ffi::c_int =
-        if mode == crate::gzguts_h::GZ_READ {
+        if gz_mode(owned.as_ref()) == crate::gzguts_h::GZ_READ {
             crate::src::gzread::gzclose_r
         } else {
             crate::src::gzwrite::gzclose_w
