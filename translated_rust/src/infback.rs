@@ -640,13 +640,8 @@ where
                                 state.mode = crate::src::inflate::BAD;
                                 continue;
                             } else {
-                                {
-                                    let state_ref = &mut *state;
-                                    state_ref.distcode =
-                                        crate::src::inflate::distance_table::Dynamic(
-                                            state_ref.next,
-                                        );
-                                }
+                                state.distcode =
+                                    crate::src::inflate::distance_table::Dynamic(state.next);
                                 state.distbits = 6 as ::core::ffi::c_uint;
                                 ret = unsafe {
                                     crate::src::inftrees::inflate_table(
