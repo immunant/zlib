@@ -1133,7 +1133,7 @@ pub unsafe extern "C" fn inflate(
                         hold = hold.wrapping_add((*c2rust_fresh33 as ::core::ffi::c_ulong) << bits);
                         bits = bits.wrapping_add(8 as ::core::ffi::c_uint);
                     }
-                    out = out.wrapping_sub(left);
+                    out = inflate_cursor_progress(out, left);
                     (*strm).total_out = (*strm).total_out.wrapping_add(out as crate::stdlib::uLong);
                     (*state).total = (*state).total.wrapping_add(out as ::core::ffi::c_ulong);
                     if (*state).wrap & 4 as ::core::ffi::c_int != 0 && out != 0 {
@@ -2170,13 +2170,13 @@ pub unsafe extern "C" fn inflate(
     (*state).hold = hold;
     (*state).bits = bits;
     if inflate_should_update_window((*state).wsize, out, left, (*state).mode, flush) {
-        if updatewindow(strm, output_start, inflate_produced_output_len(out, left)) != 0 {
+        if updatewindow(strm, output_start, inflate_cursor_progress(out, left)) != 0 {
             (*state).mode = crate::src::inflate::MEM;
             return crate::zlib_h::Z_MEM_ERROR;
         }
     }
-    in_0 = in_0.wrapping_sub((*strm).avail_in as ::core::ffi::c_uint);
-    out = out.wrapping_sub((*strm).avail_out as ::core::ffi::c_uint);
+    in_0 = inflate_cursor_progress(in_0, (*strm).avail_in as ::core::ffi::c_uint);
+    out = inflate_cursor_progress(out, (*strm).avail_out as ::core::ffi::c_uint);
     (*strm).total_in = (*strm).total_in.wrapping_add(in_0 as crate::stdlib::uLong);
     (*strm).total_out = (*strm).total_out.wrapping_add(out as crate::stdlib::uLong);
     (*state).total = (*state).total.wrapping_add(out as ::core::ffi::c_ulong);
@@ -2391,11 +2391,11 @@ fn inflate_should_update_window(
             && (mode < crate::src::inflate::CHECK || flush != crate::zlib_h::Z_FINISH)
 }
 
-fn inflate_produced_output_len(
-    output_capacity: ::core::ffi::c_uint,
-    remaining_output: ::core::ffi::c_uint,
+fn inflate_cursor_progress(
+    initial: ::core::ffi::c_uint,
+    remaining: ::core::ffi::c_uint,
 ) -> ::core::ffi::c_uint {
-    output_capacity.wrapping_sub(remaining_output)
+    initial.wrapping_sub(remaining)
 }
 
 fn syncsearch_safe(have: &mut ::core::ffi::c_uint, buf: &[::core::ffi::c_uchar]) -> usize {
@@ -3422,9 +3422,12 @@ mod tests {
     }
 
     #[test]
-    fn produced_output_length_tracks_output_cursor_progress() {
-        assert_eq!(super::inflate_produced_output_len(8, 8), 0);
-        assert_eq!(super::inflate_produced_output_len(8, 3), 5);
-        assert_eq!(super::inflate_produced_output_len(8, 0), 8);
+    fn cursor_progress_tracks_input_output_and_wrapping() {
+        assert_eq!(super::inflate_cursor_progress(16, 7), 9);
+        assert_eq!(super::inflate_cursor_progress(8, 3), 5);
+        assert_eq!(
+            super::inflate_cursor_progress(0, 1),
+            ::core::ffi::c_uint::MAX
+        );
     }
 }

@@ -234,7 +234,11 @@ fn gzgetc_buffered_result(
     crate::stdlib::off64_t,
     ::core::ffi::c_int,
 ) {
-    (have.wrapping_sub(1), pos + 1, byte as ::core::ffi::c_int)
+    (
+        have.wrapping_sub(1),
+        gz_cursor_advance(pos, 1),
+        byte as ::core::ffi::c_int,
+    )
 }
 
 fn gz_read_chunk_len(
@@ -1423,6 +1427,10 @@ mod tests {
     #[test]
     fn gzgetc_buffered_result_advances_state_and_returns_byte() {
         assert_eq!(gzgetc_buffered_result(3, 42, 255), (2, 43, 255));
+        assert_eq!(
+            gzgetc_buffered_result(1, crate::stdlib::off64_t::MAX, 0),
+            (0, crate::stdlib::off64_t::MIN, 0)
+        );
     }
 
     #[test]
