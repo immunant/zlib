@@ -5112,13 +5112,13 @@ pub unsafe extern "C" fn _tr_flush_bits_ffi(mut s: *mut crate::src::deflate::def
     (*s).pending = pending_cursor_after_bytes(pending, count);
 }
 fn tr_align_core(
-    pending_buffer: &mut [crate::stdlib::Bytef],
+    storage: &mut crate::src::deflate::PendingStorageView<'_>,
     pending: &mut crate::zutil_h::ulg,
     bi_buf: &mut crate::zutil_h::ush,
     bi_valid: &mut ::core::ffi::c_int,
 ) -> bool {
     let mut writer = PendingBitWriter {
-        pending_buffer,
+        pending_buffer: storage.pending_bytes(),
         pending,
         bi_buf,
         bi_valid,
@@ -5153,8 +5153,11 @@ pub unsafe extern "C" fn _tr_align_ffi(mut s: *mut crate::src::deflate::deflate_
     let state = &mut *s;
     let pending_buffer =
         core::slice::from_raw_parts_mut(state.pending_buf, state.pending_buf_size as usize);
+    let layout = crate::src::deflate::pending_storage_layout(state.lit_bufsize);
+    let mut storage = crate::src::deflate::PendingStorageView::new(pending_buffer, layout)
+        .expect("pending storage layout matches its allocation");
     let _ = tr_align_core(
-        pending_buffer,
+        &mut storage,
         &mut state.pending,
         &mut state.bi_buf,
         &mut state.bi_valid,
@@ -5362,7 +5365,7 @@ pub unsafe extern "C" fn _tr_flush_block_ffi(
     _tr_flush_block(s, buf, stored_len, last)
 }
 fn tr_tally_core(
-    symbols: &mut [crate::zutil_h::uchf],
+    storage: &mut crate::src::deflate::PendingStorageView<'_>,
     sym_next: &mut crate::stdlib::uInt,
     sym_end: crate::stdlib::uInt,
     matches: &mut crate::stdlib::uInt,
@@ -5373,6 +5376,7 @@ fn tr_tally_core(
 ) -> ::core::ffi::c_int {
     let symbol_bytes = tally_symbol_bytes(dist, lc);
     let (cursors, next_sym_next) = symbol_triplet_cursors(*sym_next);
+    let symbols = storage.symbol_bytes();
     for (cursor, byte) in cursors.into_iter().zip(symbol_bytes) {
         symbols[cursor as usize] = byte;
     }
@@ -5401,9 +5405,12 @@ pub unsafe extern "C" fn _tr_tally_ffi(
 ) -> ::core::ffi::c_int {
     let state = &mut *s;
     let pending_layout = crate::src::deflate::pending_storage_layout(state.lit_bufsize);
-    let symbols = core::slice::from_raw_parts_mut(state.sym_buf, pending_layout.symbol_len);
+    let pending_buffer =
+        core::slice::from_raw_parts_mut(state.pending_buf, state.pending_buf_size as usize);
+    let mut storage = crate::src::deflate::PendingStorageView::new(pending_buffer, pending_layout)
+        .expect("pending storage layout matches its allocation");
     tr_tally_core(
-        symbols,
+        &mut storage,
         &mut state.sym_next,
         state.sym_end,
         &mut state.matches,
@@ -5432,14 +5439,14 @@ mod tests {
         supplemental_tree_node, supplemental_tree_opt_len, supplemental_tree_static_len,
         symbol_buffer_has_entries, symbol_buffer_is_full, symbol_triplet_cursors,
         tally_match_tree_indices, tally_scan_tree_action, tally_symbol_bytes, tally_tree_update,
-        tr_align_core, tree_bit_emissions, tree_bit_length_cost, tree_bit_length_totals_after_node,
-        tree_code_count, tree_heap_has_pair, tree_initial_leaf_plan, tree_next_cursor,
-        tree_parent_depth, tree_run_continues, tree_run_emissions, tree_run_extra_bits,
-        tree_run_limits, tree_run_step, tree_run_step_after_increment, BlockEncoding,
-        CompressedBlockSymbol, GenBitlenOverflowNode, GenBitlenOverflowReassignment, HeapChild,
-        PendingBitWriter, ScanTreeAction, TallyTreeUpdate, TreeBitEmission, TreeInitialLeafPlan,
-        TreeRunEmission, TreeRunStep, BL_CODE_ORDER_LEN, END_BLOCK, MAX_BITS, REPZ_11_138,
-        REPZ_3_10, REP_3_6,
+        tr_align_core, tr_tally_core, tree_bit_emissions, tree_bit_length_cost,
+        tree_bit_length_totals_after_node, tree_code_count, tree_heap_has_pair,
+        tree_initial_leaf_plan, tree_next_cursor, tree_parent_depth, tree_run_continues,
+        tree_run_emissions, tree_run_extra_bits, tree_run_limits, tree_run_step,
+        tree_run_step_after_increment, BlockEncoding, CompressedBlockSymbol, GenBitlenOverflowNode,
+        GenBitlenOverflowReassignment, HeapChild, PendingBitWriter, ScanTreeAction,
+        TallyTreeUpdate, TreeBitEmission, TreeInitialLeafPlan, TreeRunEmission, TreeRunStep,
+        BL_CODE_ORDER_LEN, END_BLOCK, MAX_BITS, REPZ_11_138, REPZ_3_10, REP_3_6,
     };
 
     fn ltree_with_frequency(
@@ -6134,20 +6141,58 @@ mod tests {
 
     #[test]
     fn align_core_emits_an_empty_fixed_block_and_flushes_bits() {
+        let layout = crate::src::deflate::pending_storage_layout(2);
         let mut pending_buffer = [0; 8];
+        let mut storage =
+            crate::src::deflate::PendingStorageView::new(&mut pending_buffer, layout).unwrap();
         let mut pending = 0;
         let mut bi_buf = 0;
         let mut bi_valid = 0;
 
         assert!(tr_align_core(
-            &mut pending_buffer,
+            &mut storage,
             &mut pending,
             &mut bi_buf,
             &mut bi_valid,
         ));
         assert_eq!(pending, 1);
-        assert_eq!(pending_buffer[0], 0x02);
+        assert_eq!(storage.pending_bytes()[0], 0x02);
         assert_eq!((bi_buf, bi_valid), (0, 2));
+    }
+
+    #[test]
+    fn tally_core_writes_symbols_through_the_shared_storage_view() {
+        let layout = crate::src::deflate::pending_storage_layout(4);
+        let mut pending_buffer = [0; 16];
+        let mut storage =
+            crate::src::deflate::PendingStorageView::new(&mut pending_buffer, layout).unwrap();
+        let empty = crate::src::deflate::ct_data {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 { value: 0 },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 { value: 0 },
+        };
+        let mut dyn_ltree = [empty; crate::src::deflate::HEAP_SIZE as usize];
+        let mut dyn_dtree = [empty; crate::src::deflate::D_CODES as usize];
+        let mut sym_next = 0;
+        let mut matches = 0;
+
+        assert_eq!(
+            tr_tally_core(
+                &mut storage,
+                &mut sym_next,
+                3,
+                &mut matches,
+                &mut dyn_ltree,
+                &mut dyn_dtree,
+                0,
+                42,
+            ),
+            1
+        );
+        assert_eq!(sym_next, 3);
+        assert_eq!(storage.symbol_bytes()[..3], [0, 0, 42]);
+        assert_eq!(storage.pending_bytes()[..4], [0; 4]);
+        assert_eq!(matches, 0);
+        assert_eq!(dyn_ltree[42].fc.value, 1);
     }
 
     #[test]
