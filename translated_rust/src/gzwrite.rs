@@ -251,6 +251,32 @@ fn gz_zero_commit_state(state: &mut crate::gzguts_h::gz_state, consumed: ::core:
     state.skip = state.skip.wrapping_sub(consumed as crate::stdlib::off64_t);
 }
 
+/// Determine how much input fits after the existing buffered compressor
+/// input.  The wrapping subtraction deliberately preserves zlib's behavior
+/// for a malformed internal cursor while keeping the size conversion local.
+fn gz_write_buffered_copy_plan(
+    size: ::core::ffi::c_uint,
+    buffered_end: ::core::ffi::c_uint,
+    remaining: crate::stdlib::z_size_t,
+) -> ::core::ffi::c_uint {
+    let copy = size.wrapping_sub(buffered_end);
+    if copy as crate::stdlib::z_size_t > remaining {
+        remaining as ::core::ffi::c_uint
+    } else {
+        copy
+    }
+}
+
+/// Commit bytes copied into the pending compressor input after the raw
+/// boundary has completed the bounded buffer copy.
+fn gz_write_buffered_copy_commit_state(
+    state: &mut crate::gzguts_h::gz_state,
+    copied: ::core::ffi::c_uint,
+) {
+    state.strm.avail_in = state.strm.avail_in.wrapping_add(copied);
+    state.x.pos = state.x.pos.wrapping_add(copied as crate::stdlib::off64_t);
+}
+
 unsafe extern "C" fn gz_zero(mut state: crate::gzguts_h::gz_statep) -> ::core::ffi::c_int {
     let mut first: ::core::ffi::c_int = 0;
     let mut ret: ::core::ffi::c_int = 0;
@@ -315,17 +341,13 @@ unsafe extern "C" fn gz_write(
                 .next_in
                 .offset((*state).strm.avail_in as isize)
                 .offset_from((*state).in_0) as ::core::ffi::c_uint;
-            copy = (*state).size.wrapping_sub(have);
-            if copy as crate::stdlib::z_size_t > len {
-                copy = len as ::core::ffi::c_uint;
-            }
+            copy = gz_write_buffered_copy_plan((*state).size, have, len);
             crate::stdlib::memcpy(
                 (*state).in_0.offset(have as isize) as *mut ::core::ffi::c_void,
                 buf as *const ::core::ffi::c_void,
                 copy as crate::__stddef_size_t_h::size_t,
             );
-            (*state).strm.avail_in = (*state).strm.avail_in.wrapping_add(copy);
-            (*state).x.pos += copy as crate::stdlib::off64_t;
+            gz_write_buffered_copy_commit_state(&mut *state, copy);
             buf =
                 (buf as *const ::core::ffi::c_char).offset(copy as isize) as crate::stdlib::voidpc;
             len = len.wrapping_sub(copy as crate::stdlib::z_size_t);
@@ -496,8 +518,7 @@ pub unsafe extern "C" fn gzputc(
             .offset_from((*state).in_0) as ::core::ffi::c_uint;
         if have < (*state).size {
             *(*state).in_0.offset(have as isize) = c as ::core::ffi::c_uchar;
-            (*strm).avail_in = (*strm).avail_in.wrapping_add(1);
-            (*state).x.pos += 1;
+            gz_write_buffered_copy_commit_state(&mut *state, 1);
             return c & 0xff as ::core::ffi::c_int;
         }
     }
