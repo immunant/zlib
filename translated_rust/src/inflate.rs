@@ -456,6 +456,23 @@ impl InflateOwnedDecoder {
         }
     }
 
+    // An inflate copy duplicates only this pointer-free decoder owner.  The
+    // enclosing callback allocation and the persistent header registration
+    // remain at the ABI boundary, where their provenance and release order
+    // are still observable.
+    fn deep_copy_with_window(&self, owned_window: Option<Box<[u8]>>) -> Self {
+        Self {
+            normal: copy_inflate_normal_state(&self.normal, owned_window),
+            stream: InflateDecoderStream {
+                total_in: self.stream.total_in,
+                total_out: self.stream.total_out,
+                adler: self.stream.adler,
+                data_type: self.stream.data_type,
+                message: self.stream.message,
+            },
+        }
+    }
+
     pub(crate) fn inflate(&mut self, input: &[u8], output: &mut [u8]) -> InflateGzipResult {
         // The ABI adapter clears `strm.msg` before each invocation.  The
         // persistent owner keeps scalar counters between calls, but a prior
@@ -488,6 +505,54 @@ impl InflateOwnedDecoder {
             }),
         }
     }
+}
+
+// This is deliberately separate from `inflate_state`: normal decoder state
+// has no retained ABI registrations, so its explicit deep copy can remain a
+// wholly safe allocation-and-copy transaction.  `inflateCopy()` invokes it
+// only after allocating the destination state record, preserving zlib's
+// callback ordering and matching release on allocation failure.
+fn copy_inflate_normal_state(
+    source: &InflateNormalState,
+    owned_window: Option<Box<[u8]>>,
+) -> InflateNormalState {
+    let mut copied = initial_inflate_normal_state();
+    copied.mode = source.mode;
+    copied.last = source.last;
+    copied.wrap = source.wrap;
+    copied.havedict = source.havedict;
+    copied.flags = source.flags;
+    copied.dmax = source.dmax;
+    copied.check = source.check;
+    copied.total = source.total;
+    copied.wbits = source.wbits;
+    copied.wsize = source.wsize;
+    copied.whave = source.whave;
+    copied.wnext = source.wnext;
+    copied.owned_window = owned_window;
+    copied.hold = source.hold;
+    copied.bits = source.bits;
+    copied.length = source.length;
+    copied.offset = source.offset;
+    copied.extra = source.extra;
+    copied.lencode = source.lencode;
+    copied.distcode = source.distcode;
+    copied.lenbits = source.lenbits;
+    copied.distbits = source.distbits;
+    copied.ncode = source.ncode;
+    copied.nlen = source.nlen;
+    copied.ndist = source.ndist;
+    copied.have = source.have;
+    copied.next = source.next;
+    copied.lens.copy_from_slice(&source.lens);
+    copied.work.copy_from_slice(&source.work);
+    for (destination, source) in copied.codes.iter_mut().zip(source.codes.iter()) {
+        *destination = crate::src::inftrees::code::copied_from(source);
+    }
+    copied.sane = source.sane;
+    copied.back = source.back;
+    copied.was = source.was;
+    copied
 }
 
 pub use crate::__stddef_size_t_h::size_t;
@@ -3790,9 +3855,10 @@ pub unsafe fn inflateCopy(
         let Some(copy) = ::core::ptr::NonNull::new(copy) else {
             return crate::zlib_h::Z_MEM_ERROR;
         };
-        // The ABI state has already been projected above.  Copy its ordinary
-        // fields directly here so the deep-copy operation does not need a
-        // separate unsafe helper carrying the raw-pointer-bearing state type.
+        // The window allocation stays at this callback boundary: its failure
+        // must release the newly allocated state through the paired zfree
+        // before either state is published.  The remaining decoder copy is
+        // pointer-free and therefore belongs to its owner below.
         let owned_window = match state.decoder.normal.owned_window.as_deref() {
             Some(source_window) => {
                 let Some(mut window) = allocate_inflate_window(source_window.len()) else {
@@ -3808,56 +3874,12 @@ pub unsafe fn inflateCopy(
             }
             None => None,
         };
+        let decoder = state.decoder.deep_copy_with_window(owned_window);
         let state_copy = inflate_state {
             stream_identity: dest_identity,
             head: state.head,
             back_window: state.back_window.clone(),
-            decoder: InflateOwnedDecoder {
-                normal: InflateNormalState {
-                    mode: state.decoder.normal.mode,
-                    last: state.decoder.normal.last,
-                    wrap: state.decoder.normal.wrap,
-                    havedict: state.decoder.normal.havedict,
-                    flags: state.decoder.normal.flags,
-                    dmax: state.decoder.normal.dmax,
-                    check: state.decoder.normal.check,
-                    total: state.decoder.normal.total,
-                    wbits: state.decoder.normal.wbits,
-                    wsize: state.decoder.normal.wsize,
-                    whave: state.decoder.normal.whave,
-                    wnext: state.decoder.normal.wnext,
-                    owned_window,
-                    hold: state.decoder.normal.hold,
-                    bits: state.decoder.normal.bits,
-                    length: state.decoder.normal.length,
-                    offset: state.decoder.normal.offset,
-                    extra: state.decoder.normal.extra,
-                    lencode: state.decoder.normal.lencode,
-                    distcode: state.decoder.normal.distcode,
-                    lenbits: state.decoder.normal.lenbits,
-                    distbits: state.decoder.normal.distbits,
-                    ncode: state.decoder.normal.ncode,
-                    nlen: state.decoder.normal.nlen,
-                    ndist: state.decoder.normal.ndist,
-                    have: state.decoder.normal.have,
-                    next: state.decoder.normal.next,
-                    lens: state.decoder.normal.lens,
-                    work: state.decoder.normal.work,
-                    codes: core::array::from_fn(|index| {
-                        crate::src::inftrees::code::copied_from(&state.decoder.normal.codes[index])
-                    }),
-                    sane: state.decoder.normal.sane,
-                    back: state.decoder.normal.back,
-                    was: state.decoder.normal.was,
-                },
-                stream: InflateDecoderStream {
-                    total_in: state.decoder.stream.total_in,
-                    total_out: state.decoder.stream.total_out,
-                    adler: state.decoder.stream.adler,
-                    data_type: state.decoder.stream.data_type,
-                    message: state.decoder.stream.message,
-                },
-            },
+            decoder,
         };
         let destination_stream = crate::zlib_h::z_stream_s {
             next_in: source.next_in,
