@@ -3610,8 +3610,10 @@ pub unsafe fn tr_flush_block_from_raw(
         Some(window[offset..end].to_vec())
         }
     };
-    let strm = unsafe { s.strm.as_mut() };
-    unsafe { tr_flush_block_impl(s, strm, buf.as_deref(), stored_len, last) };
+    // This legacy state-only ABI helper has no stream argument.  Ordinary
+    // compression passes the stream explicitly; here only block generation
+    // is observable through the supplied state.
+    unsafe { tr_flush_block_impl(s, None, buf.as_deref(), stored_len, last) };
 }
 
 #[export_name = "_tr_flush_block"]
