@@ -162,6 +162,14 @@ struct InflateWindowLayout {
     len: usize,
 }
 
+/// The eventual safe owner for inflate's history window.  Live streams still
+/// use their callback-provided allocation, but keeping the exact checked
+/// representation here gives the allocator facade a ready-to-use owner for
+/// the window without changing the decoder's window-update algorithm.
+struct InflateOwnedWindow {
+    bytes: Vec<crate::stdlib::Bytef>,
+}
+
 impl InflateWindowLayout {
     /// Derive the one allocation size used by inflate's legacy window.
     ///
@@ -181,6 +189,26 @@ impl InflateWindowLayout {
 
     fn matches_state_window(&self, state: &inflate_state) -> bool {
         state.wsize == 0 || usize::try_from(state.wsize).ok() == Some(self.len)
+    }
+
+    /// Allocate the future owned window with the same fallible, checked size
+    /// that the legacy callback allocation uses.  This remains separate from
+    /// the ABI state until the allocator facade can preserve custom callback
+    /// behavior.
+    fn try_owned(&self) -> Option<InflateOwnedWindow> {
+        let mut bytes = Vec::new();
+        bytes.try_reserve_exact(self.len).ok()?;
+        bytes.resize(self.len, 0);
+        Some(InflateOwnedWindow { bytes })
+    }
+}
+
+impl InflateOwnedWindow {
+    /// The existing `update_window` core already accepts this safe view.
+    /// Keeping that hand-off explicit prevents a future owner conversion from
+    /// recreating a raw allocation-derived slice.
+    fn as_mut_slice(&mut self) -> &mut [crate::stdlib::Bytef] {
+        &mut self.bytes
     }
 }
 
