@@ -27,7 +27,7 @@ pub unsafe extern "C" fn zlibVersion() -> *const ::core::ffi::c_char {
 pub unsafe extern "C" fn zlibVersion_ffi() -> *const ::core::ffi::c_char {
     zlibVersion()
 }
-pub unsafe extern "C" fn zlibCompileFlags() -> crate::stdlib::uLong {
+fn zlib_compile_flags() -> crate::stdlib::uLong {
     let mut flags: crate::stdlib::uLong = 0;
     flags = 0 as crate::stdlib::uLong;
     match ::core::mem::size_of::<crate::stdlib::uInt>() as ::core::ffi::c_int {
@@ -101,7 +101,7 @@ pub unsafe extern "C" fn zlibCompileFlags() -> crate::stdlib::uLong {
 #[export_name = "zlibCompileFlags"]
 
 pub unsafe extern "C" fn zlibCompileFlags_ffi() -> crate::stdlib::uLong {
-    zlibCompileFlags()
+    zlib_compile_flags()
 }
 pub unsafe extern "C" fn zError(mut err: ::core::ffi::c_int) -> *const ::core::ffi::c_char {
     return z_errmsg[(if err < -6 as ::core::ffi::c_int || err > 2 as ::core::ffi::c_int {
