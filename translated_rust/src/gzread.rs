@@ -89,36 +89,41 @@ fn gz_load_checked_have(
 }
 
 #[derive(Debug, PartialEq, Eq)]
-enum GzAvailLoadAction {
+enum GzAvailLoadTransition {
     Error,
-    Commit { avail_in: crate::stdlib::uInt },
+    ResetInput { avail_in: crate::stdlib::uInt },
 }
 
-fn gz_avail_load_action(
+fn gz_avail_load_transition(
     prior_avail_in: crate::stdlib::uInt,
     load: &GzLoadResult,
-) -> GzAvailLoadAction {
+) -> GzAvailLoadTransition {
     match gz_load_checked_have(load.have, load.failed) {
-        Err(()) => GzAvailLoadAction::Error,
-        Ok(have) => GzAvailLoadAction::Commit {
+        Err(()) => GzAvailLoadTransition::Error,
+        Ok(have) => GzAvailLoadTransition::ResetInput {
             avail_in: prior_avail_in.wrapping_add(have),
         },
     }
 }
 
-fn gz_avail_apply_load_action(
+fn gz_avail_apply_load_transition(
     avail_in: &mut crate::stdlib::uInt,
-    action: GzAvailLoadAction,
-) -> bool {
-    match action {
-        GzAvailLoadAction::Error => false,
-        GzAvailLoadAction::Commit {
+    transition: GzAvailLoadTransition,
+) -> Option<GzAvailNextInAction> {
+    match transition {
+        GzAvailLoadTransition::Error => None,
+        GzAvailLoadTransition::ResetInput {
             avail_in: committed_avail_in,
         } => {
             *avail_in = committed_avail_in;
-            true
+            Some(GzAvailNextInAction::ResetToInputStart)
         }
     }
+}
+
+#[derive(Debug, PartialEq, Eq)]
+enum GzAvailNextInAction {
+    ResetToInputStart,
 }
 
 fn gz_load_with_reader<F>(
@@ -922,13 +927,15 @@ unsafe fn gz_avail(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int 
                 )
             };
             let load = gz_load(state, buf, len);
-            if !gz_avail_apply_load_action(
+            match gz_avail_apply_load_transition(
                 &mut state.strm.avail_in,
-                gz_avail_load_action(prior_avail_in, &load),
+                gz_avail_load_transition(prior_avail_in, &load),
             ) {
-                return -1 as ::core::ffi::c_int;
+                None => return -1 as ::core::ffi::c_int,
+                Some(GzAvailNextInAction::ResetToInputStart) => {
+                    state.strm.next_in = state.in_0 as *mut crate::stdlib::Bytef;
+                }
             }
-            state.strm.next_in = state.in_0 as *mut crate::stdlib::Bytef;
         }
     }
     return 0 as ::core::ffi::c_int;
@@ -1864,84 +1871,93 @@ mod tests {
     }
 
     #[test]
-    fn gz_avail_load_action_rejects_failed_loads_with_data() {
+    fn gz_avail_load_transition_rejects_failed_loads_with_data() {
         let load = GzLoadResult {
             have: 3,
             failed: true,
         };
 
-        assert_eq!(gz_avail_load_action(4, &load), GzAvailLoadAction::Error);
+        assert_eq!(
+            gz_avail_load_transition(4, &load),
+            GzAvailLoadTransition::Error
+        );
     }
 
     #[test]
-    fn gz_avail_load_action_commits_successful_empty_loads() {
+    fn gz_avail_load_transition_resets_input_after_successful_empty_load() {
         let load = GzLoadResult {
             have: 0,
             failed: false,
         };
 
         assert_eq!(
-            gz_avail_load_action(4, &load),
-            GzAvailLoadAction::Commit { avail_in: 4 }
+            gz_avail_load_transition(4, &load),
+            GzAvailLoadTransition::ResetInput { avail_in: 4 }
         );
     }
 
     #[test]
-    fn gz_avail_load_action_adds_loaded_input() {
+    fn gz_avail_load_transition_adds_loaded_input_and_resets_input() {
         let load = GzLoadResult {
             have: 3,
             failed: false,
         };
 
         assert_eq!(
-            gz_avail_load_action(4, &load),
-            GzAvailLoadAction::Commit { avail_in: 7 }
+            gz_avail_load_transition(4, &load),
+            GzAvailLoadTransition::ResetInput { avail_in: 7 }
         );
     }
 
     #[test]
-    fn gz_avail_load_action_wraps_input_count() {
+    fn gz_avail_load_transition_wraps_input_count() {
         let load = GzLoadResult {
             have: 1,
             failed: false,
         };
 
         assert_eq!(
-            gz_avail_load_action(::core::ffi::c_uint::MAX, &load),
-            GzAvailLoadAction::Commit { avail_in: 0 }
+            gz_avail_load_transition(::core::ffi::c_uint::MAX, &load),
+            GzAvailLoadTransition::ResetInput { avail_in: 0 }
         );
     }
 
     #[test]
-    fn gz_avail_apply_load_action_preserves_input_after_error() {
+    fn gz_avail_apply_load_transition_preserves_input_after_error() {
         let mut avail_in = 4;
 
-        assert!(!gz_avail_apply_load_action(
-            &mut avail_in,
-            GzAvailLoadAction::Error,
-        ));
+        assert_eq!(
+            gz_avail_apply_load_transition(&mut avail_in, GzAvailLoadTransition::Error),
+            None
+        );
         assert_eq!(avail_in, 4);
     }
 
     #[test]
-    fn gz_avail_apply_load_action_commits_new_input_count() {
+    fn gz_avail_apply_load_transition_commits_and_requests_input_reset() {
         let mut avail_in = 4;
 
-        assert!(gz_avail_apply_load_action(
-            &mut avail_in,
-            GzAvailLoadAction::Commit { avail_in: 7 },
-        ));
+        assert_eq!(
+            gz_avail_apply_load_transition(
+                &mut avail_in,
+                GzAvailLoadTransition::ResetInput { avail_in: 7 },
+            ),
+            Some(GzAvailNextInAction::ResetToInputStart)
+        );
         assert_eq!(avail_in, 7);
     }
 
     #[test]
-    fn gz_avail_apply_load_action_commits_wrapped_input_count() {
+    fn gz_avail_apply_load_transition_commits_wrapped_input_count() {
         let mut avail_in = 1;
 
-        assert!(gz_avail_apply_load_action(
-            &mut avail_in,
-            GzAvailLoadAction::Commit { avail_in: 0 },
-        ));
+        assert_eq!(
+            gz_avail_apply_load_transition(
+                &mut avail_in,
+                GzAvailLoadTransition::ResetInput { avail_in: 0 },
+            ),
+            Some(GzAvailNextInAction::ResetToInputStart)
+        );
         assert_eq!(avail_in, 0);
     }
 

@@ -889,7 +889,11 @@ fn inflate_reset_core(
     inflate_reset_keep_core(strm, state);
 }
 
-pub unsafe extern "C" fn inflateResetKeep(strm: crate::zlib_h::z_streamp) -> ::core::ffi::c_int {
+pub use inflateResetKeep_ffi as inflateResetKeep;
+#[export_name = "inflateResetKeep"]
+pub unsafe extern "C" fn inflateResetKeep_ffi(
+    strm: crate::zlib_h::z_streamp,
+) -> ::core::ffi::c_int {
     if inflateStateCheck(strm) != 0 {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
@@ -901,14 +905,11 @@ pub unsafe extern "C" fn inflateResetKeep(strm: crate::zlib_h::z_streamp) -> ::c
     state.lencode = state.distcode;
     return crate::zlib_h::Z_OK;
 }
-#[export_name = "inflateResetKeep"]
-
-pub unsafe extern "C" fn inflateResetKeep_ffi(
+pub use inflateReset_ffi as inflateReset;
+#[export_name = "inflateReset"]
+pub unsafe extern "C" fn inflateReset_ffi(
     mut strm: crate::zlib_h::z_streamp,
 ) -> ::core::ffi::c_int {
-    inflateResetKeep(strm)
-}
-pub unsafe extern "C" fn inflateReset(mut strm: crate::zlib_h::z_streamp) -> ::core::ffi::c_int {
     if inflateStateCheck(strm) != 0 {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
@@ -920,14 +921,9 @@ pub unsafe extern "C" fn inflateReset(mut strm: crate::zlib_h::z_streamp) -> ::c
     state.lencode = state.distcode;
     crate::zlib_h::Z_OK
 }
-#[export_name = "inflateReset"]
-
-pub unsafe extern "C" fn inflateReset_ffi(
-    mut strm: crate::zlib_h::z_streamp,
-) -> ::core::ffi::c_int {
-    inflateReset(strm)
-}
-pub unsafe extern "C" fn inflateReset2(
+pub use inflateReset2_ffi as inflateReset2;
+#[export_name = "inflateReset2"]
+pub unsafe extern "C" fn inflateReset2_ffi(
     mut strm: crate::zlib_h::z_streamp,
     windowBits: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
@@ -951,15 +947,9 @@ pub unsafe extern "C" fn inflateReset2(
     (*state).wbits = window_bits;
     return inflateReset(strm);
 }
-#[export_name = "inflateReset2"]
-
-pub unsafe extern "C" fn inflateReset2_ffi(
-    mut strm: crate::zlib_h::z_streamp,
-    mut windowBits: ::core::ffi::c_int,
-) -> ::core::ffi::c_int {
-    inflateReset2(strm, windowBits)
-}
-pub unsafe extern "C" fn inflateInit2_(
+pub use inflateInit2__ffi as inflateInit2_;
+#[export_name = "inflateInit2_"]
+pub unsafe extern "C" fn inflateInit2__ffi(
     mut strm: crate::zlib_h::z_streamp,
     mut windowBits: ::core::ffi::c_int,
     mut version: *const ::core::ffi::c_char,
@@ -1024,16 +1014,6 @@ pub unsafe extern "C" fn inflateInit2_(
         (*strm).state = ::core::ptr::null_mut::<crate::src::deflate::internal_state>();
     }
     return ret;
-}
-#[export_name = "inflateInit2_"]
-
-pub unsafe extern "C" fn inflateInit2__ffi(
-    mut strm: crate::zlib_h::z_streamp,
-    mut windowBits: ::core::ffi::c_int,
-    mut version: *const ::core::ffi::c_char,
-    mut stream_size: ::core::ffi::c_int,
-) -> ::core::ffi::c_int {
-    inflateInit2_(strm, windowBits, version, stream_size)
 }
 #[export_name = "inflateInit_"]
 

@@ -83,6 +83,20 @@ fn gz_comp_is_direct(direct: ::core::ffi::c_int) -> bool {
     direct != 0
 }
 
+#[derive(Debug, Eq, PartialEq)]
+enum GzCompDirectLoopAction {
+    Write,
+    Done,
+}
+
+fn gz_comp_direct_loop_action(avail_in: crate::stdlib::uInt) -> GzCompDirectLoopAction {
+    if gz_has_pending_input(avail_in) {
+        GzCompDirectLoopAction::Write
+    } else {
+        GzCompDirectLoopAction::Done
+    }
+}
+
 fn gz_init_mode(direct: ::core::ffi::c_int) -> GzInitMode {
     if gz_comp_is_direct(direct) {
         GzInitMode::Direct
@@ -1107,7 +1121,10 @@ unsafe fn gz_comp(
         }
     }
     if gz_comp_is_direct(state.direct) {
-        while state.strm.avail_in != 0 {
+        while matches!(
+            gz_comp_direct_loop_action(state.strm.avail_in),
+            GzCompDirectLoopAction::Write
+        ) {
             *crate::stdlib::__errno_location() = 0 as ::core::ffi::c_int;
             state.again = 0 as ::core::ffi::c_int;
             put = gz_comp_write_chunk_len(state.strm.avail_in as usize, max);
@@ -1799,21 +1816,22 @@ mod tests {
     use super::{
         gz_buffer_is_initialized, gz_comp_apply_deflate_progress, gz_comp_apply_deflate_result,
         gz_comp_apply_output_buffer_progress, gz_comp_deflate_action, gz_comp_deflate_progress,
-        gz_comp_deflate_stream_is_corrupt, gz_comp_direct_write_progress,
-        gz_comp_direct_write_result, gz_comp_has_output, gz_comp_is_direct,
-        gz_comp_max_write_chunk, gz_comp_needs_output_write, gz_comp_needs_reset,
-        gz_comp_output_buffer_action, gz_comp_output_buffer_progress, gz_comp_output_flush_step,
-        gz_comp_output_produced, gz_comp_output_write_chunk_len, gz_comp_output_write_progress,
-        gz_comp_output_write_result, gz_comp_pending_after_write, gz_comp_reset_action,
-        gz_comp_reset_after_flush, gz_comp_reset_transition, gz_comp_reset_value,
-        gz_comp_skips_empty_flush, gz_comp_write_again, gz_comp_write_chunk_len,
-        gz_comp_write_failed, gz_comp_write_failure, gz_comp_write_progress, gz_comp_write_result,
-        gz_has_pending_input, gz_has_pending_skip, gz_init_allocation_plan, gz_init_deflate_failed,
-        gz_init_failed, gz_init_mode, gz_init_stream_defaults, gz_write_advanced_pos,
-        gz_write_apply_buffered_progress, gz_write_apply_chunk_progress,
-        gz_write_apply_direct_progress, gz_write_buffered_comp_result, gz_write_buffered_copy_len,
-        gz_write_buffered_copy_plan, gz_write_buffered_input_action, gz_write_buffered_progress,
-        gz_write_chunk_len, gz_write_comp_failed, gz_write_consumed, gz_write_direct_action,
+        gz_comp_deflate_stream_is_corrupt, gz_comp_direct_loop_action,
+        gz_comp_direct_write_progress, gz_comp_direct_write_result, gz_comp_has_output,
+        gz_comp_is_direct, gz_comp_max_write_chunk, gz_comp_needs_output_write,
+        gz_comp_needs_reset, gz_comp_output_buffer_action, gz_comp_output_buffer_progress,
+        gz_comp_output_flush_step, gz_comp_output_produced, gz_comp_output_write_chunk_len,
+        gz_comp_output_write_progress, gz_comp_output_write_result, gz_comp_pending_after_write,
+        gz_comp_reset_action, gz_comp_reset_after_flush, gz_comp_reset_transition,
+        gz_comp_reset_value, gz_comp_skips_empty_flush, gz_comp_write_again,
+        gz_comp_write_chunk_len, gz_comp_write_failed, gz_comp_write_failure,
+        gz_comp_write_progress, gz_comp_write_result, gz_has_pending_input, gz_has_pending_skip,
+        gz_init_allocation_plan, gz_init_deflate_failed, gz_init_failed, gz_init_mode,
+        gz_init_stream_defaults, gz_write_advanced_pos, gz_write_apply_buffered_progress,
+        gz_write_apply_chunk_progress, gz_write_apply_direct_progress,
+        gz_write_buffered_comp_result, gz_write_buffered_copy_len, gz_write_buffered_copy_plan,
+        gz_write_buffered_input_action, gz_write_buffered_progress, gz_write_chunk_len,
+        gz_write_comp_failed, gz_write_consumed, gz_write_direct_action,
         gz_write_errno_is_retryable, gz_write_error_result, gz_write_is_empty,
         gz_write_preparation, gz_write_progress, gz_write_remaining_after_consumption,
         gz_write_state_is_usable, gz_write_uses_buffered_path, gz_zero_action,
@@ -1826,11 +1844,11 @@ mod tests {
         gzputs_len_fits_int, gzputs_result, gzsetparams_action, gzsetparams_buffer_action,
         gzsetparams_requires_deflate, gzsetparams_settings_match, gzsetparams_state_is_usable,
         gzsetparams_zero_action, gzwrite_request, GzCloseBufferAction, GzCompDeflateAction,
-        GzCompDirectWriteProgress, GzCompDirectWriteResult, GzCompOutputBufferAction,
-        GzCompOutputBufferProgress, GzCompOutputFlushStep, GzCompOutputWriteProgress,
-        GzCompOutputWriteResult, GzCompResetAction, GzCompWriteFailure, GzCompWriteResult,
-        GzFlushAction, GzInitAllocationPlan, GzInitMode, GzPutcWriteAction, GzSetParamsAction,
-        GzSetParamsBufferAction, GzSetParamsZeroAction, GzWriteBufferedCopyPlan,
+        GzCompDirectLoopAction, GzCompDirectWriteProgress, GzCompDirectWriteResult,
+        GzCompOutputBufferAction, GzCompOutputBufferProgress, GzCompOutputFlushStep,
+        GzCompOutputWriteProgress, GzCompOutputWriteResult, GzCompResetAction, GzCompWriteFailure,
+        GzCompWriteResult, GzFlushAction, GzInitAllocationPlan, GzInitMode, GzPutcWriteAction,
+        GzSetParamsAction, GzSetParamsBufferAction, GzSetParamsZeroAction, GzWriteBufferedCopyPlan,
         GzWriteBufferedInputAction, GzWriteDirectAction, GzWritePreparation, GzZeroAction,
         GzZeroChunkLimits, GzZeroPreparedChunk, GzZeroStep,
     };
@@ -2328,6 +2346,16 @@ mod tests {
         assert_eq!(gzputc_write_action(0), GzPutcWriteAction::Error);
         assert_eq!(gzputc_write_action(1), GzPutcWriteAction::ReturnByte);
         assert_eq!(gzputc_write_action(2), GzPutcWriteAction::Error);
+    }
+
+    #[test]
+    fn gz_comp_direct_loop_action_writes_only_with_pending_input() {
+        assert_eq!(gz_comp_direct_loop_action(0), GzCompDirectLoopAction::Done);
+        assert_eq!(gz_comp_direct_loop_action(1), GzCompDirectLoopAction::Write);
+        assert_eq!(
+            gz_comp_direct_loop_action(crate::stdlib::uInt::MAX),
+            GzCompDirectLoopAction::Write
+        );
     }
 
     #[test]
