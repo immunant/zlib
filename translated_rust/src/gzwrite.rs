@@ -527,6 +527,16 @@ unsafe extern "C" fn gz_write(
     }
     return put;
 }
+
+fn gzsetparams_settings_match(
+    requested_level: ::core::ffi::c_int,
+    current_level: ::core::ffi::c_int,
+    requested_strategy: ::core::ffi::c_int,
+    current_strategy: ::core::ffi::c_int,
+) -> bool {
+    requested_level == current_level && requested_strategy == current_strategy
+}
+
 pub unsafe extern "C" fn gzwrite(
     mut file: crate::zlib_h::gzFile,
     mut buf: crate::stdlib::voidpc,
@@ -778,7 +788,7 @@ pub unsafe extern "C" fn gzsetparams(
         crate::zlib_h::Z_OK,
         ::core::ptr::null::<::core::ffi::c_char>(),
     );
-    if level == (*state).level && strategy == (*state).strategy {
+    if gzsetparams_settings_match(level, (*state).level, strategy, (*state).strategy) {
         return crate::zlib_h::Z_OK;
     }
     if (*state).skip != 0 && gz_zero(state) == -1 as ::core::ffi::c_int {
@@ -859,7 +869,7 @@ mod tests {
         gz_write_errno_is_retryable, gz_write_error_result, gz_write_needs_pending_flush,
         gz_write_uses_buffered_path, gz_zero_apply_progress, gz_zero_chunk_len,
         gzflush_mode_is_valid, gzfwrite_len, gzputc_result, gzputs_len_fits_int, gzputs_result,
-        gzwrite_len_fits_int,
+        gzsetparams_settings_match, gzwrite_len_fits_int,
     };
 
     #[test]
@@ -907,6 +917,30 @@ mod tests {
     #[test]
     fn gzputs_result_reports_nonempty_write_failures() {
         assert_eq!(gzputs_result(1, 0), -1);
+    }
+
+    #[test]
+    fn gzsetparams_settings_match_requires_both_settings_to_match() {
+        assert!(gzsetparams_settings_match(1, 1, 2, 2));
+        assert!(!gzsetparams_settings_match(1, 2, 2, 2));
+        assert!(!gzsetparams_settings_match(1, 1, 2, 3));
+        assert!(!gzsetparams_settings_match(1, 2, 3, 4));
+    }
+
+    #[test]
+    fn gzsetparams_settings_match_compares_extreme_values_exactly() {
+        assert!(gzsetparams_settings_match(
+            ::core::ffi::c_int::MIN,
+            ::core::ffi::c_int::MIN,
+            ::core::ffi::c_int::MAX,
+            ::core::ffi::c_int::MAX
+        ));
+        assert!(!gzsetparams_settings_match(
+            ::core::ffi::c_int::MIN,
+            ::core::ffi::c_int::MAX,
+            ::core::ffi::c_int::MAX,
+            ::core::ffi::c_int::MAX
+        ));
     }
 
     #[test]

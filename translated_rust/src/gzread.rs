@@ -769,6 +769,10 @@ fn gzgets_progress(
     )
 }
 
+fn gzgets_should_continue(left: ::core::ffi::c_uint, found_eol: bool) -> bool {
+    left != 0 && !found_eol
+}
+
 fn gzclose_r_result(
     stream_err: ::core::ffi::c_int,
     close_ret: ::core::ffi::c_int,
@@ -1335,6 +1339,15 @@ mod tests {
     }
 
     #[test]
+    fn gzgets_should_continue_requires_space_without_a_newline() {
+        assert!(!gzgets_should_continue(0, false));
+        assert!(!gzgets_should_continue(0, true));
+        assert!(gzgets_should_continue(1, false));
+        assert!(!gzgets_should_continue(1, true));
+        assert!(gzgets_should_continue(::core::ffi::c_uint::MAX, false));
+    }
+
+    #[test]
     fn gz_direct_needs_look_only_for_empty_read_look_state() {
         assert!(gz_direct_needs_look(
             crate::gzguts_h::GZ_READ,
@@ -1751,7 +1764,7 @@ pub unsafe extern "C" fn gzgets(
                     gzgets_progress((*state).x.have, left, (*state).x.pos, n);
                 (*state).x.next = (*state).x.next.offset(n as isize);
                 buf = buf.offset(n as isize);
-                if !(left != 0 && eol.is_null()) {
+                if !gzgets_should_continue(left, !eol.is_null()) {
                     break;
                 }
             }

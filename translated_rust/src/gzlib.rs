@@ -465,6 +465,10 @@ fn gz_open_should_set_nonblocking(oflag: ::core::ffi::c_int) -> bool {
     oflag & crate::stdlib::O_NONBLOCK != 0
 }
 
+fn gz_open_should_set_close_on_exec(oflag: ::core::ffi::c_int) -> bool {
+    oflag & crate::stdlib::O_CLOEXEC != 0
+}
+
 fn gz_finish_open(state: &mut crate::gzguts_h::gz_state, current_offset: crate::stdlib::off64_t) {
     gz_apply_post_open_metadata(state, current_offset);
     gz_reset_state(state);
@@ -528,7 +532,7 @@ unsafe extern "C" fn gz_open(
                 crate::stdlib::fcntl(fd, crate::stdlib::F_GETFL) | crate::stdlib::O_NONBLOCK,
             );
         }
-        if plan.oflag & crate::stdlib::O_CLOEXEC != 0 {
+        if gz_open_should_set_close_on_exec(plan.oflag) {
             crate::stdlib::fcntl(
                 fd,
                 crate::stdlib::F_SETFD,
@@ -1042,9 +1046,9 @@ pub unsafe extern "C" fn gz_intmax_ffi() -> ::core::ffi::c_uint {
 mod tests {
     use super::{
         gz_clear_read_flags, gz_is_read_or_write_mode, gz_legacy_offset_result,
-        gz_open_offset_plan, gz_open_recorded_offset, gz_open_should_set_nonblocking,
-        gz_parse_open_mode, gz_post_open_metadata, gz_prepare_open, gz_reset_core,
-        gzbuffer_normalized_want, gzclearerr_core, gzerror_core,
+        gz_open_offset_plan, gz_open_recorded_offset, gz_open_should_set_close_on_exec,
+        gz_open_should_set_nonblocking, gz_parse_open_mode, gz_post_open_metadata, gz_prepare_open,
+        gz_reset_core, gzbuffer_normalized_want, gzclearerr_core, gzerror_core,
         gzoffset64_adjust_for_buffered_read, gzrewind_request_is_valid, gzseek_adjust_offset,
         gzseek_can_fast_forward, gzseek_clears_pending_skip, gzseek_error_allows_positioning,
         gzseek_fast_forward_lseek_offset, gzseek_fast_forward_reset,
@@ -1594,6 +1598,16 @@ mod tests {
         ));
         assert!(!gz_open_should_set_nonblocking(crate::stdlib::O_CLOEXEC));
         assert!(!gz_open_should_set_nonblocking(0));
+    }
+
+    #[test]
+    fn gz_open_should_set_close_on_exec_detects_only_the_close_on_exec_flag() {
+        assert!(gz_open_should_set_close_on_exec(crate::stdlib::O_CLOEXEC));
+        assert!(gz_open_should_set_close_on_exec(
+            crate::stdlib::O_CLOEXEC | crate::stdlib::O_NONBLOCK
+        ));
+        assert!(!gz_open_should_set_close_on_exec(crate::stdlib::O_NONBLOCK));
+        assert!(!gz_open_should_set_close_on_exec(0));
     }
 
     #[test]
