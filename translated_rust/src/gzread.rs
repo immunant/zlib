@@ -388,8 +388,13 @@ fn gz_decomp(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
                                 b"compressed data error\0",
                             );
                         } else {
-                            let msg = state.strm.msg as *const ::core::ffi::c_char;
-                            crate::src::gzlib::gz_error(state, crate::zlib_h::Z_DATA_ERROR, msg);
+                            let msg = crate::src::inflate::inflate_stream_message(&state.strm)
+                                .unwrap_or(b"compressed data error\0");
+                            crate::src::gzlib::gz_error_static(
+                                state,
+                                crate::zlib_h::Z_DATA_ERROR,
+                                msg,
+                            );
                         }
                         break;
                     }
@@ -1037,6 +1042,7 @@ pub unsafe extern "C" fn gzclose_r_ffi(mut file: crate::zlib_h::gzFile) -> ::cor
     }
     err = gzclose_read_status(state.err);
     crate::src::gzlib::gz_error_clear(state, crate::zlib_h::Z_OK);
+    crate::src::gzlib::gz_remove_error_info(state);
     crate::stdlib::free(state.path as *mut ::core::ffi::c_void);
     ret = crate::stdlib::close(state.fd);
     crate::stdlib::free(file as *mut ::core::ffi::c_void);

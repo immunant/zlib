@@ -870,6 +870,7 @@ pub unsafe extern "C" fn gzclose_w_ffi(mut file: crate::zlib_h::gzFile) -> ::cor
         gz_remove_owned_buffers(state);
     }
     crate::src::gzlib::gz_error_clear(state, crate::zlib_h::Z_OK);
+    crate::src::gzlib::gz_remove_error_info(state);
     crate::stdlib::free(state.path as *mut ::core::ffi::c_void);
     ret = gzclose_w_final_status(
         ret,

@@ -218,7 +218,8 @@ pub unsafe extern "C" fn inflate_fast_ffi(
                                     as isize,
                             );
                     } else {
-                        (*strm).msg = b"invalid distance code\0".as_ptr()
+                        (*strm).msg = crate::src::inflate::INFLATE_MSG_INVALID_DISTANCE_CODE
+                            .as_ptr()
                             as *const ::core::ffi::c_char
                             as *mut ::core::ffi::c_char;
                         (*state).mode = crate::src::inflate::BAD;
@@ -268,9 +269,11 @@ pub unsafe extern "C" fn inflate_fast_ffi(
                         op = dist.wrapping_sub(op);
                         if op > whave {
                             if (*state).sane != 0 {
-                                (*strm).msg = b"invalid distance too far back\0".as_ptr()
-                                    as *const ::core::ffi::c_char
-                                    as *mut ::core::ffi::c_char;
+                                (*strm).msg =
+                                    crate::src::inflate::INFLATE_MSG_INVALID_DISTANCE_TOO_FAR_BACK
+                                        .as_ptr()
+                                        as *const ::core::ffi::c_char
+                                        as *mut ::core::ffi::c_char;
                                 (*state).mode = crate::src::inflate::BAD;
                                 break;
                             }
@@ -381,7 +384,7 @@ pub unsafe extern "C" fn inflate_fast_ffi(
                 }
             }
             9180031981464905198 => {
-                (*strm).msg = b"invalid literal/length code\0".as_ptr()
+                (*strm).msg = crate::src::inflate::INFLATE_MSG_INVALID_LITERAL_LENGTH_CODE.as_ptr()
                     as *const ::core::ffi::c_char
                     as *mut ::core::ffi::c_char;
                 (*state).mode = crate::src::inflate::BAD;

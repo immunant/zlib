@@ -188,6 +188,8 @@ struct GzOwnedBuffers {
 }
 
 static GZ_OWNED_BUFFERS: Mutex<Vec<(usize, GzOwnedBuffers)>> = Mutex::new(Vec::new());
+static GZ_ERROR_PATHS: Mutex<Vec<(usize, Vec<u8>)>> = Mutex::new(Vec::new());
+static GZ_ERROR_MESSAGES: Mutex<Vec<(usize, ::std::ffi::CString)>> = Mutex::new(Vec::new());
 
 fn gz_state_key(state: &crate::gzguts_h::gz_state) -> usize {
     state as *const crate::gzguts_h::gz_state as usize
@@ -223,6 +225,77 @@ pub(crate) fn gz_remove_owned_buffers(state: &crate::gzguts_h::gz_state) {
     {
         buffers.swap_remove(pos);
     }
+}
+
+fn gz_store_error_path(state: &crate::gzguts_h::gz_state, path: &::core::ffi::CStr) {
+    let owned_path = path.to_bytes().to_vec();
+    let mut paths = GZ_ERROR_PATHS
+        .lock()
+        .expect("gz error path registry poisoned");
+    let key = gz_state_key(state);
+    if let Some((_, old_path)) = paths.iter_mut().find(|(stored_key, _)| *stored_key == key) {
+        *old_path = owned_path;
+    } else {
+        paths.push((key, owned_path));
+    }
+}
+
+fn gz_with_error_path<R>(
+    state: &crate::gzguts_h::gz_state,
+    f: impl FnOnce(&[u8]) -> R,
+) -> Option<R> {
+    let paths = GZ_ERROR_PATHS
+        .lock()
+        .expect("gz error path registry poisoned");
+    let (_, path) = paths
+        .iter()
+        .find(|(stored_key, _)| *stored_key == gz_state_key(state))?;
+    Some(f(path))
+}
+
+fn gz_remove_error_path(state: &crate::gzguts_h::gz_state) {
+    let mut paths = GZ_ERROR_PATHS
+        .lock()
+        .expect("gz error path registry poisoned");
+    let key = gz_state_key(state);
+    if let Some(pos) = paths.iter().position(|(stored_key, _)| *stored_key == key) {
+        paths.swap_remove(pos);
+    }
+}
+
+fn gz_store_error_message(state: &mut crate::gzguts_h::gz_state, message: ::std::ffi::CString) {
+    let ptr = message.as_ptr() as *mut ::core::ffi::c_char;
+    let mut messages = GZ_ERROR_MESSAGES
+        .lock()
+        .expect("gz error message registry poisoned");
+    let key = gz_state_key(state);
+    if let Some((_, old_message)) = messages
+        .iter_mut()
+        .find(|(stored_key, _)| *stored_key == key)
+    {
+        *old_message = message;
+    } else {
+        messages.push((key, message));
+    }
+    state.msg = ptr;
+}
+
+fn gz_remove_error_message(state: &crate::gzguts_h::gz_state) {
+    let mut messages = GZ_ERROR_MESSAGES
+        .lock()
+        .expect("gz error message registry poisoned");
+    let key = gz_state_key(state);
+    if let Some(pos) = messages
+        .iter()
+        .position(|(stored_key, _)| *stored_key == key)
+    {
+        messages.swap_remove(pos);
+    }
+}
+
+pub(crate) fn gz_remove_error_info(state: &crate::gzguts_h::gz_state) {
+    gz_remove_error_message(state);
+    gz_remove_error_path(state);
 }
 
 pub(crate) fn gz_with_input_buffer_mut<R>(
@@ -332,6 +405,7 @@ fn gz_open(
             b"%s\0".as_ptr() as *const ::core::ffi::c_char,
             path.as_ptr(),
         );
+        gz_store_error_path(state_ref, path);
         oflag = gz_open_oflag_for_mode(oflag, parsed_mode.mode, exclusive);
         if fd == -1 as ::core::ffi::c_int {
             fd = crate::stdlib::open(path.as_ptr(), oflag, 0o666 as ::core::ffi::c_int);
@@ -354,6 +428,7 @@ fn gz_open(
         state_ref.fd = fd;
         state_ref.path_len = len as crate::__stddef_size_t_h::size_t;
         if state_ref.fd == -1 as ::core::ffi::c_int {
+            gz_remove_error_path(state_ref);
             crate::stdlib::free(state_ref.path as *mut ::core::ffi::c_void);
             crate::stdlib::free(state as *mut ::core::ffi::c_void);
             return ::core::ptr::null_mut::<crate::zlib_h::gzFile_s>();
@@ -911,26 +986,29 @@ pub unsafe extern "C" fn gzclearerr_ffi(mut file: crate::zlib_h::gzFile) {
     gz_error_clear(state, crate::zlib_h::Z_OK);
 }
 
-fn gz_error_message_capacity(
-    path_len: crate::__stddef_size_t_h::size_t,
-    msg_len: crate::__stddef_size_t_h::size_t,
-) -> crate::__stddef_size_t_h::size_t {
-    path_len
-        .wrapping_add(msg_len)
-        .wrapping_add(3 as crate::__stddef_size_t_h::size_t)
+fn gz_error_message(path: &[u8], msg: &::core::ffi::CStr) -> Option<::std::ffi::CString> {
+    let msg = msg.to_bytes();
+    let len = path
+        .len()
+        .checked_add(2)?
+        .checked_add(msg.len())?
+        .checked_add(1)?;
+    let mut message = Vec::new();
+    message.try_reserve_exact(len).ok()?;
+    message.extend_from_slice(path);
+    message.extend_from_slice(b": ");
+    message.extend_from_slice(msg);
+    message.push(0);
+    ::std::ffi::CString::from_vec_with_nul(message).ok()
 }
 
 pub fn gz_error(
     state: &mut crate::gzguts_h::gz_state,
     err: ::core::ffi::c_int,
-    msg: *const ::core::ffi::c_char,
+    msg: Option<&::core::ffi::CStr>,
 ) {
     if !state.msg.is_null() {
-        if state.err != crate::zlib_h::Z_MEM_ERROR {
-            unsafe {
-                crate::stdlib::free(state.msg as *mut ::core::ffi::c_void);
-            }
-        }
+        gz_remove_error_message(state);
         state.msg = ::core::ptr::null_mut::<::core::ffi::c_char>();
     }
     if gz_error_should_clear_buffer(err, state.again) {
@@ -940,30 +1018,19 @@ pub fn gz_error(
     if err == crate::zlib_h::Z_MEM_ERROR {
         return;
     }
-    if msg.is_null() {
+    let Some(msg) = msg else {
         return;
-    }
-    let msg_capacity =
-        unsafe { gz_error_message_capacity(state.path_len, crate::stdlib::strlen(msg)) };
-    state.msg = unsafe { crate::stdlib::malloc(msg_capacity) as *mut ::core::ffi::c_char };
-    if state.msg.is_null() {
+    };
+    let Some(message) = gz_with_error_path(state, |path| gz_error_message(path, msg)).flatten()
+    else {
         state.err = crate::zlib_h::Z_MEM_ERROR;
         return;
-    }
-    unsafe {
-        crate::stdlib::snprintf(
-            state.msg,
-            msg_capacity,
-            b"%s%s%s\0".as_ptr() as *const ::core::ffi::c_char,
-            state.path,
-            b": \0".as_ptr() as *const ::core::ffi::c_char,
-            msg,
-        );
-    }
+    };
+    gz_store_error_message(state, message);
 }
 
 pub fn gz_error_clear(state: &mut crate::gzguts_h::gz_state, err: ::core::ffi::c_int) {
-    gz_error(state, err, ::core::ptr::null::<::core::ffi::c_char>());
+    gz_error(state, err, None);
 }
 
 pub fn gz_error_static(
@@ -971,7 +1038,10 @@ pub fn gz_error_static(
     err: ::core::ffi::c_int,
     msg: &'static [u8],
 ) {
-    gz_error(state, err, msg.as_ptr() as *const ::core::ffi::c_char);
+    match ::core::ffi::CStr::from_bytes_with_nul(msg) {
+        Ok(msg) => gz_error(state, err, Some(msg)),
+        Err(_) => gz_error(state, err, None),
+    }
 }
 
 pub(crate) fn gz_error_with_os_error(
@@ -981,7 +1051,7 @@ pub(crate) fn gz_error_with_os_error(
 ) {
     let message = ::std::io::Error::from_raw_os_error(errno).to_string();
     match ::std::ffi::CString::new(message) {
-        Ok(message) => gz_error(state, err, message.as_ptr()),
+        Ok(message) => gz_error(state, err, Some(message.as_c_str())),
         Err(_) => gz_error_static(state, err, b"unknown error\0"),
     }
 }
@@ -997,6 +1067,11 @@ pub unsafe extern "C" fn gz_error_ffi(
     mut msg: *const ::core::ffi::c_char,
 ) {
     let state = &mut *state;
+    let msg = if msg.is_null() {
+        None
+    } else {
+        Some(::core::ffi::CStr::from_ptr(msg))
+    };
     gz_error(state, err, msg)
 }
 pub fn gz_intmax() -> ::core::ffi::c_uint {
