@@ -895,9 +895,29 @@ pub fn inflateBack(
                         break;
                     }
                 }
-                let c2rust_fresh15 = put;
+                let Some(put_index) = state
+                    .wsize
+                    .checked_sub(left)
+                    .and_then(|remaining| usize::try_from(remaining).ok())
+                else {
+                    ret = crate::zlib_h::Z_STREAM_ERROR;
+                    break '_inf_leave;
+                };
+                let literal = state.length as ::core::ffi::c_uchar;
+                let Some(put_end) = put_index.checked_add(1) else {
+                    ret = crate::zlib_h::Z_STREAM_ERROR;
+                    break '_inf_leave;
+                };
+                let Some(window) = inflate_back_window(state, put_index, 1) else {
+                    ret = crate::zlib_h::Z_STREAM_ERROR;
+                    break '_inf_leave;
+                };
+                let Some(destination) = window.get_mut(put_index..put_end) else {
+                    ret = crate::zlib_h::Z_STREAM_ERROR;
+                    break '_inf_leave;
+                };
+                destination.copy_from_slice(&[literal]);
                 put = put.wrapping_add(1);
-                *c2rust_fresh15 = state.length as ::core::ffi::c_uchar;
                 left = left.wrapping_sub(1);
                 state.mode = crate::src::inflate::LEN;
             } else if here.op as ::core::ffi::c_int & 32 as ::core::ffi::c_int != 0 {
