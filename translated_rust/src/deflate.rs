@@ -2213,13 +2213,12 @@ fn install_gzip_header(
     crate::zlib_h::Z_OK
 }
 
-pub unsafe extern "C" fn deflateSetHeader(
-    mut strm: crate::zlib_h::z_streamp,
+pub unsafe fn deflateSetHeader(
+    strm: &mut crate::zlib_h::z_stream_s,
     mut head: crate::zlib_h::gz_headerp,
 ) -> ::core::ffi::c_int {
-    let Some((_strm, state, _storage)) = strm
-        .as_mut()
-        .and_then(|strm| deflate_stream_and_state(strm, DeflateStorageProjection::None))
+    let Some((_strm, state, _storage)) =
+        deflate_stream_and_state(strm, DeflateStorageProjection::None)
     else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
@@ -2267,6 +2266,9 @@ pub unsafe extern "C" fn deflateSetHeader_ffi(
     mut strm: crate::zlib_h::z_streamp,
     mut head: crate::zlib_h::gz_headerp,
 ) -> ::core::ffi::c_int {
+    let Some(strm) = strm.as_mut() else {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    };
     deflateSetHeader(strm, head)
 }
 
