@@ -22,7 +22,9 @@ fn update_byte(adler: &mut u64, sum2: &mut u64, byte: Bytef) {
     *sum2 = sum2.wrapping_add(*adler);
 }
 
-fn update_block(adler: &mut u64, sum2: &mut u64, block: &[Bytef]) {
+fn update_bounded_block(adler: &mut u64, sum2: &mut u64, block: &[Bytef]) {
+    debug_assert!(block.len() <= NMAX_USIZE);
+
     let mut groups = block.chunks_exact(16);
     for group in &mut groups {
         for &byte in group {
@@ -43,16 +45,12 @@ pub fn adler32_z(adler: uLong, buf: &[Bytef]) -> uLong {
     let adler = adler as u64;
     let mut sum2 = (adler >> 16) & 0xffff;
     let mut adler = adler & 0xffff;
-    let mut remaining = buf;
 
-    while remaining.len() >= NMAX_USIZE {
-        let (block, rest) = remaining.split_at(NMAX_USIZE);
-        update_block(&mut adler, &mut sum2, block);
+    for block in buf.chunks(NMAX_USIZE) {
+        update_bounded_block(&mut adler, &mut sum2, block);
         reduce(&mut adler, &mut sum2);
-        remaining = rest;
     }
 
-    update_block(&mut adler, &mut sum2, remaining);
     reduce(&mut adler, &mut sum2);
 
     (adler | sum2 << 16) as uLong
@@ -134,4 +132,41 @@ pub unsafe extern "C" fn adler32_combine64_ffi(
     len2: off64_t,
 ) -> uLong {
     adler32_combine64(adler1, adler2, len2)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn reference_adler32(adler: uLong, buf: &[Bytef]) -> uLong {
+        let mut sum1 = adler as u64 & 0xffff;
+        let mut sum2 = (adler as u64 >> 16) & 0xffff;
+
+        for &byte in buf {
+            sum1 = (sum1 + byte as u64) % BASE_U64;
+            sum2 = (sum2 + sum1) % BASE_U64;
+        }
+
+        (sum1 | sum2 << 16) as uLong
+    }
+
+    #[test]
+    fn matches_known_vectors() {
+        assert_eq!(adler32_z(1, b""), 1);
+        assert_eq!(adler32_z(1, b"Wikipedia"), 0x11e6_0398);
+        assert_eq!(adler32(1, b"123456789"), 0x091e_01de);
+    }
+
+    #[test]
+    fn matches_reference_across_nmax_boundaries() {
+        let input: Vec<Bytef> = (0..(NMAX_USIZE * 2 + 1))
+            .map(|index| index.wrapping_mul(37).wrapping_add(11) as Bytef)
+            .collect();
+        let seed = 0x1234_5678 as uLong;
+
+        for len in [0, NMAX_USIZE - 1, NMAX_USIZE, NMAX_USIZE + 1, input.len()] {
+            let buf = &input[..len];
+            assert_eq!(adler32_z(seed, buf), reference_adler32(seed, buf));
+        }
+    }
 }

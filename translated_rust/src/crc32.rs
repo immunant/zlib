@@ -4830,13 +4830,7 @@ pub unsafe extern "C" fn crc32_ffi(
     buf: *const ::core::ffi::c_uchar,
     len: crate::stdlib::uInt,
 ) -> crate::stdlib::uLong {
-    if buf.is_null() {
-        return 0;
-    }
-
-    crc32(crc, unsafe {
-        core::slice::from_raw_parts(buf, len as usize)
-    })
+    crc32_z_ffi(crc, buf, len as crate::stdlib::z_size_t)
 }
 pub fn crc32_combine_gen64(len2: crate::stdlib::off64_t) -> crate::stdlib::uLong {
     if len2 < 0 {

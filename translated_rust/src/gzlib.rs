@@ -89,6 +89,17 @@ unsafe extern "C" fn gz_reset(mut state: crate::gzguts_h::gz_statep) {
     (*state).strm.avail_in = 0;
 }
 
+fn gz_open_defaults(state: &mut crate::gzguts_h::gz_state) {
+    state.size = 0;
+    state.want = crate::gzguts_h::GZBUFSIZE as ::core::ffi::c_uint;
+    state.err = crate::zlib_h::Z_OK;
+    state.msg = ::core::ptr::null_mut::<::core::ffi::c_char>();
+    state.mode = crate::gzguts_h::GZ_NONE;
+    state.level = crate::zlib_h::Z_DEFAULT_COMPRESSION;
+    state.strategy = crate::zlib_h::Z_DEFAULT_STRATEGY;
+    state.direct = 0;
+}
+
 unsafe extern "C" fn gz_open(
     mut path: *const ::core::ffi::c_void,
     mut fd: ::core::ffi::c_int,
@@ -108,14 +119,7 @@ unsafe extern "C" fn gz_open(
     if state.is_null() {
         return ::core::ptr::null_mut::<crate::zlib_h::gzFile_s>();
     }
-    (*state).size = 0 as ::core::ffi::c_uint;
-    (*state).want = crate::gzguts_h::GZBUFSIZE as ::core::ffi::c_uint;
-    (*state).err = crate::zlib_h::Z_OK;
-    (*state).msg = ::core::ptr::null_mut::<::core::ffi::c_char>();
-    (*state).mode = crate::gzguts_h::GZ_NONE;
-    (*state).level = crate::zlib_h::Z_DEFAULT_COMPRESSION;
-    (*state).strategy = crate::zlib_h::Z_DEFAULT_STRATEGY;
-    (*state).direct = 0 as ::core::ffi::c_int;
+    gz_open_defaults(&mut *state);
     while *mode != 0 {
         if *mode as ::core::ffi::c_int >= '0' as i32 && *mode as ::core::ffi::c_int <= '9' as i32 {
             (*state).level = *mode as ::core::ffi::c_int - '0' as i32;
