@@ -793,7 +793,10 @@ pub unsafe extern "C" fn deflateInit2_(
     (*s).level = level;
     (*s).strategy = strategy;
     (*s).method = method as crate::stdlib::Byte;
-    return deflateReset(strm);
+    let stream = &mut *strm;
+    let state = &mut *(stream.state as *mut crate::src::deflate::deflate_state);
+    let head = ::core::slice::from_raw_parts_mut(state.head, state.hash_size as usize);
+    return deflate_reset(stream, state, head);
 }
 #[export_name = "deflateInit2_"]
 
@@ -1123,56 +1126,69 @@ pub unsafe extern "C" fn deflateResetKeep_ffi(
     let state = &mut *(stream.state as *mut crate::src::deflate::deflate_state);
     deflate_reset_keep(stream, Some(state))
 }
-unsafe extern "C" fn lm_init(mut s: *mut crate::src::deflate::deflate_state) {
-    (*s).window_size = (2 as ::core::ffi::c_long as crate::zutil_h::ulg)
-        .wrapping_mul((*s).w_size as crate::zutil_h::ulg);
-    *(*s)
-        .head
-        .offset((*s).hash_size.wrapping_sub(1 as crate::stdlib::uInt) as isize) =
-        NIL as crate::src::deflate::Posf;
-    crate::stdlib::memset(
-        (*s).head as *mut ::core::ffi::c_void,
-        0 as ::core::ffi::c_int,
-        ((*s).hash_size.wrapping_sub(1 as crate::stdlib::uInt) as crate::__stddef_size_t_h::size_t)
-            .wrapping_mul(::core::mem::size_of::<crate::src::deflate::Posf>()),
-    );
-    (*s).slid = 0 as ::core::ffi::c_int;
-    (*s).max_lazy_match = configuration_table[(*s).level as usize].max_lazy as crate::stdlib::uInt;
-    (*s).good_match = configuration_table[(*s).level as usize].good_length as crate::stdlib::uInt;
-    (*s).nice_match = configuration_table[(*s).level as usize].nice_length as ::core::ffi::c_int;
-    (*s).max_chain_length =
-        configuration_table[(*s).level as usize].max_chain as crate::stdlib::uInt;
-    (*s).strstart = 0 as crate::stdlib::uInt;
-    (*s).block_start = 0 as ::core::ffi::c_long;
-    (*s).lookahead = 0 as crate::stdlib::uInt;
-    (*s).insert = 0 as crate::stdlib::uInt;
-    (*s).prev_length = (crate::zutil_h::MIN_MATCH - 1 as ::core::ffi::c_int) as crate::stdlib::uInt;
-    (*s).match_length = (*s).prev_length;
-    (*s).match_available = 0 as ::core::ffi::c_int;
-    (*s).ins_h = 0 as crate::stdlib::uInt;
+fn lm_init(
+    state: &mut crate::src::deflate::deflate_state,
+    head: &mut [crate::src::deflate::Pos],
+) -> bool {
+    let hash_size = state.hash_size as usize;
+    let Some(last) = hash_size.checked_sub(1) else {
+        return false;
+    };
+    let Some(head) = head.get_mut(..hash_size) else {
+        return false;
+    };
+    let Some(configuration) = configuration_table.get(state.level as usize) else {
+        return false;
+    };
+    state.window_size = (2 as ::core::ffi::c_long as crate::zutil_h::ulg)
+        .wrapping_mul(state.w_size as crate::zutil_h::ulg);
+    head[..last].fill(0);
+    head[last] = NIL as crate::src::deflate::Posf;
+    state.slid = 0 as ::core::ffi::c_int;
+    state.max_lazy_match = configuration.max_lazy as crate::stdlib::uInt;
+    state.good_match = configuration.good_length as crate::stdlib::uInt;
+    state.nice_match = configuration.nice_length as ::core::ffi::c_int;
+    state.max_chain_length = configuration.max_chain as crate::stdlib::uInt;
+    state.strstart = 0 as crate::stdlib::uInt;
+    state.block_start = 0 as ::core::ffi::c_long;
+    state.lookahead = 0 as crate::stdlib::uInt;
+    state.insert = 0 as crate::stdlib::uInt;
+    state.prev_length = (crate::zutil_h::MIN_MATCH - 1 as ::core::ffi::c_int) as crate::stdlib::uInt;
+    state.match_length = state.prev_length;
+    state.match_available = 0 as ::core::ffi::c_int;
+    state.ins_h = 0 as crate::stdlib::uInt;
+    true
 }
-pub unsafe extern "C" fn deflateReset(mut strm: crate::zlib_h::z_streamp) -> ::core::ffi::c_int {
-    let mut ret: ::core::ffi::c_int = 0;
-    // Validate callbacks and the state handle before borrowing either raw
-    // pointer.  In particular, a stale non-null state with absent callbacks
-    // must be rejected without being dereferenced.
-    if deflateStateCheck(strm) != 0 {
+
+pub(crate) fn deflate_reset(
+    stream: &mut crate::zlib_h::z_stream,
+    state: &mut crate::src::deflate::deflate_state,
+    head: &mut [crate::src::deflate::Pos],
+) -> ::core::ffi::c_int {
+    let ret = deflate_reset_keep(stream, Some(state));
+    if ret != crate::zlib_h::Z_OK || !lm_init(state, head) {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    let stream = &mut *strm;
-    let state = &mut *(stream.state as *mut crate::src::deflate::deflate_state);
-    ret = deflate_reset_keep(stream, Some(state));
-    if ret == crate::zlib_h::Z_OK {
-        lm_init(state);
-    }
-    return ret;
+    ret
 }
 #[export_name = "deflateReset"]
 
 pub unsafe extern "C" fn deflateReset_ffi(
     mut strm: crate::zlib_h::z_streamp,
 ) -> ::core::ffi::c_int {
-    deflateReset(strm)
+    // This check tests callbacks before it reads `state`.  Keep it ahead of
+    // either raw-pointer-to-reference conversion so malformed streams with a
+    // stale state and no allocators are still rejected without dereferencing it.
+    if deflateStateCheck(strm) != 0 {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    }
+    let stream = &mut *strm;
+    let state = &mut *(stream.state as *mut crate::src::deflate::deflate_state);
+    if state.head.is_null() {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    }
+    let head = ::core::slice::from_raw_parts_mut(state.head, state.hash_size as usize);
+    deflate_reset(stream, state, head)
 }
 pub unsafe extern "C" fn deflateSetHeader(
     mut strm: crate::zlib_h::z_streamp,

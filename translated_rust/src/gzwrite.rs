@@ -14,7 +14,6 @@ pub use crate::src::deflate::deflate;
 pub use crate::src::deflate::deflateEnd;
 pub use crate::src::deflate::deflateInit2_;
 pub use crate::src::deflate::deflateParams;
-pub use crate::src::deflate::deflateReset;
 pub use crate::src::deflate::internal_state;
 pub use crate::stdlib::uInt;
 pub use crate::stdlib::uLong;
@@ -186,7 +185,30 @@ fn gz_comp(
             return 0 as ::core::ffi::c_int;
         }
         // `strm` is the initialized stream held by this gzip state.
-        unsafe { crate::src::deflate::deflateReset(strm) };
+        let reset_state = unsafe {
+            &mut *(strm.state as *mut crate::src::deflate::deflate_state)
+        };
+        if reset_state.head.is_null() {
+            crate::src::gzlib::gz_static_error(
+                state,
+                crate::zlib_h::Z_STREAM_ERROR,
+                b"internal error: deflate stream corrupt\0",
+            );
+            return -1 as ::core::ffi::c_int;
+        }
+        let head = unsafe {
+            ::core::slice::from_raw_parts_mut(reset_state.head, reset_state.hash_size as usize)
+        };
+        if crate::src::deflate::deflate_reset(strm, reset_state, head)
+            != crate::zlib_h::Z_OK
+        {
+            crate::src::gzlib::gz_static_error(
+                state,
+                crate::zlib_h::Z_STREAM_ERROR,
+                b"internal error: deflate stream corrupt\0",
+            );
+            return -1 as ::core::ffi::c_int;
+        }
         state.reset = 0 as ::core::ffi::c_int;
     }
     ret = crate::zlib_h::Z_OK;
