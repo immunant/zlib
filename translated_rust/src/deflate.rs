@@ -785,16 +785,28 @@ pub unsafe extern "C" fn deflateInit2__ffi(
     )
 }
 unsafe extern "C" fn deflateStateCheck(mut strm: crate::zlib_h::z_streamp) -> ::core::ffi::c_int {
-    let mut s: *mut crate::src::deflate::deflate_state =
-        ::core::ptr::null_mut::<crate::src::deflate::deflate_state>();
-    if strm.is_null() || (*strm).zalloc.is_none() || (*strm).zfree.is_none() {
+    if strm.is_null() {
         return 1 as ::core::ffi::c_int;
     }
-    s = (*strm).state as *mut crate::src::deflate::deflate_state;
-    if s.is_null() || (*s).strm != strm || !deflate_status_is_valid((*s).status) {
+    let strm_ref = &*strm;
+    let state = strm_ref.state as *mut crate::src::deflate::deflate_state;
+    if state.is_null()
+        || !deflate_state_is_valid(strm_ref, &*state, (*state).strm == strm)
+    {
         return 1 as ::core::ffi::c_int;
     }
     return 0 as ::core::ffi::c_int;
+}
+
+fn deflate_state_is_valid(
+    strm: &crate::zlib_h::z_stream,
+    state: &crate::src::deflate::deflate_state,
+    points_back_to_stream: bool,
+) -> bool {
+    strm.zalloc.is_some()
+        && strm.zfree.is_some()
+        && points_back_to_stream
+        && deflate_status_is_valid(state.status)
 }
 
 fn deflate_status_is_valid(status: ::core::ffi::c_int) -> bool {
