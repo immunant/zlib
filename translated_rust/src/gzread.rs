@@ -477,15 +477,27 @@ unsafe extern "C" fn gz_read(
         }
         's_28: {
             if (*state).x.have != 0 {
-                if (*state).x.have < n {
-                    n = (*state).x.have;
+                let state = &mut *state;
+                if state.x.have < n {
+                    n = state.x.have;
                 }
-                let input = ::core::slice::from_raw_parts((*state).x.next, n as usize);
+                // `x.next` is a cursor in the owned output buffer whenever
+                // `x.have` is nonzero here. Rebuild the buffered input with
+                // a checked range so a corrupt cursor cannot extend a raw
+                // slice beyond that allocation.
+                let cursor = state.x.next;
+                let Some(input) = state.out.as_deref().and_then(|buffer| {
+                    let start = cursor.addr().checked_sub(buffer.as_ptr().addr())?;
+                    let end = start.checked_add(n as usize)?;
+                    buffer.get(start..end)
+                }) else {
+                    return got;
+                };
                 let output = ::core::slice::from_raw_parts_mut(buf.cast::<u8>(), n as usize);
                 copy_buffered_input(input, output);
-                (*state).x.next = (*state).x.next.wrapping_add(n as usize);
-                (*state).x.have = (*state).x.have.wrapping_sub(n);
-                if (*state).err != crate::zlib_h::Z_OK {
+                state.x.next = state.x.next.wrapping_add(n as usize);
+                state.x.have = state.x.have.wrapping_sub(n);
+                if state.err != crate::zlib_h::Z_OK {
                     err = -1 as ::core::ffi::c_int;
                 }
             } else {
