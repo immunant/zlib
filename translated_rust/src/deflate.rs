@@ -2743,10 +2743,12 @@ fn deflate_stored(
                 let strm = &mut *state.strm;
                 let copy_len = left as usize;
                 let output = ::core::slice::from_raw_parts_mut(strm.next_out, copy_len);
-                let stored = ::core::slice::from_raw_parts(
-                    state.window.wrapping_offset(state.block_start as isize),
-                    copy_len,
-                );
+                let stored_base = if state.block_start >= 0 as ::core::ffi::c_long {
+                    state.window.wrapping_add(state.block_start as usize)
+                } else {
+                    state.window.wrapping_offset(state.block_start as isize)
+                };
+                let stored = ::core::slice::from_raw_parts(stored_base, copy_len);
                 copy_deflate_bytes(output, stored);
                 strm.next_out = strm.next_out.wrapping_add(copy_len);
                 strm.avail_out = strm.avail_out.wrapping_sub(left);

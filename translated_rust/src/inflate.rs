@@ -349,6 +349,35 @@ pub(crate) enum InflateDynamicTables {
     },
 }
 
+pub(crate) struct InflateCodeLengthTable {
+    pub(crate) ret: ::core::ffi::c_int,
+    pub(crate) table_used: usize,
+    pub(crate) lenbits: ::core::ffi::c_uint,
+}
+
+pub(crate) fn inflate_build_code_length_table(
+    lens: &[::core::ffi::c_ushort],
+    codes: &mut [crate::src::inftrees::code],
+    work: &mut [::core::ffi::c_ushort],
+) -> InflateCodeLengthTable {
+    let mut lenbits = 7 as ::core::ffi::c_uint;
+    let mut table_used = 0usize;
+    let ret = crate::src::inftrees::inflate_table_impl(
+        crate::src::inftrees::CODES,
+        lens,
+        19 as ::core::ffi::c_uint,
+        codes,
+        &mut table_used,
+        &mut lenbits,
+        work,
+    );
+    InflateCodeLengthTable {
+        ret,
+        table_used,
+        lenbits,
+    }
+}
+
 pub(crate) fn inflate_build_dynamic_tables(
     lens: &[::core::ffi::c_ushort],
     nlen: ::core::ffi::c_uint,
@@ -1539,19 +1568,18 @@ pub unsafe extern "C" fn inflate_ffi(
                 (*state).next = &raw mut (*state).codes as *mut crate::src::inftrees::code;
                 (*state).distcode = (*state).next as *const crate::src::inftrees::code;
                 (*state).lencode = (*state).distcode;
-                (*state).lenbits = 7 as ::core::ffi::c_uint;
-                let mut table_used = 0usize;
-                ret = crate::src::inftrees::inflate_table_impl(
-                    crate::src::inftrees::CODES,
+                let code_lengths = crate::src::inflate::inflate_build_code_length_table(
                     &(*state).lens,
-                    19 as ::core::ffi::c_uint,
                     &mut (*state).codes,
-                    &mut table_used,
-                    &mut (*state).lenbits,
                     &mut (*state).work,
                 );
+                (*state).lenbits = code_lengths.lenbits;
+                ret = code_lengths.ret;
                 if ret == 0 {
-                    (*state).next = (*state).codes.as_mut_ptr().wrapping_add(table_used);
+                    (*state).next = (*state)
+                        .codes
+                        .as_mut_ptr()
+                        .wrapping_add(code_lengths.table_used);
                 }
                 if ret != 0 {
                     (*strm).msg = b"invalid code lengths set\0".as_ptr()

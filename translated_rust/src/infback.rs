@@ -373,19 +373,15 @@ pub unsafe extern "C" fn inflateBack_ffi(
                     let codes_base = state_ref.codes.as_mut_ptr();
                     state_ref.next = codes_base;
                     state_ref.lencode = codes_base as *const crate::src::inftrees::code;
-                    state_ref.lenbits = 7 as ::core::ffi::c_uint;
-                    let mut table_used = 0usize;
-                    ret = crate::src::inftrees::inflate_table_impl(
-                        crate::src::inftrees::CODES,
+                    let code_lengths = crate::src::inflate::inflate_build_code_length_table(
                         &state_ref.lens,
-                        19 as ::core::ffi::c_uint,
                         &mut state_ref.codes,
-                        &mut table_used,
-                        &mut state_ref.lenbits,
                         &mut state_ref.work,
                     );
+                    state_ref.lenbits = code_lengths.lenbits;
+                    ret = code_lengths.ret;
                     if ret == 0 {
-                        state_ref.next = codes_base.wrapping_add(table_used);
+                        state_ref.next = codes_base.wrapping_add(code_lengths.table_used);
                     }
                     if ret != 0 {
                         (*strm).msg = b"invalid code lengths set\0".as_ptr()
