@@ -855,10 +855,11 @@ fn fill_window(s: &mut crate::src::deflate::deflate_state) {
                 ) else {
                     return;
                 };
-                // `fill_window` is the sole transitional owner of these
-                // callback-allocated hash buffers. Lend them directly to the
-                // safe sliding routine instead of routing through a second
-                // unsafe implementation adapter.
+                // Preserve the legacy early malformed-state exit before the
+                // refill. The actual hash update can wait until after the
+                // refill: no code between these points consults the hash
+                // chains, and delaying it lets the same checked lends serve a
+                // subsequent pending-string insertion.
                 let Ok(head_len) = usize::try_from(state.hash_size) else {
                     return;
                 };
@@ -870,18 +871,6 @@ fn fill_window(s: &mut crate::src::deflate::deflate_state) {
                 {
                     return;
                 }
-                let head = if head_len == 0 {
-                    &mut []
-                } else {
-                    ::core::slice::from_raw_parts_mut(state.head, head_len)
-                };
-                let prev = if prev_len == 0 {
-                    &mut []
-                } else {
-                    ::core::slice::from_raw_parts_mut(state.prev, prev_len)
-                };
-                slide_hash_state(head, prev, wsize);
-                state.slid = 1;
                 more = next_more;
             }
             // `read_buf()` consumes at most this exact available-input snapshot.
@@ -898,9 +887,15 @@ fn fill_window(s: &mut crate::src::deflate::deflate_state) {
             let progress = read_buf(state.strm, output, more, state.wrap);
             n = progress.copied;
             state.lookahead = state.lookahead.wrapping_add(n);
-            if state.lookahead.wrapping_add(state.insert)
-                >= crate::zutil_h::MIN_MATCH as crate::stdlib::uInt
-            {
+            let insert_pending = state.lookahead.wrapping_add(state.insert)
+                >= crate::zutil_h::MIN_MATCH as crate::stdlib::uInt;
+            if should_slide || insert_pending {
+                // `fill_window` is the sole transitional owner of these
+                // callback-allocated hash buffers. One pair of lends now
+                // serves both the slide and the optional insertion below.
+                // The slide prevalidated these lengths and pointers above;
+                // insertion-only iterations validate them at their original
+                // post-refill point.
                 let Ok(head_len) = usize::try_from(state.hash_size) else {
                     return;
                 };
@@ -922,18 +917,24 @@ fn fill_window(s: &mut crate::src::deflate::deflate_state) {
                 } else {
                     ::core::slice::from_raw_parts_mut(state.prev, prev_len)
                 };
-                if !insert_pending_strings_state(
-                    window,
-                    head,
-                    prev,
-                    state.strstart,
-                    state.lookahead,
-                    &mut state.insert,
-                    &mut state.ins_h,
-                    state.hash_shift,
-                    state.hash_mask,
-                    state.w_mask,
-                ) {
+                if should_slide {
+                    slide_hash_state(head, prev, wsize);
+                    state.slid = 1;
+                }
+                if insert_pending
+                    && !insert_pending_strings_state(
+                        window,
+                        head,
+                        prev,
+                        state.strstart,
+                        state.lookahead,
+                        &mut state.insert,
+                        &mut state.ins_h,
+                        state.hash_shift,
+                        state.hash_mask,
+                        state.w_mask,
+                    )
+                {
                     return;
                 }
             }

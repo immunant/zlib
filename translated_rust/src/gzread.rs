@@ -248,38 +248,32 @@ fn gz_avail(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
         return -1 as ::core::ffi::c_int;
     }
     if state.eof == 0 as ::core::ffi::c_int {
-        let refill = {
-            let Some(buffers) = state.buffers.as_mut() else {
-                return -1;
-            };
-            let Some(refill) =
-                gz_avail_refill_plan(state.input_index, state.strm.avail_in, state.size)
-            else {
-                return -1;
-            };
-            if state.strm.avail_in != 0
-                && gz_avail_retain_input(&mut buffers.input, refill.retain.clone()).is_none()
-            {
-                return -1;
-            }
-            refill
+        let Some(refill) = gz_avail_refill_plan(state.input_index, state.strm.avail_in, state.size)
+        else {
+            return -1;
         };
-        let result = {
+        let (result, input) = {
             let (Some(file), Some(buffers)) = (state.file.as_mut(), state.buffers.as_mut()) else {
                 return -1;
             };
-            let Some(input) = buffers.input.get_mut(refill.load) else {
+            // Borrow the owned allocation once for both the retained-prefix
+            // move and the descriptor refill. Keeping this as a normal slice
+            // also avoids repeatedly traversing Box's raw representation.
+            let input = buffers.input.as_mut();
+            if state.strm.avail_in != 0
+                && gz_avail_retain_input(input, refill.retain).is_none()
+            {
+                return -1;
+            }
+            let Some(load) = input.get_mut(refill.load) else {
                 return -1;
             };
-            gz_load(file, input)
+            let result = gz_load(file, load);
+            (result, input.as_mut_ptr())
         };
         let got = match gz_load_commit(state, result) {
             Ok(got) => got,
             Err(()) => return -1,
-        };
-        let input = match state.buffers.as_mut() {
-            Some(buffers) => buffers.input.as_mut_ptr(),
-            None => return -1,
         };
         state.strm.avail_in = state.strm.avail_in.wrapping_add(got);
         state.strm.next_in = input;
