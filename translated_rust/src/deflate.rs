@@ -1428,6 +1428,28 @@ fn deflate_get_dictionary_state(
     Some(crate::zlib_h::Z_OK)
 }
 
+/// Check the non-overlap precondition before lending the callback-owned
+/// history window and caller dictionary as Rust slices. zlib's original copy
+/// has `memcpy` semantics, so an overlapping destination was never supported;
+/// reject it rather than creating aliased shared and mutable views here.
+fn deflate_spans_are_disjoint(
+    left_address: usize,
+    left_len: usize,
+    right_address: usize,
+    right_len: usize,
+) -> bool {
+    if left_len == 0 || right_len == 0 {
+        return true;
+    }
+    let Some(left_end) = left_address.checked_add(left_len) else {
+        return false;
+    };
+    let Some(right_end) = right_address.checked_add(right_len) else {
+        return false;
+    };
+    left_end <= right_address || right_end <= left_address
+}
+
 #[export_name = "deflateGetDictionary"]
 
 pub unsafe extern "C" fn deflateGetDictionary_ffi(
@@ -1448,6 +1470,10 @@ pub unsafe extern "C" fn deflateGetDictionary_ffi(
             return crate::zlib_h::Z_STREAM_ERROR;
         };
         if state.window.is_null() {
+            return crate::zlib_h::Z_STREAM_ERROR;
+        }
+        if !deflate_spans_are_disjoint(state.window as usize, window_len, dictionary as usize, len)
+        {
             return crate::zlib_h::Z_STREAM_ERROR;
         }
         let window = ::core::slice::from_raw_parts(state.window, window_len);
