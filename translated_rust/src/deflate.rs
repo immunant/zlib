@@ -401,6 +401,16 @@ fn deflate_rle_clamp_match_length(
     match_length.min(lookahead)
 }
 
+fn deflate_rle_match_length(
+    scan_distance: crate::stdlib::uInt,
+    lookahead: crate::stdlib::uInt,
+) -> crate::stdlib::uInt {
+    deflate_rle_clamp_match_length(
+        (crate::zutil_h::MAX_MATCH as crate::stdlib::uInt).wrapping_sub(scan_distance),
+        lookahead,
+    )
+}
+
 fn deflate_rle_can_scan_match(
     lookahead: crate::stdlib::uInt,
     strstart: crate::stdlib::uInt,
@@ -3765,12 +3775,10 @@ unsafe fn deflate_rle(
                         break;
                     }
                 }
-                (*s).match_length = (crate::zutil_h::MAX_MATCH as crate::stdlib::uInt)
-                    .wrapping_sub(
-                        strend.offset_from(scan) as ::core::ffi::c_long as crate::stdlib::uInt
-                    );
-                (*s).match_length =
-                    deflate_rle_clamp_match_length((*s).match_length, (*s).lookahead);
+                (*s).match_length = deflate_rle_match_length(
+                    strend.offset_from(scan) as ::core::ffi::c_long as crate::stdlib::uInt,
+                    (*s).lookahead,
+                );
             }
         }
         if (*s).match_length >= crate::zutil_h::MIN_MATCH as crate::stdlib::uInt {
@@ -4036,7 +4044,7 @@ mod tests {
         deflate_huff_literal_progress, deflate_match_refill_action, deflate_pending_value,
         deflate_preflight, deflate_prime_bits_valid, deflate_request_is_invalid,
         deflate_reset_status_and_adler, deflate_rle_can_scan_match, deflate_rle_clamp_match_length,
-        deflate_rle_match_state_after_emit, deflate_rle_refill_action,
+        deflate_rle_match_length, deflate_rle_match_state_after_emit, deflate_rle_refill_action,
         deflate_set_dictionary_allowed, deflate_should_return_buf_error, deflate_state_check_impl,
         deflate_state_check_result, deflate_state_is_usable, deflate_state_status_valid,
         deflate_version_matches, dictionary_tail_offset, fill_window_available_space,
@@ -4084,6 +4092,19 @@ mod tests {
         assert_eq!(
             deflate_rle_clamp_match_length(crate::stdlib::uInt::MAX, crate::stdlib::uInt::MAX),
             crate::stdlib::uInt::MAX
+        );
+    }
+
+    #[test]
+    fn deflate_rle_match_length_preserves_scan_distance_and_lookahead_bounds() {
+        let max_match = crate::zutil_h::MAX_MATCH as crate::stdlib::uInt;
+
+        assert_eq!(deflate_rle_match_length(0, max_match), max_match);
+        assert_eq!(deflate_rle_match_length(5, max_match), max_match - 5);
+        assert_eq!(deflate_rle_match_length(0, 17), 17);
+        assert_eq!(
+            deflate_rle_match_length(max_match.wrapping_add(1), crate::stdlib::uInt::MAX),
+            crate::stdlib::uInt::MAX,
         );
     }
 

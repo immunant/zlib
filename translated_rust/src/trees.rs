@@ -3633,6 +3633,10 @@ fn symbol_buffer_is_full(next: crate::stdlib::uInt, end: crate::stdlib::uInt) ->
     next == end
 }
 
+fn bit_buffer_would_overflow(bi_valid: ::core::ffi::c_int, bit_count: ::core::ffi::c_int) -> bool {
+    bi_valid > crate::src::deflate::Buf_size - bit_count
+}
+
 fn bi_flush_core(
     bi_buf: &mut crate::zutil_h::ush,
     bi_valid: &mut ::core::ffi::c_int,
@@ -4359,7 +4363,7 @@ unsafe fn send_tree(
                 ScanTreeAction::LiteralCount(_) => loop {
                     let mut len: ::core::ffi::c_int =
                         (*s).bl_tree[curlen as usize].dl.len as ::core::ffi::c_int;
-                    if (*s).bi_valid > crate::src::deflate::Buf_size - len {
+                    if bit_buffer_would_overflow((*s).bi_valid, len) {
                         let mut val: ::core::ffi::c_int =
                             (*s).bl_tree[curlen as usize].fc.value as ::core::ffi::c_int;
                         (*s).bi_buf = ((*s).bi_buf as ::core::ffi::c_int
@@ -4395,7 +4399,7 @@ unsafe fn send_tree(
                     if emit_length_once {
                         let mut len_0: ::core::ffi::c_int =
                             (*s).bl_tree[curlen as usize].dl.len as ::core::ffi::c_int;
-                        if (*s).bi_valid > crate::src::deflate::Buf_size - len_0 {
+                        if bit_buffer_would_overflow((*s).bi_valid, len_0) {
                             let mut val_0: ::core::ffi::c_int =
                                 (*s).bl_tree[curlen as usize].fc.value as ::core::ffi::c_int;
                             (*s).bi_buf = ((*s).bi_buf as ::core::ffi::c_int
@@ -4428,7 +4432,7 @@ unsafe fn send_tree(
                     let mut len_1: ::core::ffi::c_int =
                         (*s).bl_tree[16 as ::core::ffi::c_int as usize].dl.len
                             as ::core::ffi::c_int;
-                    if (*s).bi_valid > crate::src::deflate::Buf_size - len_1 {
+                    if bit_buffer_would_overflow((*s).bi_valid, len_1) {
                         let mut val_1: ::core::ffi::c_int =
                             (*s).bl_tree[16 as ::core::ffi::c_int as usize].fc.value
                                 as ::core::ffi::c_int;
@@ -4458,7 +4462,7 @@ unsafe fn send_tree(
                         (*s).bi_valid += len_1;
                     }
                     let mut len_2: ::core::ffi::c_int = 2 as ::core::ffi::c_int;
-                    if (*s).bi_valid > crate::src::deflate::Buf_size - len_2 {
+                    if bit_buffer_would_overflow((*s).bi_valid, len_2) {
                         let mut val_2: ::core::ffi::c_int = count - 3 as ::core::ffi::c_int;
                         (*s).bi_buf = ((*s).bi_buf as ::core::ffi::c_int
                             | (val_2 as crate::zutil_h::ush as ::core::ffi::c_int) << (*s).bi_valid)
@@ -4490,7 +4494,7 @@ unsafe fn send_tree(
                     let mut len_3: ::core::ffi::c_int =
                         (*s).bl_tree[17 as ::core::ffi::c_int as usize].dl.len
                             as ::core::ffi::c_int;
-                    if (*s).bi_valid > crate::src::deflate::Buf_size - len_3 {
+                    if bit_buffer_would_overflow((*s).bi_valid, len_3) {
                         let mut val_3: ::core::ffi::c_int =
                             (*s).bl_tree[17 as ::core::ffi::c_int as usize].fc.value
                                 as ::core::ffi::c_int;
@@ -4520,7 +4524,7 @@ unsafe fn send_tree(
                         (*s).bi_valid += len_3;
                     }
                     let mut len_4: ::core::ffi::c_int = 3 as ::core::ffi::c_int;
-                    if (*s).bi_valid > crate::src::deflate::Buf_size - len_4 {
+                    if bit_buffer_would_overflow((*s).bi_valid, len_4) {
                         let mut val_4: ::core::ffi::c_int = count - 3 as ::core::ffi::c_int;
                         (*s).bi_buf = ((*s).bi_buf as ::core::ffi::c_int
                             | (val_4 as crate::zutil_h::ush as ::core::ffi::c_int) << (*s).bi_valid)
@@ -4552,7 +4556,7 @@ unsafe fn send_tree(
                     let mut len_5: ::core::ffi::c_int =
                         (*s).bl_tree[18 as ::core::ffi::c_int as usize].dl.len
                             as ::core::ffi::c_int;
-                    if (*s).bi_valid > crate::src::deflate::Buf_size - len_5 {
+                    if bit_buffer_would_overflow((*s).bi_valid, len_5) {
                         let mut val_5: ::core::ffi::c_int =
                             (*s).bl_tree[18 as ::core::ffi::c_int as usize].fc.value
                                 as ::core::ffi::c_int;
@@ -4582,7 +4586,7 @@ unsafe fn send_tree(
                         (*s).bi_valid += len_5;
                     }
                     let mut len_6: ::core::ffi::c_int = 7 as ::core::ffi::c_int;
-                    if (*s).bi_valid > crate::src::deflate::Buf_size - len_6 {
+                    if bit_buffer_would_overflow((*s).bi_valid, len_6) {
                         let mut val_6: ::core::ffi::c_int = count - 11 as ::core::ffi::c_int;
                         (*s).bi_buf = ((*s).bi_buf as ::core::ffi::c_int
                             | (val_6 as crate::zutil_h::ush as ::core::ffi::c_int) << (*s).bi_valid)
@@ -4658,7 +4662,7 @@ unsafe fn send_all_trees(
 ) {
     let mut rank: ::core::ffi::c_int = 0;
     let mut len: ::core::ffi::c_int = 5 as ::core::ffi::c_int;
-    if (*s).bi_valid > crate::src::deflate::Buf_size - len {
+    if bit_buffer_would_overflow((*s).bi_valid, len) {
         let mut val: ::core::ffi::c_int = lcodes - 257 as ::core::ffi::c_int;
         (*s).bi_buf = ((*s).bi_buf as ::core::ffi::c_int
             | (val as crate::zutil_h::ush as ::core::ffi::c_int) << (*s).bi_valid)
@@ -4682,7 +4686,7 @@ unsafe fn send_all_trees(
         (*s).bi_valid += len;
     }
     let mut len_0: ::core::ffi::c_int = 5 as ::core::ffi::c_int;
-    if (*s).bi_valid > crate::src::deflate::Buf_size - len_0 {
+    if bit_buffer_would_overflow((*s).bi_valid, len_0) {
         let mut val_0: ::core::ffi::c_int = dcodes - 1 as ::core::ffi::c_int;
         (*s).bi_buf = ((*s).bi_buf as ::core::ffi::c_int
             | (val_0 as crate::zutil_h::ush as ::core::ffi::c_int) << (*s).bi_valid)
@@ -4706,7 +4710,7 @@ unsafe fn send_all_trees(
         (*s).bi_valid += len_0;
     }
     let mut len_1: ::core::ffi::c_int = 4 as ::core::ffi::c_int;
-    if (*s).bi_valid > crate::src::deflate::Buf_size - len_1 {
+    if bit_buffer_would_overflow((*s).bi_valid, len_1) {
         let mut val_1: ::core::ffi::c_int = blcodes - 4 as ::core::ffi::c_int;
         (*s).bi_buf = ((*s).bi_buf as ::core::ffi::c_int
             | (val_1 as crate::zutil_h::ush as ::core::ffi::c_int) << (*s).bi_valid)
@@ -4732,7 +4736,7 @@ unsafe fn send_all_trees(
     rank = 0 as ::core::ffi::c_int;
     while rank < blcodes {
         let mut len_2: ::core::ffi::c_int = 3 as ::core::ffi::c_int;
-        if (*s).bi_valid > crate::src::deflate::Buf_size - len_2 {
+        if bit_buffer_would_overflow((*s).bi_valid, len_2) {
             let mut val_2: ::core::ffi::c_int =
                 (*s).bl_tree[bl_order[rank as usize] as usize].dl.len as ::core::ffi::c_int;
             (*s).bi_buf = ((*s).bi_buf as ::core::ffi::c_int
@@ -4780,7 +4784,7 @@ pub unsafe extern "C" fn _tr_stored_block(
     mut last: ::core::ffi::c_int,
 ) {
     let mut len: ::core::ffi::c_int = 3 as ::core::ffi::c_int;
-    if (*s).bi_valid > crate::src::deflate::Buf_size - len {
+    if bit_buffer_would_overflow((*s).bi_valid, len) {
         let mut val: ::core::ffi::c_int =
             ((0 as ::core::ffi::c_int) << 1 as ::core::ffi::c_int) + last;
         (*s).bi_buf = ((*s).bi_buf as ::core::ffi::c_int
@@ -4861,7 +4865,7 @@ pub unsafe extern "C" fn _tr_flush_bits_ffi(mut s: *mut crate::src::deflate::def
 }
 pub unsafe extern "C" fn _tr_align(mut s: *mut crate::src::deflate::deflate_state) {
     let mut len: ::core::ffi::c_int = 3 as ::core::ffi::c_int;
-    if (*s).bi_valid > crate::src::deflate::Buf_size - len {
+    if bit_buffer_would_overflow((*s).bi_valid, len) {
         let mut val: ::core::ffi::c_int = (1 as ::core::ffi::c_int) << 1 as ::core::ffi::c_int;
         (*s).bi_buf = ((*s).bi_buf as ::core::ffi::c_int
             | (val as crate::zutil_h::ush as ::core::ffi::c_int) << (*s).bi_valid)
@@ -4887,7 +4891,7 @@ pub unsafe extern "C" fn _tr_align(mut s: *mut crate::src::deflate::deflate_stat
     }
     let mut len_0: ::core::ffi::c_int =
         static_ltree[256 as ::core::ffi::c_int as usize].dl.len as ::core::ffi::c_int;
-    if (*s).bi_valid > crate::src::deflate::Buf_size - len_0 {
+    if bit_buffer_would_overflow((*s).bi_valid, len_0) {
         let mut val_0: ::core::ffi::c_int =
             static_ltree[256 as ::core::ffi::c_int as usize].fc.value as ::core::ffi::c_int;
         (*s).bi_buf = ((*s).bi_buf as ::core::ffi::c_int
@@ -4943,7 +4947,7 @@ unsafe fn compress_block(
             if dist == 0 as ::core::ffi::c_uint {
                 let mut len: ::core::ffi::c_int =
                     (*ltree.offset(lc as isize)).dl.len as ::core::ffi::c_int;
-                if (*s).bi_valid > crate::src::deflate::Buf_size - len {
+                if bit_buffer_would_overflow((*s).bi_valid, len) {
                     let mut val: ::core::ffi::c_int =
                         (*ltree.offset(lc as isize)).fc.value as ::core::ffi::c_int;
                     (*s).bi_buf = ((*s).bi_buf as ::core::ffi::c_int
@@ -4978,7 +4982,7 @@ unsafe fn compress_block(
                 ))
                 .dl
                 .len as ::core::ffi::c_int;
-                if (*s).bi_valid > crate::src::deflate::Buf_size - len_0 {
+                if bit_buffer_would_overflow((*s).bi_valid, len_0) {
                     let mut val_0: ::core::ffi::c_int = (*ltree.offset(
                         code.wrapping_add(256 as ::core::ffi::c_uint)
                             .wrapping_add(1 as ::core::ffi::c_uint)
@@ -5021,7 +5025,7 @@ unsafe fn compress_block(
                 if extra != 0 as ::core::ffi::c_int {
                     lc -= base_length[code as usize];
                     let mut len_1: ::core::ffi::c_int = extra;
-                    if (*s).bi_valid > crate::src::deflate::Buf_size - len_1 {
+                    if bit_buffer_would_overflow((*s).bi_valid, len_1) {
                         let mut val_1: ::core::ffi::c_int = lc;
                         (*s).bi_buf = ((*s).bi_buf as ::core::ffi::c_int
                             | (val_1 as crate::zutil_h::ush as ::core::ffi::c_int) << (*s).bi_valid)
@@ -5051,7 +5055,7 @@ unsafe fn compress_block(
                 code = crate::src::trees::_dist_code[dist_code_index(dist)] as ::core::ffi::c_uint;
                 let mut len_2: ::core::ffi::c_int =
                     (*dtree.offset(code as isize)).dl.len as ::core::ffi::c_int;
-                if (*s).bi_valid > crate::src::deflate::Buf_size - len_2 {
+                if bit_buffer_would_overflow((*s).bi_valid, len_2) {
                     let mut val_2: ::core::ffi::c_int =
                         (*dtree.offset(code as isize)).fc.value as ::core::ffi::c_int;
                     (*s).bi_buf = ((*s).bi_buf as ::core::ffi::c_int
@@ -5082,7 +5086,7 @@ unsafe fn compress_block(
                 if extra != 0 as ::core::ffi::c_int {
                     dist = dist.wrapping_sub(base_dist[code as usize] as ::core::ffi::c_uint);
                     let mut len_3: ::core::ffi::c_int = extra;
-                    if (*s).bi_valid > crate::src::deflate::Buf_size - len_3 {
+                    if bit_buffer_would_overflow((*s).bi_valid, len_3) {
                         let mut val_3: ::core::ffi::c_int = dist as ::core::ffi::c_int;
                         (*s).bi_buf = ((*s).bi_buf as ::core::ffi::c_int
                             | (val_3 as crate::zutil_h::ush as ::core::ffi::c_int) << (*s).bi_valid)
@@ -5118,7 +5122,7 @@ unsafe fn compress_block(
     }
     let mut len_4: ::core::ffi::c_int =
         (*ltree.offset(256 as ::core::ffi::c_int as isize)).dl.len as ::core::ffi::c_int;
-    if (*s).bi_valid > crate::src::deflate::Buf_size - len_4 {
+    if bit_buffer_would_overflow((*s).bi_valid, len_4) {
         let mut val_4: ::core::ffi::c_int =
             (*ltree.offset(256 as ::core::ffi::c_int as isize)).fc.value as ::core::ffi::c_int;
         (*s).bi_buf = ((*s).bi_buf as ::core::ffi::c_int
@@ -5216,7 +5220,7 @@ pub unsafe extern "C" fn _tr_flush_block(
     } else if encoding == BlockEncoding::Static {
         let mut len: ::core::ffi::c_int = 3 as ::core::ffi::c_int;
         let header = block_header_bits(1 as ::core::ffi::c_int, last);
-        if (*s).bi_valid > crate::src::deflate::Buf_size - len {
+        if bit_buffer_would_overflow((*s).bi_valid, len) {
             let mut val: ::core::ffi::c_int = header;
             (*s).bi_buf = ((*s).bi_buf as ::core::ffi::c_int
                 | (val as crate::zutil_h::ush as ::core::ffi::c_int) << (*s).bi_valid)
@@ -5249,7 +5253,7 @@ pub unsafe extern "C" fn _tr_flush_block(
     } else {
         let mut len_0: ::core::ffi::c_int = 3 as ::core::ffi::c_int;
         let header = block_header_bits(2 as ::core::ffi::c_int, last);
-        if (*s).bi_valid > crate::src::deflate::Buf_size - len_0 {
+        if bit_buffer_would_overflow((*s).bi_valid, len_0) {
             let mut val_0: ::core::ffi::c_int = header;
             (*s).bi_buf = ((*s).bi_buf as ::core::ffi::c_int
                 | (val_0 as crate::zutil_h::ush as ::core::ffi::c_int) << (*s).bi_valid)
@@ -5346,9 +5350,9 @@ pub unsafe extern "C" fn _tr_tally_ffi(
 #[cfg(test)]
 mod tests {
     use super::{
-        bi_flush_core, bi_reverse, bi_windup_core, bit_length_correction, bl_order,
-        bl_tree_header_bit_length, block_bit_length_bytes, block_header_bits,
-        canonical_codes_for_lengths, clamped_tree_bit_length, classify_tree_run,
+        bi_flush_core, bi_reverse, bi_windup_core, bit_buffer_would_overflow,
+        bit_length_correction, bl_order, bl_tree_header_bit_length, block_bit_length_bytes,
+        block_header_bits, canonical_codes_for_lengths, clamped_tree_bit_length, classify_tree_run,
         combined_tree_frequency, detect_data_type_from_ltree, dist_code_index, heap_node_precedes,
         last_nonzero_bl_code_rank, mark_bl_code_nonzero_at_rank, next_code_for_len, next_codes,
         pending_cursor_after_bytes, pqdownheap_child_to_promote, rebalance_overflowed_bit_lengths,
@@ -5606,6 +5610,23 @@ mod tests {
             crate::stdlib::uInt::MAX,
             crate::stdlib::uInt::MAX - 1
         ));
+    }
+
+    #[test]
+    fn bit_buffer_overflow_detects_exact_capacity_boundary() {
+        assert!(!bit_buffer_would_overflow(
+            crate::src::deflate::Buf_size - 5,
+            5
+        ));
+        assert!(bit_buffer_would_overflow(
+            crate::src::deflate::Buf_size - 4,
+            5
+        ));
+        assert!(!bit_buffer_would_overflow(
+            crate::src::deflate::Buf_size - 4,
+            4
+        ));
+        assert!(bit_buffer_would_overflow(crate::src::deflate::Buf_size, 1));
     }
 
     #[test]

@@ -213,6 +213,14 @@ fn inflate_stream_buffers_are_valid(
     has_output && (has_input || available_input == 0)
 }
 
+fn inflate_reset_keep_adler(wrap: ::core::ffi::c_int) -> Option<crate::stdlib::uLong> {
+    if wrap == 0 {
+        None
+    } else {
+        Some((wrap & 1) as crate::stdlib::uLong)
+    }
+}
+
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 enum InflateZlibHeaderError {
     IncorrectCheck,
@@ -753,8 +761,8 @@ pub unsafe extern "C" fn inflateResetKeep(
     (*strm).total_in = (*strm).total_out;
     (*strm).msg = ::core::ptr::null_mut::<::core::ffi::c_char>();
     (*strm).data_type = 0 as ::core::ffi::c_int;
-    if (*state).wrap != 0 {
-        (*strm).adler = ((*state).wrap & 1 as ::core::ffi::c_int) as crate::stdlib::uLong;
+    if let Some(adler) = inflate_reset_keep_adler((*state).wrap) {
+        (*strm).adler = adler;
     }
     (*state).mode = crate::src::inflate::HEAD;
     (*state).last = 0 as ::core::ffi::c_int;
@@ -3068,21 +3076,22 @@ mod tests {
         inflate_mark_value, inflate_match_copy_plan, inflate_mode_data_type_flags,
         inflate_mode_is_valid, inflate_mode_on_entry, inflate_needs_buffer_error,
         inflate_output_checksum, inflate_prime_update, inflate_reset2_discards_window,
-        inflate_reset2_params, inflate_should_update_window, inflate_state_check_impl,
-        inflate_state_check_result, inflate_state_is_usable, inflate_state_metadata_is_valid,
-        inflate_stream_buffers_are_valid, inflate_stream_has_allocator_callbacks,
-        inflate_sync_input_progress, inflate_sync_normalized_wrap, inflate_sync_point_value,
-        inflate_sync_remaining_input, inflate_sync_search_core, inflate_undermine_core,
-        inflate_validate_core, inflate_validate_wrap, inflate_zlib_header_error,
-        inflate_zlib_header_transition, inflate_zlib_window_params, initial_window_metadata,
-        reset_window_history, stored_block_length, syncsearch_safe, update_window_core,
-        update_window_has_produced_bytes, window_allocation_failed, window_allocation_request,
-        window_needs_allocation, window_update_plan, DynamicCodeLengthRepeat, InflateBlockKind,
-        InflateCopyProgress, InflateGzipExtraProgress, InflateGzipFlags, InflateGzipFlagsError,
-        InflateMatchPlan, InflateMatchSource, InflateOutputChecksum, InflatePrimeUpdate,
-        InflateSyncSearch, InflateZlibHeaderError, InflateZlibHeaderTransition,
-        InflateZlibWindowParams, BAD, CHECK, CODE_LENGTH_ORDER, COPY_, COPY_1, DICT, DICTID, HEAD,
-        LEN_, MATCH, STORED, SYNC, TYPE, TYPEDO,
+        inflate_reset2_params, inflate_reset_keep_adler, inflate_should_update_window,
+        inflate_state_check_impl, inflate_state_check_result, inflate_state_is_usable,
+        inflate_state_metadata_is_valid, inflate_stream_buffers_are_valid,
+        inflate_stream_has_allocator_callbacks, inflate_sync_input_progress,
+        inflate_sync_normalized_wrap, inflate_sync_point_value, inflate_sync_remaining_input,
+        inflate_sync_search_core, inflate_undermine_core, inflate_validate_core,
+        inflate_validate_wrap, inflate_zlib_header_error, inflate_zlib_header_transition,
+        inflate_zlib_window_params, initial_window_metadata, reset_window_history,
+        stored_block_length, syncsearch_safe, update_window_core, update_window_has_produced_bytes,
+        window_allocation_failed, window_allocation_request, window_needs_allocation,
+        window_update_plan, DynamicCodeLengthRepeat, InflateBlockKind, InflateCopyProgress,
+        InflateGzipExtraProgress, InflateGzipFlags, InflateGzipFlagsError, InflateMatchPlan,
+        InflateMatchSource, InflateOutputChecksum, InflatePrimeUpdate, InflateSyncSearch,
+        InflateZlibHeaderError, InflateZlibHeaderTransition, InflateZlibWindowParams, BAD, CHECK,
+        CODE_LENGTH_ORDER, COPY_, COPY_1, DICT, DICTID, HEAD, LEN_, MATCH, STORED, SYNC, TYPE,
+        TYPEDO,
     };
 
     #[test]
@@ -3169,6 +3178,14 @@ mod tests {
         assert!(inflate_is_gzip_header(3, 0x8b1f));
         assert!(!inflate_is_gzip_header(1, 0x8b1f));
         assert!(!inflate_is_gzip_header(2, 0x1f8b));
+    }
+
+    #[test]
+    fn inflate_reset_keep_adler_preserves_wrapper_specific_reset_behavior() {
+        assert_eq!(inflate_reset_keep_adler(0), None);
+        assert_eq!(inflate_reset_keep_adler(1), Some(1));
+        assert_eq!(inflate_reset_keep_adler(2), Some(0));
+        assert_eq!(inflate_reset_keep_adler(3), Some(1));
     }
 
     #[test]
