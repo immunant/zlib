@@ -1208,18 +1208,31 @@ pub unsafe extern "C" fn deflateReset_ffi(
 ) -> ::core::ffi::c_int {
     deflateReset(strm)
 }
-pub unsafe extern "C" fn deflateSetHeader(
-    mut strm: crate::zlib_h::z_streamp,
-    mut head: crate::zlib_h::gz_headerp,
+fn deflate_set_header_impl(
+    state: &mut crate::src::deflate::deflate_state,
+    header: Option<GzipHeader>,
 ) -> ::core::ffi::c_int {
-    if deflateStateCheck(strm) != 0 || (*(*strm).state).wrap != 2 as ::core::ffi::c_int {
+    if state.wrap != 2 as ::core::ffi::c_int {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    let state = &mut *(*strm).state;
     let old_header = state.gzhead;
-    state.gzhead = gzip_header_store(gzip_header_snapshot(head));
+    state.gzhead = gzip_header_store(header);
     gzip_header_remove(old_header);
     return crate::zlib_h::Z_OK;
+}
+
+pub unsafe fn deflateSetHeader<F>(
+    strm: &mut crate::zlib_h::z_stream_s,
+    header: F,
+) -> ::core::ffi::c_int
+where
+    F: FnOnce() -> Option<GzipHeader>,
+{
+    if deflateStateCheck(strm) != 0 {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    }
+    let state = &mut *strm.state;
+    deflate_set_header_impl(state, header())
 }
 #[export_name = "deflateSetHeader"]
 
@@ -1227,7 +1240,10 @@ pub unsafe extern "C" fn deflateSetHeader_ffi(
     mut strm: crate::zlib_h::z_streamp,
     mut head: crate::zlib_h::gz_headerp,
 ) -> ::core::ffi::c_int {
-    deflateSetHeader(strm, head)
+    let Some(strm) = strm.as_mut() else {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    };
+    deflateSetHeader(strm, || gzip_header_snapshot(head))
 }
 pub unsafe extern "C" fn deflatePending(
     mut strm: crate::zlib_h::z_streamp,
