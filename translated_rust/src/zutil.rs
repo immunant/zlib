@@ -44,6 +44,21 @@ static ERROR_MESSAGES: [&[u8]; 10] = [
     &ERROR_VERSION,
     &ERROR_EMPTY,
 ];
+
+// This is deliberately more aligned than any value zlib allocates through
+// zcalloc.  The allocation is subsequently released by zcfree, whose C
+// allocator is the process allocator used by this crate's default Rust
+// allocator as well.
+#[repr(align(64))]
+struct ZcallocUnit([u8; 64]);
+
+fn zcalloc_units(items: ::core::ffi::c_uint, size: ::core::ffi::c_uint) -> Option<usize> {
+    let bytes = (items as usize).checked_mul(size as usize)?;
+    bytes
+        .checked_add(::core::mem::size_of::<ZcallocUnit>() - 1)
+        .map(|rounded| (rounded / ::core::mem::size_of::<ZcallocUnit>()).max(1))
+}
+
 fn zlib_version() -> &'static CStr {
     ZLIB_VERSION_TEXT
 }
@@ -142,10 +157,19 @@ pub unsafe extern "C" fn zError_ffi(mut err: ::core::ffi::c_int) -> *const ::cor
 }
 pub unsafe extern "C" fn zcalloc(
     _opaque: crate::stdlib::voidpf,
-    mut items: ::core::ffi::c_uint,
-    mut size: ::core::ffi::c_uint,
+    items: ::core::ffi::c_uint,
+    size: ::core::ffi::c_uint,
 ) -> crate::stdlib::voidpf {
-    crate::stdlib::malloc(items.wrapping_mul(size) as crate::__stddef_size_t_h::size_t)
+    let Some(units) = zcalloc_units(items, size) else {
+        return ::core::ptr::null_mut();
+    };
+    let mut allocation = Vec::<ZcallocUnit>::new();
+    if allocation.try_reserve_exact(units).is_err() {
+        return ::core::ptr::null_mut();
+    }
+    let pointer = allocation.as_mut_ptr().cast();
+    ::core::mem::forget(allocation);
+    pointer
 }
 #[export_name = "zcalloc"]
 
