@@ -1582,14 +1582,54 @@ fn put_short_msb(
     state.pending = state.pending.wrapping_add(2);
 }
 
-unsafe extern "C" fn putShortMSB(
-    mut s: *mut crate::src::deflate::deflate_state,
-    mut b: crate::stdlib::uInt,
+fn write_zlib_header(
+    state: &mut crate::src::deflate::deflate_state,
+    pending_buf: &mut [crate::stdlib::Bytef],
+    header: crate::stdlib::uInt,
+    dictionary_adler: Option<crate::stdlib::uLong>,
 ) {
-    let state = &mut *s;
-    let pending_buf =
-        ::core::slice::from_raw_parts_mut(state.pending_buf, state.pending_buf_size as usize);
-    put_short_msb(state, pending_buf, b);
+    put_short_msb(state, pending_buf, header);
+    if let Some(dictionary_adler) = dictionary_adler {
+        put_short_msb(
+            state,
+            pending_buf,
+            (dictionary_adler >> 16 as ::core::ffi::c_int) as crate::stdlib::uInt,
+        );
+        put_short_msb(
+            state,
+            pending_buf,
+            (dictionary_adler & 0xffff as crate::stdlib::uLong) as crate::stdlib::uInt,
+        );
+    }
+}
+
+fn write_gzip_trailer(
+    state: &mut crate::src::deflate::deflate_state,
+    pending_buf: &mut [crate::stdlib::Bytef],
+    checksum: crate::stdlib::uLong,
+    total_in: crate::stdlib::uLong,
+) {
+    let pending = state.pending as usize;
+    pending_buf[pending..pending + 4].copy_from_slice(&(checksum as u32).to_le_bytes());
+    pending_buf[pending + 4..pending + 8].copy_from_slice(&(total_in as u32).to_le_bytes());
+    state.pending = state.pending.wrapping_add(8);
+}
+
+fn write_zlib_trailer(
+    state: &mut crate::src::deflate::deflate_state,
+    pending_buf: &mut [crate::stdlib::Bytef],
+    checksum: crate::stdlib::uLong,
+) {
+    put_short_msb(
+        state,
+        pending_buf,
+        (checksum >> 16 as ::core::ffi::c_int) as crate::stdlib::uInt,
+    );
+    put_short_msb(
+        state,
+        pending_buf,
+        (checksum & 0xffff as crate::stdlib::uLong) as crate::stdlib::uInt,
+    );
 }
 
 fn pending_copy_len(
@@ -1781,16 +1821,18 @@ pub unsafe extern "C" fn deflate(
             (31 as crate::stdlib::uInt)
                 .wrapping_sub(header.wrapping_rem(31 as crate::stdlib::uInt)),
         );
-        putShortMSB(s, header);
-        if (*s).strstart != 0 as crate::stdlib::uInt {
-            putShortMSB(
-                s,
-                ((*strm).adler >> 16 as ::core::ffi::c_int) as crate::stdlib::uInt,
+        let dictionary_adler = if (*s).strstart != 0 as crate::stdlib::uInt {
+            Some((*strm).adler)
+        } else {
+            None
+        };
+        {
+            let state = &mut *s;
+            let pending_buf = ::core::slice::from_raw_parts_mut(
+                state.pending_buf,
+                state.pending_buf_size as usize,
             );
-            putShortMSB(
-                s,
-                ((*strm).adler & 0xffff as crate::stdlib::uLong) as crate::stdlib::uInt,
-            );
+            write_zlib_header(state, pending_buf, header, dictionary_adler);
         }
         (*strm).adler = crate::src::adler32::adler32_buffer(
             0 as crate::stdlib::uLong,
@@ -2171,53 +2213,22 @@ pub unsafe extern "C" fn deflate(
         return crate::zlib_h::Z_STREAM_END;
     }
     if (*s).wrap == 2 as ::core::ffi::c_int {
-        let c2rust_fresh25 = (*s).pending;
-        (*s).pending = (*s).pending.wrapping_add(1);
-        *(*s).pending_buf.offset(c2rust_fresh25 as isize) =
-            ((*strm).adler & 0xff as crate::stdlib::uLong) as crate::stdlib::Byte;
-        let c2rust_fresh26 = (*s).pending;
-        (*s).pending = (*s).pending.wrapping_add(1);
-        *(*s).pending_buf.offset(c2rust_fresh26 as isize) =
-            ((*strm).adler >> 8 as ::core::ffi::c_int & 0xff as crate::stdlib::uLong)
-                as crate::stdlib::Byte;
-        let c2rust_fresh27 = (*s).pending;
-        (*s).pending = (*s).pending.wrapping_add(1);
-        *(*s).pending_buf.offset(c2rust_fresh27 as isize) =
-            ((*strm).adler >> 16 as ::core::ffi::c_int & 0xff as crate::stdlib::uLong)
-                as crate::stdlib::Byte;
-        let c2rust_fresh28 = (*s).pending;
-        (*s).pending = (*s).pending.wrapping_add(1);
-        *(*s).pending_buf.offset(c2rust_fresh28 as isize) =
-            ((*strm).adler >> 24 as ::core::ffi::c_int & 0xff as crate::stdlib::uLong)
-                as crate::stdlib::Byte;
-        let c2rust_fresh29 = (*s).pending;
-        (*s).pending = (*s).pending.wrapping_add(1);
-        *(*s).pending_buf.offset(c2rust_fresh29 as isize) =
-            ((*strm).total_in & 0xff as crate::stdlib::uLong) as crate::stdlib::Byte;
-        let c2rust_fresh30 = (*s).pending;
-        (*s).pending = (*s).pending.wrapping_add(1);
-        *(*s).pending_buf.offset(c2rust_fresh30 as isize) =
-            ((*strm).total_in >> 8 as ::core::ffi::c_int & 0xff as crate::stdlib::uLong)
-                as crate::stdlib::Byte;
-        let c2rust_fresh31 = (*s).pending;
-        (*s).pending = (*s).pending.wrapping_add(1);
-        *(*s).pending_buf.offset(c2rust_fresh31 as isize) =
-            ((*strm).total_in >> 16 as ::core::ffi::c_int & 0xff as crate::stdlib::uLong)
-                as crate::stdlib::Byte;
-        let c2rust_fresh32 = (*s).pending;
-        (*s).pending = (*s).pending.wrapping_add(1);
-        *(*s).pending_buf.offset(c2rust_fresh32 as isize) =
-            ((*strm).total_in >> 24 as ::core::ffi::c_int & 0xff as crate::stdlib::uLong)
-                as crate::stdlib::Byte;
+        let checksum = (*strm).adler;
+        let total_in = (*strm).total_in;
+        let state = &mut *s;
+        let pending_buf = ::core::slice::from_raw_parts_mut(
+            state.pending_buf,
+            state.pending_buf_size as usize,
+        );
+        write_gzip_trailer(state, pending_buf, checksum, total_in);
     } else {
-        putShortMSB(
-            s,
-            ((*strm).adler >> 16 as ::core::ffi::c_int) as crate::stdlib::uInt,
+        let checksum = (*strm).adler;
+        let state = &mut *s;
+        let pending_buf = ::core::slice::from_raw_parts_mut(
+            state.pending_buf,
+            state.pending_buf_size as usize,
         );
-        putShortMSB(
-            s,
-            ((*strm).adler & 0xffff as crate::stdlib::uLong) as crate::stdlib::uInt,
-        );
+        write_zlib_trailer(state, pending_buf, checksum);
     }
     flush_pending(strm);
     if (*s).wrap > 0 as ::core::ffi::c_int {
