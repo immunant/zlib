@@ -782,6 +782,10 @@ pub unsafe extern "C" fn gzeof_ffi(mut file: crate::zlib_h::gzFile) -> ::core::f
     }
     gzeof_state(state.mode, state.past)
 }
+fn gzerror_fixed_message(bytes: &'static [u8]) -> &'static ::std::ffi::CStr {
+    ::std::ffi::CStr::from_bytes_with_nul(bytes).unwrap_or_default()
+}
+
 fn gzerror_state<'a>(
     mode: ::core::ffi::c_int,
     err: ::core::ffi::c_int,
@@ -791,18 +795,9 @@ fn gzerror_state<'a>(
         return None;
     }
     if err == crate::zlib_h::Z_MEM_ERROR {
-        return Some((
-            err,
-            ::std::ffi::CStr::from_bytes_with_nul(b"out of memory\0")
-                .expect("static message is NUL-terminated"),
-        ));
+        return Some((err, gzerror_fixed_message(b"out of memory\0")));
     }
-    Some((
-        err,
-        message.unwrap_or_else(|| {
-            ::std::ffi::CStr::from_bytes_with_nul(b"\0").expect("static message is NUL-terminated")
-        }),
-    ))
+    Some((err, message.unwrap_or_else(|| gzerror_fixed_message(b"\0"))))
 }
 #[export_name = "gzerror"]
 
