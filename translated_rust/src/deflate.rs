@@ -1892,13 +1892,19 @@ impl DeflateDictionaryRequest<'_> {
 }
 
 // The ABI stream is the only place that carries the opaque state and its
-// callback-owned window.  Snapshot the validated history before dispatching
-// to the raw-pointer-free copy core.
-unsafe fn deflateGetDictionary<'stream>(
-    strm: &'stream mut crate::zlib_h::z_stream_s,
-) -> Option<DeflateDictionaryRequest<'stream>> {
+// callback-owned window.  The export has already formed zlib's fixed maximum
+// output view, so this boundary only selects the live history prefix before
+// dispatching to the raw-pointer-free copy core.
+unsafe fn deflateGetDictionary(
+    strm: &mut crate::zlib_h::z_stream_s,
+    dictionary: Option<&mut [crate::stdlib::Bytef]>,
+    dict_length: Option<&mut crate::stdlib::uInt>,
+) -> ::core::ffi::c_int {
     let (_strm, state, storage) =
-        deflate_stream_and_state(strm, DeflateStorageProjection::Dictionary)?;
+        match deflate_stream_and_state(strm, DeflateStorageProjection::Dictionary) {
+            Some(projection) => projection,
+            None => return crate::zlib_h::Z_STREAM_ERROR,
+        };
     let mut len = state.strstart.wrapping_add(state.lookahead);
     if len > state.w_size {
         len = state.w_size;
@@ -1907,14 +1913,16 @@ unsafe fn deflateGetDictionary<'stream>(
     let end = state.strstart.wrapping_add(state.lookahead) as usize;
     // `Dictionary` establishes the bounded callback window together with the
     // state projection.  Reuse that view instead of rebuilding it here.
-    let window: &[crate::stdlib::Bytef] = storage
-        .window
-        .expect("dictionary window projection");
-    Some(DeflateDictionaryRequest {
-        window,
-        start: end - len,
-        len,
-    })
+    let window: &[crate::stdlib::Bytef] = storage.window.expect("dictionary window projection");
+    deflate_get_dictionary(
+        DeflateDictionaryRequest {
+            window,
+            start: end - len,
+            len,
+        },
+        dictionary,
+        dict_length,
+    )
 }
 
 fn deflate_get_dictionary(
@@ -1923,7 +1931,8 @@ fn deflate_get_dictionary(
     dict_length: Option<&mut crate::stdlib::uInt>,
 ) -> ::core::ffi::c_int {
     if let Some(output) = dictionary {
-        output.copy_from_slice(&request.window[request.start..request.start + request.len]);
+        output[..request.len]
+            .copy_from_slice(&request.window[request.start..request.start + request.len]);
     }
     if let Some(dict_length) = dict_length {
         *dict_length = request.len as crate::stdlib::uInt;
@@ -1940,21 +1949,18 @@ pub unsafe extern "C" fn deflateGetDictionary_ffi(
     let Some(strm) = strm.as_mut() else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
-    let Some(request) = deflateGetDictionary(strm) else {
-        return crate::zlib_h::Z_STREAM_ERROR;
-    };
-    // C defines the dictionary output only when history exists. Convert the
-    // optional caller cursor at this boundary using the validated length, so
-    // the implementation never receives a raw output pointer.
-    let dictionary = if dictionary.is_null() || request.dictionary_len() == 0 {
+    // zlib guarantees that a 32 KiB output buffer is sufficient.  Form this
+    // bounded optional view before stream/state dispatch, leaving the named
+    // implementation to choose and copy only the live history prefix.
+    let dictionary = if dictionary.is_null() {
         None
     } else {
         Some(::core::slice::from_raw_parts_mut(
             dictionary,
-            request.dictionary_len(),
+            1usize << crate::stdlib::MAX_WBITS,
         ))
     };
-    deflate_get_dictionary(request, dictionary, dictLength.as_mut())
+    deflateGetDictionary(strm, dictionary, dictLength.as_mut())
 }
 // Reset state that contains no allocation handles or stream backlinks.  The
 // ABI-facing caller projects these fields once, leaving reset policy and tree
