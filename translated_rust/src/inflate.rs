@@ -365,6 +365,26 @@ fn inflate_header_extra_copy_plan(
     Some((offset as usize, copied as usize))
 }
 
+/// Plan gzip's optional extra-field length transition without touching the
+/// retained ABI header. The decoder boundary still owns cursor consumption and
+/// header publication; this keeps the flag-dependent scalar policy explicit.
+struct InflateExtraLengthPlan {
+    length: ::core::ffi::c_uint,
+    update_crc: bool,
+}
+
+fn inflate_extra_length_plan(
+    flags: ::core::ffi::c_int,
+    wrap: ::core::ffi::c_int,
+    hold: ::core::ffi::c_ulong,
+) -> InflateExtraLengthPlan {
+    let has_extra = flags & 0x400 != 0;
+    InflateExtraLengthPlan {
+        length: hold as ::core::ffi::c_uint,
+        update_crc: has_extra && flags & 0x200 != 0 && wrap & 4 != 0,
+    }
+}
+
 /// Validate the low 16 bits carried by a gzip header CRC.  The wrapper bit,
 /// accumulated CRC, and bit-buffer value are all scalar state, so this policy
 /// does not need to remain in the transitional cursor loop.
@@ -2694,20 +2714,18 @@ pub fn inflate(
                                                                 8 as ::core::ffi::c_uint,
                                                             );
                                                         }
-                                                        state_ref.length =
-                                                            hold as ::core::ffi::c_uint;
+                                                        let extra_plan = inflate_extra_length_plan(
+                                                            state_ref.flags,
+                                                            state_ref.wrap,
+                                                            hold,
+                                                        );
+                                                        state_ref.length = extra_plan.length;
                                                         if !state_ref.head.is_null() {
-                                                            (*state_ref.head).extra_len = hold
-                                                                as ::core::ffi::c_uint
+                                                            (*state_ref.head).extra_len = extra_plan
+                                                                .length
                                                                 as crate::stdlib::uInt;
                                                         }
-                                                        if state_ref.flags
-                                                            & 0x200 as ::core::ffi::c_int
-                                                            != 0
-                                                            && state_ref.wrap
-                                                                & 4 as ::core::ffi::c_int
-                                                                != 0
-                                                        {
+                                                        if extra_plan.update_crc {
                                                             hbuf[0 as ::core::ffi::c_int
                                                                 as usize] =
                                                                 hold as ::core::ffi::c_uchar;
