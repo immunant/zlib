@@ -986,6 +986,21 @@ fn gz_decomp_decision(
     GzDecompDecision { clear_junk, action }
 }
 
+#[derive(Debug, Eq, PartialEq)]
+struct GzDecompTrailingJunkPlan {
+    avail_in: crate::stdlib::uInt,
+    eof: ::core::ffi::c_int,
+    how: ::core::ffi::c_int,
+}
+
+fn gz_decomp_trailing_junk_plan() -> GzDecompTrailingJunkPlan {
+    GzDecompTrailingJunkPlan {
+        avail_in: 0,
+        eof: 1,
+        how: crate::gzguts_h::LOOK,
+    }
+}
+
 unsafe fn gz_decomp(mut state: crate::gzguts_h::gz_statep) -> ::core::ffi::c_int {
     let mut ret: ::core::ffi::c_int = crate::zlib_h::Z_OK;
     let mut had: ::core::ffi::c_uint = 0;
@@ -1046,9 +1061,10 @@ unsafe fn gz_decomp(mut state: crate::gzguts_h::gz_statep) -> ::core::ffi::c_int
                 break;
             }
             GzDecompAction::TrailingJunk => {
-                (*strm).avail_in = 0 as crate::stdlib::uInt;
-                (*state).eof = 1 as ::core::ffi::c_int;
-                (*state).how = crate::gzguts_h::LOOK;
+                let plan = gz_decomp_trailing_junk_plan();
+                (*strm).avail_in = plan.avail_in;
+                (*state).eof = plan.eof;
+                (*state).how = plan.how;
                 ret = crate::zlib_h::Z_OK;
                 break;
             }
@@ -1684,6 +1700,18 @@ mod tests {
             GzDecompDecision {
                 clear_junk: false,
                 action: GzDecompAction::TrailingJunk,
+            }
+        );
+    }
+
+    #[test]
+    fn gz_decomp_trailing_junk_plan_discards_input_and_restarts_look() {
+        assert_eq!(
+            gz_decomp_trailing_junk_plan(),
+            GzDecompTrailingJunkPlan {
+                avail_in: 0,
+                eof: 1,
+                how: crate::gzguts_h::LOOK,
             }
         );
     }
