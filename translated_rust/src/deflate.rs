@@ -2595,15 +2595,20 @@ pub unsafe extern "C" fn deflateCopy(
         ::core::ptr::null_mut::<crate::src::deflate::deflate_state>();
     let mut ss: *mut crate::src::deflate::deflate_state =
         ::core::ptr::null_mut::<crate::src::deflate::deflate_state>();
-    if deflateStateCheck(source).is_none() || dest.is_null() {
-        return crate::zlib_h::Z_STREAM_ERROR;
-    }
-    ss = (*source).state as *mut crate::src::deflate::deflate_state;
-    crate::stdlib::memcpy(
-        dest as *mut ::core::ffi::c_void,
-        source as *const ::core::ffi::c_void,
-        ::core::mem::size_of::<crate::zlib_h::z_stream>(),
-    );
+    ss = {
+        let Some((source, _)) = deflateStateCheck(source) else {
+            return crate::zlib_h::Z_STREAM_ERROR;
+        };
+        if dest.is_null() {
+            return crate::zlib_h::Z_STREAM_ERROR;
+        }
+        let state = source.state as *mut crate::src::deflate::deflate_state;
+        // Publish the source stream fields before the allocator callbacks, as
+        // zlib's original whole-struct copy does. A typed copy preserves every
+        // observable stream field without an untyped foreign-memory operation.
+        *dest = *source;
+        state
+    };
     // Snapshot every source-derived allocation request before any callback.
     // A custom allocator is allowed to inspect the destination stream, so
     // later requests must not need to revisit the source state through raw
