@@ -1769,8 +1769,7 @@ pub(crate) fn deflate_reset_legacy_stream(
     if !deflate_reset_keep_stream_valid(Some(stream)) {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    let state =
-        unsafe { (stream.state as *mut crate::src::deflate::deflate_state).as_mut() };
+    let state = unsafe { (stream.state as *mut crate::src::deflate::deflate_state).as_mut() };
     deflate_reset_state(stream, state)
 }
 
@@ -2062,6 +2061,7 @@ pub unsafe extern "C" fn deflatePrime_ffi(
 pub(crate) fn deflateParams(
     strm: &mut crate::zlib_h::z_stream,
     state: &mut crate::src::deflate::deflate_state,
+    input: Option<&[crate::stdlib::Bytef]>,
     hash_tables: Option<(
         &mut [crate::src::deflate::Posf],
         &mut [crate::src::deflate::Posf],
@@ -2097,7 +2097,7 @@ pub(crate) fn deflateParams(
     if (strategy != state.strategy || current_kind != next_kind)
         && state.last_flush != -2 as ::core::ffi::c_int
     {
-        let err = deflate(strm, crate::zlib_h::Z_BLOCK);
+        let err = deflate(strm, crate::zlib_h::Z_BLOCK, input);
         if err == crate::zlib_h::Z_STREAM_ERROR {
             return err;
         }
@@ -2156,6 +2156,17 @@ pub unsafe extern "C" fn deflateParams_ffi(
     let Some(state) = (strm.state as *mut crate::src::deflate::deflate_state).as_mut() else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
+    // The input cursor is borrowed only when the parameter transition needs
+    // to flush a block.  A missing slice deliberately represents the same
+    // malformed non-empty/null cursor that `deflate` reports as Z_STREAM_ERROR.
+    let input = if strm.avail_in == 0 || strm.next_in.is_null() {
+        None
+    } else {
+        Some(::core::slice::from_raw_parts(
+            strm.next_in,
+            strm.avail_in as usize,
+        ))
+    };
     let hash_tables = if state.head.is_null() || state.prev.is_null() {
         None
     } else {
@@ -2164,7 +2175,7 @@ pub unsafe extern "C" fn deflateParams_ffi(
             ::core::slice::from_raw_parts_mut(state.prev, state.w_size as usize),
         ))
     };
-    deflateParams(strm, state, hash_tables, level, strategy)
+    deflateParams(strm, state, input, hash_tables, level, strategy)
 }
 fn deflate_tune(
     state: &mut crate::src::deflate::deflate_state,
@@ -2902,6 +2913,7 @@ fn deflate_update(
 pub fn deflate(
     strm: &mut crate::zlib_h::z_stream,
     mut flush: ::core::ffi::c_int,
+    input: Option<&[crate::stdlib::Bytef]>,
 ) -> ::core::ffi::c_int {
     // The exported wrapper and internal callers provide a live stream
     // reference. Keep the translated raw-state implementation below local
@@ -2925,7 +2937,9 @@ pub fn deflate(
         return crate::zlib_h::Z_STREAM_ERROR;
     }
     if strm.next_out.is_null()
-        || strm.avail_in != 0 as crate::stdlib::uInt && strm.next_in.is_null()
+        || strm.avail_in != 0 as crate::stdlib::uInt
+            && (strm.next_in.is_null()
+                || input.map_or(true, |input| input.len() != strm.avail_in as usize))
         || state.status == crate::src::deflate::FINISH_STATE && flush != crate::zlib_h::Z_FINISH
     {
         strm.msg = crate::src::zutil::zError(-2 as ::core::ffi::c_int)
@@ -3260,11 +3274,7 @@ pub fn deflate(
         // window and hash chains are owned vectors. Form the input span once,
         // then let that branch dispatch through the vectors directly instead
         // of recreating raw slices for all three work areas.
-        let input = if strm.avail_in == 0 {
-            &[]
-        } else {
-            unsafe { ::core::slice::from_raw_parts(strm.next_in, strm.avail_in as usize) }
-        };
+        let input = input.unwrap_or(&[]);
         let using_owned_workspace = state.owned_storage.is_some();
         // This is the last raw stream/storage bridge for custom and mixed
         // allocator workspaces. The named safe update below owns level and
@@ -3400,7 +3410,15 @@ pub unsafe extern "C" fn deflate_ffi(
     let Some(strm) = strm.as_mut() else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
-    deflate(strm, flush)
+    let input = if strm.avail_in == 0 || strm.next_in.is_null() {
+        None
+    } else {
+        Some(::core::slice::from_raw_parts(
+            strm.next_in,
+            strm.avail_in as usize,
+        ))
+    };
+    deflate(strm, flush, input)
 }
 /// Tear down an already-borrowed deflate state.
 ///

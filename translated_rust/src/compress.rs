@@ -89,6 +89,21 @@ pub fn compress2_z(
         let avail_out = stream.avail_out;
         // `stream` is initialized above and its input/output cursors are
         // derived only from the borrowed slices retained for this call.
+        let input = if stream.avail_in == 0 {
+            None
+        } else {
+            source.and_then(|source| {
+                usize::try_from(source_len)
+                    .ok()
+                    .and_then(|remaining| source.len().checked_sub(remaining))
+                    .and_then(|start| start.checked_sub(stream.avail_in as usize))
+                    .and_then(|start| {
+                        start
+                            .checked_add(stream.avail_in as usize)
+                            .and_then(|end| source.get(start..end))
+                    })
+            })
+        };
         err = crate::src::deflate::deflate(
             &mut stream,
             if source_len != 0 {
@@ -96,6 +111,7 @@ pub fn compress2_z(
             } else {
                 crate::zlib_h::Z_FINISH
             },
+            input,
         );
         written = written
             .wrapping_add(avail_out.wrapping_sub(stream.avail_out) as crate::stdlib::z_size_t);

@@ -330,8 +330,39 @@ fn gz_comp(state: &mut crate::gzguts_h::gz_state, flush: ::core::ffi::c_int) -> 
             }
         }
         have = strm.avail_out as ::core::ffi::c_uint;
-        // `strm` is the initialized stream held by this gzip state.
-        ret = crate::src::deflate::deflate(strm, flush);
+        // `strm` is the initialized stream held by this gzip state. Its input
+        // cursor always indexes `state.in_0`, so preserve that relationship as
+        // a checked safe slice for the deflate implementation.
+        let input = if strm.avail_in == 0 {
+            None
+        } else {
+            let Some(cursor) = strm.next_in.addr().checked_sub(state.in_0.as_ptr().addr()) else {
+                crate::src::gzlib::gz_static_error(
+                    state,
+                    crate::zlib_h::Z_STREAM_ERROR,
+                    b"internal write buffer corrupt\0",
+                );
+                return -1 as ::core::ffi::c_int;
+            };
+            let Some(end) = cursor.checked_add(strm.avail_in as usize) else {
+                crate::src::gzlib::gz_static_error(
+                    state,
+                    crate::zlib_h::Z_STREAM_ERROR,
+                    b"internal write buffer corrupt\0",
+                );
+                return -1 as ::core::ffi::c_int;
+            };
+            let Some(input) = state.in_0.get(cursor..end) else {
+                crate::src::gzlib::gz_static_error(
+                    state,
+                    crate::zlib_h::Z_STREAM_ERROR,
+                    b"internal write buffer corrupt\0",
+                );
+                return -1 as ::core::ffi::c_int;
+            };
+            Some(&input[..])
+        };
+        ret = crate::src::deflate::deflate(strm, flush, input);
         if ret == crate::zlib_h::Z_STREAM_ERROR {
             crate::src::gzlib::gz_static_error(
                 state,
@@ -719,9 +750,29 @@ fn gzsetparams(
         let Some((deflate_state, hash_tables)) = deflate_state else {
             return crate::zlib_h::Z_STREAM_ERROR;
         };
+        let input = if state.strm.avail_in == 0 {
+            None
+        } else {
+            let Some(cursor) = state
+                .strm
+                .next_in
+                .addr()
+                .checked_sub(state.in_0.as_ptr().addr())
+            else {
+                return crate::zlib_h::Z_STREAM_ERROR;
+            };
+            let Some(end) = cursor.checked_add(state.strm.avail_in as usize) else {
+                return crate::zlib_h::Z_STREAM_ERROR;
+            };
+            let Some(input) = state.in_0.get(cursor..end) else {
+                return crate::zlib_h::Z_STREAM_ERROR;
+            };
+            Some(&input[..])
+        };
         let _ = crate::src::deflate::deflateParams(
             &mut state.strm,
             deflate_state,
+            input,
             hash_tables,
             level,
             strategy,
@@ -777,9 +828,7 @@ fn gzclose_w_cleanup(state: &mut crate::gzguts_h::gz_state) {
     let path = ::core::mem::replace(&mut state.path, ::core::mem::ManuallyDrop::new(None));
     drop(::core::mem::ManuallyDrop::into_inner(path));
 }
-pub fn gzclose_w(
-    state: &mut crate::gzguts_h::gz_state,
-) -> crate::src::gzclose::GzCloseResult {
+pub fn gzclose_w(state: &mut crate::gzguts_h::gz_state) -> crate::src::gzclose::GzCloseResult {
     let mut ret: ::core::ffi::c_int = crate::zlib_h::Z_OK;
     // `gz_open` allocates exactly one state. Keep the C error path's
     // non-consuming behavior for a mismatched close entry point.
