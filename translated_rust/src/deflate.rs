@@ -999,16 +999,26 @@ pub unsafe extern "C" fn deflateSetDictionary_ffi(
     deflateSetDictionary(&mut *strm, dictionary)
 }
 pub fn deflateGetDictionary(
-    state: &crate::src::deflate::deflate_state,
-    window: Option<&[crate::stdlib::Bytef]>,
+    state: &mut crate::src::deflate::deflate_state,
+    stream: &mut crate::zlib_h::z_stream,
     dictionary: Option<&mut [crate::stdlib::Bytef]>,
     dict_length: Option<&mut crate::stdlib::uInt>,
 ) -> ::core::ffi::c_int {
-    deflate_get_dictionary(state, window, dictionary, dict_length)
+    // The window is an allocation owned by the validated deflater, so bind it
+    // here with the other implementation-owned buffers.  The ABI wrapper only
+    // binds the optional caller outputs and dispatches to this helper.
+    fill_window(
+        state,
+        stream,
+        false,
+        |state, _stream, window, _head, _prev, _input| {
+            deflate_get_dictionary(state, Some(window), dictionary, dict_length)
+        },
+    )
 }
 
-// Once the ABI adapter has bound the state window and optional caller ranges,
-// dictionary reporting is entirely ordinary slice and scalar work.
+// Once the implementation has bound the state window and optional caller
+// ranges, dictionary reporting is entirely ordinary slice and scalar work.
 fn deflate_dictionary_length(state: &crate::src::deflate::deflate_state) -> crate::stdlib::uInt {
     state
         .strstart
@@ -1025,7 +1035,7 @@ fn deflate_get_dictionary(
     let len = deflate_dictionary_length(state);
     if let (Some(window), Some(dictionary)) = (window, dictionary) {
         let end = state.strstart.wrapping_add(state.lookahead) as usize;
-        dictionary.copy_from_slice(&window[end - len as usize..end]);
+        dictionary[..len as usize].copy_from_slice(&window[end - len as usize..end]);
     }
     if let Some(dict_length) = dict_length {
         *dict_length = len;
@@ -1039,31 +1049,21 @@ pub unsafe extern "C" fn deflateGetDictionary_ffi(
     mut dictionary: *mut crate::stdlib::Bytef,
     mut dictLength: *mut crate::stdlib::uInt,
 ) -> ::core::ffi::c_int {
-    let Some((_strm, state)) = deflateStateCheck(strm) else {
+    let Some((strm, state)) = deflateStateCheck(strm) else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
-    let len = deflate_dictionary_length(state);
-    // SAFETY: the ABI caller supplies the optional output ranges. The
-    // validated deflater owns its window for `window_size` bytes; only the
-    // requested dictionary prefix is exposed to the safe dispatcher.
-    let (window, dictionary, dict_length) = unsafe {
-        let window = if len == 0 {
-            None
-        } else {
-            Some(::core::slice::from_raw_parts(
-                state.window,
-                state.window_size as usize,
-            ))
-        };
-        let dictionary = if dictionary.is_null() || len == 0 {
-            None
-        } else {
-            Some(::core::slice::from_raw_parts_mut(dictionary, len as usize))
-        };
-        let dict_length = dictLength.as_mut();
-        (window, dictionary, dict_length)
+    // zlib requires a dictionary output buffer large enough for the complete
+    // window.  The named implementation determines how much of it is live.
+    let dictionary = if dictionary.is_null() || state.w_size == 0 {
+        None
+    } else {
+        Some(::core::slice::from_raw_parts_mut(
+            dictionary,
+            state.w_size as usize,
+        ))
     };
-    deflateGetDictionary(state, window, dictionary, dict_length)
+    let dict_length = dictLength.as_mut();
+    deflateGetDictionary(state, strm, dictionary, dict_length)
 }
 // Resetting a previously validated deflater only needs its bound stream.
 // Keep raw stream dereferencing at the ABI wrappers so gzip's private reset
