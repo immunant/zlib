@@ -2721,65 +2721,6 @@ pub unsafe extern "C" fn inflateSyncPoint_ffi(
     inflateSyncPoint(strm)
 }
 
-// `inflateCopy()` must preserve the ABI-visible scalar state while giving the
-// normal history window an independent owner.  Keep the raw-pointer-bearing
-// state at this narrow unsafe boundary; the actual field copy uses ordinary
-// Rust values and never duplicates an owner by bit pattern.
-unsafe fn copy_inflate_state(
-    source: &inflate_state,
-    stream_identity: usize,
-) -> Option<inflate_state> {
-    let owned_window = match source.owned_window.as_deref() {
-        Some(source_window) => {
-            let mut window = allocate_inflate_window(source_window.len())?;
-            window[..source.whave as usize]
-                .copy_from_slice(&source_window[..source.whave as usize]);
-            Some(window)
-        }
-        None => None,
-    };
-    Some(inflate_state {
-        stream_identity,
-        mode: source.mode,
-        last: source.last,
-        wrap: source.wrap,
-        havedict: source.havedict,
-        flags: source.flags,
-        dmax: source.dmax,
-        check: source.check,
-        total: source.total,
-        head: source.head,
-        wbits: source.wbits,
-        wsize: source.wsize,
-        whave: source.whave,
-        wnext: source.wnext,
-        window: source.window,
-        owned_window,
-        hold: source.hold,
-        bits: source.bits,
-        length: source.length,
-        offset: source.offset,
-        extra: source.extra,
-        lencode: source.lencode,
-        distcode: source.distcode,
-        lenbits: source.lenbits,
-        distbits: source.distbits,
-        ncode: source.ncode,
-        nlen: source.nlen,
-        ndist: source.ndist,
-        have: source.have,
-        next: source.next,
-        lens: source.lens,
-        work: source.work,
-        codes: core::array::from_fn(|index| {
-            crate::src::inftrees::code::copied_from(&source.codes[index])
-        }),
-        sane: source.sane,
-        back: source.back,
-        was: source.was,
-    })
-}
-
 pub unsafe extern "C" fn inflateCopy(
     mut dest: crate::zlib_h::z_streamp,
     mut source: crate::zlib_h::z_streamp,
@@ -2803,12 +2744,62 @@ pub unsafe extern "C" fn inflateCopy(
     let Some(copy) = ::core::ptr::NonNull::new(copy) else {
         return crate::zlib_h::Z_MEM_ERROR;
     };
-    let Some(state_copy) = copy_inflate_state(state, dest_identity) else {
-        Some(source.zfree.expect("non-null function pointer")).expect("non-null function pointer")(
-            source.opaque,
-            copy.as_ptr().cast(),
-        );
-        return crate::zlib_h::Z_MEM_ERROR;
+    // The ABI state has already been projected above.  Copy its ordinary
+    // fields directly here so the deep-copy operation does not need a
+    // separate unsafe helper carrying the raw-pointer-bearing state type.
+    let owned_window = match state.owned_window.as_deref() {
+        Some(source_window) => {
+            let Some(mut window) = allocate_inflate_window(source_window.len()) else {
+                Some(source.zfree.expect("non-null function pointer"))
+                    .expect("non-null function pointer")(
+                    source.opaque, copy.as_ptr().cast()
+                );
+                return crate::zlib_h::Z_MEM_ERROR;
+            };
+            window[..state.whave as usize].copy_from_slice(&source_window[..state.whave as usize]);
+            Some(window)
+        }
+        None => None,
+    };
+    let state_copy = inflate_state {
+        stream_identity: dest_identity,
+        mode: state.mode,
+        last: state.last,
+        wrap: state.wrap,
+        havedict: state.havedict,
+        flags: state.flags,
+        dmax: state.dmax,
+        check: state.check,
+        total: state.total,
+        head: state.head,
+        wbits: state.wbits,
+        wsize: state.wsize,
+        whave: state.whave,
+        wnext: state.wnext,
+        window: state.window,
+        owned_window,
+        hold: state.hold,
+        bits: state.bits,
+        length: state.length,
+        offset: state.offset,
+        extra: state.extra,
+        lencode: state.lencode,
+        distcode: state.distcode,
+        lenbits: state.lenbits,
+        distbits: state.distbits,
+        ncode: state.ncode,
+        nlen: state.nlen,
+        ndist: state.ndist,
+        have: state.have,
+        next: state.next,
+        lens: state.lens,
+        work: state.work,
+        codes: core::array::from_fn(|index| {
+            crate::src::inftrees::code::copied_from(&state.codes[index])
+        }),
+        sane: state.sane,
+        back: state.back,
+        was: state.was,
     };
     // zalloc() returns uninitialized storage.  Publish a fully initialized
     // state in one write, then mirror the source stream exactly with only its
