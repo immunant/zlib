@@ -592,7 +592,7 @@ unsafe fn updatewindow(
     let end = if copy == 0 {
         &[]
     } else {
-        ::core::slice::from_raw_parts(end.sub(copy as usize), copy as usize)
+        ::core::slice::from_raw_parts(end.wrapping_sub(copy as usize), copy as usize)
     };
     let window = ::core::slice::from_raw_parts_mut(
         state.window,
