@@ -148,10 +148,10 @@ unsafe fn gz_look(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
         if state.in_0.is_null() || state.out.is_null() {
             crate::stdlib::free(state.out as *mut ::core::ffi::c_void);
             crate::stdlib::free(state.in_0 as *mut ::core::ffi::c_void);
-            crate::src::gzlib::gz_error(
+            crate::src::gzlib::gz_error_state(
                 state,
                 crate::zlib_h::Z_MEM_ERROR,
-                b"out of memory\0".as_ptr() as *const ::core::ffi::c_char,
+                Some(c"out of memory"),
             );
             return -1 as ::core::ffi::c_int;
         }
@@ -171,10 +171,10 @@ unsafe fn gz_look(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
             crate::stdlib::free(state.out as *mut ::core::ffi::c_void);
             crate::stdlib::free(state.in_0 as *mut ::core::ffi::c_void);
             state.size = 0 as ::core::ffi::c_uint;
-            crate::src::gzlib::gz_error(
+            crate::src::gzlib::gz_error_state(
                 state,
                 crate::zlib_h::Z_MEM_ERROR,
-                b"out of memory\0".as_ptr() as *const ::core::ffi::c_char,
+                Some(c"out of memory"),
             );
             return -1 as ::core::ffi::c_int;
         }
