@@ -593,6 +593,51 @@ impl<'a> DeflateWorkingSet<'a> {
         )
     }
 
+    /// Insert the current sequence for the fast strategy.  Fast has a
+    /// separate entry point so its state machine can stay independent while
+    /// sharing the checked chain operation with slow.
+    pub(crate) fn fast_insert_hash(
+        &mut self,
+        state: &mut internal_state,
+    ) -> Option<crate::src::deflate::IPos> {
+        deflate_fast_insert_hash_core(
+            self.window,
+            self.head,
+            self.prev,
+            state.strstart,
+            state.w_mask,
+            state.hash_shift,
+            state.hash_mask,
+            &mut state.ins_h,
+        )
+    }
+
+    /// Search the established fast-strategy chain without reconstructing a
+    /// callback-backed view from the raw state.
+    pub(crate) fn fast_longest_match(
+        &self,
+        state: &mut internal_state,
+        cur_match: crate::src::deflate::IPos,
+    ) -> crate::stdlib::uInt {
+        longest_match_with_views(state, self.window, self.prev, cur_match)
+    }
+
+    pub(crate) fn fast_literal_at(
+        &self,
+        position: crate::stdlib::uInt,
+    ) -> Option<crate::zutil_h::uch> {
+        deflate_fast_literal_core(self.window, position)
+    }
+
+    pub(crate) fn fast_initial_hash(&self, state: &internal_state) -> Option<crate::stdlib::uInt> {
+        deflate_fast_initial_hash_core(
+            self.window,
+            state.strstart,
+            state.hash_shift,
+            state.hash_mask,
+        )
+    }
+
     /// Refill the bounded window and rebuild its hash chains.  The caller
     /// provides only a call-scoped input view and scalar stream progress;
     /// this working set retains the callback-backed storage borrows.
@@ -5655,6 +5700,95 @@ fn deflate_slow_max_insert(
         .wrapping_sub(crate::zutil_h::MIN_MATCH as crate::stdlib::uInt)
 }
 
+/// Result of one fast-strategy iteration after its checked storage work.
+/// Caller-buffer refill and block draining remain at the exported boundary.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum DeflateFastStep {
+    NeedMore,
+    Continue { flush_block: bool },
+}
+
+/// Execute one fast-strategy hash/search/tally iteration using only the
+/// call-scoped working set.  This preserves the legacy insertion ordering:
+/// after a short match, every skipped position is inserted before the cursor
+/// advances to the saved post-match position.
+pub(crate) fn deflate_fast_step_core(
+    state: &mut internal_state,
+    working: &mut DeflateWorkingSet<'_>,
+) -> DeflateFastStep {
+    let mut hash_head = NIL as crate::src::deflate::IPos;
+    if state.lookahead >= crate::zutil_h::MIN_MATCH as crate::stdlib::uInt {
+        let Some(inserted) = working.fast_insert_hash(state) else {
+            return DeflateFastStep::NeedMore;
+        };
+        hash_head = inserted;
+    }
+    if can_search_hash_match(hash_head, state.strstart, state.w_size) {
+        state.match_length = working.fast_longest_match(state, hash_head);
+    }
+
+    if state.match_length >= crate::zutil_h::MIN_MATCH as crate::stdlib::uInt {
+        if !deflate_tally_match(
+            working
+                .pending()
+                .expect("fast working set owns pending storage"),
+            state,
+            state.match_length,
+            state.strstart,
+            state.match_start,
+        ) {
+            return DeflateFastStep::NeedMore;
+        }
+        let flush_block = symbol_buffer_is_full(state.sym_next, state.sym_end);
+        let progress = deflate_fast_match_progress(
+            state.match_length,
+            state.max_lazy_match,
+            state.lookahead,
+            state.strstart,
+        );
+        state.lookahead = progress.lookahead;
+        if progress.insert {
+            state.match_length = progress.remaining_match_length;
+            loop {
+                state.strstart = state.strstart.wrapping_add(1);
+                if working.fast_insert_hash(state).is_none() {
+                    return DeflateFastStep::NeedMore;
+                }
+                state.match_length = state.match_length.wrapping_sub(1);
+                if state.match_length == 0 {
+                    break;
+                }
+            }
+            state.strstart = progress.strstart;
+        } else {
+            state.strstart = progress.strstart;
+            state.match_length = 0;
+            let Some(ins_h) = working.fast_initial_hash(state) else {
+                return DeflateFastStep::NeedMore;
+            };
+            state.ins_h = ins_h;
+        }
+        return DeflateFastStep::Continue { flush_block };
+    }
+
+    let Some(literal) = working.fast_literal_at(state.strstart) else {
+        return DeflateFastStep::NeedMore;
+    };
+    if !deflate_tally_literal(
+        working
+            .pending()
+            .expect("fast working set owns pending storage"),
+        state,
+        literal,
+    ) {
+        return DeflateFastStep::NeedMore;
+    }
+    let flush_block = symbol_buffer_is_full(state.sym_next, state.sym_end);
+    (state.lookahead, state.strstart) =
+        deflate_literal_state_after_emit(state.lookahead, state.strstart);
+    DeflateFastStep::Continue { flush_block }
+}
+
 /// Result of one slow-strategy iteration after its bounded storage work.
 ///
 /// Refill, block encoding, and output draining are deliberately outside this
@@ -7137,6 +7271,42 @@ mod tests {
             &[0, 0, b'Q']
         );
         assert_eq!(state.dyn_ltree[b'Q' as usize].fc.value, 1);
+    }
+
+    #[test]
+    fn deflate_fast_step_core_tallies_literals_through_the_working_set() {
+        let mut state = super::internal_state::newly_allocated();
+        let layout = pending_storage_layout(4);
+        state.lit_bufsize = 4;
+        state.pending_buf_size = layout.total_len as crate::zutil_h::ulg;
+        state.sym_buf_offset = layout.symbol_offset;
+        state.sym_end = layout.symbol_flush_threshold;
+        state.window_size = 8;
+        state.hash_size = 8;
+        state.w_size = 4;
+        state.w_mask = 3;
+        state.lookahead = 1;
+        state.strstart = 0;
+
+        let mut pending = [0; 16];
+        let mut window = [0; 8];
+        window[0] = b'F';
+        let mut head = [0; 8];
+        let mut prev = [0; 4];
+        let mut working =
+            DeflateWorkingSet::new(&state, &mut pending, &mut window, &mut head, &mut prev)
+                .unwrap();
+
+        assert_eq!(
+            super::deflate_fast_step_core(&mut state, &mut working),
+            super::DeflateFastStep::Continue { flush_block: false },
+        );
+        assert_eq!((state.strstart, state.lookahead, state.sym_next), (1, 0, 3));
+        assert_eq!(
+            &pending[layout.symbol_offset..layout.symbol_offset + 3],
+            &[0, 0, b'F']
+        );
+        assert_eq!(state.dyn_ltree[b'F' as usize].fc.value, 1);
     }
 
     #[test]

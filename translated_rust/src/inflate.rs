@@ -4844,6 +4844,63 @@ mod tests {
     }
 
     #[test]
+    fn inflate_ffi_fast_path_preserves_overlapping_match_output() {
+        // The input and output boundaries deliberately satisfy
+        // inflate_can_use_fast_path().  The stream emits "abc" followed by
+        // overlapping matches, exercising the fast decoder's output-source
+        // match copy and its return to the ordinary inflate state machine.
+        let mut input = [
+            120, 156, 75, 76, 74, 78, 28, 69, 196, 33, 0, 136, 77, 114, 217,
+        ];
+        let mut output = [0_u8; 300];
+        let mut stream = crate::zlib_h::z_stream {
+            next_in: input.as_mut_ptr(),
+            avail_in: input.len() as crate::stdlib::uInt,
+            total_in: 0,
+            next_out: output.as_mut_ptr(),
+            avail_out: output.len() as crate::stdlib::uInt,
+            total_out: 0,
+            msg: core::ptr::null_mut(),
+            state: core::ptr::null_mut(),
+            zalloc: None,
+            zfree: None,
+            opaque: core::ptr::null_mut(),
+            data_type: 0,
+            adler: 0,
+            reserved: 0,
+        };
+
+        assert_eq!(
+            unsafe {
+                super::inflateInit2_(
+                    &mut stream,
+                    crate::zutil_h::DEF_WBITS,
+                    crate::zlib_h::ZLIB_VERSION.as_ptr(),
+                    core::mem::size_of::<crate::zlib_h::z_stream>() as ::core::ffi::c_int,
+                )
+            },
+            crate::zlib_h::Z_OK
+        );
+        assert_eq!(
+            unsafe { super::inflate_ffi(&mut stream, crate::zlib_h::Z_NO_FLUSH) },
+            crate::zlib_h::Z_STREAM_END
+        );
+        assert!(output
+            .iter()
+            .enumerate()
+            .all(|(index, &byte)| byte == b"abc"[index % 3]));
+        assert_eq!(stream.total_out, output.len() as crate::stdlib::uLong);
+        assert_eq!(
+            unsafe { (&*(stream.state as *const crate::src::inflate::inflate_state)).back },
+            -1
+        );
+        assert_eq!(
+            unsafe { super::inflateEnd_ffi(&mut stream) },
+            crate::zlib_h::Z_OK
+        );
+    }
+
+    #[test]
     fn inflate_ffi_preserves_window_history_across_output_buffers() {
         // The second call has fresh output storage, so its matches must read
         // the callback-owned inflate window established by the first call.
