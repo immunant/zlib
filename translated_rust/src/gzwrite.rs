@@ -407,6 +407,28 @@ pub(crate) fn gzclose_write_result(
     }
 }
 
+/// Insert one byte into the owned pending-compression input.  The ABI stream
+/// cursor is represented by `next_index` for this operation, so this core
+/// only needs the owned slice and scalar stream state.
+fn gzputc_buffered_insert(
+    input: &mut [u8],
+    size: ::core::ffi::c_uint,
+    avail_in: crate::stdlib::uInt,
+    next_index: usize,
+    pos: crate::stdlib::off64_t,
+    c: ::core::ffi::c_int,
+) -> Option<(usize, crate::stdlib::uInt, crate::stdlib::off64_t)> {
+    if size == 0 || size as usize > input.len() {
+        return None;
+    }
+    let end = next_index.checked_add(avail_in as usize)?;
+    if next_index > size as usize || end >= size as usize {
+        return None;
+    }
+    *input.get_mut(end)? = c as ::core::ffi::c_uchar;
+    Some((next_index, avail_in.wrapping_add(1), pos.wrapping_add(1)))
+}
+
 pub(crate) unsafe extern "C" fn gz_zero(
     mut state: crate::gzguts_h::gz_statep,
 ) -> ::core::ffi::c_int {
@@ -611,44 +633,63 @@ pub unsafe extern "C" fn gzputc(
     mut file: crate::zlib_h::gzFile,
     mut c: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
-    let mut have: ::core::ffi::c_uint = 0;
     let mut buf: [::core::ffi::c_uchar; 1] = [0; 1];
-    let mut state: crate::gzguts_h::gz_statep =
-        ::core::ptr::null_mut::<crate::gzguts_h::gz_state>();
-    let mut strm: crate::zlib_h::z_streamp = ::core::ptr::null_mut::<crate::zlib_h::z_stream>();
     if file.is_null() {
         return -1 as ::core::ffi::c_int;
     }
-    state = file as crate::gzguts_h::gz_statep;
-    strm = &raw mut (*state).strm as crate::zlib_h::z_streamp;
-    if !gzwrite_state_is_valid((*state).mode, (*state).err, (*state).again) {
+    let state = &mut *(file as crate::gzguts_h::gz_statep);
+    if !gzwrite_state_is_valid(state.mode, state.err, state.again) {
         return -1 as ::core::ffi::c_int;
     }
     crate::src::gzlib::gz_error(
-        state as *mut crate::gzguts_h::gz_state,
+        state,
         crate::zlib_h::Z_OK,
         ::core::ptr::null::<::core::ffi::c_char>(),
     );
-    if (*state).skip != 0 && gz_zero(state) == -1 as ::core::ffi::c_int {
+    if state.skip != 0 && gz_zero(state) == -1 as ::core::ffi::c_int {
         return -1 as ::core::ffi::c_int;
     }
-    if (*state).size != 0 {
-        let Some(input) = (*state).buffers.as_mut().map(|buffers| buffers.input.as_mut()) else {
+    if state.size != 0 {
+        // `strm.next_in` is an ABI cursor into the owned input allocation.
+        // Reconcile it at the boundary before passing only an index to the
+        // slice-based insertion core.
+        let next_index = if state.strm.avail_in == 0 {
+            Some(0)
+        } else {
+            let Some(input) = state.buffers.as_ref().map(|buffers| &buffers.input) else {
+                return -1;
+            };
+            (state.strm.next_in as usize)
+                .checked_sub(input.as_ptr() as usize)
+                .filter(|index| *index <= input.len())
+        };
+        let Some(next_index) = next_index else {
             return -1;
         };
-        let input = input.as_mut_ptr();
-        if (*strm).avail_in == 0 as crate::stdlib::uInt {
-            (*strm).next_in = input as *mut crate::stdlib::Bytef;
-        }
-        have = (*strm)
-            .next_in
-            .offset((*strm).avail_in as isize)
-            .offset_from(input) as ::core::ffi::c_uint;
-        if have < (*state).size {
-            *input.offset(have as isize) = c as ::core::ffi::c_uchar;
-            gz_write_buffered_copy_commit_state(&mut *state, 1);
+        let inserted = {
+            let Some(input) = state.buffers.as_mut().map(|buffers| buffers.input.as_mut()) else {
+                return -1;
+            };
+            gzputc_buffered_insert(
+                input,
+                state.size,
+                state.strm.avail_in,
+                next_index,
+                state.x.pos,
+                c,
+            )
+        };
+        if let Some((next_index, avail_in, pos)) = inserted {
+            let Some(input) = state.buffers.as_mut().map(|buffers| buffers.input.as_mut()) else {
+                return -1;
+            };
+            state.strm.next_in = input.as_mut_ptr().wrapping_add(next_index);
+            state.strm.avail_in = avail_in;
+            state.x.pos = pos;
             return c & 0xff as ::core::ffi::c_int;
         }
+        // A full pending input buffer follows the existing `gz_write` path
+        // below, which flushes it before inserting this byte.
     }
     buf[0 as ::core::ffi::c_int as usize] = c as ::core::ffi::c_uchar;
     if gz_write(
