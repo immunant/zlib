@@ -1094,15 +1094,12 @@ pub unsafe extern "C" fn deflatePending_ffi(
 ) -> ::core::ffi::c_int {
     deflatePending(strm, pending, bits)
 }
-pub unsafe extern "C" fn deflateUsed(
-    mut strm: crate::zlib_h::z_streamp,
-    mut bits: *mut ::core::ffi::c_int,
+fn deflate_used(
+    state: &crate::src::deflate::deflate_state,
+    bits: Option<&mut ::core::ffi::c_int>,
 ) -> ::core::ffi::c_int {
-    if deflateStateCheck(strm) != 0 {
-        return crate::zlib_h::Z_STREAM_ERROR;
-    }
-    if !bits.is_null() {
-        *bits = (*(*strm).state).bi_used;
+    if let Some(bits) = bits {
+        *bits = state.bi_used;
     }
     return crate::zlib_h::Z_OK;
 }
@@ -1112,7 +1109,28 @@ pub unsafe extern "C" fn deflateUsed_ffi(
     mut strm: crate::zlib_h::z_streamp,
     mut bits: *mut ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
-    deflateUsed(strm, bits)
+    let Some(strm) = strm.as_ref() else {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    };
+    if strm.zalloc.is_none() || strm.zfree.is_none() {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    }
+    let Some(state) = (strm.state as *const crate::src::deflate::deflate_state).as_ref() else {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    };
+    if state.strm != strm as *const crate::zlib_h::z_stream_s as crate::zlib_h::z_streamp
+        || state.status != crate::src::deflate::INIT_STATE
+            && state.status != crate::src::deflate::GZIP_STATE
+            && state.status != crate::src::deflate::EXTRA_STATE
+            && state.status != crate::src::deflate::NAME_STATE
+            && state.status != crate::src::deflate::COMMENT_STATE
+            && state.status != crate::src::deflate::HCRC_STATE
+            && state.status != crate::src::deflate::BUSY_STATE
+            && state.status != crate::src::deflate::FINISH_STATE
+    {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    }
+    deflate_used(state, bits.as_mut())
 }
 pub unsafe extern "C" fn deflatePrime(
     mut strm: crate::zlib_h::z_streamp,
