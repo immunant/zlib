@@ -1596,14 +1596,14 @@ macro_rules! deflate_params_at_boundary {
             }
             let s = (*strm).state as *mut crate::src::deflate::deflate_state;
             let Some(plan) = crate::src::deflate::deflate_params_plan(
-                            level,
-                            strategy,
-                            (*s).level,
-                            (*s).strategy,
-                            (*s).last_flush,
-                        ) else {
-                            break 'deflate_params_result crate::zlib_h::Z_STREAM_ERROR;
-                        };
+                level,
+                strategy,
+                (*s).level,
+                (*s).strategy,
+                (*s).last_flush,
+            ) else {
+                break 'deflate_params_result crate::zlib_h::Z_STREAM_ERROR;
+            };
             if plan.needs_block_flush {
                 let err = crate::src::deflate::deflate(strm, crate::zlib_h::Z_BLOCK);
                 if err == crate::zlib_h::Z_STREAM_ERROR {
@@ -1622,11 +1622,11 @@ macro_rules! deflate_params_at_boundary {
                 {
                     if (*s).matches == 1 as crate::stdlib::uInt {
                         let Ok(head_len) = usize::try_from((*s).hash_size) else {
-                                        break 'deflate_params_result crate::zlib_h::Z_STREAM_ERROR;
-                                    };
+                            break 'deflate_params_result crate::zlib_h::Z_STREAM_ERROR;
+                        };
                         let Ok(prev_len) = usize::try_from((*s).w_size) else {
-                                        break 'deflate_params_result crate::zlib_h::Z_STREAM_ERROR;
-                                    };
+                            break 'deflate_params_result crate::zlib_h::Z_STREAM_ERROR;
+                        };
                         if (head_len != 0 && (*s).head.is_null())
                             || (prev_len != 0 && (*s).prev.is_null())
                         {
@@ -1646,8 +1646,8 @@ macro_rules! deflate_params_at_boundary {
                         (*s).slid = 1;
                     } else {
                         let Ok(head_len) = usize::try_from((*s).hash_size) else {
-                                        break 'deflate_params_result crate::zlib_h::Z_STREAM_ERROR;
-                                    };
+                            break 'deflate_params_result crate::zlib_h::Z_STREAM_ERROR;
+                        };
                         if head_len != 0 && (*s).head.is_null() {
                             break 'deflate_params_result crate::zlib_h::Z_STREAM_ERROR;
                         }
@@ -2325,8 +2325,7 @@ pub unsafe extern "C" fn deflate(
         let state = &*s;
         strm_ref.next_out.is_null()
             || strm_ref.avail_in != 0 as crate::stdlib::uInt && strm_ref.next_in.is_null()
-            || state.status == crate::src::deflate::FINISH_STATE
-                && flush != crate::zlib_h::Z_FINISH
+            || state.status == crate::src::deflate::FINISH_STATE && flush != crate::zlib_h::Z_FINISH
     };
     if invalid_stream_or_state {
         (*strm).msg =
@@ -2945,10 +2944,8 @@ pub unsafe extern "C" fn deflateCopy_ffi(
         ((*ds).hash_size as crate::__stddef_size_t_h::size_t)
             .wrapping_mul(::core::mem::size_of::<crate::src::deflate::Pos>()),
     );
-    let (pending_out_after_base, pending_out_distance) = deflate_cursor_direction(
-        (*ss).pending_out as usize,
-        (*ss).pending_buf as usize,
-    );
+    let (pending_out_after_base, pending_out_distance) =
+        deflate_cursor_direction((*ss).pending_out as usize, (*ss).pending_buf as usize);
     // `pending_out` is normally within the pending allocation. Keep the
     // translated wrapping behavior for malformed state too, but express the
     // cursor as an unsigned direction before forming the new pointer.
@@ -3366,18 +3363,26 @@ unsafe extern "C" fn deflate_stored(
     let mut len: ::core::ffi::c_uint = 0;
     let mut left: ::core::ffi::c_uint = 0;
     let mut have: ::core::ffi::c_uint = 0;
-    let mut used: ::core::ffi::c_uint = (*(*s).strm).avail_in as ::core::ffi::c_uint;
+    let mut used: ::core::ffi::c_uint = {
+        let state = &mut *s;
+        let strm = &mut *state.strm;
+        strm.avail_in
+    };
     loop {
-        let Some(plan) = stored_initial_block_plan(
-            (*s).pending_buf_size,
-            (*s).w_size,
-            (*s).bi_valid,
-            (*(*s).strm).avail_out,
-            (*s).strstart,
-            (*s).block_start,
-            (*(*s).strm).avail_in,
-            flush,
-        ) else {
+        let Some(plan) = ({
+            let state = &mut *s;
+            let strm = &mut *state.strm;
+            stored_initial_block_plan(
+                state.pending_buf_size,
+                state.w_size,
+                state.bi_valid,
+                strm.avail_out,
+                state.strstart,
+                state.block_start,
+                strm.avail_in,
+                flush,
+            )
+        }) else {
             break;
         };
         len = plan.len;
@@ -3465,7 +3470,11 @@ unsafe extern "C" fn deflate_stored(
             break;
         }
     }
-    used = used.wrapping_sub((*(*s).strm).avail_in as ::core::ffi::c_uint);
+    used = used.wrapping_sub({
+        let state = &mut *s;
+        let strm = &mut *state.strm;
+        strm.avail_in
+    });
     if used != 0 {
         let Ok(window_len) = usize::try_from((*s).window_size) else {
             return need_more;
