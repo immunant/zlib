@@ -290,9 +290,6 @@ pub const finish_started: block_state = 2;
 
 pub const need_more: block_state = 0;
 
-type compress_func =
-    Option<unsafe fn(*mut crate::src::deflate::deflate_state, ::core::ffi::c_int) -> block_state>;
-
 #[derive(Copy, Clone, PartialEq, Eq)]
 enum CompressorKind {
     Stored,
@@ -2560,6 +2557,44 @@ fn repeated_flush_is_buffer_error(
         && flush != crate::zlib_h::Z_FINISH
 }
 
+/// Choose the ordinary deflate block encoder from validated scalar state.
+///
+/// The compatibility state is opaque to C callers, but a malformed internal
+/// level previously reached `configuration_table` through an unchecked index
+/// in the raw dispatcher.  Keep table selection in this safe core so such a
+/// state becomes the established stream error rather than a panic.
+#[derive(Copy, Clone)]
+enum DeflateCompressor {
+    Stored,
+    Huffman,
+    Rle,
+    Fast,
+    Slow,
+}
+
+fn deflate_compressor_plan(
+    level: ::core::ffi::c_int,
+    strategy: ::core::ffi::c_int,
+) -> Option<DeflateCompressor> {
+    if !(0..=9).contains(&level) || !(0..=crate::zlib_h::Z_FIXED).contains(&strategy) {
+        return None;
+    }
+    if level == 0 {
+        return Some(DeflateCompressor::Stored);
+    }
+    if strategy == crate::zlib_h::Z_HUFFMAN_ONLY {
+        return Some(DeflateCompressor::Huffman);
+    }
+    if strategy == crate::zlib_h::Z_RLE {
+        return Some(DeflateCompressor::Rle);
+    }
+    match configuration_table.get(level as usize)?.kind {
+        CompressorKind::Stored => Some(DeflateCompressor::Stored),
+        CompressorKind::Fast => Some(DeflateCompressor::Fast),
+        CompressorKind::Slow => Some(DeflateCompressor::Slow),
+    }
+}
+
 pub unsafe fn deflate(
     mut strm: crate::zlib_h::z_streamp,
     mut flush: ::core::ffi::c_int,
@@ -3006,29 +3041,21 @@ pub unsafe fn deflate(
                 && state.status != crate::src::deflate::FINISH_STATE
     };
     if should_compress {
-        let (level, strategy, compressor_kind) = {
+        let compressor = {
             let state = &*s;
-            (
-                state.level,
-                state.strategy,
-                configuration_table[state.level as usize].kind,
-            )
+            deflate_compressor_plan(state.level, state.strategy)
+        };
+        let Some(compressor) = compressor else {
+            return crate::zlib_h::Z_STREAM_ERROR;
         };
         let mut bstate: block_state = need_more;
-        bstate = (if level == 0 as ::core::ffi::c_int {
-            deflate_stored(s, flush) as ::core::ffi::c_uint
-        } else if strategy == crate::zlib_h::Z_HUFFMAN_ONLY {
-            deflate_huff(s, flush) as ::core::ffi::c_uint
-        } else if strategy == crate::zlib_h::Z_RLE {
-            deflate_rle(s, flush) as ::core::ffi::c_uint
-        } else {
-            let compressor: compress_func = match compressor_kind {
-                CompressorKind::Stored => Some(deflate_stored),
-                CompressorKind::Fast => Some(deflate_fast),
-                CompressorKind::Slow => Some(deflate_slow),
-            };
-            compressor.expect("configuration compressor")(s, flush) as ::core::ffi::c_uint
-        }) as block_state;
+        bstate = match compressor {
+            DeflateCompressor::Stored => deflate_stored(s, flush),
+            DeflateCompressor::Huffman => deflate_huff(s, flush),
+            DeflateCompressor::Rle => deflate_rle(s, flush),
+            DeflateCompressor::Fast => deflate_fast(s, flush),
+            DeflateCompressor::Slow => deflate_slow(s, flush),
+        };
         if bstate as ::core::ffi::c_uint
             == finish_started as ::core::ffi::c_int as ::core::ffi::c_uint
             || bstate as ::core::ffi::c_uint
