@@ -1088,6 +1088,16 @@ fn update_window_buffer_len(wsize: ::core::ffi::c_uint) -> usize {
     wsize as usize
 }
 
+fn update_window_buffer_len_after_metadata(
+    wsize: ::core::ffi::c_uint,
+    wbits: ::core::ffi::c_uint,
+) -> usize {
+    let updated_wsize = window_metadata_update_plan(wsize, wbits)
+        .map(|metadata| metadata.wsize)
+        .unwrap_or(wsize);
+    update_window_buffer_len(updated_wsize)
+}
+
 fn update_window_produced_len(copy: ::core::ffi::c_uint) -> Option<usize> {
     if copy == 0 {
         None
@@ -1117,21 +1127,21 @@ unsafe fn updatewindow(
     if window_allocation_failed(allocation_plan, !state.window.is_null()) {
         return 1;
     }
-    update_window_metadata(
+    let window_len = update_window_buffer_len_after_metadata(state.wsize, state.wbits);
+    update_window_core(
         state.wbits,
         &mut state.wsize,
         &mut state.wnext,
         &mut state.whave,
+        core::slice::from_raw_parts_mut(state.window, window_len),
+        update_window_produced_slice(match update_window_produced_len(copy) {
+            Some(produced_len) => Some(core::slice::from_raw_parts(
+                end.wrapping_sub(produced_len),
+                produced_len,
+            )),
+            None => None,
+        }),
     );
-    let window =
-        core::slice::from_raw_parts_mut(state.window, update_window_buffer_len(state.wsize));
-    let produced = match update_window_produced_len(copy) {
-        Some(produced_len) => {
-            core::slice::from_raw_parts(end.wrapping_sub(produced_len), produced_len)
-        }
-        None => &[],
-    };
-    update_window_history(window, &mut state.wnext, &mut state.whave, produced);
     0
 }
 pub unsafe extern "C" fn inflate(
@@ -3195,16 +3205,16 @@ mod tests {
         inflate_trailer_checksum_from_hold, inflate_undermine_core, inflate_validate_core,
         inflate_validate_wrap, inflate_zlib_header_error, inflate_zlib_header_transition,
         inflate_zlib_window_params, initial_window_metadata, reset_window_history,
-        stored_block_length, syncsearch_safe, update_window_buffer_len, update_window_core,
-        update_window_history, update_window_produced_len, window_allocation_failed,
-        window_allocation_plan, window_allocation_request, window_allocation_request_for_plan,
-        window_metadata_update_plan, window_needs_allocation, window_update_plan,
-        DynamicCodeLengthRepeat, InflateBlockKind, InflateCallProgress, InflateCopyProgress,
-        InflateGzipExtraProgress, InflateGzipFlags, InflateGzipFlagsError, InflateMatchPlan,
-        InflateMatchSource, InflateOutputChecksum, InflatePrimeUpdate, InflateSyncSearch,
-        InflateZlibHeaderError, InflateZlibHeaderTransition, InflateZlibWindowParams,
-        WindowAllocationPlan, BAD, CHECK, CODE_LENGTH_ORDER, COPY_, COPY_1, DICT, DICTID, HEAD,
-        LEN_, MATCH, STORED, SYNC, TYPE, TYPEDO,
+        stored_block_length, syncsearch_safe, update_window_buffer_len,
+        update_window_buffer_len_after_metadata, update_window_core, update_window_history,
+        update_window_produced_len, window_allocation_failed, window_allocation_plan,
+        window_allocation_request, window_allocation_request_for_plan, window_metadata_update_plan,
+        window_needs_allocation, window_update_plan, DynamicCodeLengthRepeat, InflateBlockKind,
+        InflateCallProgress, InflateCopyProgress, InflateGzipExtraProgress, InflateGzipFlags,
+        InflateGzipFlagsError, InflateMatchPlan, InflateMatchSource, InflateOutputChecksum,
+        InflatePrimeUpdate, InflateSyncSearch, InflateZlibHeaderError, InflateZlibHeaderTransition,
+        InflateZlibWindowParams, WindowAllocationPlan, BAD, CHECK, CODE_LENGTH_ORDER, COPY_,
+        COPY_1, DICT, DICTID, HEAD, LEN_, MATCH, STORED, SYNC, TYPE, TYPEDO,
     };
 
     #[test]
@@ -4579,6 +4589,26 @@ mod tests {
     }
 
     #[test]
+    fn window_update_core_replaces_newly_initialized_history() {
+        let mut window = [0; 8];
+        let mut wsize = 0;
+        let mut wnext = 5;
+        let mut whave = 4;
+
+        update_window_core(
+            3,
+            &mut wsize,
+            &mut wnext,
+            &mut whave,
+            &mut window,
+            b"0123456789",
+        );
+
+        assert_eq!((wsize, wnext, whave), (8, 0, 8));
+        assert_eq!(window, *b"23456789");
+    }
+
+    #[test]
     fn update_window_buffer_len_preserves_c_uint_widths() {
         assert_eq!(update_window_buffer_len(0), 0);
         assert_eq!(update_window_buffer_len(32_768), 32_768);
@@ -4586,6 +4616,12 @@ mod tests {
             update_window_buffer_len(::core::ffi::c_uint::MAX),
             ::core::ffi::c_uint::MAX as usize
         );
+    }
+
+    #[test]
+    fn update_window_buffer_len_after_metadata_initializes_only_empty_windows() {
+        assert_eq!(update_window_buffer_len_after_metadata(0, 3), 8);
+        assert_eq!(update_window_buffer_len_after_metadata(8, 15), 8);
     }
 
     #[test]

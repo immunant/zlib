@@ -552,6 +552,23 @@ fn gz_read_request_is_empty(len: crate::stdlib::z_size_t) -> bool {
     len == 0 as crate::stdlib::z_size_t
 }
 
+#[derive(Debug, PartialEq, Eq)]
+enum GzReadSetup {
+    ReturnEmpty,
+    Skip,
+    Read,
+}
+
+fn gz_read_setup(len: crate::stdlib::z_size_t, skip: crate::stdlib::off64_t) -> GzReadSetup {
+    if gz_read_request_is_empty(len) {
+        GzReadSetup::ReturnEmpty
+    } else if gz_read_has_pending_skip(skip) {
+        GzReadSetup::Skip
+    } else {
+        GzReadSetup::Read
+    }
+}
+
 fn gz_read_marks_past_eof(len: crate::stdlib::z_size_t, eof: ::core::ffi::c_int) -> bool {
     len != 0 && eof != 0
 }
@@ -2535,6 +2552,21 @@ mod tests {
     }
 
     #[test]
+    fn gz_read_setup_prioritizes_empty_requests_over_pending_skip() {
+        assert_eq!(gz_read_setup(0, 7), GzReadSetup::ReturnEmpty);
+    }
+
+    #[test]
+    fn gz_read_setup_runs_pending_skip_before_reading() {
+        assert_eq!(gz_read_setup(1, -1), GzReadSetup::Skip);
+    }
+
+    #[test]
+    fn gz_read_setup_reads_without_pending_skip() {
+        assert_eq!(gz_read_setup(1, 0), GzReadSetup::Read);
+    }
+
+    #[test]
     fn gz_ungetc_buffer_state_prioritizes_empty_buffer() {
         assert!(matches!(
             gz_ungetc_buffer_state(0, 8),
@@ -3136,11 +3168,14 @@ unsafe fn gz_read(
     let mut got: crate::stdlib::z_size_t = 0;
     let mut n: ::core::ffi::c_uint = 0;
     let mut err: ::core::ffi::c_int = 0;
-    if gz_read_request_is_empty(len) {
-        return 0 as crate::stdlib::z_size_t;
-    }
-    if gz_read_has_pending_skip(state_ref.skip) && gz_skip(state_ref) == -1 as ::core::ffi::c_int {
-        return 0 as crate::stdlib::z_size_t;
+    match gz_read_setup(len, state_ref.skip) {
+        GzReadSetup::ReturnEmpty => return 0 as crate::stdlib::z_size_t,
+        GzReadSetup::Skip => {
+            if gz_skip(state_ref) == -1 as ::core::ffi::c_int {
+                return 0 as crate::stdlib::z_size_t;
+            }
+        }
+        GzReadSetup::Read => {}
     }
     got = 0 as crate::stdlib::z_size_t;
     err = 0 as ::core::ffi::c_int;
