@@ -250,38 +250,55 @@ unsafe fn gz_comp(
                 && (flush != crate::zlib_h::Z_FINISH || ret == crate::zlib_h::Z_STREAM_END)
         {
             while state.strm.next_out > state.x.next {
-                *crate::stdlib::__errno_location() = 0 as ::core::ffi::c_int;
                 state.again = 0 as ::core::ffi::c_int;
-                let buffered = state.strm.next_out.addr().wrapping_sub(state.x.next.addr());
-                put = if buffered > max as usize {
-                    max
-                } else {
-                    buffered as ::core::ffi::c_uint
+                let write = {
+                    let Some(buffer) = state.out.as_deref() else {
+                        return -1;
+                    };
+                    let Some(buffered_len) =
+                        state.strm.next_out.addr().checked_sub(state.x.next.addr())
+                    else {
+                        return -1;
+                    };
+                    let Some(buffered_len) = ::core::ffi::c_uint::try_from(buffered_len).ok()
+                    else {
+                        return -1;
+                    };
+                    let Some(buffered) = crate::src::gzlib::GzBufferedCursor::from_owned_buffer(
+                        buffer,
+                        state.x.next.addr(),
+                        buffered_len,
+                    ) else {
+                        return -1;
+                    };
+                    put = buffered_len.min(max);
+                    let Some((input, _)) = buffered.consume(put as usize) else {
+                        return -1;
+                    };
+                    let result = gz_direct_write(state.fd.as_ref().unwrap(), input);
+                    result
                 };
-                writ = crate::stdlib::write(
-                    <rustix::fd::OwnedFd as rustix::fd::AsRawFd>::as_raw_fd(
-                        state.fd.as_ref().unwrap(),
-                    ),
-                    state.x.next as *const ::core::ffi::c_void,
-                    put as crate::__stddef_size_t_h::size_t,
-                ) as ::core::ffi::c_int;
-                if writ < 0 as ::core::ffi::c_int {
-                    let failure = gz_write_failure(*crate::stdlib::__errno_location());
-                    if failure.would_block {
-                        state.again = 1 as ::core::ffi::c_int;
+                match write {
+                    Ok(written) => {
+                        writ = written as ::core::ffi::c_int;
+                        state.x.next = state.x.next.wrapping_add(written);
                     }
-                    let message = errno::Errno(failure.errno_value).to_string();
-                    crate::src::gzlib::GzErrorState {
-                        message: &mut state.msg,
-                        error: &mut state.err,
-                        buffered: &mut state.x.have,
-                        again: state.again,
-                        path: state.path.as_deref(),
+                    Err(failure) => {
+                        if failure.would_block {
+                            state.again = 1 as ::core::ffi::c_int;
+                        }
+                        let message = errno::Errno(failure.errno_value).to_string();
+                        crate::src::gzlib::GzErrorState {
+                            message: &mut state.msg,
+                            error: &mut state.err,
+                            buffered: &mut state.x.have,
+                            again: state.again,
+                            path: state.path.as_deref(),
+                        }
+                        .set(crate::zlib_h::Z_ERRNO, Some(message.as_bytes()));
+                        return -1 as ::core::ffi::c_int;
                     }
-                    .set(crate::zlib_h::Z_ERRNO, Some(message.as_bytes()));
-                    return -1 as ::core::ffi::c_int;
                 }
-                state.x.next = state.x.next.wrapping_add(writ as usize);
             }
             if state.strm.avail_out == 0 as crate::stdlib::uInt {
                 state.strm.avail_out = state.size as crate::stdlib::uInt;
