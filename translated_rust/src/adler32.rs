@@ -54,21 +54,17 @@ fn adler32_buffer(
     }
 }
 
-pub unsafe extern "C" fn adler32_z(
+// The exported ABI adapter owns the raw caller-buffer conversion. Keep this
+// compatibility entry point as a narrow forwarder so internal callers do not
+// duplicate that boundary.
+pub unsafe extern "C" fn adler32(
     adler: crate::stdlib::uLong,
     buf: *const crate::stdlib::Bytef,
-    len: crate::stdlib::z_size_t,
+    len: crate::stdlib::uInt,
 ) -> crate::stdlib::uLong {
-    if buf.is_null() {
-        return adler32_buffer(adler, None);
-    }
-    let buf = if len == 0 {
-        &[]
-    } else {
-        unsafe { ::core::slice::from_raw_parts(buf, len) }
-    };
-    adler32_buffer(adler, Some(buf))
+    adler32_z_ffi(adler, buf, len as crate::stdlib::z_size_t)
 }
+
 #[export_name = "adler32_z"]
 pub unsafe extern "C" fn adler32_z_ffi(
     mut adler: crate::stdlib::uLong,
@@ -84,13 +80,6 @@ pub unsafe extern "C" fn adler32_z_ffi(
         unsafe { ::core::slice::from_raw_parts(buf, len) }
     };
     adler32_buffer(adler, Some(buf))
-}
-pub unsafe extern "C" fn adler32(
-    mut adler: crate::stdlib::uLong,
-    mut buf: *const crate::stdlib::Bytef,
-    mut len: crate::stdlib::uInt,
-) -> crate::stdlib::uLong {
-    adler32_z(adler, buf, len as crate::stdlib::z_size_t)
 }
 #[export_name = "adler32"]
 pub unsafe extern "C" fn adler32_ffi(

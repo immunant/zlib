@@ -4899,21 +4899,17 @@ fn crc32_buffer(crc: crate::stdlib::uLong, buf: Option<&[u8]>) -> crate::stdlib:
     }
 }
 
-pub unsafe extern "C" fn crc32_z(
+// The exported ABI adapter owns the raw caller-buffer conversion. Keep this
+// compatibility entry point as a narrow forwarder so internal callers do not
+// duplicate that boundary.
+pub unsafe extern "C" fn crc32(
     crc: crate::stdlib::uLong,
     buf: *const ::core::ffi::c_uchar,
-    len: crate::stdlib::z_size_t,
+    len: crate::stdlib::uInt,
 ) -> crate::stdlib::uLong {
-    if buf.is_null() {
-        return crc32_buffer(crc, None);
-    }
-    let buf = if len == 0 {
-        &[]
-    } else {
-        unsafe { ::core::slice::from_raw_parts(buf, len) }
-    };
-    crc32_buffer(crc, Some(buf))
+    crc32_z_ffi(crc, buf, len as crate::stdlib::z_size_t)
 }
+
 #[export_name = "crc32_z"]
 
 pub unsafe extern "C" fn crc32_z_ffi(
@@ -4930,13 +4926,6 @@ pub unsafe extern "C" fn crc32_z_ffi(
         unsafe { ::core::slice::from_raw_parts(buf, len) }
     };
     crc32_buffer(crc, Some(buf))
-}
-pub unsafe extern "C" fn crc32(
-    mut crc: crate::stdlib::uLong,
-    mut buf: *const ::core::ffi::c_uchar,
-    mut len: crate::stdlib::uInt,
-) -> crate::stdlib::uLong {
-    return crc32_z(crc, buf, len as crate::stdlib::z_size_t);
 }
 #[export_name = "crc32"]
 
