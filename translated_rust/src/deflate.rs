@@ -2582,20 +2582,18 @@ pub fn deflate(
                 (head.extra_len & 0xffff) as usize,
             ))
         };
-        let name = if head.name.is_null() {
-            None
-        } else {
-            Some(::core::ffi::CStr::from_ptr(
-                head.name as *const ::core::ffi::c_char,
-            ))
-        };
-        let comment = if head.comment.is_null() {
-            None
-        } else {
-            Some(::core::ffi::CStr::from_ptr(
-                head.comment as *const ::core::ffi::c_char,
-            ))
-        };
+        // `name` and `comment` have the same retained C-string contract.
+        // Bind the two optional fields through one conversion site while
+        // keeping both borrows live for this synchronous header transition.
+        let mut strings = [None, None];
+        for (string, field) in strings.iter_mut().zip([head.name, head.comment]) {
+            if !field.is_null() {
+                *string = Some(::core::ffi::CStr::from_ptr(
+                    field as *const ::core::ffi::c_char,
+                ));
+            }
+        }
+        let [name, comment] = strings;
         (head, extra, name, comment)
     };
     deflate_finish_bound_gzip_header(stream, state, flush, head, extra, name, comment)
