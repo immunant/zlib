@@ -565,39 +565,41 @@ unsafe extern "C" fn updatewindow(
     mut end: *const crate::stdlib::Bytef,
     mut copy: ::core::ffi::c_uint,
 ) -> ::core::ffi::c_int {
-    let mut state: *mut crate::src::inflate::inflate_state =
-        ::core::ptr::null_mut::<crate::src::inflate::inflate_state>();
-    state = (*strm).state as *mut crate::src::inflate::inflate_state;
-    if (*state).window.is_null() {
-        (*state).window = Some((*strm).zalloc.expect("non-null function pointer"))
+    // Keep the raw stream/state adoption at this legacy codec boundary, but
+    // make all subsequent state work ordinary Rust field access. This helper
+    // is still unsafe because it invokes the caller allocator and lends the
+    // ABI-owned window/output spans below.
+    let strm = &mut *strm;
+    let state = &mut *(strm.state as *mut crate::src::inflate::inflate_state);
+    if state.window.is_null() {
+        state.window = Some(strm.zalloc.expect("non-null function pointer"))
             .expect("non-null function pointer")(
-            (*strm).opaque,
-            (1 as crate::stdlib::uInt) << (*state).wbits,
+            strm.opaque,
+            (1 as crate::stdlib::uInt) << state.wbits,
             ::core::mem::size_of::<::core::ffi::c_uchar>() as crate::stdlib::uInt,
         ) as *mut ::core::ffi::c_uchar;
-        if (*state).window.is_null() {
+        if state.window.is_null() {
             return 1 as ::core::ffi::c_int;
         }
     }
-    if (*state).wsize == 0 as ::core::ffi::c_uint {
-        (*state).wsize = (1 as ::core::ffi::c_uint) << (*state).wbits;
-        (*state).wnext = 0 as ::core::ffi::c_uint;
-        (*state).whave = 0 as ::core::ffi::c_uint;
+    if state.wsize == 0 as ::core::ffi::c_uint {
+        state.wsize = (1 as ::core::ffi::c_uint) << state.wbits;
+        state.wnext = 0 as ::core::ffi::c_uint;
+        state.whave = 0 as ::core::ffi::c_uint;
     }
-    let Some(plan) = inflate_window_copy_plan((*state).wsize, (*state).wnext, (*state).whave, copy)
-    else {
+    let Some(plan) = inflate_window_copy_plan(state.wsize, state.wnext, state.whave, copy) else {
         return 1 as ::core::ffi::c_int;
     };
     let Some((next, have)) = plan.cursor_values() else {
         return 1 as ::core::ffi::c_int;
     };
-    let Ok(window_len) = usize::try_from((*state).wsize) else {
+    let Ok(window_len) = usize::try_from(state.wsize) else {
         return 1 as ::core::ffi::c_int;
     };
     let Ok(copy_len) = usize::try_from(copy) else {
         return 1 as ::core::ffi::c_int;
     };
-    let window = ::core::slice::from_raw_parts_mut((*state).window, window_len);
+    let window = ::core::slice::from_raw_parts_mut(state.window, window_len);
     let produced = if copy_len == 0 {
         &[]
     } else {
@@ -612,8 +614,8 @@ unsafe extern "C" fn updatewindow(
     if inflate_window_copy(window, produced, plan).is_none() {
         return 1 as ::core::ffi::c_int;
     }
-    (*state).wnext = next;
-    (*state).whave = have;
+    state.wnext = next;
+    state.whave = have;
     return 0 as ::core::ffi::c_int;
 }
 pub unsafe extern "C" fn inflate(
