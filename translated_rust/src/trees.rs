@@ -5157,7 +5157,7 @@ pub unsafe extern "C" fn _tr_tally(
     let sym_next = (*s).sym_next;
     let (cursors, next_sym_next) = symbol_triplet_cursors(sym_next);
     for (cursor, byte) in cursors.into_iter().zip(symbol_bytes) {
-        *(*s).sym_buf.offset(cursor as isize) = byte;
+        *(*s).sym_buf.wrapping_add(cursor as usize) = byte;
     }
     (*s).sym_next = next_sym_next;
     if dist == 0 as ::core::ffi::c_uint {
