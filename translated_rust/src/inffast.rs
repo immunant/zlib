@@ -513,6 +513,37 @@ fn fast_match_copy_layout(
     }
 }
 
+/// Copy a match whose source is already in the current output buffer.
+///
+/// This deliberately copies one byte at a time. When the match exceeds its
+/// distance, each byte just written is source for the next byte, which is
+/// deflate's required overlapping-copy behavior.
+fn fast_copy_from_output(
+    output: &mut [crate::stdlib::Bytef],
+    output_produced: crate::stdlib::uInt,
+    distance: ::core::ffi::c_uint,
+    match_length: ::core::ffi::c_uint,
+) -> Option<()> {
+    let write_start = usize::try_from(output_produced).ok()?;
+    let distance = usize::try_from(distance).ok()?;
+    let match_length = usize::try_from(match_length).ok()?;
+    if distance == 0 || distance > write_start {
+        return None;
+    }
+    let write_end = write_start.checked_add(match_length)?;
+    if write_end > output.len() {
+        return None;
+    }
+
+    for offset in 0..match_length {
+        let source = write_start.checked_sub(distance)?.checked_add(offset)?;
+        let destination = write_start.checked_add(offset)?;
+        let byte = *output.get(source)?;
+        *output.get_mut(destination)? = byte;
+    }
+    Some(())
+}
+
 fn finish_fast_distance(
     base_distance: ::core::ffi::c_uint,
     hold: crate::stdlib::uLong,
@@ -875,7 +906,7 @@ pub unsafe extern "C" fn inflate_fast_ffi(
 mod tests {
     use super::{
         add_and_consume_extra_bits, append_input_byte, bit_mask, code, consume_bits,
-        fast_code_entry, fast_decode_error_message, fast_decode_failure,
+        fast_code_entry, fast_copy_from_output, fast_decode_error_message, fast_decode_failure,
         fast_decode_needs_prefetch, fast_decode_prefetch_byte_count, fast_dist_action,
         fast_distance_requires_window_copy, fast_length_extra_bits_refill_byte_count,
         fast_litlen_action, fast_match_copy_layout, fast_match_uses_window, fast_window_copy_plan,
@@ -1275,6 +1306,26 @@ mod tests {
             output_cursor_after_write(::core::ffi::c_uint::MAX, 0),
             (0, ::core::ffi::c_uint::MAX),
         );
+    }
+
+    #[test]
+    fn fast_output_match_copy_preserves_overlapping_history() {
+        let mut output = *b"abc______";
+
+        assert_eq!(fast_copy_from_output(&mut output, 3, 3, 6), Some(()));
+        assert_eq!(output, *b"abcabcabc");
+    }
+
+    #[test]
+    fn fast_output_match_copy_rejects_invalid_ranges_without_writing() {
+        let mut output = *b"abc___";
+
+        assert_eq!(fast_copy_from_output(&mut output, 3, 0, 2), None);
+        assert_eq!(output, *b"abc___");
+        assert_eq!(fast_copy_from_output(&mut output, 3, 4, 2), None);
+        assert_eq!(output, *b"abc___");
+        assert_eq!(fast_copy_from_output(&mut output, 3, 3, 4), None);
+        assert_eq!(output, *b"abc___");
     }
 
     #[test]
