@@ -325,42 +325,25 @@ static configuration_table: [config; 10] = [
     },
 ];
 
+fn slide_hash_table(table: &mut [crate::src::deflate::Posf], wsize: crate::stdlib::uInt) {
+    for entry in table.iter_mut().rev() {
+        let position = *entry as ::core::ffi::c_uint;
+        *entry = (if position >= wsize {
+            position.wrapping_sub(wsize as ::core::ffi::c_uint)
+        } else {
+            NIL as ::core::ffi::c_uint
+        }) as crate::src::deflate::Pos as crate::src::deflate::Posf;
+    }
+}
+
 unsafe extern "C" fn slide_hash(mut s: *mut crate::src::deflate::deflate_state) {
-    let mut n: ::core::ffi::c_uint = 0;
-    let mut m: ::core::ffi::c_uint = 0;
-    let mut p: *mut crate::src::deflate::Posf =
-        ::core::ptr::null_mut::<crate::src::deflate::Posf>();
-    let mut wsize: crate::stdlib::uInt = (*s).w_size;
-    n = (*s).hash_size as ::core::ffi::c_uint;
-    p = (*s).head.offset(n as isize);
-    loop {
-        p = p.offset(-1);
-        m = *p as ::core::ffi::c_uint;
-        *p = (if m >= wsize {
-            m.wrapping_sub(wsize as ::core::ffi::c_uint)
-        } else {
-            NIL as ::core::ffi::c_uint
-        }) as crate::src::deflate::Pos as crate::src::deflate::Posf;
-        n = n.wrapping_sub(1);
-        if n == 0 {
-            break;
-        }
-    }
-    n = wsize as ::core::ffi::c_uint;
-    p = (*s).prev.offset(n as isize);
-    loop {
-        p = p.offset(-1);
-        m = *p as ::core::ffi::c_uint;
-        *p = (if m >= wsize {
-            m.wrapping_sub(wsize as ::core::ffi::c_uint)
-        } else {
-            NIL as ::core::ffi::c_uint
-        }) as crate::src::deflate::Pos as crate::src::deflate::Posf;
-        n = n.wrapping_sub(1);
-        if n == 0 {
-            break;
-        }
-    }
+    let wsize = (*s).w_size;
+    // `head` and `prev` are allocated at these exact element counts in
+    // `deflateInit2_()` and `deflateCopy()`.
+    let head = ::core::slice::from_raw_parts_mut((*s).head, (*s).hash_size as usize);
+    let prev = ::core::slice::from_raw_parts_mut((*s).prev, wsize as usize);
+    slide_hash_table(head, wsize);
+    slide_hash_table(prev, wsize);
     (*s).slid = 1 as ::core::ffi::c_int;
 }
 
