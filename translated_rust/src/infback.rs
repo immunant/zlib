@@ -828,13 +828,13 @@ pub unsafe extern "C" fn inflateBack(
     }
     // The stream owns this initialized allocation for the whole decode. Bind
     // it once after the null check so decoder bookkeeping stays reference-based.
-    let state = (*strm).state as *mut crate::src::inflate::inflate_state;
-    (*strm).msg = ::core::ptr::null_mut::<::core::ffi::c_char>();
+    let state = strm.state as *mut crate::src::inflate::inflate_state;
+    strm.msg = ::core::ptr::null_mut::<::core::ffi::c_char>();
     let state_ref = &mut *state;
     inflate_back_reset(state_ref);
-    next = (*strm).next_in as *mut ::core::ffi::c_uchar;
+    next = strm.next_in as *mut ::core::ffi::c_uchar;
     have = (if !next.is_null() {
-        (*strm).avail_in
+        strm.avail_in
     } else {
         0 as crate::stdlib::uInt
     }) as ::core::ffi::c_uint;
@@ -870,7 +870,7 @@ pub unsafe extern "C" fn inflateBack(
                     state_ref.last = last;
                     inflate_back_drop_bits(&mut hold, &mut bits, 3);
                     if inflate_back_start_block(state_ref, block_type) {
-                        (*strm).msg = b"invalid block type\0".as_ptr() as *const ::core::ffi::c_char
+                        strm.msg = b"invalid block type\0".as_ptr() as *const ::core::ffi::c_char
                             as *mut ::core::ffi::c_char;
                         inflate_back_enter_bad(state_ref);
                     }
@@ -930,7 +930,7 @@ pub unsafe extern "C" fn inflateBack(
                     inflate_back_finish_stored_block(state_ref);
                     continue;
                 } else {
-                    (*strm).msg = b"invalid stored block lengths\0".as_ptr()
+                    strm.msg = b"invalid stored block lengths\0".as_ptr()
                         as *const ::core::ffi::c_char
                         as *mut ::core::ffi::c_char;
                     inflate_back_enter_bad(state_ref);
@@ -957,7 +957,7 @@ pub unsafe extern "C" fn inflateBack(
                 inflate_back_set_dynamic_header(state_ref, header);
                 inflate_back_drop_bits(&mut hold, &mut bits, 14);
                 if !inflate_back_dynamic_header_is_valid(header) {
-                    (*strm).msg = b"too many length or distance symbols\0".as_ptr()
+                    strm.msg = b"too many length or distance symbols\0".as_ptr()
                         as *const ::core::ffi::c_char
                         as *mut ::core::ffi::c_char;
                     inflate_back_enter_bad(state_ref);
@@ -1004,7 +1004,7 @@ pub unsafe extern "C" fn inflateBack(
                         &raw mut state_ref.work as *mut ::core::ffi::c_ushort,
                     );
                     if ret != 0 {
-                        (*strm).msg = b"invalid code lengths set\0".as_ptr()
+                        strm.msg = b"invalid code lengths set\0".as_ptr()
                             as *const ::core::ffi::c_char
                             as *mut ::core::ffi::c_char;
                         inflate_back_enter_bad(state_ref);
@@ -1077,7 +1077,7 @@ pub unsafe extern "C" fn inflateBack(
                                     state_ref.have,
                                     repeat_kind,
                                 ) else {
-                                    (*strm).msg = b"invalid bit length repeat\0".as_ptr()
+                                    strm.msg = b"invalid bit length repeat\0".as_ptr()
                                         as *const ::core::ffi::c_char
                                         as *mut ::core::ffi::c_char;
                                     inflate_back_enter_bad(state_ref);
@@ -1095,7 +1095,7 @@ pub unsafe extern "C" fn inflateBack(
                                     state_ref.nlen,
                                     state_ref.ndist,
                                 ) {
-                                    (*strm).msg = b"invalid bit length repeat\0".as_ptr()
+                                    strm.msg = b"invalid bit length repeat\0".as_ptr()
                                         as *const ::core::ffi::c_char
                                         as *mut ::core::ffi::c_char;
                                     inflate_back_enter_bad(state_ref);
@@ -1116,7 +1116,7 @@ pub unsafe extern "C" fn inflateBack(
                             continue;
                         }
                         if !inflate_back_has_end_code(state_ref) {
-                            (*strm).msg = b"invalid code -- missing end-of-block\0".as_ptr()
+                            strm.msg = b"invalid code -- missing end-of-block\0".as_ptr()
                                 as *const ::core::ffi::c_char
                                 as *mut ::core::ffi::c_char;
                             inflate_back_enter_bad(state_ref);
@@ -1139,7 +1139,7 @@ pub unsafe extern "C" fn inflateBack(
                                 &raw mut state_ref.work as *mut ::core::ffi::c_ushort,
                             );
                             if ret != 0 {
-                                (*strm).msg = b"invalid literal/lengths set\0".as_ptr()
+                                strm.msg = b"invalid literal/lengths set\0".as_ptr()
                                     as *const ::core::ffi::c_char
                                     as *mut ::core::ffi::c_char;
                                 inflate_back_enter_bad(state_ref);
@@ -1165,7 +1165,7 @@ pub unsafe extern "C" fn inflateBack(
                                     &raw mut state_ref.work as *mut ::core::ffi::c_ushort,
                                 );
                                 if ret != 0 {
-                                    (*strm).msg = b"invalid distances set\0".as_ptr()
+                                    strm.msg = b"invalid distances set\0".as_ptr()
                                         as *const ::core::ffi::c_char
                                         as *mut ::core::ffi::c_char;
                                     inflate_back_enter_bad(state_ref);
@@ -1193,20 +1193,20 @@ pub unsafe extern "C" fn inflateBack(
             }
         }
         if inflate_back_can_use_fast_path(have, left) {
-            (*strm).next_out = put as *mut crate::stdlib::Bytef;
-            (*strm).avail_out = left as crate::stdlib::uInt;
-            (*strm).next_in = next as *mut crate::stdlib::Bytef;
-            (*strm).avail_in = have as crate::stdlib::uInt;
+            strm.next_out = put as *mut crate::stdlib::Bytef;
+            strm.avail_out = left as crate::stdlib::uInt;
+            strm.next_in = next as *mut crate::stdlib::Bytef;
+            strm.avail_in = have as crate::stdlib::uInt;
             state_ref.hold = hold;
             state_ref.bits = bits;
             crate::src::inffast::inflate_fast(
                 strm as *mut crate::zlib_h::z_stream_s,
                 state_ref.wsize,
             );
-            put = (*strm).next_out as *mut ::core::ffi::c_uchar;
-            left = (*strm).avail_out as ::core::ffi::c_uint;
-            next = (*strm).next_in as *mut ::core::ffi::c_uchar;
-            have = (*strm).avail_in as ::core::ffi::c_uint;
+            put = strm.next_out as *mut ::core::ffi::c_uchar;
+            left = strm.avail_out as ::core::ffi::c_uint;
+            next = strm.next_in as *mut ::core::ffi::c_uchar;
+            have = strm.avail_in as ::core::ffi::c_uint;
             hold = state_ref.hold;
             bits = state_ref.bits;
         } else {
@@ -1283,7 +1283,7 @@ pub unsafe extern "C" fn inflateBack(
                     inflate_back_finish_end_code(state_ref);
                 }
                 InflateBackLengthCode::Invalid => {
-                    (*strm).msg = b"invalid literal/length code\0".as_ptr()
+                    strm.msg = b"invalid literal/length code\0".as_ptr()
                         as *const ::core::ffi::c_char
                         as *mut ::core::ffi::c_char;
                     inflate_back_enter_bad(state_ref);
@@ -1370,7 +1370,7 @@ pub unsafe extern "C" fn inflateBack(
                     inflate_back_drop_bits(&mut hold, &mut bits, here.bits as ::core::ffi::c_uint);
                     match inflate_back_start_distance_code(state_ref, here) {
                         InflateBackDistanceCode::Invalid => {
-                            (*strm).msg = b"invalid distance code\0".as_ptr()
+                            strm.msg = b"invalid distance code\0".as_ptr()
                                 as *const ::core::ffi::c_char
                                 as *mut ::core::ffi::c_char;
                             inflate_back_enter_bad(state_ref);
@@ -1404,7 +1404,7 @@ pub unsafe extern "C" fn inflateBack(
                                 state_ref.whave,
                                 left,
                             ) {
-                                (*strm).msg = b"invalid distance too far back\0".as_ptr()
+                                strm.msg = b"invalid distance too far back\0".as_ptr()
                                     as *const ::core::ffi::c_char
                                     as *mut ::core::ffi::c_char;
                                 inflate_back_enter_bad(state_ref);
@@ -1466,8 +1466,8 @@ pub unsafe extern "C" fn inflateBack(
             ret = crate::zlib_h::Z_BUF_ERROR;
         }
     }
-    (*strm).next_in = next as *mut crate::stdlib::Bytef;
-    (*strm).avail_in = have as crate::stdlib::uInt;
+    strm.next_in = next as *mut crate::stdlib::Bytef;
+    strm.avail_in = have as crate::stdlib::uInt;
     return ret;
 }
 #[export_name = "inflateBack"]
