@@ -1089,14 +1089,18 @@ fn gzeof_result(mode: ::core::ffi::c_int, past: ::core::ffi::c_int) -> ::core::f
     }
 }
 
+fn gzeof_state_result(state: &crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
+    gzeof_result(state.mode, state.past)
+}
+
 #[export_name = "gzeof"]
 pub unsafe extern "C" fn gzeof_ffi(file: crate::zlib_h::gzFile) -> ::core::ffi::c_int {
     if file.is_null() {
         return 0 as ::core::ffi::c_int;
     }
 
-    let state = &*(file as crate::gzguts_h::gz_statep);
-    gzeof_result((*state).mode, (*state).past)
+    let state = unsafe { &*(file as crate::gzguts_h::gz_statep) };
+    gzeof_state_result(state)
 }
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum GzErrorMessage {

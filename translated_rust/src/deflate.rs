@@ -3624,6 +3624,15 @@ fn deflate_slow_should_emit_previous_match(
     previous_match_length >= 3 && match_length <= previous_match_length
 }
 
+fn deflate_slow_max_insert(
+    strstart: crate::stdlib::uInt,
+    lookahead: crate::stdlib::uInt,
+) -> crate::stdlib::uInt {
+    strstart
+        .wrapping_add(lookahead)
+        .wrapping_sub(crate::zutil_h::MIN_MATCH as crate::stdlib::uInt)
+}
+
 unsafe extern "C" fn deflate_slow(
     mut s: *mut crate::src::deflate::deflate_state,
     mut flush: ::core::ffi::c_int,
@@ -3675,10 +3684,8 @@ unsafe extern "C" fn deflate_slow(
             }
         }
         if deflate_slow_should_emit_previous_match((*s).prev_length, (*s).match_length) {
-            let mut max_insert: crate::stdlib::uInt = (*s)
-                .strstart
-                .wrapping_add((*s).lookahead)
-                .wrapping_sub(crate::zutil_h::MIN_MATCH as crate::stdlib::uInt);
+            let mut max_insert: crate::stdlib::uInt =
+                deflate_slow_max_insert((*s).strstart, (*s).lookahead);
             let mut len: crate::zutil_h::uch =
                 (*s).prev_length.wrapping_sub(3 as crate::stdlib::uInt) as crate::zutil_h::uch;
             let mut dist: crate::zutil_h::ush = ((*s).strstart as crate::src::deflate::IPos)
@@ -4614,6 +4621,19 @@ mod tests {
         assert!(super::deflate_slow_should_emit_previous_match(3, 3));
         assert!(super::deflate_slow_should_emit_previous_match(4, 3));
         assert!(!super::deflate_slow_should_emit_previous_match(3, 4));
+    }
+
+    #[test]
+    fn deflate_slow_max_insert_preserves_wrapping_bounds() {
+        assert_eq!(super::deflate_slow_max_insert(10, 7), 14);
+        assert_eq!(
+            super::deflate_slow_max_insert(crate::stdlib::uInt::MAX, 1),
+            0u32.wrapping_sub(crate::zutil_h::MIN_MATCH as crate::stdlib::uInt)
+        );
+        assert_eq!(
+            super::deflate_slow_max_insert(0, 0),
+            crate::stdlib::uInt::MAX - 2
+        );
     }
 
     #[test]
