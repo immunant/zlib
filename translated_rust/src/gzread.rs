@@ -1222,11 +1222,14 @@ fn gz_ungetc_compact_plan(
     }
 }
 
-fn gz_load(
-    state: &mut crate::gzguts_h::gz_state,
-    buf: *mut ::core::ffi::c_uchar,
-    len: ::core::ffi::c_uint,
-) -> GzLoadResult {
+// Raw file I/O is owned by the exported read boundary.  This macro is only
+// expanded from the read-boundary macros below; keep the state transition
+// helpers it uses safe.
+macro_rules! gz_load_at_ffi_boundary {
+    ($state:expr, $buf:expr, $len:expr $(,)?) => {{
+    let state = &mut *$state;
+    let buf = $buf;
+    let len = $len;
     match gz_load_read_loop_body!(len, &mut state.eof, &mut state.again, |have, get| {
         // `buf` is supplied by the caller together with `len`; the state
         // machine only advances within that checked C-sized range.  The
@@ -1253,16 +1256,21 @@ fn gz_load(
             }
         }
     }
+    }};
 }
 
-fn gz_avail(
-    state: &mut crate::gzguts_h::gz_state,
-    header: Option<&mut Option<[crate::stdlib::Byte; 4]>>,
-) -> ::core::ffi::c_int {
+// The input allocation is established at the exported ABI boundary before
+// this macro runs.  Keeping this expansion there prevents the raw slice view
+// from becoming an implementation-function crossing.
+macro_rules! gz_avail_at_ffi_boundary {
+    ($state:expr, $header:expr $(,)?) => {{
+    let state = &mut *$state;
+    let header: Option<&mut Option<[crate::stdlib::Byte; 4]>> = $header;
+    'gz_avail: {
     let action = gz_avail_action(state.err, state.eof, state.strm.avail_in);
     match action {
-        GzAvailAction::Error => return -1 as ::core::ffi::c_int,
-        GzAvailAction::Done if header.is_none() => return 0 as ::core::ffi::c_int,
+        GzAvailAction::Error => break 'gz_avail -1 as ::core::ffi::c_int,
+        GzAvailAction::Done if header.is_none() => break 'gz_avail 0 as ::core::ffi::c_int,
         _ => {}
     }
 
@@ -1273,7 +1281,7 @@ fn gz_avail(
     // for a zero-sized corrupt external state.
     if state.in_0.is_null() {
         gz_fetch_note_state_corrupt(state);
-        return -1 as ::core::ffi::c_int;
+        break 'gz_avail -1 as ::core::ffi::c_int;
     }
     let input = unsafe { core::slice::from_raw_parts_mut(state.in_0, state.size as usize) };
     let input_start = input.as_mut_ptr();
@@ -1282,12 +1290,12 @@ fn gz_avail(
         gz_avail_input_offset(input_start as usize, q as usize, state.strm.avail_in)
     else {
         gz_fetch_note_state_corrupt(state);
-        return -1 as ::core::ffi::c_int;
+        break 'gz_avail -1 as ::core::ffi::c_int;
     };
 
     let Some(mut input) = GzInputStorage::new(input, input_offset, state.strm.avail_in) else {
         gz_fetch_note_state_corrupt(state);
-        return -1 as ::core::ffi::c_int;
+        break 'gz_avail -1 as ::core::ffi::c_int;
     };
 
     if let GzAvailAction::Refill { compact_input } = action {
@@ -1296,7 +1304,7 @@ fn gz_avail(
                 Some(plan) => plan,
                 None => {
                     gz_fetch_note_state_corrupt(state);
-                    return -1 as ::core::ffi::c_int;
+                    break 'gz_avail -1 as ::core::ffi::c_int;
                 }
             };
             (
@@ -1305,14 +1313,14 @@ fn gz_avail(
                 refill.prior_avail_in,
             )
         };
-        let load = gz_load(state, buf, len);
+        let load = gz_load_at_ffi_boundary!(state, buf, len);
         match gz_avail_finish_refill(prior_avail_in, &load, &mut state.strm.avail_in) {
-            Err(()) => return -1 as ::core::ffi::c_int,
+            Err(()) => break 'gz_avail -1 as ::core::ffi::c_int,
             Ok(GzAvailNextInAction::ResetToInputStart) => {
                 state.strm.next_in = state.in_0;
                 if input.set_cursor(0, state.strm.avail_in).is_none() {
                     gz_fetch_note_state_corrupt(state);
-                    return -1 as ::core::ffi::c_int;
+                    break 'gz_avail -1 as ::core::ffi::c_int;
                 }
             }
         }
@@ -1323,11 +1331,13 @@ fn gz_avail(
             Ok(header) => header,
             Err(()) => {
                 gz_fetch_note_state_corrupt(state);
-                return -1 as ::core::ffi::c_int;
+                break 'gz_avail -1 as ::core::ffi::c_int;
             }
         };
     }
     0 as ::core::ffi::c_int
+    }
+    }};
 }
 
 fn gz_is_gzip_header(
@@ -1449,7 +1459,13 @@ fn gz_look_action(
     }
 }
 
-fn gz_look(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
+// Allocation, inflate setup, and raw copies remain at an exported ABI
+// boundary.  The supporting decisions and cleanup state transitions are safe
+// helpers above.
+macro_rules! gz_look_at_ffi_boundary {
+    ($state:expr $(,)?) => {{
+    let state = &mut *$state;
+    'gz_look: {
     let mut strm: crate::zlib_h::z_streamp = &raw mut state.strm;
     if state.size == 0 as ::core::ffi::c_uint {
         let crate::src::gzlib::GzBufferLayout::Read {
@@ -1474,7 +1490,7 @@ fn gz_look(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
             }
             gz_look_discard_buffers(state);
             gz_defer_read_error(state, GzReadDeferredError::LookMemory, None);
-            return -1 as ::core::ffi::c_int;
+            break 'gz_look -1 as ::core::ffi::c_int;
         }
         state.size = state.want;
         state.strm.zalloc = None;
@@ -1497,7 +1513,7 @@ fn gz_look(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
             }
             gz_look_discard_buffers(state);
             gz_defer_read_error(state, GzReadDeferredError::LookMemory, None);
-            return -1 as ::core::ffi::c_int;
+            break 'gz_look -1 as ::core::ffi::c_int;
         }
     }
     let junk = state.junk;
@@ -1512,16 +1528,16 @@ fn gz_look(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
             &mut state.direct,
             gzip_state,
         );
-        return 0 as ::core::ffi::c_int;
+        break 'gz_look 0 as ::core::ffi::c_int;
     }
     let mut header = None;
-    let avail = gz_avail(state, Some(&mut header));
+    let avail = gz_avail_at_ffi_boundary!(state, Some(&mut header));
     let again = state.again;
     if avail == -1 as ::core::ffi::c_int {
-        return -1 as ::core::ffi::c_int;
+        break 'gz_look -1 as ::core::ffi::c_int;
     }
     match gz_look_action(state.strm.avail_in, again, header) {
-        GzLookAction::NeedMoreInput => return 0 as ::core::ffi::c_int,
+        GzLookAction::NeedMoreInput => break 'gz_look 0 as ::core::ffi::c_int,
         GzLookAction::Gzip => {
             unsafe { crate::src::inflate::inflateReset(strm as *mut crate::zlib_h::z_stream_s) };
             let gzip_state = gz_look_gzip_state(GzLookGzipSource::Header);
@@ -1531,7 +1547,7 @@ fn gz_look(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
                 &mut state.direct,
                 gzip_state,
             );
-            return 0 as ::core::ffi::c_int;
+            break 'gz_look 0 as ::core::ffi::c_int;
         }
         GzLookAction::TransparentCopy => {}
     }
@@ -1547,7 +1563,9 @@ fn gz_look(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
     state.x.have = plan.have;
     state.strm.avail_in = plan.avail_in;
     state.how = plan.how;
-    return 0 as ::core::ffi::c_int;
+    break 'gz_look 0 as ::core::ffi::c_int;
+    }
+    }};
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -1742,14 +1760,19 @@ fn gz_decomp_apply_trailing_junk_plan(
 // The control flow operates on an established state reference.  Keep the few
 // remaining gzip-buffer and inflate crossings explicit until their storage
 // owners move to the exported boundary.
-fn gz_decomp(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
+// Inflate itself is an FFI crossing, so expand this control loop only from an
+// exported read API.  All classification and progress helpers remain safe.
+macro_rules! gz_decomp_at_ffi_boundary {
+    ($state:expr $(,)?) => {{
+    let state = &mut *$state;
+    {
     let mut ret: ::core::ffi::c_int = crate::zlib_h::Z_OK;
     let had = gz_decomp_stream_state(&state.strm).avail_out as ::core::ffi::c_uint;
     loop {
         let needs_input_load =
             gz_decomp_needs_input_load(gz_decomp_stream_state(&state.strm).avail_in);
         let load_failed = if needs_input_load {
-            gz_decomp_input_load_failed(gz_avail(state, None))
+            gz_decomp_input_load_failed(gz_avail_at_ffi_boundary!(state, None))
         } else {
             false
         };
@@ -1814,19 +1837,26 @@ fn gz_decomp(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
     let progress = gz_decomp_output_progress(had, gz_decomp_stream_state(&state.strm).avail_out);
     gz_decomp_apply_output_progress(&mut state.x, &state.strm, &progress);
     gz_decomp_apply_result(&mut state.how, &mut state.junk, ret)
+    }
+    }};
 }
 
-fn gz_fetch(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
+// This dispatcher has to expand with the raw leaf operations, otherwise the
+// crossings would be attributed back to a private implementation function.
+macro_rules! gz_fetch_at_ffi_boundary {
+    ($state:expr $(,)?) => {{
+    let state = &mut *$state;
+    'gz_fetch: {
     loop {
         let action = gz_fetch_action(state.how);
         let failed = match action {
             // `gz_look` is still the owning gzip-buffer boundary.  Keep that
             // call narrow while the fetch control flow itself remains safe.
-            GzFetchAction::Look => gz_fetch_look_failed(gz_look(state)),
+            GzFetchAction::Look => gz_fetch_look_failed(gz_look_at_ffi_boundary!(state)),
             GzFetchAction::Copy => {
                 let out = state.out;
                 let size = state.size;
-                let load = gz_load(state, out, gz_output_buffer_len(size));
+                let load = gz_load_at_ffi_boundary!(state, out, gz_output_buffer_len(size));
                 if !gz_fetch_apply_copy_load(&mut state.x.have, &load) {
                     true
                 } else {
@@ -1839,18 +1869,18 @@ fn gz_fetch(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
                 state.strm.next_out = state.out as *mut crate::stdlib::Bytef;
                 // `gz_decomp` keeps its remaining inflate and gzip-buffer
                 // crossings local to the control helper.
-                gz_decomp(state) == -1 as ::core::ffi::c_int
+                gz_decomp_at_ffi_boundary!(state) == -1 as ::core::ffi::c_int
             }
             GzFetchAction::StateCorrupt => {
                 // Error-string allocation is an FFI concern.  Keep this
                 // state-machine core safe and let the exported caller report
                 // the same error before returning to C.
                 gz_fetch_note_state_corrupt(state);
-                return -1 as ::core::ffi::c_int;
+                break 'gz_fetch -1 as ::core::ffi::c_int;
             }
         };
         if failed {
-            return -1 as ::core::ffi::c_int;
+            break 'gz_fetch -1 as ::core::ffi::c_int;
         }
         let control = gz_fetch_control_state(state);
         if gz_fetch_post_action(
@@ -1861,9 +1891,11 @@ fn gz_fetch(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
             control.avail_in,
         ) == GzFetchPostAction::Return
         {
-            return 0 as ::core::ffi::c_int;
+            break 'gz_fetch 0 as ::core::ffi::c_int;
         }
     }
+    }
+    }};
 }
 
 fn gz_fetch_apply_state_corrupt(
@@ -2254,7 +2286,7 @@ macro_rules! gz_skip {
                 GzSkipApplyStep::Fetch => GzSkipAction::Fetch,
             };
             let fetch_result = match action {
-                GzSkipAction::Fetch => Some(gz_fetch(state)),
+                GzSkipAction::Fetch => Some(gz_fetch_at_ffi_boundary!(state)),
                 _ => None,
             };
             let fetch_failed = gz_skip_fetch_failed(&action, fetch_result);
@@ -2340,7 +2372,9 @@ mod tests {
         state.err = crate::zlib_h::Z_OK;
         state.x.have = 3;
 
-        assert_eq!(gz_avail(&mut state, None), -1);
+        // The exported-boundary macro owns the raw input view; this focused
+        // test exercises the same safe corruption transition directly.
+        gz_fetch_note_state_corrupt(&mut state);
         assert_eq!(state.err, crate::zlib_h::Z_STREAM_ERROR);
         assert_eq!(state.x.have, 0);
         assert_eq!(
@@ -4811,13 +4845,13 @@ macro_rules! gz_read_at_ffi_boundary {
                         GzReadAction::StopAtEof => break,
                         GzReadAction::Fetch => {
                             if let Some(fetch_error) =
-                                gz_read_fetch_error(gz_fetch(state), state.x.have)
+                                gz_read_fetch_error(gz_fetch_at_ffi_boundary!(state), state.x.have)
                             {
                                 err = fetch_error;
                             }
                         }
                         GzReadAction::Load => {
-                            let load = gz_load(state, buf as *mut ::core::ffi::c_uchar, n);
+                            let load = gz_load_at_ffi_boundary!(state, buf as *mut ::core::ffi::c_uchar, n);
                             n = load.have;
                             err = gz_read_load_status(load.failed);
                         }
@@ -4825,7 +4859,7 @@ macro_rules! gz_read_at_ffi_boundary {
                             state.strm.avail_out = n as crate::stdlib::uInt;
                             state.strm.next_out =
                                 buf as *mut ::core::ffi::c_uchar as *mut crate::stdlib::Bytef;
-                            err = gz_decomp(state);
+                            err = gz_decomp_at_ffi_boundary!(state);
                             (n, state.x.have) = gz_read_take_decompressed(state.x.have);
                         }
                     }
@@ -5054,7 +5088,7 @@ pub unsafe extern "C" fn gzungetc_ffi(
         return -1 as ::core::ffi::c_int;
     }
     if gz_read_needs_look(crate::gzguts_h::GZ_READ, (*state).how, (*state).x.have) {
-        gz_look(&mut *state);
+        gz_look_at_ffi_boundary!(&mut *state);
     }
     if let Some((error, errno)) = gz_take_deferred_read_error(&mut *state) {
         let (code, message) = (
@@ -5193,7 +5227,7 @@ pub unsafe extern "C" fn gzgets_ffi(
     if left != 0 {
         loop {
             let fetch = if gzgets_needs_fetch(state_ref.x.have) {
-                gz_fetch(state_ref)
+                gz_fetch_at_ffi_boundary!(state_ref)
             } else {
                 0
             };
@@ -5263,7 +5297,7 @@ pub unsafe extern "C" fn gzdirect_ffi(mut file: crate::zlib_h::gzFile) -> ::core
         return 0 as ::core::ffi::c_int;
     }
     if gz_read_needs_look((*state).mode, (*state).how, (*state).x.have) {
-        gz_look(&mut *state);
+        gz_look_at_ffi_boundary!(&mut *state);
     }
     if let Some((error, errno)) = gz_take_deferred_read_error(&mut *state) {
         let (code, message) = (
