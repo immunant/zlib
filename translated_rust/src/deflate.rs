@@ -2767,40 +2767,44 @@ fn deflate_end_status(status: ::core::ffi::c_int) -> ::core::ffi::c_int {
 }
 
 pub unsafe extern "C" fn deflateEnd(mut strm: crate::zlib_h::z_streamp) -> ::core::ffi::c_int {
-    let mut status: ::core::ffi::c_int = 0;
     if deflateStateCheck(strm) != 0 {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    status = (*(*strm).state).status;
-    if !(*(*strm).state).pending_buf.is_null() {
-        Some((*strm).zfree.expect("non-null function pointer")).expect("non-null function pointer")(
-            (*strm).opaque,
-            (*(*strm).state).pending_buf as crate::stdlib::voidpf,
-        );
+    // Snapshot every callback argument before releasing any allocation. A
+    // custom `zfree` is foreign code, so do not retain a Rust borrow of the
+    // stream or state while it runs.
+    let (state_ptr, zfree, opaque) = {
+        let strm = &mut *strm;
+        (
+            strm.state as *mut crate::src::deflate::deflate_state,
+            strm.zfree.expect("non-null function pointer"),
+            strm.opaque,
+        )
+    };
+    let (status, pending_buf, head, prev, window) = {
+        let state = &*state_ptr;
+        (
+            state.status,
+            state.pending_buf,
+            state.head,
+            state.prev,
+            state.window,
+        )
+    };
+    if !pending_buf.is_null() {
+        zfree(opaque, pending_buf as crate::stdlib::voidpf);
     }
-    if !(*(*strm).state).head.is_null() {
-        Some((*strm).zfree.expect("non-null function pointer")).expect("non-null function pointer")(
-            (*strm).opaque,
-            (*(*strm).state).head as crate::stdlib::voidpf,
-        );
+    if !head.is_null() {
+        zfree(opaque, head as crate::stdlib::voidpf);
     }
-    if !(*(*strm).state).prev.is_null() {
-        Some((*strm).zfree.expect("non-null function pointer")).expect("non-null function pointer")(
-            (*strm).opaque,
-            (*(*strm).state).prev as crate::stdlib::voidpf,
-        );
+    if !prev.is_null() {
+        zfree(opaque, prev as crate::stdlib::voidpf);
     }
-    if !(*(*strm).state).window.is_null() {
-        Some((*strm).zfree.expect("non-null function pointer")).expect("non-null function pointer")(
-            (*strm).opaque,
-            (*(*strm).state).window as crate::stdlib::voidpf,
-        );
+    if !window.is_null() {
+        zfree(opaque, window as crate::stdlib::voidpf);
     }
-    Some((*strm).zfree.expect("non-null function pointer")).expect("non-null function pointer")(
-        (*strm).opaque,
-        (*strm).state as crate::stdlib::voidpf,
-    );
-    (*strm).state = ::core::ptr::null_mut::<crate::src::deflate::internal_state>();
+    zfree(opaque, state_ptr as crate::stdlib::voidpf);
+    (&mut *strm).state = ::core::ptr::null_mut::<crate::src::deflate::internal_state>();
     deflate_end_status(status)
 }
 #[export_name = "deflateEnd"]
