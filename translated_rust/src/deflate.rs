@@ -442,8 +442,10 @@ unsafe extern "C" fn read_buf(
         len as crate::__stddef_size_t_h::size_t,
     );
     if (*(*strm).state).wrap == 1 as ::core::ffi::c_int {
-        (*strm).adler =
-            crate::src::adler32::adler32((*strm).adler, buf, len as crate::stdlib::uInt);
+        (*strm).adler = crate::src::adler32::adler32(
+            (*strm).adler,
+            Some(::core::slice::from_raw_parts(buf, len as crate::stdlib::z_size_t)),
+        );
     } else if (*(*strm).state).wrap == 2 as ::core::ffi::c_int {
         (*strm).adler = crate::src::crc32::crc32((*strm).adler, buf, len as crate::stdlib::uInt);
     }
@@ -827,7 +829,13 @@ pub unsafe extern "C" fn deflateSetDictionary(
         return crate::zlib_h::Z_STREAM_ERROR;
     }
     if wrap == 1 as ::core::ffi::c_int {
-        (*strm).adler = crate::src::adler32::adler32((*strm).adler, dictionary, dictLength);
+        (*strm).adler = crate::src::adler32::adler32(
+            (*strm).adler,
+            Some(::core::slice::from_raw_parts(
+                dictionary,
+                dictLength as crate::stdlib::z_size_t,
+            )),
+        );
     }
     (*s).wrap = 0 as ::core::ffi::c_int;
     if dictLength >= (*s).w_size {
@@ -974,11 +982,7 @@ pub unsafe extern "C" fn deflateResetKeep(
             0 as crate::stdlib::uInt,
         )
     } else {
-        crate::src::adler32::adler32(
-            0 as crate::stdlib::uLong,
-            ::core::ptr::null::<crate::stdlib::Bytef>(),
-            0 as crate::stdlib::uInt,
-        )
+        crate::src::adler32::adler32(0 as crate::stdlib::uLong, None)
     };
     (*s).last_flush = -2 as ::core::ffi::c_int;
     crate::src::trees::_tr_init(s as *mut crate::src::deflate::internal_state);
@@ -1574,11 +1578,7 @@ pub unsafe extern "C" fn deflate(
                 ((*strm).adler & 0xffff as crate::stdlib::uLong) as crate::stdlib::uInt,
             );
         }
-        (*strm).adler = crate::src::adler32::adler32(
-            0 as crate::stdlib::uLong,
-            ::core::ptr::null::<crate::stdlib::Bytef>(),
-            0 as crate::stdlib::uInt,
-        );
+        (*strm).adler = crate::src::adler32::adler32(0 as crate::stdlib::uLong, None);
         (*s).status = crate::src::deflate::BUSY_STATE;
         flush_pending(strm);
         if (*s).pending != 0 as crate::zutil_h::ulg {
