@@ -440,8 +440,39 @@ unsafe fn gz_skip(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
             } else {
                 state.x.have
             };
+            let Some(start) = state
+                .out
+                .iter()
+                .position(|byte| std::ptr::eq(byte, state.x.next))
+            else {
+                crate::src::gzlib::gz_error_state(
+                    state,
+                    crate::zlib_h::Z_STREAM_ERROR,
+                    Some(c"state corrupt"),
+                );
+                return -1 as ::core::ffi::c_int;
+            };
+            let Some(next) = start
+                .checked_add(n as usize)
+                .filter(|next| *next <= state.out.len())
+            else {
+                crate::src::gzlib::gz_error_state(
+                    state,
+                    crate::zlib_h::Z_STREAM_ERROR,
+                    Some(c"state corrupt"),
+                );
+                return -1 as ::core::ffi::c_int;
+            };
+            if start > state.out.len() || state.x.have as usize > state.out.len() - start {
+                crate::src::gzlib::gz_error_state(
+                    state,
+                    crate::zlib_h::Z_STREAM_ERROR,
+                    Some(c"state corrupt"),
+                );
+                return -1 as ::core::ffi::c_int;
+            }
             state.x.have = state.x.have.wrapping_sub(n);
-            state.x.next = state.x.next.offset(n as isize);
+            state.x.next = state.out[next..].as_mut_ptr();
             state.x.pos += n as crate::stdlib::off64_t;
             state.skip -= n as crate::stdlib::off64_t;
         } else {
