@@ -1196,6 +1196,7 @@ fn read_buf(
     strm: crate::zlib_h::z_streamp,
     buf: *mut crate::stdlib::Bytef,
     size: ::core::ffi::c_uint,
+    wrap: ::core::ffi::c_int,
 ) -> ::core::ffi::c_uint {
     let stream = unsafe { &mut *strm };
     let len = read_buf_len(stream.avail_in, size);
@@ -1204,7 +1205,6 @@ fn read_buf(
     }
     let input = unsafe { core::slice::from_raw_parts(stream.next_in, len as usize) };
     let output = unsafe { core::slice::from_raw_parts_mut(buf, len as usize) };
-    let state = unsafe { &*(stream.state as *mut crate::src::deflate::deflate_state) };
     let result = read_buf_core(
         input,
         output,
@@ -1212,7 +1212,7 @@ fn read_buf(
         size,
         stream.total_in,
         stream.adler,
-        state.wrap,
+        wrap,
     );
     stream.avail_in = result.avail_in;
     stream.adler = result.adler;
@@ -4402,8 +4402,11 @@ unsafe extern "C" fn deflate_stored(
     mut s: *mut crate::src::deflate::deflate_state,
     mut flush: ::core::ffi::c_int,
 ) -> block_state {
-    let mut min_block: ::core::ffi::c_uint =
-        stored_block_min_size((*s).pending_buf_size, (*s).w_size);
+    let (pending_buf_size, w_size, wrap) = {
+        let state = &*s;
+        (state.pending_buf_size, state.w_size, state.wrap)
+    };
+    let mut min_block: ::core::ffi::c_uint = stored_block_min_size(pending_buf_size, w_size);
     let mut last: ::core::ffi::c_int = 0 as ::core::ffi::c_int;
     let mut len: ::core::ffi::c_uint = 0;
     let mut left: ::core::ffi::c_uint = 0;
@@ -4449,7 +4452,7 @@ unsafe extern "C" fn deflate_stored(
             (*s).block_start += window_len as ::core::ffi::c_long;
         }
         if input_len != 0 {
-            read_buf((*s).strm, (*(*s).strm).next_out, input_len);
+            read_buf((*s).strm, (*(*s).strm).next_out, input_len, wrap);
             (*(*s).strm).next_out = (*(*s).strm).next_out.offset(input_len as isize);
             (*(*s).strm).avail_out = (*(*s).strm).avail_out.wrapping_sub(input_len);
             (*(*s).strm).total_out = (*(*s).strm)
@@ -4541,6 +4544,7 @@ unsafe extern "C" fn deflate_stored(
             (*s).strm,
             (*s).window.wrapping_add((*s).strstart as usize),
             have,
+            wrap,
         );
         (*s).strstart = (*s).strstart.wrapping_add(have);
         (*s).insert = stored_insert_after_input((*s).insert, (*s).w_size, have);
