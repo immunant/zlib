@@ -55,20 +55,20 @@ unsafe extern "C" fn gz_init(mut state: crate::gzguts_h::gz_statep) -> ::core::f
     let input_len = match (state_ref.want as usize).checked_mul(2) {
         Some(len) => len,
         None => {
-            crate::src::gzlib::gz_error(
-                state as *mut crate::gzguts_h::gz_state,
+            crate::src::gzlib::gz_error_static(
+                state_ref,
                 crate::zlib_h::Z_MEM_ERROR,
-                b"out of memory\0".as_ptr() as *const ::core::ffi::c_char,
+                b"out of memory\0",
             );
             return -1;
         }
     };
     let output_len = (state_ref.direct == 0).then_some(state_ref.want as usize);
     let Some(buffers) = crate::gzguts_h::gz_buffers::new(input_len, output_len) else {
-        crate::src::gzlib::gz_error(
-            state as *mut crate::gzguts_h::gz_state,
+        crate::src::gzlib::gz_error_static(
+            state_ref,
             crate::zlib_h::Z_MEM_ERROR,
-            b"out of memory\0".as_ptr() as *const ::core::ffi::c_char,
+            b"out of memory\0",
         );
         return -1;
     };
@@ -89,10 +89,10 @@ unsafe extern "C" fn gz_init(mut state: crate::gzguts_h::gz_statep) -> ::core::f
         );
         if ret != crate::zlib_h::Z_OK {
             state_ref.buffers = None;
-            crate::src::gzlib::gz_error(
-                state as *mut crate::gzguts_h::gz_state,
+            crate::src::gzlib::gz_error_static(
+                state_ref,
                 crate::zlib_h::Z_MEM_ERROR,
-                b"out of memory\0".as_ptr() as *const ::core::ffi::c_char,
+                b"out of memory\0",
             );
             return -1 as ::core::ffi::c_int;
         }
@@ -724,11 +724,7 @@ pub unsafe extern "C" fn gzflush(
     if !gzwrite_state_is_valid(state.mode, state.err, state.again) {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    crate::src::gzlib::gz_error(
-        state as *mut _,
-        crate::zlib_h::Z_OK,
-        ::core::ptr::null::<::core::ffi::c_char>(),
-    );
+    crate::src::gzlib::gz_error_clear(state);
     if !gzflush_is_valid(flush) {
         return crate::zlib_h::Z_STREAM_ERROR;
     }

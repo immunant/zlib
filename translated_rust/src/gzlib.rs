@@ -1162,6 +1162,26 @@ pub(crate) fn gz_error_update_state(
     state.msg = update.message;
 }
 
+/// Clear a prior gzip error without converting an ABI string pointer.  This is
+/// the common operation at the start of a public read or write request.
+pub(crate) fn gz_error_clear(state: &mut crate::gzguts_h::gz_state) {
+    gz_error_update_state(state, crate::zlib_h::Z_OK, None);
+}
+
+/// Store one of zlib's fixed diagnostic strings using the owned state path.
+/// Descriptor and codec diagnostics that arrive as foreign pointers still
+/// need a boundary conversion before they can use this core.
+pub(crate) fn gz_error_static(
+    state: &mut crate::gzguts_h::gz_state,
+    err: ::core::ffi::c_int,
+    message: &'static [u8],
+) {
+    match ::std::ffi::CStr::from_bytes_with_nul(message) {
+        Ok(message) => gz_error_update_state(state, err, Some(message)),
+        Err(_) => gz_error_update_state(state, crate::zlib_h::Z_MEM_ERROR, None),
+    }
+}
+
 // Transitional adapter for the translated gzip I/O routines.  New code uses
 // `gz_error_update_state`; this raw form remains until those routines have
 // been moved behind their boundary adapters.
