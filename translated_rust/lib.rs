@@ -69,10 +69,8 @@ pub mod gzguts_h {
         /// The gzip writer owns its deflater directly.  `strm.state` mirrors
         /// this owner only while legacy stream-oriented helpers still need it.
         pub deflater: Option<Box<crate::src::deflate::deflate_state>>,
-        /// The gzip reader will own its inflater directly as well.  During
-        /// the transition, `strm.state` remains the ABI mirror used by the
-        /// legacy read helpers; new reader code must borrow this owner rather
-        /// than recovering the raw stream link.
+        /// The gzip reader owns its decoder directly.  Its stream carrier is
+        /// only the public counters and buffer-cursor view used by decoding.
         pub inflater: Option<Box<crate::src::inflate::inflate_state>>,
         pub strm: crate::zlib_h::z_stream,
     }

@@ -270,7 +270,8 @@ fn inflate_state_valid(
     strm: &crate::zlib_h::z_stream_s,
     state: &crate::src::inflate::inflate_state,
 ) -> bool {
-    strm.zalloc.is_some() && strm.zfree.is_some() && inflate_state_mode_valid(state)
+    inflate_state_mode_valid(state)
+        && (strm.state.is_null() || (strm.zalloc.is_some() && strm.zfree.is_some()))
 }
 
 fn inflate_state_mode_valid(state: &crate::src::inflate::inflate_state) -> bool {
@@ -373,7 +374,12 @@ pub(crate) fn inflate_reset_gzip(
     state: &mut crate::src::inflate::inflate_state,
 ) -> ::core::ffi::c_int {
     let adler = {
-        let Some(state) = inflate_validate_state(strm, state) else {
+        let state = if strm.state.is_null() {
+            inflate_state_mode_valid(state).then_some(state)
+        } else {
+            inflate_validate_state(strm, state)
+        };
+        let Some(state) = state else {
             return crate::zlib_h::Z_STREAM_ERROR;
         };
         state.wsize = 0;
@@ -383,6 +389,27 @@ pub(crate) fn inflate_reset_gzip(
     };
     inflate_reset_keep_stream(strm, adler);
     crate::zlib_h::Z_OK
+}
+
+/// Initialize the decoder state owned by a gzip reader.
+///
+/// Unlike a public inflate stream, this state is held directly by `gz_state`,
+/// so it has no allocator callbacks or ABI `state` link to validate.  The
+/// stream carrier still receives the same counters and checksum setup that
+/// `inflateInit2_(..., 15 + 16, ...)` would establish.
+pub(crate) fn new_gzip_inflate_state() -> crate::src::inflate::inflate_state {
+    let mut state = new_inflate_state();
+    state.wrap = 6;
+    state.wbits = 15;
+    state.wsize = 0;
+    state.whave = 0;
+    state.wnext = 0;
+    inflate_reset_keep_state(&mut state);
+    state
+}
+
+pub(crate) fn initialize_gzip_stream(strm: &mut crate::zlib_h::z_stream_s) {
+    inflate_reset_keep_stream(strm, Some(0));
 }
 
 #[export_name = "inflateReset"]

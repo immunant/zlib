@@ -16,8 +16,6 @@ pub use crate::stdlib::ssize_t;
 
 pub use crate::src::deflate::internal_state;
 pub use crate::src::inflate::inflate_impl;
-pub use crate::src::inflate::inflateEnd;
-pub use crate::src::inflate::inflateInit2_;
 pub use crate::stdlib::uInt;
 pub use crate::stdlib::uLong;
 pub use crate::stdlib::voidp;
@@ -136,6 +134,38 @@ struct GzUngetcState<'a> {
     output: &'a mut [u8],
     past: &'a mut ::core::ffi::c_int,
     error: GzUngetcErrorState<'a>,
+}
+
+/// Reset the reader-owned inflater while keeping the ABI stream carrier and
+/// decoder owner as separate Rust borrows.
+fn gz_reset_inflater(
+    state: &mut crate::gzguts_h::gz_state,
+) -> bool {
+    let (strm, inflater) = (&mut state.strm, &mut state.inflater);
+    let Some(inflater) = inflater.as_deref_mut() else {
+        return false;
+    };
+    crate::src::inflate::inflate_reset_gzip(strm, inflater) == crate::zlib_h::Z_OK
+}
+
+/// Decode one bounded segment with the gzip reader's owned inflater.
+fn gz_inflate_segment(
+    strm: &mut crate::zlib_h::z_stream_s,
+    inflater: &mut Option<Box<crate::src::inflate::inflate_state>>,
+    input: &[u8],
+    output: &mut [u8],
+    message: &mut Option<&'static ::core::ffi::CStr>,
+) -> Option<::core::ffi::c_int> {
+    let inflater = inflater.as_deref_mut()?;
+    Some(crate::src::inflate::inflate_impl(
+        strm,
+        inflater,
+        crate::zlib_h::Z_NO_FLUSH,
+        input,
+        output,
+        None,
+        message,
+    ))
 }
 
 /// Insert one byte before the unread portion of an owned gzip output buffer.
@@ -315,37 +345,19 @@ unsafe fn gz_look(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
             return -1 as ::core::ffi::c_int;
         }
         state.size = state.want;
-        state.strm.zalloc = None;
-        state.strm.zfree = None;
-        state.strm.opaque = ::core::ptr::null_mut::<::core::ffi::c_void>();
         state.strm.avail_in = 0 as crate::stdlib::uInt;
         state.strm.next_in = ::core::ptr::null_mut::<crate::stdlib::Bytef>();
-        if crate::src::inflate::inflateInit2_(
-            &mut state.strm,
-            15 as ::core::ffi::c_int + 16 as ::core::ffi::c_int,
-            crate::zlib_h::ZLIB_VERSION.as_ptr(),
-            ::core::mem::size_of::<crate::zlib_h::z_stream>() as ::core::ffi::c_int,
-        ) != crate::zlib_h::Z_OK
-        {
-            state.in_0.clear();
-            state.out.clear();
-            state.size = 0 as ::core::ffi::c_uint;
-            crate::src::gzlib::gz_error_state(
-                state,
-                crate::zlib_h::Z_MEM_ERROR,
-                Some(c"out of memory"),
-            );
-            return -1 as ::core::ffi::c_int;
-        }
+        state.inflater = Some(Box::new(crate::src::inflate::new_gzip_inflate_state()));
+        crate::src::inflate::initialize_gzip_stream(&mut state.strm);
     }
     if state.direct == -1 as ::core::ffi::c_int || state.junk == 0 as ::core::ffi::c_int {
-        if let Some(inflate_state) = state
-            .strm
-            .state
-            .cast::<crate::src::inflate::inflate_state>()
-            .as_mut()
-        {
-            crate::src::inflate::inflate_reset_gzip(&mut state.strm, inflate_state);
+        if !gz_reset_inflater(state) {
+            crate::src::gzlib::gz_error_state(
+                state,
+                crate::zlib_h::Z_STREAM_ERROR,
+                Some(c"internal error: inflate stream corrupt"),
+            );
+            return -1;
         }
         state.how = crate::gzguts_h::GZIP;
         state.junk = (state.junk != -1 as ::core::ffi::c_int) as ::core::ffi::c_int;
@@ -376,13 +388,13 @@ unsafe fn gz_look(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
     }
     let input = &state.in_0[input_start..input_start + input_len];
     if input.len() > 3 && input[0] == 31 && input[1] == 139 && input[2] == 8 && input[3] < 32 {
-        if let Some(inflate_state) = state
-            .strm
-            .state
-            .cast::<crate::src::inflate::inflate_state>()
-            .as_mut()
-        {
-            crate::src::inflate::inflate_reset_gzip(&mut state.strm, inflate_state);
+        if !gz_reset_inflater(state) {
+            crate::src::gzlib::gz_error_state(
+                state,
+                crate::zlib_h::Z_STREAM_ERROR,
+                Some(c"internal error: inflate stream corrupt"),
+            );
+            return -1;
         }
         state.how = crate::gzguts_h::GZIP;
         state.junk = 1 as ::core::ffi::c_int;
@@ -461,10 +473,19 @@ unsafe fn gz_decomp(
                 ret = crate::zlib_h::Z_STREAM_ERROR;
                 break;
             }
-            let input = &state.in_0[input_start..input_start + input_len];
             let mut inflate_message = None;
-            let inflate_state = state.strm.state.cast::<crate::src::inflate::inflate_state>();
-            let Some(inflate_state) = inflate_state.as_mut() else {
+            let result = {
+                let input = &state.in_0[input_start..input_start + input_len];
+                let (strm, inflater) = (&mut state.strm, &mut state.inflater);
+                gz_inflate_segment(
+                    strm,
+                    inflater,
+                    input,
+                    &mut output[..output_len],
+                    &mut inflate_message,
+                )
+            };
+            let Some(result) = result else {
                 crate::src::gzlib::gz_error_state(
                     state,
                     crate::zlib_h::Z_STREAM_ERROR,
@@ -473,15 +494,7 @@ unsafe fn gz_decomp(
                 ret = crate::zlib_h::Z_STREAM_ERROR;
                 break;
             };
-            ret = crate::src::inflate::inflate_impl(
-                &mut state.strm,
-                inflate_state,
-                crate::zlib_h::Z_NO_FLUSH,
-                input,
-                &mut output[..output_len],
-                None,
-                &mut inflate_message,
-            );
+            ret = result;
             if state.strm.avail_out < had {
                 state.junk = 0 as ::core::ffi::c_int;
             }
@@ -677,9 +690,8 @@ unsafe fn gz_skip(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
 /// Read into a caller-bounded buffer while keeping the legacy state
 /// transitions behind this safe slice-based operation.
 ///
-/// The gzip state still carries the ABI inflater stream, but its only
-/// remaining unsafe crossings are confined to the skip/fetch operations
-/// below.  Callers only provide a checked output slice.
+/// The gzip state owns its inflater and callers only provide a checked output
+/// slice.
 fn gz_read_buffer(
     state: &mut crate::gzguts_h::gz_state,
     buf: &mut [u8],
@@ -1198,7 +1210,7 @@ pub unsafe fn gzclose_r(mut owned: Box<crate::gzguts_h::gz_state>) -> ::core::ff
             return crate::zlib_h::Z_STREAM_ERROR;
         }
         if state.size != 0 {
-            crate::src::inflate::inflateEnd(&mut state.strm);
+            state.inflater = None;
             state.in_0.clear();
         }
         let err = if state.err == crate::zlib_h::Z_BUF_ERROR {
