@@ -660,24 +660,106 @@ unsafe fn gz_init(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
     return 0 as ::core::ffi::c_int;
 }
 
+// Zero-fill can either complete a deferred seek by itself or precede a normal
+// compressor request.  Keep that distinction in the existing compressor
+// boundary so callers do not need a second unsafe state adapter just to stage
+// zero bytes.
+enum GzSkipMaterialization {
+    None,
+    Continue,
+    Only,
+}
+
 unsafe fn gz_comp(
     state: &mut crate::gzguts_h::gz_state,
     mut flush: ::core::ffi::c_int,
     external_input: Option<&[u8]>,
     retune: Option<GzDeflateRetune>,
     mut close: Option<GzWriteCloseCodec<'_>>,
-    materialize_skip: bool,
+    skip_materialization: GzSkipMaterialization,
 ) -> ::core::ffi::c_int {
+    if matches!(skip_materialization, GzSkipMaterialization::Only) {
+        // Treat pre-existing buffered input and each staged zero chunk as the
+        // same pending compressor request.  The recursive request uses
+        // `None`, so it cannot re-enter this zero-only transition.
+        let mut needs_compress = state.strm.avail_in != 0;
+        let mut staged_zero: Option<GzZeroStep> = None;
+        let mut first = true;
+        loop {
+            if needs_compress {
+                let ret = gz_comp(
+                    state,
+                    crate::zlib_h::Z_NO_FLUSH,
+                    None,
+                    None,
+                    None,
+                    GzSkipMaterialization::None,
+                );
+                if let Some(step) = staged_zero.take() {
+                    let progress = step.finish(state.strm.avail_in, state.x.pos, state.skip);
+                    state.x.pos = progress.position;
+                    state.skip = progress.skip;
+                }
+                if ret == -1 as ::core::ffi::c_int {
+                    return -1;
+                }
+                if !first && state.skip == 0 {
+                    return 0;
+                }
+            }
+            let step = GzZeroStep::new(state.buffers.size, state.skip);
+            if first {
+                if state
+                    .buffers
+                    .input
+                    .as_deref_mut()
+                    .and_then(|input| step.zero_input(input))
+                    .is_none()
+                {
+                    return -1;
+                }
+                first = false;
+            }
+            state.strm.avail_in = step.input_len;
+            let Some(input) = state.buffers.input.as_deref() else {
+                return -1;
+            };
+            let Some(cursor) =
+                crate::src::gzlib::GzCodecInput::from_index(input, 0, step.input_len)
+            else {
+                return -1;
+            };
+            state
+                .buffers
+                .write_owner
+                .as_mut()
+                .unwrap()
+                .set_input(cursor);
+            staged_zero = Some(step);
+            needs_compress = true;
+        }
+    }
     // A normal flush must materialize a deferred forward seek before issuing
     // its compressor request.  Keep that ordered transition at this existing
     // codec boundary: close still records a failed zero-fill and continues
     // its cleanup, while a flush returns that failure before compression.
-    if state.skip != 0 && (materialize_skip || close.is_some()) {
-        let status = gz_zero(state);
+    if state.skip != 0
+        && (matches!(skip_materialization, GzSkipMaterialization::Continue) || close.is_some())
+    {
+        let status = gz_comp(
+            state,
+            crate::zlib_h::Z_NO_FLUSH,
+            None,
+            None,
+            None,
+            GzSkipMaterialization::Only,
+        );
         if let Some(close) = close.as_mut() {
             close.result.record_codec_result(status, state.err);
         }
-        if materialize_skip && status == -1 as ::core::ffi::c_int {
+        if matches!(skip_materialization, GzSkipMaterialization::Continue)
+            && status == -1 as ::core::ffi::c_int
+        {
             return -1;
         }
     }
@@ -999,61 +1081,6 @@ unsafe fn gz_comp(
     finish_close(state, 0 as ::core::ffi::c_int)
 }
 
-unsafe fn gz_zero(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
-    // Treat pre-existing buffered input and each staged zero chunk as the
-    // same pending compressor request.  This keeps the zero-fill policy in
-    // the pointer-free `GzZeroStep`/`GzZeroProgress` pair and leaves a single
-    // compressor boundary below this ABI-shaped state adapter.
-    let mut needs_compress = state.strm.avail_in != 0;
-    let mut staged_zero: Option<GzZeroStep> = None;
-    let mut first = true;
-    loop {
-        if needs_compress {
-            let ret = gz_comp(state, crate::zlib_h::Z_NO_FLUSH, None, None, None, false);
-            if let Some(step) = staged_zero.take() {
-                let progress = step.finish(state.strm.avail_in, state.x.pos, state.skip);
-                state.x.pos = progress.position;
-                state.skip = progress.skip;
-            }
-            if ret == -1 as ::core::ffi::c_int {
-                return -1 as ::core::ffi::c_int;
-            }
-            if !first && state.skip == 0 {
-                return 0;
-            }
-        }
-        let step = GzZeroStep::new(state.buffers.size, state.skip);
-        if first {
-            if state
-                .buffers
-                .input
-                .as_deref_mut()
-                .and_then(|input| step.zero_input(input))
-                .is_none()
-            {
-                return -1;
-            }
-            first = false;
-        }
-        state.strm.avail_in = step.input_len;
-        let Some(input) = state.buffers.input.as_deref() else {
-            return -1;
-        };
-        let Some(cursor) = crate::src::gzlib::GzCodecInput::from_index(input, 0, step.input_len)
-        else {
-            return -1;
-        };
-        state
-            .buffers
-            .write_owner
-            .as_mut()
-            .unwrap()
-            .set_input(cursor);
-        staged_zero = Some(step);
-        needs_compress = true;
-    }
-}
-
 // This is the only ABI-shaped write adapter.  The persistent `GzWriteOwner`
 // supplies the owned input cursor and deflater lifecycle; the adapter merely
 // projects those bounded requests through the legacy gzip/deflate state.
@@ -1084,7 +1111,15 @@ unsafe fn gzip_write_state_adapter(
             let GzFlushPlan::Dispatch { flush } = plan else {
                 return crate::zlib_h::Z_STREAM_ERROR as crate::stdlib::z_size_t;
             };
-            if gz_comp(state, flush, None, None, None, true) == -1 {
+            if gz_comp(
+                state,
+                flush,
+                None,
+                None,
+                None,
+                GzSkipMaterialization::Continue,
+            ) == -1
+            {
                 return state.err as crate::stdlib::z_size_t;
             }
             return state.err as crate::stdlib::z_size_t;
@@ -1097,7 +1132,16 @@ unsafe fn gzip_write_state_adapter(
     {
         return 0 as crate::stdlib::z_size_t;
     }
-    if state.skip != 0 && gz_zero(state) == -1 as ::core::ffi::c_int {
+    if state.skip != 0
+        && gz_comp(
+            state,
+            crate::zlib_h::Z_NO_FLUSH,
+            None,
+            None,
+            None,
+            GzSkipMaterialization::Only,
+        ) == -1 as ::core::ffi::c_int
+    {
         return 0 as crate::stdlib::z_size_t;
     }
     if request.len() < state.buffers.size as crate::stdlib::z_size_t {
@@ -1142,8 +1186,14 @@ unsafe fn gzip_write_state_adapter(
             if request.is_empty() {
                 break;
             }
-            if gz_comp(state, crate::zlib_h::Z_NO_FLUSH, None, None, None, false)
-                == -1 as ::core::ffi::c_int
+            if gz_comp(
+                state,
+                crate::zlib_h::Z_NO_FLUSH,
+                None,
+                None,
+                None,
+                GzSkipMaterialization::None,
+            ) == -1 as ::core::ffi::c_int
             {
                 return request.partial_or_zero(state.again);
             }
@@ -1154,8 +1204,14 @@ unsafe fn gzip_write_state_adapter(
             .write_owner
             .as_ref()
             .is_some_and(|owner| owner.input().available() != 0)
-            && gz_comp(state, crate::zlib_h::Z_NO_FLUSH, None, None, None, false)
-                == -1 as ::core::ffi::c_int
+            && gz_comp(
+                state,
+                crate::zlib_h::Z_NO_FLUSH,
+                None,
+                None,
+                None,
+                GzSkipMaterialization::None,
+            ) == -1 as ::core::ffi::c_int
         {
             return 0 as crate::stdlib::z_size_t;
         }
@@ -1200,7 +1256,7 @@ unsafe fn gzip_write_state_adapter(
                 Some(request.remaining()),
                 None,
                 None,
-                false,
+                GzSkipMaterialization::None,
             );
             let consumed = chunk.consumed(state.strm.avail_in);
             state.x.pos += consumed as crate::stdlib::off64_t;
@@ -1361,7 +1417,16 @@ unsafe fn gzsetparams(
     let GzSetParamsPlan::Change { materialize_skip } = plan else {
         return crate::zlib_h::Z_OK;
     };
-    if materialize_skip && gz_zero(state) == -1 as ::core::ffi::c_int {
+    if materialize_skip
+        && gz_comp(
+            state,
+            crate::zlib_h::Z_NO_FLUSH,
+            None,
+            None,
+            None,
+            GzSkipMaterialization::Only,
+        ) == -1 as ::core::ffi::c_int
+    {
         return state.err;
     }
     if gzsetparams_needs_retune(state.buffers.size) {
@@ -1371,7 +1436,7 @@ unsafe fn gzsetparams(
             None,
             Some(GzDeflateRetune { level, strategy }),
             None,
-            false,
+            GzSkipMaterialization::None,
         ) == -1 as ::core::ffi::c_int
         {
             return state.err;
@@ -1407,7 +1472,7 @@ pub unsafe fn gzclose_w(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c
             result: &mut result,
             deflater_closed: &mut deflater_closed,
         }),
-        false,
+        GzSkipMaterialization::None,
     );
     let mut resources = GzWriteCloseResources::take(
         &mut state.buffers,
