@@ -749,7 +749,14 @@ fn inflate_window_metadata_is_valid(
     if state.wsize == 0 {
         return state.wnext == 0 && state.whave == 0;
     }
-    state.wsize as usize == layout.len && state.wnext < state.wsize && state.whave <= state.wsize
+    // Any established window cursor must have the matching owned allocation.
+    // This rejects corrupted state before an `Existing` access could hand a
+    // missing window to match-copy or fast-decode code. A zero-sized cursor
+    // state remains valid while the inflater is waiting to learn wbits.
+    !state.window.is_null()
+        && state.wsize as usize == layout.len
+        && state.wnext < state.wsize
+        && state.whave <= state.wsize
 }
 
 fn update_window(
