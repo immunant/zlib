@@ -340,6 +340,31 @@ fn inflate_mark_value(
         }) as ::core::ffi::c_long
 }
 
+fn inflate_reset2_params(
+    window_bits: ::core::ffi::c_int,
+) -> Option<(::core::ffi::c_int, ::core::ffi::c_uint)> {
+    let (wrap, window_bits) = if window_bits < 0 {
+        if window_bits < -15 {
+            return None;
+        }
+        (0, -window_bits)
+    } else {
+        let wrap = (window_bits >> 4) + 5;
+        let window_bits = if window_bits < 48 {
+            window_bits & 15
+        } else {
+            window_bits
+        };
+        (wrap, window_bits)
+    };
+
+    if window_bits != 0 && !(8..=15).contains(&window_bits) {
+        return None;
+    }
+
+    Some((wrap, window_bits as ::core::ffi::c_uint))
+}
+
 unsafe extern "C" fn inflateStateCheck(mut strm: crate::zlib_h::z_streamp) -> ::core::ffi::c_int {
     let mut state: *mut crate::src::inflate::inflate_state =
         ::core::ptr::null_mut::<crate::src::inflate::inflate_state>();
@@ -412,33 +437,18 @@ pub unsafe extern "C" fn inflateReset_ffi(
 }
 pub unsafe extern "C" fn inflateReset2(
     mut strm: crate::zlib_h::z_streamp,
-    mut windowBits: ::core::ffi::c_int,
+    windowBits: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
-    let mut wrap: ::core::ffi::c_int = 0;
     let mut state: *mut crate::src::inflate::inflate_state =
         ::core::ptr::null_mut::<crate::src::inflate::inflate_state>();
     if inflateStateCheck(strm) != 0 {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
     state = (*strm).state as *mut crate::src::inflate::inflate_state;
-    if windowBits < 0 as ::core::ffi::c_int {
-        if windowBits < -15 as ::core::ffi::c_int {
-            return crate::zlib_h::Z_STREAM_ERROR;
-        }
-        wrap = 0 as ::core::ffi::c_int;
-        windowBits = -windowBits;
-    } else {
-        wrap = (windowBits >> 4 as ::core::ffi::c_int) + 5 as ::core::ffi::c_int;
-        if windowBits < 48 as ::core::ffi::c_int {
-            windowBits &= 15 as ::core::ffi::c_int;
-        }
-    }
-    if windowBits != 0
-        && (windowBits < 8 as ::core::ffi::c_int || windowBits > 15 as ::core::ffi::c_int)
-    {
+    let Some((wrap, window_bits)) = inflate_reset2_params(windowBits) else {
         return crate::zlib_h::Z_STREAM_ERROR;
-    }
-    if !(*state).window.is_null() && (*state).wbits != windowBits as ::core::ffi::c_uint {
+    };
+    if !(*state).window.is_null() && (*state).wbits != window_bits {
         Some((*strm).zfree.expect("non-null function pointer")).expect("non-null function pointer")(
             (*strm).opaque,
             (*state).window as crate::stdlib::voidpf,
@@ -446,7 +456,7 @@ pub unsafe extern "C" fn inflateReset2(
         (*state).window = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
     }
     (*state).wrap = wrap;
-    (*state).wbits = windowBits as ::core::ffi::c_uint;
+    (*state).wbits = window_bits;
     return inflateReset(strm);
 }
 #[export_name = "inflateReset2"]
@@ -2603,9 +2613,9 @@ pub unsafe extern "C" fn inflateCodesUsed_ffi(
 mod tests {
     use super::{
         apply_window_update, dynamic_header_counts, inflate_mark_value, inflate_mode_is_valid,
-        inflate_prime_update, inflate_state_metadata_is_valid, inflate_sync_search_core,
-        initial_window_metadata, syncsearch_safe, window_update_plan, InflatePrimeUpdate,
-        InflateSyncSearch, BAD, CODE_LENGTH_ORDER, COPY_1, HEAD, MATCH, SYNC,
+        inflate_prime_update, inflate_reset2_params, inflate_state_metadata_is_valid,
+        inflate_sync_search_core, initial_window_metadata, syncsearch_safe, window_update_plan,
+        InflatePrimeUpdate, InflateSyncSearch, BAD, CODE_LENGTH_ORDER, COPY_1, HEAD, MATCH, SYNC,
     };
 
     #[test]
@@ -2676,6 +2686,22 @@ mod tests {
             inflate_prime_update(0, 20, 16, 0),
             InflatePrimeUpdate::StreamError
         );
+    }
+
+    #[test]
+    fn inflate_reset2_params_decodes_raw_and_wrapped_windows() {
+        assert_eq!(inflate_reset2_params(-15), Some((0, 15)));
+        assert_eq!(inflate_reset2_params(0), Some((5, 0)));
+        assert_eq!(inflate_reset2_params(15), Some((5, 15)));
+        assert_eq!(inflate_reset2_params(31), Some((6, 15)));
+        assert_eq!(inflate_reset2_params(32), Some((7, 0)));
+    }
+
+    #[test]
+    fn inflate_reset2_params_rejects_invalid_windows() {
+        assert_eq!(inflate_reset2_params(-16), None);
+        assert_eq!(inflate_reset2_params(7), None);
+        assert_eq!(inflate_reset2_params(48), None);
     }
 
     #[test]

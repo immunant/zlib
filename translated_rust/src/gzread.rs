@@ -141,6 +141,17 @@ fn gz_fread_items_read(
     }
 }
 
+fn gzgetc_read_result(
+    bytes_read: crate::stdlib::z_size_t,
+    byte: ::core::ffi::c_uchar,
+) -> ::core::ffi::c_int {
+    if bytes_read < 1 as crate::stdlib::z_size_t {
+        -1 as ::core::ffi::c_int
+    } else {
+        byte as ::core::ffi::c_int
+    }
+}
+
 fn gz_read_chunk_len(
     len: crate::stdlib::z_size_t,
     buffered: ::core::ffi::c_uint,
@@ -968,6 +979,17 @@ mod tests {
     }
 
     #[test]
+    fn gzgetc_read_result_returns_error_when_no_byte_was_read() {
+        assert_eq!(gzgetc_read_result(0, 42), -1);
+    }
+
+    #[test]
+    fn gzgetc_read_result_returns_the_read_byte() {
+        assert_eq!(gzgetc_read_result(1, 0), 0);
+        assert_eq!(gzgetc_read_result(1, ::core::ffi::c_uchar::MAX), 255);
+    }
+
+    #[test]
     fn gz_fread_request_len_accepts_representable_products() {
         assert_eq!(
             gz_fread_request_len(crate::stdlib::z_size_t::MAX, 1),
@@ -1600,16 +1622,14 @@ pub unsafe extern "C" fn gzgetc(mut file: crate::zlib_h::gzFile) -> ::core::ffi:
         (*state).x.next = (*state).x.next.offset(1);
         return *c2rust_fresh2 as ::core::ffi::c_int;
     }
-    return if gz_read(
-        state,
-        &raw mut buf as *mut ::core::ffi::c_uchar as crate::stdlib::voidp,
-        1 as crate::stdlib::z_size_t,
-    ) < 1 as crate::stdlib::z_size_t
-    {
-        -1 as ::core::ffi::c_int
-    } else {
-        buf[0 as ::core::ffi::c_int as usize] as ::core::ffi::c_int
-    };
+    return gzgetc_read_result(
+        gz_read(
+            state,
+            &raw mut buf as *mut ::core::ffi::c_uchar as crate::stdlib::voidp,
+            1 as crate::stdlib::z_size_t,
+        ),
+        buf[0 as ::core::ffi::c_int as usize],
+    );
 }
 #[export_name = "gzgetc"]
 

@@ -93,6 +93,10 @@ fn gzclearerr_core(
     true
 }
 
+fn gz_error_clears_buffer(err: ::core::ffi::c_int, again: ::core::ffi::c_int) -> bool {
+    err != crate::zlib_h::Z_OK && err != crate::zlib_h::Z_BUF_ERROR && again == 0
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 struct GzResetFields {
     mode: ::core::ffi::c_int,
@@ -994,7 +998,7 @@ pub unsafe extern "C" fn gz_error(
         }
         (*state).msg = ::core::ptr::null_mut::<::core::ffi::c_char>();
     }
-    if err != crate::zlib_h::Z_OK && err != crate::zlib_h::Z_BUF_ERROR && (*state).again == 0 {
+    if gz_error_clears_buffer(err, (*state).again) {
         (*state).x.have = 0 as ::core::ffi::c_uint;
     }
     (*state).err = err;
@@ -1045,12 +1049,13 @@ pub unsafe extern "C" fn gz_intmax_ffi() -> ::core::ffi::c_uint {
 #[cfg(test)]
 mod tests {
     use super::{
-        gz_clear_read_flags, gz_is_read_or_write_mode, gz_legacy_offset_result,
-        gz_open_offset_plan, gz_open_recorded_offset, gz_open_should_set_close_on_exec,
-        gz_open_should_set_nonblocking, gz_parse_open_mode, gz_post_open_metadata, gz_prepare_open,
-        gz_reset_core, gzbuffer_normalized_want, gzclearerr_core, gzerror_core,
-        gzoffset64_adjust_for_buffered_read, gzrewind_request_is_valid, gzseek_adjust_offset,
-        gzseek_can_fast_forward, gzseek_clears_pending_skip, gzseek_error_allows_positioning,
+        gz_clear_read_flags, gz_error_clears_buffer, gz_is_read_or_write_mode,
+        gz_legacy_offset_result, gz_open_offset_plan, gz_open_recorded_offset,
+        gz_open_should_set_close_on_exec, gz_open_should_set_nonblocking, gz_parse_open_mode,
+        gz_post_open_metadata, gz_prepare_open, gz_reset_core, gzbuffer_normalized_want,
+        gzclearerr_core, gzerror_core, gzoffset64_adjust_for_buffered_read,
+        gzrewind_request_is_valid, gzseek_adjust_offset, gzseek_can_fast_forward,
+        gzseek_clears_pending_skip, gzseek_error_allows_positioning,
         gzseek_fast_forward_lseek_offset, gzseek_fast_forward_reset,
         gzseek_plan_read_buffer_consumption, gzseek_plan_remaining_offset,
         gzseek_read_buffer_consumed, gzseek_request_is_valid, gztell64_core, GzErrorMessage,
@@ -1223,6 +1228,14 @@ mod tests {
     #[test]
     fn gzbuffer_rejects_sizes_that_overflow_when_doubled() {
         assert_eq!(gzbuffer_normalized_want(::core::ffi::c_uint::MAX), None);
+    }
+
+    #[test]
+    fn gz_error_clears_buffer_only_for_nonrecoverable_errors_without_retry() {
+        assert!(gz_error_clears_buffer(crate::zlib_h::Z_MEM_ERROR, 0));
+        assert!(!gz_error_clears_buffer(crate::zlib_h::Z_OK, 0));
+        assert!(!gz_error_clears_buffer(crate::zlib_h::Z_BUF_ERROR, 0));
+        assert!(!gz_error_clears_buffer(crate::zlib_h::Z_MEM_ERROR, 1));
     }
 
     #[test]

@@ -78,6 +78,14 @@ fn gzwrite_len_fits_int(len: ::core::ffi::c_uint) -> bool {
     (len as ::core::ffi::c_int) >= 0
 }
 
+fn gz_write_state_is_usable(
+    mode: ::core::ffi::c_int,
+    err: ::core::ffi::c_int,
+    again: ::core::ffi::c_int,
+) -> bool {
+    mode == crate::gzguts_h::GZ_WRITE && (err == crate::zlib_h::Z_OK || again != 0)
+}
+
 fn gzflush_mode_is_valid(flush: ::core::ffi::c_int) -> bool {
     flush >= 0 && flush <= crate::zlib_h::Z_FINISH
 }
@@ -573,9 +581,7 @@ pub unsafe extern "C" fn gzwrite(
         return 0 as ::core::ffi::c_int;
     }
     state = file as crate::gzguts_h::gz_statep;
-    if (*state).mode != crate::gzguts_h::GZ_WRITE
-        || (*state).err != crate::zlib_h::Z_OK && (*state).again == 0
-    {
+    if !gz_write_state_is_usable((*state).mode, (*state).err, (*state).again) {
         return 0 as ::core::ffi::c_int;
     }
     crate::src::gzlib::gz_error(
@@ -892,10 +898,10 @@ mod tests {
         gz_comp_reset_after_flush, gz_comp_skips_empty_flush, gz_comp_write_chunk_len,
         gz_write_apply_direct_progress, gz_write_buffered_copy_len, gz_write_buffered_progress,
         gz_write_chunk_consumed_len, gz_write_chunk_len, gz_write_errno_is_retryable,
-        gz_write_error_result, gz_write_needs_pending_flush, gz_write_uses_buffered_path,
-        gz_zero_apply_progress, gz_zero_chunk_len, gzflush_mode_is_valid, gzfwrite_len,
-        gzputc_result, gzputs_len_fits_int, gzputs_result, gzsetparams_settings_match,
-        gzwrite_len_fits_int,
+        gz_write_error_result, gz_write_needs_pending_flush, gz_write_state_is_usable,
+        gz_write_uses_buffered_path, gz_zero_apply_progress, gz_zero_chunk_len,
+        gzflush_mode_is_valid, gzfwrite_len, gzputc_result, gzputs_len_fits_int, gzputs_result,
+        gzsetparams_settings_match, gzwrite_len_fits_int,
     };
 
     #[test]
@@ -1140,6 +1146,34 @@ mod tests {
             (::core::ffi::c_int::MAX as ::core::ffi::c_uint) + 1
         ));
         assert!(!gzwrite_len_fits_int(::core::ffi::c_uint::MAX));
+    }
+
+    #[test]
+    fn gz_write_state_is_usable_for_writable_healthy_or_retryable_states() {
+        assert!(gz_write_state_is_usable(
+            crate::gzguts_h::GZ_WRITE,
+            crate::zlib_h::Z_OK,
+            0
+        ));
+        assert!(gz_write_state_is_usable(
+            crate::gzguts_h::GZ_WRITE,
+            crate::zlib_h::Z_ERRNO,
+            1
+        ));
+    }
+
+    #[test]
+    fn gz_write_state_is_usable_rejects_wrong_mode_and_unretryable_errors() {
+        assert!(!gz_write_state_is_usable(
+            crate::gzguts_h::GZ_WRITE + 1,
+            crate::zlib_h::Z_OK,
+            1
+        ));
+        assert!(!gz_write_state_is_usable(
+            crate::gzguts_h::GZ_WRITE,
+            crate::zlib_h::Z_ERRNO,
+            0
+        ));
     }
 
     #[test]
