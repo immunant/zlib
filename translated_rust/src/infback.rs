@@ -396,15 +396,23 @@ fn inflate_back_copy_match(
     destination: usize,
     source: InflateBackMatchSource,
     count: ::core::ffi::c_uint,
-) {
+) -> Option<()> {
+    let count = usize::try_from(count).ok()?;
     let source = match source {
-        InflateBackMatchSource::Ahead(distance) => destination + distance,
-        InflateBackMatchSource::Behind(distance) => destination - distance,
+        InflateBackMatchSource::Ahead(distance) => destination.checked_add(distance)?,
+        InflateBackMatchSource::Behind(distance) => destination.checked_sub(distance)?,
     };
+    destination
+        .checked_add(count)?
+        .le(&window.len())
+        .then_some(())?;
+    source.checked_add(count)?.le(&window.len()).then_some(())?;
 
-    for offset in 0..count as usize {
-        window[destination + offset] = window[source + offset];
+    for offset in 0..count {
+        let byte = *window.get(source.checked_add(offset)?)?;
+        *window.get_mut(destination.checked_add(offset)?)? = byte;
     }
+    Some(())
 }
 
 fn inflate_back_block_header(
@@ -1167,7 +1175,17 @@ pub unsafe extern "C" fn inflateBack(
                                     state.window,
                                     state.wsize as usize,
                                 );
-                                inflate_back_copy_match(window, destination, source, planned_copy);
+                                if inflate_back_copy_match(
+                                    window,
+                                    destination,
+                                    source,
+                                    planned_copy,
+                                )
+                                .is_none()
+                                {
+                                    state.mode = crate::src::inflate::BAD;
+                                    break;
+                                }
                                 put = put.wrapping_add(planned_copy as usize);
                                 state.length = state.length.wrapping_sub(planned_copy);
                                 left = left.wrapping_sub(planned_copy);
@@ -1449,7 +1467,9 @@ mod tests {
     fn inflate_back_copy_match_reuses_new_output_for_overlapping_back_references() {
         let mut window = [b'a', b'b', 0, 0, 0, 0, 0, 0];
 
-        inflate_back_copy_match(&mut window, 2, InflateBackMatchSource::Behind(2), 6);
+        assert!(
+            inflate_back_copy_match(&mut window, 2, InflateBackMatchSource::Behind(2), 6).is_some()
+        );
 
         assert_eq!(window, [b'a', b'b', b'a', b'b', b'a', b'b', b'a', b'b']);
     }
@@ -1458,9 +1478,29 @@ mod tests {
     fn inflate_back_copy_match_reads_wrapped_history_ahead_of_output() {
         let mut window = [0, 0, 0, 0, b'w', b'x', b'y', b'z'];
 
-        inflate_back_copy_match(&mut window, 0, InflateBackMatchSource::Ahead(4), 4);
+        assert!(
+            inflate_back_copy_match(&mut window, 0, InflateBackMatchSource::Ahead(4), 4).is_some()
+        );
 
         assert_eq!(window, [b'w', b'x', b'y', b'z', b'w', b'x', b'y', b'z']);
+    }
+
+    #[test]
+    fn inflate_back_copy_match_rejects_ranges_without_mutating_the_window() {
+        let original = [b'a', b'b', b'c', b'd'];
+
+        for (destination, source, count) in [
+            (1, InflateBackMatchSource::Behind(2), 1),
+            (1, InflateBackMatchSource::Ahead(3), 1),
+            (3, InflateBackMatchSource::Behind(1), 2),
+        ] {
+            let mut window = original;
+            assert_eq!(
+                inflate_back_copy_match(&mut window, destination, source, count),
+                None
+            );
+            assert_eq!(window, original);
+        }
     }
 
     #[test]
