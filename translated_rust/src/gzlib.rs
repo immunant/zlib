@@ -64,25 +64,31 @@ pub use crate::zlib_h::Z_MEM_ERROR;
 pub use crate::zlib_h::Z_OK;
 pub use crate::zlib_h::Z_RLE;
 
-unsafe extern "C" fn gz_reset(mut state: crate::gzguts_h::gz_statep) {
-    (*state).x.have = 0 as ::core::ffi::c_uint;
-    if (*state).mode == crate::gzguts_h::GZ_READ {
-        (*state).eof = 0 as ::core::ffi::c_int;
-        (*state).past = 0 as ::core::ffi::c_int;
-        (*state).how = crate::gzguts_h::LOOK;
-        (*state).junk = -1 as ::core::ffi::c_int;
+/// Reset the scalar gzip state after the caller has restored its descriptor
+/// position.  Error-message ownership remains at the raw boundary.
+fn gz_reset_state(state: &mut crate::gzguts_h::gz_state) {
+    state.x.have = 0;
+    if state.mode == crate::gzguts_h::GZ_READ {
+        state.eof = 0;
+        state.past = 0;
+        state.how = crate::gzguts_h::LOOK;
+        state.junk = -1;
     } else {
-        (*state).reset = 0 as ::core::ffi::c_int;
+        state.reset = 0;
     }
-    (*state).again = 0 as ::core::ffi::c_int;
-    (*state).skip = 0 as crate::stdlib::off64_t;
+    state.again = 0;
+    state.skip = 0;
+    state.x.pos = 0;
+    state.strm.avail_in = 0;
+}
+
+unsafe extern "C" fn gz_reset(mut state: crate::gzguts_h::gz_statep) {
+    gz_reset_state(&mut *state);
     gz_error(
         state,
         crate::zlib_h::Z_OK,
         ::core::ptr::null::<::core::ffi::c_char>(),
     );
-    (*state).x.pos = 0 as crate::stdlib::off64_t;
-    (*state).strm.avail_in = 0 as crate::stdlib::uInt;
 }
 
 unsafe extern "C" fn gz_open(
@@ -366,6 +372,14 @@ pub unsafe extern "C" fn gzbuffer_ffi(
         None => -1,
     }
 }
+
+/// Determine whether a gzip stream can be rewound before accessing its
+/// descriptor or mutating its state.
+fn gzrewind_is_valid(mode: ::core::ffi::c_int, err: ::core::ffi::c_int) -> bool {
+    mode == crate::gzguts_h::GZ_READ
+        && (err == crate::zlib_h::Z_OK || err == crate::zlib_h::Z_BUF_ERROR)
+}
+
 pub unsafe extern "C" fn gzrewind(mut file: crate::zlib_h::gzFile) -> ::core::ffi::c_int {
     let mut state: crate::gzguts_h::gz_statep =
         ::core::ptr::null_mut::<crate::gzguts_h::gz_state>();
@@ -373,9 +387,7 @@ pub unsafe extern "C" fn gzrewind(mut file: crate::zlib_h::gzFile) -> ::core::ff
         return -1 as ::core::ffi::c_int;
     }
     state = file as crate::gzguts_h::gz_statep;
-    if (*state).mode != crate::gzguts_h::GZ_READ
-        || (*state).err != crate::zlib_h::Z_OK && (*state).err != crate::zlib_h::Z_BUF_ERROR
-    {
+    if !gzrewind_is_valid((*state).mode, (*state).err) {
         return -1 as ::core::ffi::c_int;
     }
     if crate::stdlib::lseek64(
