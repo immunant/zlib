@@ -200,7 +200,9 @@ pub use crate::zlib_h::Z_TREES;
 pub use crate::zlib_h::Z_VERSION_ERROR;
 pub use crate::zutil_h::DEF_WBITS;
 
-unsafe extern "C" fn inflateStateCheck(mut strm: crate::zlib_h::z_streamp) -> ::core::ffi::c_int {
+// This raw-state adapter is used only by translated Rust implementations;
+// exported wrappers bind their own ABI arguments.
+unsafe fn inflateStateCheck(mut strm: crate::zlib_h::z_streamp) -> ::core::ffi::c_int {
     if strm.is_null() {
         return 1 as ::core::ffi::c_int;
     }
@@ -568,7 +570,9 @@ fn update_window(
     }
 }
 
-unsafe extern "C" fn updatewindow(
+// Updating a bound inflater window is an internal operation, not an ABI
+// entry point. Its pointer binding remains confined to this adapter.
+unsafe fn updatewindow(
     strm: crate::zlib_h::z_streamp,
     end: *const crate::stdlib::Bytef,
     copy: ::core::ffi::c_uint,

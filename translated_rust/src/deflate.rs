@@ -412,7 +412,10 @@ fn read_buf_bytes(
     len
 }
 
-unsafe extern "C" fn fill_window(mut s: *mut crate::src::deflate::deflate_state) {
+// This is an internal raw-pointer adapter, not a C callback or export. Keep
+// the ABI boundary out of the implementation so callers cannot treat it as
+// another FFI entry point.
+unsafe fn fill_window(mut s: *mut crate::src::deflate::deflate_state) {
     let state = &mut *s;
     let stream = &mut *state.strm;
     let window = if state.window_size == 0 {
@@ -750,7 +753,9 @@ pub unsafe extern "C" fn deflateInit2__ffi(
         stream_size,
     )
 }
-unsafe extern "C" fn deflateStateCheck(mut strm: crate::zlib_h::z_streamp) -> ::core::ffi::c_int {
+// State checking is likewise internal; its raw stream binding is required by
+// the translated callers, but it has no C ABI contract of its own.
+unsafe fn deflateStateCheck(mut strm: crate::zlib_h::z_streamp) -> ::core::ffi::c_int {
     if strm.is_null() {
         return 1 as ::core::ffi::c_int;
     }
