@@ -1096,6 +1096,75 @@ fn deflate_cursor_direction(cursor: usize, base: usize) -> (bool, usize) {
     }
 }
 
+/// Validate a compatibility cursor and byte count against one owned buffer.
+/// The ABI boundary converts pointers to address tokens; all later copying is
+/// ordinary slice work.
+fn deflate_copy_range(
+    buffer_len: usize,
+    buffer_start: usize,
+    cursor: usize,
+    count: usize,
+) -> Option<::core::ops::Range<usize>> {
+    let start = cursor.checked_sub(buffer_start)?;
+    let end = start.checked_add(count)?;
+    (end <= buffer_len).then_some(start..end)
+}
+
+/// Copy the independently allocated portions of a cloned deflate state.
+/// The caller has already validated the allocation-backed slice lends and
+/// cursor ranges, so this core has no ABI pointers or allocation concerns.
+fn deflate_copy_owned_buffers(
+    dst_window: &mut [crate::stdlib::Byte],
+    src_window: &[crate::stdlib::Byte],
+    window_len: usize,
+    dst_prev: &mut [crate::src::deflate::Pos],
+    src_prev: &[crate::src::deflate::Pos],
+    prev_len: usize,
+    dst_head: &mut [crate::src::deflate::Pos],
+    src_head: &[crate::src::deflate::Pos],
+    head_len: usize,
+    dst_pending: &mut [crate::stdlib::Byte],
+    src_pending: &[crate::stdlib::Byte],
+    pending: ::core::ops::Range<usize>,
+    dst_sym: ::core::ops::Range<usize>,
+    src_sym: ::core::ops::Range<usize>,
+) -> bool {
+    let Some((dst_window, src_window)) = dst_window
+        .get_mut(..window_len)
+        .zip(src_window.get(..window_len))
+    else {
+        return false;
+    };
+    let Some((dst_prev, src_prev)) = dst_prev.get_mut(..prev_len).zip(src_prev.get(..prev_len))
+    else {
+        return false;
+    };
+    let Some((dst_head, src_head)) = dst_head.get_mut(..head_len).zip(src_head.get(..head_len))
+    else {
+        return false;
+    };
+    dst_window.copy_from_slice(src_window);
+    dst_prev.copy_from_slice(src_prev);
+    dst_head.copy_from_slice(src_head);
+    {
+        let Some((dst_pending_range, src_pending_range)) = dst_pending
+            .get_mut(pending.clone())
+            .zip(src_pending.get(pending))
+        else {
+            return false;
+        };
+        dst_pending_range.copy_from_slice(src_pending_range);
+    }
+    {
+        let Some((dst_sym, src_sym)) = dst_pending.get_mut(dst_sym).zip(src_pending.get(src_sym))
+        else {
+            return false;
+        };
+        dst_sym.copy_from_slice(src_sym);
+    }
+    true
+}
+
 pub(crate) unsafe fn deflateStateCheck(mut strm: crate::zlib_h::z_streamp) -> ::core::ffi::c_int {
     if strm.is_null() {
         return 1;
@@ -2883,116 +2952,198 @@ pub unsafe extern "C" fn deflateCopy_ffi(
     mut dest: crate::zlib_h::z_streamp,
     mut source: crate::zlib_h::z_streamp,
 ) -> ::core::ffi::c_int {
-    let mut ds: *mut crate::src::deflate::deflate_state =
-        ::core::ptr::null_mut::<crate::src::deflate::deflate_state>();
-    let mut ss: *mut crate::src::deflate::deflate_state =
-        ::core::ptr::null_mut::<crate::src::deflate::deflate_state>();
-    if deflateStateCheck(source) != 0 || dest.is_null() {
+    if deflateStateCheck(source) != 0 || dest.is_null() || dest == source {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    ss = (*source).state as *mut crate::src::deflate::deflate_state;
-    crate::stdlib::memcpy(
-        dest as *mut ::core::ffi::c_void,
-        source as *const ::core::ffi::c_void,
-        ::core::mem::size_of::<crate::zlib_h::z_stream>(),
-    );
-    ds = Some((*dest).zalloc.expect("non-null function pointer"))
-        .expect("non-null function pointer")(
-        (*dest).opaque,
+    let source_stream = &*source;
+    let source_state = &*(source_stream.state as *mut crate::src::deflate::deflate_state);
+    let dest_stream = &mut *dest;
+    *dest_stream = *source_stream;
+    let zalloc = dest_stream.zalloc.expect("validated stream allocator");
+    let opaque = dest_stream.opaque;
+    let ds = zalloc(
+        opaque,
         1 as crate::stdlib::uInt,
         ::core::mem::size_of::<crate::src::deflate::deflate_state>() as crate::stdlib::uInt,
     ) as *mut crate::src::deflate::deflate_state;
     if ds.is_null() {
         return crate::zlib_h::Z_MEM_ERROR;
     }
-    crate::stdlib::memset(
-        ds as *mut ::core::ffi::c_void,
-        0 as ::core::ffi::c_int,
-        ::core::mem::size_of::<crate::src::deflate::deflate_state>(),
-    );
-    (*dest).state = ds as *mut crate::src::deflate::internal_state;
-    crate::stdlib::memcpy(
-        ds as *mut ::core::ffi::c_void,
-        ss as *const ::core::ffi::c_void,
-        ::core::mem::size_of::<crate::src::deflate::deflate_state>(),
-    );
-    (*ds).strm = dest;
-    (*ds).window = Some((*dest).zalloc.expect("non-null function pointer"))
-        .expect("non-null function pointer")(
-        (*dest).opaque,
-        (*ds).w_size,
+    dest_stream.state = ds as *mut crate::src::deflate::internal_state;
+    let dest_state = &mut *ds;
+    *dest_state = *source_state;
+    dest_state.strm = dest;
+    dest_state.window = zalloc(
+        opaque,
+        dest_state.w_size,
         (2 as usize).wrapping_mul(::core::mem::size_of::<crate::stdlib::Byte>())
             as crate::stdlib::uInt,
     ) as *mut crate::stdlib::Bytef;
-    (*ds).prev = Some((*dest).zalloc.expect("non-null function pointer"))
-        .expect("non-null function pointer")(
-        (*dest).opaque,
-        (*ds).w_size,
+    dest_state.prev = zalloc(
+        opaque,
+        dest_state.w_size,
         ::core::mem::size_of::<crate::src::deflate::Pos>() as crate::stdlib::uInt,
     ) as *mut crate::src::deflate::Posf;
-    (*ds).head = Some((*dest).zalloc.expect("non-null function pointer"))
-        .expect("non-null function pointer")(
-        (*dest).opaque,
-        (*ds).hash_size,
+    dest_state.head = zalloc(
+        opaque,
+        dest_state.hash_size,
         ::core::mem::size_of::<crate::src::deflate::Pos>() as crate::stdlib::uInt,
     ) as *mut crate::src::deflate::Posf;
-    (*ds).pending_buf = Some((*dest).zalloc.expect("non-null function pointer"))
-        .expect("non-null function pointer")(
-        (*dest).opaque,
-        (*ds).lit_bufsize,
-        4 as crate::stdlib::uInt,
-    ) as *mut crate::zutil_h::uchf as *mut crate::stdlib::Bytef;
-    if (*ds).window.is_null()
-        || (*ds).prev.is_null()
-        || (*ds).head.is_null()
-        || (*ds).pending_buf.is_null()
+    dest_state.pending_buf = zalloc(opaque, dest_state.lit_bufsize, 4 as crate::stdlib::uInt)
+        as *mut crate::zutil_h::uchf as *mut crate::stdlib::Bytef;
+    if dest_state.window.is_null()
+        || dest_state.prev.is_null()
+        || dest_state.head.is_null()
+        || dest_state.pending_buf.is_null()
     {
         deflateEnd(dest);
         return crate::zlib_h::Z_MEM_ERROR;
     }
-    crate::stdlib::memcpy(
-        (*ds).window as *mut ::core::ffi::c_void,
-        (*ss).window as *const ::core::ffi::c_void,
-        (*ss).high_water as crate::__stddef_size_t_h::size_t,
-    );
-    crate::stdlib::memcpy(
-        (*ds).prev as *mut ::core::ffi::c_void,
-        (*ss).prev as *const ::core::ffi::c_void,
-        ((if (*ss).slid != 0 || (*ss).strstart.wrapping_sub((*ss).insert) > (*ds).w_size {
-            (*ds).w_size
-        } else {
-            (*ss).strstart.wrapping_sub((*ss).insert)
-        }) as crate::__stddef_size_t_h::size_t)
-            .wrapping_mul(::core::mem::size_of::<crate::src::deflate::Pos>()),
-    );
-    crate::stdlib::memcpy(
-        (*ds).head as *mut ::core::ffi::c_void,
-        (*ss).head as *const ::core::ffi::c_void,
-        ((*ds).hash_size as crate::__stddef_size_t_h::size_t)
-            .wrapping_mul(::core::mem::size_of::<crate::src::deflate::Pos>()),
-    );
-    let (pending_out_after_base, pending_out_distance) =
-        deflate_cursor_direction((*ss).pending_out as usize, (*ss).pending_buf as usize);
-    // `pending_out` is normally within the pending allocation. Keep the
-    // translated wrapping behavior for malformed state too, but express the
-    // cursor as an unsigned direction before forming the new pointer.
-    (*ds).pending_out = if pending_out_after_base {
-        (*ds).pending_buf.wrapping_add(pending_out_distance)
-    } else {
-        (*ds).pending_buf.wrapping_sub(pending_out_distance)
+    let Some(window_len) = usize::try_from(dest_state.window_size).ok() else {
+        deflateEnd(dest);
+        return crate::zlib_h::Z_STREAM_ERROR;
     };
-    crate::stdlib::memcpy(
-        (*ds).pending_out as *mut ::core::ffi::c_void,
-        (*ss).pending_out as *const ::core::ffi::c_void,
-        (*ss).pending as crate::__stddef_size_t_h::size_t,
-    );
-    (*ds).sym_buf =
-        (*ds).pending_buf.wrapping_add((*ds).lit_bufsize as usize) as *mut crate::zutil_h::uchf;
-    crate::stdlib::memcpy(
-        (*ds).sym_buf as *mut ::core::ffi::c_void,
-        (*ss).sym_buf as *const ::core::ffi::c_void,
-        (*ss).sym_next as crate::__stddef_size_t_h::size_t,
-    );
+    let Some(prev_capacity) = usize::try_from(dest_state.w_size).ok() else {
+        deflateEnd(dest);
+        return crate::zlib_h::Z_STREAM_ERROR;
+    };
+    let Some(head_len) = usize::try_from(dest_state.hash_size).ok() else {
+        deflateEnd(dest);
+        return crate::zlib_h::Z_STREAM_ERROR;
+    };
+    let Some(pending_capacity) = usize::try_from(dest_state.pending_buf_size).ok() else {
+        deflateEnd(dest);
+        return crate::zlib_h::Z_STREAM_ERROR;
+    };
+    if (window_len != 0 && source_state.window.is_null())
+        || (prev_capacity != 0 && source_state.prev.is_null())
+        || (head_len != 0 && source_state.head.is_null())
+        || (pending_capacity != 0 && source_state.pending_buf.is_null())
+    {
+        deflateEnd(dest);
+        return crate::zlib_h::Z_STREAM_ERROR;
+    }
+    let window_len_to_copy = usize::try_from(source_state.high_water)
+        .ok()
+        .filter(|len| *len <= window_len);
+    let prev_len = if source_state.slid != 0
+        || source_state.strstart.wrapping_sub(source_state.insert) > dest_state.w_size
+    {
+        Some(prev_capacity)
+    } else {
+        usize::try_from(source_state.strstart.wrapping_sub(source_state.insert))
+            .ok()
+            .filter(|len| *len <= prev_capacity)
+    };
+    let pending_len = usize::try_from(source_state.pending).ok();
+    let sym_len = usize::try_from(source_state.sym_next).ok();
+    let pending_range = pending_len.and_then(|len| {
+        deflate_copy_range(
+            pending_capacity,
+            source_state.pending_buf as usize,
+            source_state.pending_out as usize,
+            len,
+        )
+    });
+    let src_sym = sym_len.and_then(|len| {
+        deflate_copy_range(
+            pending_capacity,
+            source_state.pending_buf as usize,
+            source_state.sym_buf as usize,
+            len,
+        )
+    });
+    let dst_sym = sym_len.and_then(|len| {
+        usize::try_from(dest_state.lit_bufsize)
+            .ok()
+            .and_then(|start| start.checked_add(len))
+            .filter(|end| *end <= pending_capacity)
+            .and_then(|end| end.checked_sub(len).map(|start| start..end))
+    });
+    let Some((window_len_to_copy, prev_len, pending_range, src_sym, dst_sym)) = window_len_to_copy
+        .zip(prev_len)
+        .zip(pending_range)
+        .zip(src_sym)
+        .zip(dst_sym)
+        .map(
+            |((((window_len_to_copy, prev_len), pending_range), src_sym), dst_sym)| {
+                (
+                    window_len_to_copy,
+                    prev_len,
+                    pending_range,
+                    src_sym,
+                    dst_sym,
+                )
+            },
+        )
+    else {
+        deflateEnd(dest);
+        return crate::zlib_h::Z_STREAM_ERROR;
+    };
+    let src_window = if window_len == 0 {
+        &[]
+    } else {
+        ::core::slice::from_raw_parts(source_state.window, window_len)
+    };
+    let dst_window = if window_len == 0 {
+        &mut []
+    } else {
+        ::core::slice::from_raw_parts_mut(dest_state.window, window_len)
+    };
+    let src_prev = if prev_capacity == 0 {
+        &[]
+    } else {
+        ::core::slice::from_raw_parts(source_state.prev, prev_capacity)
+    };
+    let dst_prev = if prev_capacity == 0 {
+        &mut []
+    } else {
+        ::core::slice::from_raw_parts_mut(dest_state.prev, prev_capacity)
+    };
+    let src_head = if head_len == 0 {
+        &[]
+    } else {
+        ::core::slice::from_raw_parts(source_state.head, head_len)
+    };
+    let dst_head = if head_len == 0 {
+        &mut []
+    } else {
+        ::core::slice::from_raw_parts_mut(dest_state.head, head_len)
+    };
+    let src_pending = if pending_capacity == 0 {
+        &[]
+    } else {
+        ::core::slice::from_raw_parts(source_state.pending_buf, pending_capacity)
+    };
+    let dst_pending = if pending_capacity == 0 {
+        &mut []
+    } else {
+        ::core::slice::from_raw_parts_mut(dest_state.pending_buf, pending_capacity)
+    };
+    if !deflate_copy_owned_buffers(
+        dst_window,
+        src_window,
+        window_len_to_copy,
+        dst_prev,
+        src_prev,
+        prev_len,
+        dst_head,
+        src_head,
+        head_len,
+        dst_pending,
+        src_pending,
+        pending_range.clone(),
+        dst_sym,
+        src_sym,
+    ) {
+        deflateEnd(dest);
+        return crate::zlib_h::Z_STREAM_ERROR;
+    }
+    dest_state.pending_out = dest_state.pending_buf.wrapping_add(pending_range.start);
+    dest_state.sym_buf = dest_state
+        .pending_buf
+        .wrapping_add(usize::try_from(dest_state.lit_bufsize).expect("validated pending range"))
+        as *mut crate::zutil_h::uchf;
     return crate::zlib_h::Z_OK;
 }
 fn longest_match_state(
