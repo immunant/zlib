@@ -4687,7 +4687,6 @@ pub mod crc32_h {
         0xc4e22c3c as crate::stdlib::z_crc_t,
     ];
     use crate::src::crc32::z_word_t;
-    
 }
 
 pub use crate::__stddef_size_t_h::size_t;

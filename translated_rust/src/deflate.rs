@@ -1134,10 +1134,8 @@ pub unsafe extern "C" fn deflatePrime(
                 << (*s).bi_valid) as crate::zutil_h::ush as ::core::ffi::c_int)
             as crate::zutil_h::ush;
         (*s).bi_valid += put;
-        let pending_buf = ::core::slice::from_raw_parts_mut(
-            (*s).pending_buf,
-            (*s).pending_buf_size as usize,
-        );
+        let pending_buf =
+            ::core::slice::from_raw_parts_mut((*s).pending_buf, (*s).pending_buf_size as usize);
         crate::src::trees::bi_flush(s, pending_buf);
         value >>= put;
         bits -= put;
@@ -1435,10 +1433,8 @@ unsafe extern "C" fn flush_pending(mut strm: crate::zlib_h::z_streamp) {
     let mut s: *mut crate::src::deflate::deflate_state =
         (*strm).state as *mut crate::src::deflate::deflate_state;
     let s = &mut *s;
-    let pending_buf = ::core::slice::from_raw_parts_mut(
-        (*s).pending_buf,
-        (*s).pending_buf_size as usize,
-    );
+    let pending_buf =
+        ::core::slice::from_raw_parts_mut((*s).pending_buf, (*s).pending_buf_size as usize);
     crate::src::trees::bi_flush(s, pending_buf);
     len = if (*s).pending > (*strm).avail_out as crate::zutil_h::ulg {
         (*strm).avail_out as ::core::ffi::c_uint
