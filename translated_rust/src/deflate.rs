@@ -426,10 +426,10 @@ fn fill_window(state: &mut crate::src::deflate::deflate_state) {
                 slide_hash(state);
                 more = more.wrapping_add(wsize as ::core::ffi::c_uint);
             }
-            if (*state.strm).avail_in == 0 as crate::stdlib::uInt {
+            let strm = &mut *state.strm;
+            if strm.avail_in == 0 as crate::stdlib::uInt {
                 break;
             }
-            let strm = &mut *state.strm;
             let out = ::core::slice::from_raw_parts_mut(
                 state
                     .window
@@ -482,7 +482,7 @@ fn fill_window(state: &mut crate::src::deflate::deflate_state) {
                 }
             }
             if !(state.lookahead < crate::src::deflate::MIN_LOOKAHEAD as crate::stdlib::uInt
-                && (*state.strm).avail_in != 0 as crate::stdlib::uInt)
+                && strm.avail_in != 0 as crate::stdlib::uInt)
             {
                 break;
             }
@@ -2695,6 +2695,32 @@ fn deflate_insert_limit(strstart: crate::stdlib::uInt) -> crate::stdlib::uInt {
     }
 }
 
+fn deflate_rle_match_length(
+    window: &[crate::stdlib::Bytef],
+    strstart: crate::stdlib::uInt,
+    lookahead: crate::stdlib::uInt,
+) -> crate::stdlib::uInt {
+    if lookahead < crate::zutil_h::MIN_MATCH as crate::stdlib::uInt
+        || strstart == 0 as crate::stdlib::uInt
+    {
+        return 0 as crate::stdlib::uInt;
+    }
+
+    let prev = window[strstart.wrapping_sub(1) as usize];
+    let max_len = lookahead.min(crate::zutil_h::MAX_MATCH as crate::stdlib::uInt);
+    let start = strstart as usize;
+    let mut len = 0 as crate::stdlib::uInt;
+    while len < max_len && window[start + len as usize] == prev {
+        len = len.wrapping_add(1);
+    }
+
+    if len >= crate::zutil_h::MIN_MATCH as crate::stdlib::uInt {
+        len
+    } else {
+        0 as crate::stdlib::uInt
+    }
+}
+
 fn deflate_flush_blocked_state(final_flush: bool) -> block_state {
     if final_flush {
         finish_started
@@ -3371,9 +3397,6 @@ fn deflate_rle(
     let s = state as *mut crate::src::deflate::deflate_state;
     unsafe {
         let mut bflush: ::core::ffi::c_int = 0;
-        let mut prev: crate::stdlib::uInt = 0;
-        let mut scan: *mut crate::stdlib::Bytef = ::core::ptr::null_mut::<crate::stdlib::Bytef>();
-        let mut strend: *mut crate::stdlib::Bytef = ::core::ptr::null_mut::<crate::stdlib::Bytef>();
         loop {
             if state.lookahead <= crate::zutil_h::MAX_MATCH as crate::stdlib::uInt {
                 fill_window(state);
@@ -3387,74 +3410,9 @@ fn deflate_rle(
                 }
             }
             state.match_length = 0 as crate::stdlib::uInt;
-            if state.lookahead >= crate::zutil_h::MIN_MATCH as crate::stdlib::uInt
-                && state.strstart > 0 as crate::stdlib::uInt
-            {
-                scan = state
-                    .window
-                    .wrapping_offset(state.strstart as isize)
-                    .wrapping_offset(-(1 as ::core::ffi::c_int as isize));
-                prev = *scan as crate::stdlib::uInt;
-                scan = scan.wrapping_offset(1);
-                if prev == *scan as crate::stdlib::uInt
-                    && {
-                        scan = scan.wrapping_offset(1);
-                        prev == *scan as crate::stdlib::uInt
-                    }
-                    && {
-                        scan = scan.wrapping_offset(1);
-                        prev == *scan as crate::stdlib::uInt
-                    }
-                {
-                    strend = state
-                        .window
-                        .wrapping_offset(state.strstart as isize)
-                        .wrapping_offset(crate::zutil_h::MAX_MATCH as isize);
-                    loop {
-                        scan = scan.wrapping_offset(1);
-                        if !(prev == *scan as crate::stdlib::uInt
-                            && {
-                                scan = scan.wrapping_offset(1);
-                                prev == *scan as crate::stdlib::uInt
-                            }
-                            && {
-                                scan = scan.wrapping_offset(1);
-                                prev == *scan as crate::stdlib::uInt
-                            }
-                            && {
-                                scan = scan.wrapping_offset(1);
-                                prev == *scan as crate::stdlib::uInt
-                            }
-                            && {
-                                scan = scan.wrapping_offset(1);
-                                prev == *scan as crate::stdlib::uInt
-                            }
-                            && {
-                                scan = scan.wrapping_offset(1);
-                                prev == *scan as crate::stdlib::uInt
-                            }
-                            && {
-                                scan = scan.wrapping_offset(1);
-                                prev == *scan as crate::stdlib::uInt
-                            }
-                            && {
-                                scan = scan.wrapping_offset(1);
-                                prev == *scan as crate::stdlib::uInt
-                            }
-                            && scan < strend)
-                        {
-                            break;
-                        }
-                    }
-                    state.match_length = (crate::zutil_h::MAX_MATCH as crate::stdlib::uInt)
-                        .wrapping_sub(
-                            (strend as usize).wrapping_sub(scan as usize) as crate::stdlib::uInt
-                        );
-                    if state.match_length > state.lookahead {
-                        state.match_length = state.lookahead;
-                    }
-                }
-            }
+            let window =
+                &*::core::ptr::slice_from_raw_parts(state.window, state.window_size as usize);
+            state.match_length = deflate_rle_match_length(window, state.strstart, state.lookahead);
             if state.match_length >= crate::zutil_h::MIN_MATCH as crate::stdlib::uInt {
                 let len: crate::zutil_h::uch =
                     state.match_length.wrapping_sub(3 as crate::stdlib::uInt)
