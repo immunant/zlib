@@ -4061,16 +4061,16 @@ unsafe fn build_tree(
     build_tree_impl(state, desc, tree, stat_desc);
 }
 
-unsafe fn scan_tree(
-    mut s: *mut crate::src::deflate::deflate_state,
-    mut tree: *mut crate::src::deflate::ct_data,
-    mut max_code: ::core::ffi::c_int,
+fn scan_tree_impl(
+    state: &mut crate::src::deflate::deflate_state,
+    tree: &mut [crate::src::deflate::ct_data],
+    max_code: ::core::ffi::c_int,
 ) {
     let mut n: ::core::ffi::c_int = 0;
     let mut prevlen: ::core::ffi::c_int = -1 as ::core::ffi::c_int;
     let mut curlen: ::core::ffi::c_int = 0;
     let mut nextlen: ::core::ffi::c_int =
-        (*tree.offset(0 as ::core::ffi::c_int as isize)).dl.dad as ::core::ffi::c_int;
+        tree[0].dl.dad as ::core::ffi::c_int;
     let mut count: ::core::ffi::c_int = 0 as ::core::ffi::c_int;
     let mut max_count: ::core::ffi::c_int = 7 as ::core::ffi::c_int;
     let mut min_count: ::core::ffi::c_int = 4 as ::core::ffi::c_int;
@@ -4078,35 +4078,32 @@ unsafe fn scan_tree(
         max_count = 138 as ::core::ffi::c_int;
         min_count = 3 as ::core::ffi::c_int;
     }
-    (*tree.offset((max_code + 1 as ::core::ffi::c_int) as isize))
-        .dl
-        .dad = 0xffff as ::core::ffi::c_int as crate::zutil_h::ush;
+    tree[(max_code + 1 as ::core::ffi::c_int) as usize].dl.dad =
+        0xffff as ::core::ffi::c_int as crate::zutil_h::ush;
     n = 0 as ::core::ffi::c_int;
     while n <= max_code {
         curlen = nextlen;
-        nextlen = (*tree.offset((n + 1 as ::core::ffi::c_int) as isize))
-            .dl
-            .dad as ::core::ffi::c_int;
+        nextlen = tree[(n + 1 as ::core::ffi::c_int) as usize].dl.dad as ::core::ffi::c_int;
         count += 1;
         if !(count < max_count && curlen == nextlen) {
             if count < min_count {
-                (*s).bl_tree[curlen as usize].fc.freq = ((*s).bl_tree[curlen as usize].fc.freq
+                state.bl_tree[curlen as usize].fc.freq = (state.bl_tree[curlen as usize].fc.freq
                     as ::core::ffi::c_int
                     + count as crate::zutil_h::ush as ::core::ffi::c_int)
                     as crate::zutil_h::ush;
             } else if curlen != 0 as ::core::ffi::c_int {
                 if curlen != prevlen {
-                    (*s).bl_tree[curlen as usize].fc.freq =
-                        (*s).bl_tree[curlen as usize].fc.freq.wrapping_add(1);
+                    state.bl_tree[curlen as usize].fc.freq =
+                        state.bl_tree[curlen as usize].fc.freq.wrapping_add(1);
                 }
-                (*s).bl_tree[REP_3_6 as usize].fc.freq =
-                    (*s).bl_tree[REP_3_6 as usize].fc.freq.wrapping_add(1);
+                state.bl_tree[REP_3_6 as usize].fc.freq =
+                    state.bl_tree[REP_3_6 as usize].fc.freq.wrapping_add(1);
             } else if count <= 10 as ::core::ffi::c_int {
-                (*s).bl_tree[REPZ_3_10 as usize].fc.freq =
-                    (*s).bl_tree[REPZ_3_10 as usize].fc.freq.wrapping_add(1);
+                state.bl_tree[REPZ_3_10 as usize].fc.freq =
+                    state.bl_tree[REPZ_3_10 as usize].fc.freq.wrapping_add(1);
             } else {
-                (*s).bl_tree[REPZ_11_138 as usize].fc.freq =
-                    (*s).bl_tree[REPZ_11_138 as usize].fc.freq.wrapping_add(1);
+                state.bl_tree[REPZ_11_138 as usize].fc.freq =
+                    state.bl_tree[REPZ_11_138 as usize].fc.freq.wrapping_add(1);
             }
             count = 0 as ::core::ffi::c_int;
             prevlen = curlen;
@@ -4123,6 +4120,18 @@ unsafe fn scan_tree(
         }
         n += 1;
     }
+}
+
+// The dynamic trees are stored behind C-compatible pointers. Bind the exact
+// run plus its sentinel once; scanning itself is ordinary slice indexing.
+unsafe fn scan_tree(
+    s: *mut crate::src::deflate::deflate_state,
+    tree: *mut crate::src::deflate::ct_data,
+    max_code: ::core::ffi::c_int,
+) {
+    let state = &mut *s;
+    let tree = ::core::slice::from_raw_parts_mut(tree, (max_code + 2) as usize);
+    scan_tree_impl(state, tree, max_code);
 }
 
 unsafe fn send_tree(
