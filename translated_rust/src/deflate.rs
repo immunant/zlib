@@ -2849,84 +2849,82 @@ unsafe extern "C" fn deflate_fast(
     mut s: *mut crate::src::deflate::deflate_state,
     mut flush: ::core::ffi::c_int,
 ) -> block_state {
+    let state = &mut *s;
     let mut hash_head: crate::src::deflate::IPos = 0;
     let mut bflush: ::core::ffi::c_int = 0;
     loop {
-        if (*s).lookahead < crate::src::deflate::MIN_LOOKAHEAD as crate::stdlib::uInt {
+        if state.lookahead < crate::src::deflate::MIN_LOOKAHEAD as crate::stdlib::uInt {
             fill_window(s);
-            if (*s).lookahead < crate::src::deflate::MIN_LOOKAHEAD as crate::stdlib::uInt
+            if state.lookahead < crate::src::deflate::MIN_LOOKAHEAD as crate::stdlib::uInt
                 && flush == crate::zlib_h::Z_NO_FLUSH
             {
                 return need_more;
             }
-            if (*s).lookahead == 0 as crate::stdlib::uInt {
+            if state.lookahead == 0 as crate::stdlib::uInt {
                 break;
             }
         }
-        let window = ::core::slice::from_raw_parts((*s).window, (*s).window_size as usize);
+        let window = ::core::slice::from_raw_parts(state.window, state.window_size as usize);
         hash_head = NIL as crate::src::deflate::IPos;
-        if (*s).lookahead >= crate::zutil_h::MIN_MATCH as crate::stdlib::uInt {
-            let state = &mut *s;
+        if state.lookahead >= crate::zutil_h::MIN_MATCH as crate::stdlib::uInt {
             let head = ::core::slice::from_raw_parts_mut(state.head, state.hash_size as usize);
             let prev = ::core::slice::from_raw_parts_mut(state.prev, state.w_size as usize);
             hash_head = insert_hash_entry(state, window, head, prev);
         }
         if hash_head != NIL as crate::src::deflate::IPos
-            && ((*s).strstart as crate::src::deflate::IPos).wrapping_sub(hash_head)
-                <= (*s)
+            && (state.strstart as crate::src::deflate::IPos).wrapping_sub(hash_head)
+                <= state
                     .w_size
                     .wrapping_sub(crate::src::deflate::MIN_LOOKAHEAD as crate::stdlib::uInt)
         {
-            (*s).match_length = longest_match(s, hash_head);
+            state.match_length = longest_match(s, hash_head);
         }
-        if (*s).match_length >= crate::zutil_h::MIN_MATCH as crate::stdlib::uInt {
+        if state.match_length >= crate::zutil_h::MIN_MATCH as crate::stdlib::uInt {
             bflush = crate::src::trees::_tr_tally(
                 s,
-                (*s).strstart.wrapping_sub((*s).match_start),
-                (*s).match_length.wrapping_sub(crate::zutil_h::MIN_MATCH as crate::stdlib::uInt),
+                state.strstart.wrapping_sub(state.match_start),
+                state.match_length.wrapping_sub(crate::zutil_h::MIN_MATCH as crate::stdlib::uInt),
             );
-            (*s).lookahead = (*s).lookahead.wrapping_sub((*s).match_length);
-            if (*s).match_length <= (*s).max_lazy_match
-                && (*s).lookahead >= crate::zutil_h::MIN_MATCH as crate::stdlib::uInt
+            state.lookahead = state.lookahead.wrapping_sub(state.match_length);
+            if state.match_length <= state.max_lazy_match
+                && state.lookahead >= crate::zutil_h::MIN_MATCH as crate::stdlib::uInt
             {
-                (*s).match_length = (*s).match_length.wrapping_sub(1);
+                state.match_length = state.match_length.wrapping_sub(1);
                 loop {
-                    (*s).strstart = (*s).strstart.wrapping_add(1);
-                    let state = &mut *s;
+                    state.strstart = state.strstart.wrapping_add(1);
                     let head = ::core::slice::from_raw_parts_mut(state.head, state.hash_size as usize);
                     let prev = ::core::slice::from_raw_parts_mut(state.prev, state.w_size as usize);
                     hash_head = insert_hash_entry(state, window, head, prev);
-                    (*s).match_length = (*s).match_length.wrapping_sub(1);
-                    if (*s).match_length == 0 as crate::stdlib::uInt {
+                    state.match_length = state.match_length.wrapping_sub(1);
+                    if state.match_length == 0 as crate::stdlib::uInt {
                         break;
                     }
                 }
-                (*s).strstart = (*s).strstart.wrapping_add(1);
+                state.strstart = state.strstart.wrapping_add(1);
             } else {
-                (*s).strstart = (*s).strstart.wrapping_add((*s).match_length);
-                (*s).match_length = 0 as crate::stdlib::uInt;
-                let state = &mut *s;
+                state.strstart = state.strstart.wrapping_add(state.match_length);
+                state.match_length = 0 as crate::stdlib::uInt;
                 reset_insert_hash(state, window);
             }
         } else {
-            let cc = literal_byte(window, (*s).strstart);
+            let cc = literal_byte(window, state.strstart);
             bflush = crate::src::trees::_tr_tally(s, 0, cc as ::core::ffi::c_uint);
-            (*s).lookahead = (*s).lookahead.wrapping_sub(1);
-            (*s).strstart = (*s).strstart.wrapping_add(1);
+            state.lookahead = state.lookahead.wrapping_sub(1);
+            state.strstart = state.strstart.wrapping_add(1);
         }
         if bflush != 0 {
             crate::src::trees::_tr_flush_block(
                 s as *mut crate::src::deflate::internal_state,
-                match block_start_bytes(window, (*s).block_start) {
+                match block_start_bytes(window, state.block_start) {
                     Some(bytes) => bytes.as_ptr() as *mut crate::stdlib::charf,
                     None => ::core::ptr::null_mut::<crate::stdlib::charf>(),
                 },
-                ((*s).strstart as ::core::ffi::c_long - (*s).block_start) as crate::zutil_h::ulg,
+                (state.strstart as ::core::ffi::c_long - state.block_start) as crate::zutil_h::ulg,
                 0 as ::core::ffi::c_int,
             );
-            (*s).block_start = (*s).strstart as ::core::ffi::c_long;
-            flush_pending((*s).strm);
-            if (*(*s).strm).avail_out == 0 as crate::stdlib::uInt {
+            state.block_start = state.strstart as ::core::ffi::c_long;
+            flush_pending(state.strm);
+            if (*state.strm).avail_out == 0 as crate::stdlib::uInt {
                 return (if false {
                     finish_started as ::core::ffi::c_int
                 } else {
@@ -2935,10 +2933,10 @@ unsafe extern "C" fn deflate_fast(
             }
         }
     }
-    (*s).insert = if (*s).strstart
+    state.insert = if state.strstart
         < (crate::zutil_h::MIN_MATCH - 1 as ::core::ffi::c_int) as crate::stdlib::uInt
     {
-        (*s).strstart
+        state.strstart
     } else {
         (crate::zutil_h::MIN_MATCH - 1 as ::core::ffi::c_int) as crate::stdlib::uInt
     };
@@ -2946,18 +2944,18 @@ unsafe extern "C" fn deflate_fast(
         crate::src::trees::_tr_flush_block(
             s as *mut crate::src::deflate::internal_state,
             match block_start_bytes(
-                ::core::slice::from_raw_parts((*s).window, (*s).window_size as usize),
-                (*s).block_start,
+                ::core::slice::from_raw_parts(state.window, state.window_size as usize),
+                state.block_start,
             ) {
                 Some(bytes) => bytes.as_ptr() as *mut crate::stdlib::charf,
                 None => ::core::ptr::null_mut::<crate::stdlib::charf>(),
             },
-            ((*s).strstart as ::core::ffi::c_long - (*s).block_start) as crate::zutil_h::ulg,
+            (state.strstart as ::core::ffi::c_long - state.block_start) as crate::zutil_h::ulg,
             1 as ::core::ffi::c_int,
         );
-        (*s).block_start = (*s).strstart as ::core::ffi::c_long;
-        flush_pending((*s).strm);
-        if (*(*s).strm).avail_out == 0 as crate::stdlib::uInt {
+        state.block_start = state.strstart as ::core::ffi::c_long;
+        flush_pending(state.strm);
+        if (*state.strm).avail_out == 0 as crate::stdlib::uInt {
             return (if true {
                 finish_started as ::core::ffi::c_int
             } else {
@@ -2966,22 +2964,22 @@ unsafe extern "C" fn deflate_fast(
         }
         return finish_done;
     }
-    if (*s).sym_next != 0 {
+    if state.sym_next != 0 {
         crate::src::trees::_tr_flush_block(
             s as *mut crate::src::deflate::internal_state,
             match block_start_bytes(
-                ::core::slice::from_raw_parts((*s).window, (*s).window_size as usize),
-                (*s).block_start,
+                ::core::slice::from_raw_parts(state.window, state.window_size as usize),
+                state.block_start,
             ) {
                 Some(bytes) => bytes.as_ptr() as *mut crate::stdlib::charf,
                 None => ::core::ptr::null_mut::<crate::stdlib::charf>(),
             },
-            ((*s).strstart as ::core::ffi::c_long - (*s).block_start) as crate::zutil_h::ulg,
+            (state.strstart as ::core::ffi::c_long - state.block_start) as crate::zutil_h::ulg,
             0 as ::core::ffi::c_int,
         );
-        (*s).block_start = (*s).strstart as ::core::ffi::c_long;
-        flush_pending((*s).strm);
-        if (*(*s).strm).avail_out == 0 as crate::stdlib::uInt {
+        state.block_start = state.strstart as ::core::ffi::c_long;
+        flush_pending(state.strm);
+        if (*state.strm).avail_out == 0 as crate::stdlib::uInt {
             return (if false {
                 finish_started as ::core::ffi::c_int
             } else {
@@ -3218,54 +3216,55 @@ unsafe extern "C" fn deflate_rle(
     mut s: *mut crate::src::deflate::deflate_state,
     mut flush: ::core::ffi::c_int,
 ) -> block_state {
+    let state = &mut *s;
     let mut bflush: ::core::ffi::c_int = 0;
     loop {
-        if (*s).lookahead <= crate::zutil_h::MAX_MATCH as crate::stdlib::uInt {
+        if state.lookahead <= crate::zutil_h::MAX_MATCH as crate::stdlib::uInt {
             fill_window(s);
-            if (*s).lookahead <= crate::zutil_h::MAX_MATCH as crate::stdlib::uInt
+            if state.lookahead <= crate::zutil_h::MAX_MATCH as crate::stdlib::uInt
                 && flush == crate::zlib_h::Z_NO_FLUSH
             {
                 return need_more;
             }
-            if (*s).lookahead == 0 as crate::stdlib::uInt {
+            if state.lookahead == 0 as crate::stdlib::uInt {
                 break;
             }
         }
-        (*s).match_length = 0 as crate::stdlib::uInt;
-        let window = ::core::slice::from_raw_parts((*s).window, (*s).window_size as usize);
-        if (*s).lookahead >= crate::zutil_h::MIN_MATCH as crate::stdlib::uInt
-            && (*s).strstart > 0 as crate::stdlib::uInt
+        state.match_length = 0 as crate::stdlib::uInt;
+        let window = ::core::slice::from_raw_parts(state.window, state.window_size as usize);
+        if state.lookahead >= crate::zutil_h::MIN_MATCH as crate::stdlib::uInt
+            && state.strstart > 0 as crate::stdlib::uInt
         {
-            (*s).match_length = rle_match_length(window, (*s).strstart, (*s).lookahead);
+            state.match_length = rle_match_length(window, state.strstart, state.lookahead);
         }
-        if (*s).match_length >= crate::zutil_h::MIN_MATCH as crate::stdlib::uInt {
+        if state.match_length >= crate::zutil_h::MIN_MATCH as crate::stdlib::uInt {
             bflush = crate::src::trees::_tr_tally(
                 s,
                 1,
-                (*s).match_length.wrapping_sub(crate::zutil_h::MIN_MATCH as crate::stdlib::uInt),
+                state.match_length.wrapping_sub(crate::zutil_h::MIN_MATCH as crate::stdlib::uInt),
             );
-            (*s).lookahead = (*s).lookahead.wrapping_sub((*s).match_length);
-            (*s).strstart = (*s).strstart.wrapping_add((*s).match_length);
-            (*s).match_length = 0 as crate::stdlib::uInt;
+            state.lookahead = state.lookahead.wrapping_sub(state.match_length);
+            state.strstart = state.strstart.wrapping_add(state.match_length);
+            state.match_length = 0 as crate::stdlib::uInt;
         } else {
-            let cc = literal_byte(window, (*s).strstart);
+            let cc = literal_byte(window, state.strstart);
             bflush = crate::src::trees::_tr_tally(s, 0, cc as ::core::ffi::c_uint);
-            (*s).lookahead = (*s).lookahead.wrapping_sub(1);
-            (*s).strstart = (*s).strstart.wrapping_add(1);
+            state.lookahead = state.lookahead.wrapping_sub(1);
+            state.strstart = state.strstart.wrapping_add(1);
         }
         if bflush != 0 {
             crate::src::trees::_tr_flush_block(
                 s as *mut crate::src::deflate::internal_state,
-                match block_start_bytes(window, (*s).block_start) {
+                match block_start_bytes(window, state.block_start) {
                     Some(bytes) => bytes.as_ptr() as *mut crate::stdlib::charf,
                     None => ::core::ptr::null_mut::<crate::stdlib::charf>(),
                 },
-                ((*s).strstart as ::core::ffi::c_long - (*s).block_start) as crate::zutil_h::ulg,
+                (state.strstart as ::core::ffi::c_long - state.block_start) as crate::zutil_h::ulg,
                 0 as ::core::ffi::c_int,
             );
-            (*s).block_start = (*s).strstart as ::core::ffi::c_long;
-            flush_pending((*s).strm);
-            if (*(*s).strm).avail_out == 0 as crate::stdlib::uInt {
+            state.block_start = state.strstart as ::core::ffi::c_long;
+            flush_pending(state.strm);
+            if (*state.strm).avail_out == 0 as crate::stdlib::uInt {
                 return (if false {
                     finish_started as ::core::ffi::c_int
                 } else {
@@ -3274,23 +3273,23 @@ unsafe extern "C" fn deflate_rle(
             }
         }
     }
-    (*s).insert = 0 as crate::stdlib::uInt;
+    state.insert = 0 as crate::stdlib::uInt;
     if flush == crate::zlib_h::Z_FINISH {
         crate::src::trees::_tr_flush_block(
             s as *mut crate::src::deflate::internal_state,
             match block_start_bytes(
-                ::core::slice::from_raw_parts((*s).window, (*s).window_size as usize),
-                (*s).block_start,
+                ::core::slice::from_raw_parts(state.window, state.window_size as usize),
+                state.block_start,
             ) {
                 Some(bytes) => bytes.as_ptr() as *mut crate::stdlib::charf,
                 None => ::core::ptr::null_mut::<crate::stdlib::charf>(),
             },
-            ((*s).strstart as ::core::ffi::c_long - (*s).block_start) as crate::zutil_h::ulg,
+            (state.strstart as ::core::ffi::c_long - state.block_start) as crate::zutil_h::ulg,
             1 as ::core::ffi::c_int,
         );
-        (*s).block_start = (*s).strstart as ::core::ffi::c_long;
-        flush_pending((*s).strm);
-        if (*(*s).strm).avail_out == 0 as crate::stdlib::uInt {
+        state.block_start = state.strstart as ::core::ffi::c_long;
+        flush_pending(state.strm);
+        if (*state.strm).avail_out == 0 as crate::stdlib::uInt {
             return (if true {
                 finish_started as ::core::ffi::c_int
             } else {
@@ -3299,22 +3298,22 @@ unsafe extern "C" fn deflate_rle(
         }
         return finish_done;
     }
-    if (*s).sym_next != 0 {
+    if state.sym_next != 0 {
         crate::src::trees::_tr_flush_block(
             s as *mut crate::src::deflate::internal_state,
             match block_start_bytes(
-                ::core::slice::from_raw_parts((*s).window, (*s).window_size as usize),
-                (*s).block_start,
+                ::core::slice::from_raw_parts(state.window, state.window_size as usize),
+                state.block_start,
             ) {
                 Some(bytes) => bytes.as_ptr() as *mut crate::stdlib::charf,
                 None => ::core::ptr::null_mut::<crate::stdlib::charf>(),
             },
-            ((*s).strstart as ::core::ffi::c_long - (*s).block_start) as crate::zutil_h::ulg,
+            (state.strstart as ::core::ffi::c_long - state.block_start) as crate::zutil_h::ulg,
             0 as ::core::ffi::c_int,
         );
-        (*s).block_start = (*s).strstart as ::core::ffi::c_long;
-        flush_pending((*s).strm);
-        if (*(*s).strm).avail_out == 0 as crate::stdlib::uInt {
+        state.block_start = state.strstart as ::core::ffi::c_long;
+        flush_pending(state.strm);
+        if (*state.strm).avail_out == 0 as crate::stdlib::uInt {
             return (if false {
                 finish_started as ::core::ffi::c_int
             } else {
@@ -3329,36 +3328,37 @@ unsafe extern "C" fn deflate_huff(
     mut s: *mut crate::src::deflate::deflate_state,
     mut flush: ::core::ffi::c_int,
 ) -> block_state {
+    let state = &mut *s;
     let mut bflush: ::core::ffi::c_int = 0;
     loop {
-        if (*s).lookahead == 0 as crate::stdlib::uInt {
+        if state.lookahead == 0 as crate::stdlib::uInt {
             fill_window(s);
-            if (*s).lookahead == 0 as crate::stdlib::uInt {
+            if state.lookahead == 0 as crate::stdlib::uInt {
                 if flush == crate::zlib_h::Z_NO_FLUSH {
                     return need_more;
                 }
                 break;
             }
         }
-        (*s).match_length = 0 as crate::stdlib::uInt;
-        let window = ::core::slice::from_raw_parts((*s).window, (*s).window_size as usize);
-        let cc = literal_byte(window, (*s).strstart);
+        state.match_length = 0 as crate::stdlib::uInt;
+        let window = ::core::slice::from_raw_parts(state.window, state.window_size as usize);
+        let cc = literal_byte(window, state.strstart);
         bflush = crate::src::trees::_tr_tally(s, 0, cc as ::core::ffi::c_uint);
-        (*s).lookahead = (*s).lookahead.wrapping_sub(1);
-        (*s).strstart = (*s).strstart.wrapping_add(1);
+        state.lookahead = state.lookahead.wrapping_sub(1);
+        state.strstart = state.strstart.wrapping_add(1);
         if bflush != 0 {
             crate::src::trees::_tr_flush_block(
                 s as *mut crate::src::deflate::internal_state,
-                match block_start_bytes(window, (*s).block_start) {
+                match block_start_bytes(window, state.block_start) {
                     Some(bytes) => bytes.as_ptr() as *mut crate::stdlib::charf,
                     None => ::core::ptr::null_mut::<crate::stdlib::charf>(),
                 },
-                ((*s).strstart as ::core::ffi::c_long - (*s).block_start) as crate::zutil_h::ulg,
+                (state.strstart as ::core::ffi::c_long - state.block_start) as crate::zutil_h::ulg,
                 0 as ::core::ffi::c_int,
             );
-            (*s).block_start = (*s).strstart as ::core::ffi::c_long;
-            flush_pending((*s).strm);
-            if (*(*s).strm).avail_out == 0 as crate::stdlib::uInt {
+            state.block_start = state.strstart as ::core::ffi::c_long;
+            flush_pending(state.strm);
+            if (*state.strm).avail_out == 0 as crate::stdlib::uInt {
                 return (if false {
                     finish_started as ::core::ffi::c_int
                 } else {
@@ -3367,23 +3367,23 @@ unsafe extern "C" fn deflate_huff(
             }
         }
     }
-    (*s).insert = 0 as crate::stdlib::uInt;
+    state.insert = 0 as crate::stdlib::uInt;
     if flush == crate::zlib_h::Z_FINISH {
         crate::src::trees::_tr_flush_block(
             s as *mut crate::src::deflate::internal_state,
             match block_start_bytes(
-                ::core::slice::from_raw_parts((*s).window, (*s).window_size as usize),
-                (*s).block_start,
+                ::core::slice::from_raw_parts(state.window, state.window_size as usize),
+                state.block_start,
             ) {
                 Some(bytes) => bytes.as_ptr() as *mut crate::stdlib::charf,
                 None => ::core::ptr::null_mut::<crate::stdlib::charf>(),
             },
-            ((*s).strstart as ::core::ffi::c_long - (*s).block_start) as crate::zutil_h::ulg,
+            (state.strstart as ::core::ffi::c_long - state.block_start) as crate::zutil_h::ulg,
             1 as ::core::ffi::c_int,
         );
-        (*s).block_start = (*s).strstart as ::core::ffi::c_long;
-        flush_pending((*s).strm);
-        if (*(*s).strm).avail_out == 0 as crate::stdlib::uInt {
+        state.block_start = state.strstart as ::core::ffi::c_long;
+        flush_pending(state.strm);
+        if (*state.strm).avail_out == 0 as crate::stdlib::uInt {
             return (if true {
                 finish_started as ::core::ffi::c_int
             } else {
@@ -3392,22 +3392,22 @@ unsafe extern "C" fn deflate_huff(
         }
         return finish_done;
     }
-    if (*s).sym_next != 0 {
+    if state.sym_next != 0 {
         crate::src::trees::_tr_flush_block(
             s as *mut crate::src::deflate::internal_state,
             match block_start_bytes(
-                ::core::slice::from_raw_parts((*s).window, (*s).window_size as usize),
-                (*s).block_start,
+                ::core::slice::from_raw_parts(state.window, state.window_size as usize),
+                state.block_start,
             ) {
                 Some(bytes) => bytes.as_ptr() as *mut crate::stdlib::charf,
                 None => ::core::ptr::null_mut::<crate::stdlib::charf>(),
             },
-            ((*s).strstart as ::core::ffi::c_long - (*s).block_start) as crate::zutil_h::ulg,
+            (state.strstart as ::core::ffi::c_long - state.block_start) as crate::zutil_h::ulg,
             0 as ::core::ffi::c_int,
         );
-        (*s).block_start = (*s).strstart as ::core::ffi::c_long;
-        flush_pending((*s).strm);
-        if (*(*s).strm).avail_out == 0 as crate::stdlib::uInt {
+        state.block_start = state.strstart as ::core::ffi::c_long;
+        flush_pending(state.strm);
+        if (*state.strm).avail_out == 0 as crate::stdlib::uInt {
             return (if false {
                 finish_started as ::core::ffi::c_int
             } else {
