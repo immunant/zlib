@@ -3654,14 +3654,18 @@ pub fn deflate(
                         let Ok(head_len) = usize::try_from(state.hash_size) else {
                             return crate::zlib_h::Z_STREAM_ERROR;
                         };
-                        if head_len == 0 || state.head.is_null() {
+                        if head_len == 0
+                            || state.head.is_null()
+                            || window_hash.head.len() != head_len
+                        {
                             return crate::zlib_h::Z_STREAM_ERROR;
                         }
-                        // This legacy stream boundary owns the callback-allocated
-                        // hash-table lend.  Full flush clears every entry (NIL is
-                        // zero) through the slice-only state core instead of libc
-                        // `memset` and its raw byte-count arithmetic.
-                        let head = ::core::slice::from_raw_parts_mut(state.head, head_len);
+                        // The per-call ABI boundary already lent the
+                        // callback-allocated hash table. Full flush clears
+                        // that exact checked lend (NIL is zero) through the
+                        // slice-only state core instead of rebuilding a raw
+                        // slice or using libc `memset`.
+                        let head = &mut *window_hash.head;
                         clear_hash_state(head, &mut state.slid);
                         if state.lookahead == 0 as crate::stdlib::uInt {
                             state.strstart = 0 as crate::stdlib::uInt;
