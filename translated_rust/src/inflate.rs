@@ -218,6 +218,19 @@ fn inflate_state_check_result(
     }
 }
 
+fn inflate_state_references_are_valid(
+    stream: &crate::zlib_h::z_stream,
+    state: &crate::src::inflate::inflate_state,
+    state_matches_stream: bool,
+) -> bool {
+    inflate_state_is_usable(
+        stream.zalloc.is_some(),
+        stream.zfree.is_some(),
+        state_matches_stream,
+        state.mode,
+    )
+}
+
 fn inflate_stream_buffers_are_valid(
     has_output: bool,
     has_input: bool,
@@ -794,11 +807,10 @@ fn inflate_state_check_impl(
     let Some(state) = state else {
         return inflate_state_check_result(true, false, false);
     };
-    inflate_state_metadata_check_result(
-        stream.zalloc.is_some(),
-        stream.zfree.is_some(),
-        state_matches_stream,
-        state.mode,
+    inflate_state_check_result(
+        true,
+        true,
+        inflate_state_references_are_valid(stream, state, state_matches_stream),
     )
 }
 
@@ -854,7 +866,11 @@ unsafe fn inflateStateCheck(mut strm: crate::zlib_h::z_streamp) -> ::core::ffi::
         return inflate_state_check_impl(Some(stream), None, false);
     }
     let state = &*state;
-    inflate_state_check_impl(Some(stream), Some(state), state.strm == strm)
+    inflate_state_check_result(
+        true,
+        true,
+        inflate_state_references_are_valid(stream, state, state.strm == strm),
+    )
 }
 
 fn inflate_reset_keep_core(

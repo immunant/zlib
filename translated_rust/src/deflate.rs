@@ -1271,6 +1271,14 @@ fn deflate_state_check_impl(
     deflate_state_check_result(true, true, state_is_usable)
 }
 
+fn deflate_state_check_references(
+    stream: &crate::zlib_h::z_stream,
+    state: &crate::src::deflate::deflate_state,
+    state_matches_stream: bool,
+) -> ::core::ffi::c_int {
+    deflate_state_check_impl(Some(stream), Some(state), state_matches_stream)
+}
+
 fn deflate_reset_status_and_adler(
     wrap: ::core::ffi::c_int,
 ) -> (::core::ffi::c_int, crate::stdlib::uLong) {
@@ -1335,7 +1343,7 @@ unsafe fn deflateStateCheck(mut strm: crate::zlib_h::z_streamp) -> ::core::ffi::
         return deflate_state_check_impl(Some(stream), None, false);
     }
     let state = &*state;
-    deflate_state_check_impl(Some(stream), Some(state), state.strm == strm)
+    deflate_state_check_references(stream, state, state.strm == strm)
 }
 pub unsafe extern "C" fn deflateSetDictionary(
     mut strm: crate::zlib_h::z_streamp,
