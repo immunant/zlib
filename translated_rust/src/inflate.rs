@@ -2811,7 +2811,9 @@ pub unsafe extern "C" fn inflateCopy_ffi(
 ) -> ::core::ffi::c_int {
     inflateCopy(dest, source)
 }
-pub unsafe extern "C" fn inflateUndermine(
+#[export_name = "inflateUndermine"]
+
+pub unsafe extern "C" fn inflateUndermine_ffi(
     mut strm: crate::zlib_h::z_streamp,
     _subvert: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
@@ -2820,15 +2822,9 @@ pub unsafe extern "C" fn inflateUndermine(
     };
     inflate_undermine(state)
 }
-#[export_name = "inflateUndermine"]
+#[export_name = "inflateValidate"]
 
-pub unsafe extern "C" fn inflateUndermine_ffi(
-    mut strm: crate::zlib_h::z_streamp,
-    mut subvert: ::core::ffi::c_int,
-) -> ::core::ffi::c_int {
-    inflateUndermine(strm, subvert)
-}
-pub unsafe extern "C" fn inflateValidate(
+pub unsafe extern "C" fn inflateValidate_ffi(
     mut strm: crate::zlib_h::z_streamp,
     mut check: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
@@ -2836,20 +2832,6 @@ pub unsafe extern "C" fn inflateValidate(
         return crate::zlib_h::Z_STREAM_ERROR;
     };
     inflate_validate(state, check)
-}
-#[export_name = "inflateValidate"]
-
-pub unsafe extern "C" fn inflateValidate_ffi(
-    mut strm: crate::zlib_h::z_streamp,
-    mut check: ::core::ffi::c_int,
-) -> ::core::ffi::c_int {
-    inflateValidate(strm, check)
-}
-pub unsafe extern "C" fn inflateMark(mut strm: crate::zlib_h::z_streamp) -> ::core::ffi::c_long {
-    let Some((_strm, state)) = inflateStateCheck(strm) else {
-        return -((1 as ::core::ffi::c_long) << 16 as ::core::ffi::c_int);
-    };
-    inflate_mark(state)
 }
 
 fn inflate_sync_point(state: &crate::src::inflate::inflate_state) -> ::core::ffi::c_int {
@@ -2897,22 +2879,20 @@ fn inflate_mark(state: &crate::src::inflate::inflate_state) -> ::core::ffi::c_lo
 pub unsafe extern "C" fn inflateMark_ffi(
     mut strm: crate::zlib_h::z_streamp,
 ) -> ::core::ffi::c_long {
-    inflateMark(strm)
-}
-pub unsafe extern "C" fn inflateCodesUsed(
-    mut strm: crate::zlib_h::z_streamp,
-) -> ::core::ffi::c_ulong {
     let Some((_strm, state)) = inflateStateCheck(strm) else {
-        return -1 as ::core::ffi::c_int as ::core::ffi::c_ulong;
+        return -((1 as ::core::ffi::c_long) << 16 as ::core::ffi::c_int);
     };
-    inflate_codes_used(state)
+    inflate_mark(state)
 }
 #[export_name = "inflateCodesUsed"]
 
 pub unsafe extern "C" fn inflateCodesUsed_ffi(
     mut strm: crate::zlib_h::z_streamp,
 ) -> ::core::ffi::c_ulong {
-    inflateCodesUsed(strm)
+    let Some((_strm, state)) = inflateStateCheck(strm) else {
+        return -1 as ::core::ffi::c_int as ::core::ffi::c_ulong;
+    };
+    inflate_codes_used(state)
 }
 
 fn inflate_codes_used(state: &crate::src::inflate::inflate_state) -> crate::stdlib::uLong {
