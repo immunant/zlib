@@ -695,6 +695,58 @@ fn copy_history_dictionary(output: &mut [u8], window: &[u8], wnext: usize, whave
     output[first..whave].copy_from_slice(&window[..wnext]);
 }
 
+// A read-only, pointer-free view of the history state used by
+// inflateGetDictionary().  Keeping the history borrow and its ring metadata
+// together lets the ABI wrapper turn its optional output pointer into a
+// bounded slice before it dispatches to the copy core.
+struct InflateDictionaryRequest<'window> {
+    window: &'window [crate::stdlib::Bytef],
+    wnext: usize,
+    whave: usize,
+}
+
+impl InflateDictionaryRequest<'_> {
+    fn dictionary_len(&self) -> usize {
+        self.whave
+    }
+}
+
+// The ABI stream carries the opaque state pointer.  Project it once and keep
+// all of the resulting data in the pointer-free request consumed below.
+unsafe fn inflateGetDictionary<'stream>(
+    stream: &'stream mut crate::zlib_h::z_stream_s,
+) -> Option<InflateDictionaryRequest<'stream>> {
+    let (_, state) = inflate_stream_and_state(stream)?;
+    let whave = state.whave as usize;
+    let window = if whave == 0 {
+        &[]
+    } else {
+        state
+            .owned_window
+            .as_deref()
+            .expect("normal inflate owns its history window")
+    };
+    Some(InflateDictionaryRequest {
+        window,
+        wnext: state.wnext as usize,
+        whave,
+    })
+}
+
+fn inflate_get_dictionary(
+    request: InflateDictionaryRequest<'_>,
+    dictionary: Option<&mut [crate::stdlib::Bytef]>,
+    dict_length: Option<&mut crate::stdlib::uInt>,
+) -> ::core::ffi::c_int {
+    if let Some(output) = dictionary {
+        copy_history_dictionary(output, request.window, request.wnext, request.whave);
+    }
+    if let Some(dict_length) = dict_length {
+        *dict_length = request.whave as crate::stdlib::uInt;
+    }
+    crate::zlib_h::Z_OK
+}
+
 // Copy one decoded match into the current output chunk.  A match that reaches
 // into output must be copied forward one byte at a time: later bytes can
 // intentionally read the bytes just written (for example, a distance of one).
@@ -2770,37 +2822,6 @@ pub unsafe extern "C" fn inflateEnd(mut strm: crate::zlib_h::z_streamp) -> ::cor
 pub unsafe extern "C" fn inflateEnd_ffi(mut strm: crate::zlib_h::z_streamp) -> ::core::ffi::c_int {
     inflateEnd(strm)
 }
-pub unsafe extern "C" fn inflateGetDictionary(
-    mut strm: crate::zlib_h::z_streamp,
-    mut dictionary: *mut crate::stdlib::Bytef,
-    mut dictLength: *mut crate::stdlib::uInt,
-) -> ::core::ffi::c_int {
-    let Some(strm) = strm.as_mut() else {
-        return crate::zlib_h::Z_STREAM_ERROR;
-    };
-    // Keep the opaque-state projection scoped to the stream borrow.  The
-    // caller output remains the only raw cursor below; the history copy is
-    // wholly slice-based.
-    let Some((_strm, state)) = inflate_stream_and_state(strm) else {
-        return crate::zlib_h::Z_STREAM_ERROR;
-    };
-    if state.whave != 0 && !dictionary.is_null() {
-        // The caller dictionary buffer and internal history allocation are
-        // distinct, as required by the translated C memcpy operations. Form
-        // bounded views once, then keep the ring-order copy pointer-free.
-        let whave = state.whave as usize;
-        let window = state
-            .owned_window
-            .as_deref()
-            .expect("normal inflate owns its history window");
-        let output = ::core::slice::from_raw_parts_mut(dictionary, whave);
-        copy_history_dictionary(output, window, state.wnext as usize, whave);
-    }
-    if !dictLength.is_null() {
-        *dictLength = state.whave as crate::stdlib::uInt;
-    }
-    return crate::zlib_h::Z_OK;
-}
 #[export_name = "inflateGetDictionary"]
 
 pub unsafe extern "C" fn inflateGetDictionary_ffi(
@@ -2808,7 +2829,25 @@ pub unsafe extern "C" fn inflateGetDictionary_ffi(
     mut dictionary: *mut crate::stdlib::Bytef,
     mut dictLength: *mut crate::stdlib::uInt,
 ) -> ::core::ffi::c_int {
-    inflateGetDictionary(strm, dictionary, dictLength)
+    let Some(stream) = strm.as_mut() else {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    };
+    let Some(request) = inflateGetDictionary(stream) else {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    };
+    // C defines the dictionary output only when history exists.  Convert the
+    // raw optional output at this boundary, using the bounded request's
+    // length, so the implementation receives no raw output pointer.
+    let dictionary = if dictionary.is_null() || request.dictionary_len() == 0 {
+        None
+    } else {
+        Some(::core::slice::from_raw_parts_mut(
+            dictionary,
+            request.dictionary_len(),
+        ))
+    };
+    let dict_length = dictLength.as_mut();
+    inflate_get_dictionary(request, dictionary, dict_length)
 }
 pub unsafe extern "C" fn inflateSetDictionary(
     mut strm: crate::zlib_h::z_streamp,
