@@ -547,48 +547,51 @@ pub unsafe extern "C" fn gztell_ffi(mut file: crate::zlib_h::gzFile) -> crate::s
         _ => -1,
     }
 }
-pub unsafe extern "C" fn gzoffset64(mut file: crate::zlib_h::gzFile) -> crate::stdlib::off64_t {
-    let mut offset: crate::stdlib::off64_t = 0;
-    let mut state: crate::gzguts_h::gz_statep =
-        ::core::ptr::null_mut::<crate::gzguts_h::gz_state>();
-    if file.is_null() {
-        return -1 as crate::stdlib::off64_t;
+/// Adjust the descriptor position to the gzip stream position after the
+/// boundary has sampled the opaque state and queried the descriptor.
+fn gzoffset_mode_is_valid(mode: ::core::ffi::c_int) -> bool {
+    mode == crate::gzguts_h::GZ_READ || mode == crate::gzguts_h::GZ_WRITE
+}
+
+fn gzoffset_state(
+    mode: ::core::ffi::c_int,
+    avail_in: crate::stdlib::uInt,
+    descriptor_offset: crate::stdlib::off64_t,
+) -> Option<crate::stdlib::off64_t> {
+    if !gzoffset_mode_is_valid(mode) || descriptor_offset == -1 {
+        return None;
     }
-    state = file as crate::gzguts_h::gz_statep;
-    if (*state).mode != crate::gzguts_h::GZ_READ && (*state).mode != crate::gzguts_h::GZ_WRITE {
-        return -1 as crate::stdlib::off64_t;
-    }
-    offset = crate::stdlib::lseek64(
-        (*state).fd,
-        0 as crate::stdlib::__off64_t,
-        crate::stdlib::SEEK_CUR,
-    ) as crate::stdlib::off64_t;
-    if offset == -1 as crate::stdlib::off64_t {
-        return -1 as crate::stdlib::off64_t;
-    }
-    if (*state).mode == crate::gzguts_h::GZ_READ {
-        offset -= (*state).strm.avail_in as crate::stdlib::off64_t;
-    }
-    return offset;
+    Some(if mode == crate::gzguts_h::GZ_READ {
+        descriptor_offset - avail_in as crate::stdlib::off64_t
+    } else {
+        descriptor_offset
+    })
 }
 #[export_name = "gzoffset64"]
 
 pub unsafe extern "C" fn gzoffset64_ffi(mut file: crate::zlib_h::gzFile) -> crate::stdlib::off64_t {
-    gzoffset64(file)
-}
-pub unsafe extern "C" fn gzoffset(mut file: crate::zlib_h::gzFile) -> crate::stdlib::off_t {
-    let mut ret: crate::stdlib::off64_t = 0;
-    ret = gzoffset64(file);
-    return if ret == ret {
-        ret
-    } else {
-        -1 as crate::stdlib::off_t
-    };
+    if file.is_null() {
+        return -1;
+    }
+    let state = &*(file as crate::gzguts_h::gz_statep);
+    if !gzoffset_mode_is_valid(state.mode) {
+        return -1;
+    }
+    let descriptor_offset = crate::stdlib::lseek64(state.fd, 0, crate::stdlib::SEEK_CUR);
+    gzoffset_state(state.mode, state.strm.avail_in, descriptor_offset).unwrap_or(-1)
 }
 #[export_name = "gzoffset"]
 
 pub unsafe extern "C" fn gzoffset_ffi(mut file: crate::zlib_h::gzFile) -> crate::stdlib::off_t {
-    gzoffset(file)
+    if file.is_null() {
+        return -1;
+    }
+    let state = &*(file as crate::gzguts_h::gz_statep);
+    if !gzoffset_mode_is_valid(state.mode) {
+        return -1;
+    }
+    let descriptor_offset = crate::stdlib::lseek64(state.fd, 0, crate::stdlib::SEEK_CUR);
+    gzoffset_state(state.mode, state.strm.avail_in, descriptor_offset).unwrap_or(-1)
 }
 fn gzeof_state(mode: ::core::ffi::c_int, past: ::core::ffi::c_int) -> ::core::ffi::c_int {
     if mode == crate::gzguts_h::GZ_READ {
