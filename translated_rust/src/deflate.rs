@@ -1327,7 +1327,7 @@ pub unsafe extern "C" fn deflateInit2_(
     (*s).level = level;
     (*s).strategy = strategy;
     (*s).method = method as crate::stdlib::Byte;
-    return deflateReset(strm);
+    return deflateReset_ffi(strm);
 }
 #[export_name = "deflateInit2_"]
 
@@ -1645,26 +1645,18 @@ fn deflate_reset_keep_state(
     crate::src::trees::tr_init(state);
 }
 
-pub unsafe extern "C" fn deflateResetKeep(
-    mut strm: crate::zlib_h::z_streamp,
-) -> ::core::ffi::c_int {
-    let mut s: *mut crate::src::deflate::deflate_state =
-        ::core::ptr::null_mut::<crate::src::deflate::deflate_state>();
-    if deflateStateCheck(strm) != 0 {
-        return crate::zlib_h::Z_STREAM_ERROR;
-    }
-    let stream = &mut *strm;
-    s = stream.state as *mut crate::src::deflate::deflate_state;
-    let state = &mut *s;
-    deflate_reset_keep_state(stream, state);
-    return crate::zlib_h::Z_OK;
-}
 #[export_name = "deflateResetKeep"]
 
 pub unsafe extern "C" fn deflateResetKeep_ffi(
     mut strm: crate::zlib_h::z_streamp,
 ) -> ::core::ffi::c_int {
-    deflateResetKeep(strm)
+    if deflateStateCheck(strm) != 0 {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    }
+    let stream = &mut *strm;
+    let state = &mut *(stream.state as *mut crate::src::deflate::deflate_state);
+    deflate_reset_keep_state(stream, state);
+    crate::zlib_h::Z_OK
 }
 
 fn lm_match_parameters(
@@ -1768,30 +1760,35 @@ fn lm_apply_reset(state: &mut crate::src::deflate::deflate_state, plan: LmResetP
     state.ins_h = 0 as crate::stdlib::uInt;
 }
 
-unsafe fn lm_init(mut s: *mut crate::src::deflate::deflate_state) {
-    let state = &mut *s;
+fn lm_init(state: &mut crate::src::deflate::deflate_state, head: &mut [crate::src::deflate::Posf]) {
     let plan = lm_init_plan(state.hash_size, state.w_size, state.level);
-    crate::stdlib::memset(
-        state.head as *mut ::core::ffi::c_void,
-        0 as ::core::ffi::c_int,
-        plan.head_reset.clear_len,
-    );
+    head[..state.hash_size as usize].fill(0);
     lm_apply_reset(state, plan.reset);
-}
-pub unsafe extern "C" fn deflateReset(mut strm: crate::zlib_h::z_streamp) -> ::core::ffi::c_int {
-    let mut ret: ::core::ffi::c_int = 0;
-    ret = deflateResetKeep(strm);
-    if ret == crate::zlib_h::Z_OK {
-        lm_init((*strm).state as *mut crate::src::deflate::deflate_state);
-    }
-    return ret;
 }
 #[export_name = "deflateReset"]
 
 pub unsafe extern "C" fn deflateReset_ffi(
     mut strm: crate::zlib_h::z_streamp,
 ) -> ::core::ffi::c_int {
-    deflateReset(strm)
+    if deflateStateCheck(strm) != 0 {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    }
+    let stream = &mut *strm;
+    let state = &mut *(stream.state as *mut crate::src::deflate::deflate_state);
+    if state.head.is_null()
+        || state
+            .head
+            .align_offset(::core::mem::align_of::<crate::src::deflate::Posf>())
+            != 0
+        || state.hash_size as usize
+            > isize::MAX as usize / ::core::mem::size_of::<crate::src::deflate::Posf>()
+    {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    }
+    let head = core::slice::from_raw_parts_mut(state.head, state.hash_size as usize);
+    deflate_reset_keep_state(stream, state);
+    lm_init(state, head);
+    crate::zlib_h::Z_OK
 }
 fn deflate_set_header_allowed(wrap: ::core::ffi::c_int) -> bool {
     wrap == 2 as ::core::ffi::c_int
