@@ -94,6 +94,10 @@ pub struct internal_state {
     // callback allocations below, so their allocation/free observations stay
     // exactly as supplied by the caller.
     owned_storage: Option<DeflateOwnedStorage>,
+    // The exact pointer-free request plan used for callback-owned storage.
+    // Retaining it lets the sole raw-to-slice boundary verify the live scalar
+    // geometry against the original allocations before it borrows them.
+    callback_storage_plan: Option<CallbackDeflateStoragePlan>,
     pub status: ::core::ffi::c_int,
     // Callback-owned workspaces retain nullable typed handles.  Only the
     // callback-storage adapter materializes borrowed slices from them.
@@ -352,6 +356,15 @@ struct DeflateCallbackAllocation {
     item_size: crate::stdlib::uInt,
 }
 
+impl Clone for DeflateCallbackAllocation {
+    fn clone(&self) -> Self {
+        Self {
+            items: self.items,
+            item_size: self.item_size,
+        }
+    }
+}
+
 /// The four callback allocations that back one deflate workspace.
 ///
 /// This is deliberately pointer-free.  Initialization and deep copy must
@@ -365,7 +378,49 @@ struct CallbackDeflateStoragePlan {
     pending: DeflateCallbackAllocation,
 }
 
+impl Clone for CallbackDeflateStoragePlan {
+    fn clone(&self) -> Self {
+        Self {
+            window: self.window.clone(),
+            prev: self.prev.clone(),
+            head: self.head.clone(),
+            pending: self.pending.clone(),
+        }
+    }
+}
+
 impl CallbackDeflateStoragePlan {
+    /// Check that the state still describes precisely the workspace that this
+    /// plan allocated.  The callback handles themselves remain opaque, but a
+    /// later paired owner can rely on this scalar attestation before replacing
+    /// the raw borrowing boundary.
+    fn matches_state(&self, state: &crate::src::deflate::deflate_state) -> bool {
+        let Some(window_bytes) = usize::try_from(self.window.items)
+            .ok()
+            .and_then(|items| items.checked_mul(self.window.item_size as usize))
+        else {
+            return false;
+        };
+        let Some(pending_bytes) = usize::try_from(self.pending.items)
+            .ok()
+            .and_then(|items| items.checked_mul(self.pending.item_size as usize))
+        else {
+            return false;
+        };
+        self.window.item_size
+            == 2 * ::core::mem::size_of::<crate::stdlib::Byte>() as crate::stdlib::uInt
+            && self.prev.item_size
+                == ::core::mem::size_of::<crate::src::deflate::Pos>() as crate::stdlib::uInt
+            && self.head.item_size
+                == ::core::mem::size_of::<crate::src::deflate::Pos>() as crate::stdlib::uInt
+            && self.pending.item_size == 4
+            && state.w_size == self.window.items
+            && state.hash_size == self.head.items
+            && state.lit_bufsize == self.pending.items
+            && state.window_size == window_bytes as crate::zutil_h::ulg
+            && state.pending_buf_size == pending_bytes as crate::zutil_h::ulg
+    }
+
     /// Allocate one complete callback-owned workspace into its established
     /// typed state handles.
     ///
@@ -846,6 +901,18 @@ fn with_callback_deflate_storage<R>(
     need: CallbackDeflateStorageNeed,
     action: impl FnOnce(&mut crate::src::deflate::deflate_state, CallbackDeflateStorage<'_>) -> R,
 ) -> Option<R> {
+    // Do not derive a callback allocation's extent from mutable stream state
+    // alone.  The plan is installed beside the four callback requests, so it
+    // proves that these scalar lengths still describe those exact requests
+    // before this boundary creates any borrowed view.
+    if state.owned_storage.is_none()
+        && !state
+            .callback_storage_plan
+            .as_ref()
+            .is_some_and(|plan| plan.matches_state(state))
+    {
+        return None;
+    }
     // Preserve the legacy workspace boundary's validation order: an update
     // with no window must fail before it tries to view either hash table.
     if matches!(
@@ -1203,6 +1270,7 @@ fn empty_deflate_state() -> crate::src::deflate::deflate_state {
         strm: 0,
         allocator_provenance: crate::src::zutil::UNKNOWN_ALLOCATOR_PROVENANCE,
         owned_storage: None,
+        callback_storage_plan: None,
         status: 0,
         pending_buf: None,
         pending_buf_size: 0,
@@ -1332,6 +1400,7 @@ fn configure_allocated_deflate_state(
     } else {
         let callback_storage = storage.callback_storage_plan();
         callback_storage.allocate_into(strm, state);
+        state.callback_storage_plan = Some(callback_storage);
     }
     if state.window.is_none()
         || state.prev.is_none()
