@@ -2584,11 +2584,9 @@ pub unsafe extern "C" fn inflateCopy(
     if copy.is_null() {
         return crate::zlib_h::Z_MEM_ERROR;
     }
-    crate::stdlib::memset(
-        copy as *mut ::core::ffi::c_void,
-        0 as ::core::ffi::c_int,
-        ::core::mem::size_of::<crate::src::inflate::inflate_state>(),
-    );
+    // The allocation is not observed before the complete state copy below.
+    // Clearing it here would be dead work and only adds an unsafe foreign
+    // memory call; the copy establishes every state byte before use.
     window = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
     if !(*state).window.is_null() {
         window = Some((*source).zalloc.expect("non-null function pointer"))
