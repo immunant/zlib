@@ -615,26 +615,19 @@ struct GzOpenConfig {
 // the initial reset values here as well, so a later opaque gzip owner can use
 // this constructor without reintroducing ABI-shaped state mutation.
 struct GzOpenState {
-    mode: ::core::ffi::c_int,
     fd: rustix::fd::OwnedFd,
     path: Box<[u8]>,
     size: ::core::ffi::c_uint,
     want: ::core::ffi::c_uint,
     direct: ::core::ffi::c_int,
-    junk: ::core::ffi::c_int,
-    how: ::core::ffi::c_int,
-    again: ::core::ffi::c_int,
     start: crate::stdlib::off64_t,
-    eof: ::core::ffi::c_int,
-    past: ::core::ffi::c_int,
     level: ::core::ffi::c_int,
     strategy: ::core::ffi::c_int,
-    reset: ::core::ffi::c_int,
-    skip: crate::stdlib::off64_t,
-    err: ::core::ffi::c_int,
-    buffered: ::core::ffi::c_uint,
-    pos: crate::stdlib::off64_t,
-    avail_in: crate::stdlib::uInt,
+    // A fresh handle starts at exactly the same pointer-free reset state that
+    // rewind and seek use.  Keeping this as one owned transition avoids
+    // re-expanding ABI cursor/stream fields during the eventual gzip owner
+    // split.
+    reset: GzResetState,
 }
 
 impl GzOpenConfig {
@@ -699,26 +692,15 @@ impl GzOpenConfig {
             avail_in: 0,
         });
         GzOpenState {
-            mode: reset.mode,
             fd,
             path: self.path,
             size: 0,
             want: crate::gzguts_h::GZBUFSIZE as ::core::ffi::c_uint,
             direct: self.mode.direct,
-            junk: reset.junk,
-            how: reset.how,
-            again: reset.again,
             start,
-            eof: reset.eof,
-            past: reset.past,
             level: self.mode.level,
             strategy: self.mode.strategy,
-            reset: reset.reset,
-            skip: reset.skip,
-            err: reset.err,
-            buffered: reset.have,
-            pos: reset.pos,
-            avail_in: reset.avail_in,
+            reset,
         }
     }
 }
@@ -828,11 +810,11 @@ unsafe fn gz_open(path: &[u8], fd: ::core::ffi::c_int, mode: &[u8]) -> crate::zl
     let initial = config.into_open_state(fd);
     state_owner.push(crate::gzguts_h::gz_state {
         x: crate::zlib_h::gzFile_s {
-            have: initial.buffered,
+            have: initial.reset.have,
             next: ::core::ptr::null_mut(),
-            pos: initial.pos,
+            pos: initial.reset.pos,
         },
-        mode: initial.mode,
+        mode: initial.reset.mode,
         fd: Some(initial.fd),
         path: Some(initial.path),
         size: initial.size,
@@ -840,21 +822,21 @@ unsafe fn gz_open(path: &[u8], fd: ::core::ffi::c_int, mode: &[u8]) -> crate::zl
         in_0: None,
         out: None,
         direct: initial.direct,
-        junk: initial.junk,
-        how: initial.how,
-        again: initial.again,
+        junk: initial.reset.junk,
+        how: initial.reset.how,
+        again: initial.reset.again,
         start: initial.start,
-        eof: initial.eof,
-        past: initial.past,
+        eof: initial.reset.eof,
+        past: initial.reset.past,
         level: initial.level,
         strategy: initial.strategy,
-        reset: initial.reset,
-        skip: initial.skip,
-        err: initial.err,
+        reset: initial.reset.reset,
+        skip: initial.reset.skip,
+        err: initial.reset.err,
         msg: None,
         strm: crate::zlib_h::z_stream {
             next_in: ::core::ptr::null_mut(),
-            avail_in: initial.avail_in,
+            avail_in: initial.reset.avail_in,
             total_in: 0,
             next_out: ::core::ptr::null_mut(),
             avail_out: 0,
