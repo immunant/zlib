@@ -2072,6 +2072,46 @@ pub(crate) fn gz_with_owned_state<R>(
     Some(operation(state.0.as_mut()))
 }
 
+// Closing consumes the opaque handle's state allocation.  Remove its box
+// from the registry before cleanup so the close coordinators can operate on
+// an ordinary owned value without reconstructing a reference from the
+// foreign handle.  In-flight non-closing operations retain the registry lock
+// for their full borrow, so this can only take the box after they finish.
+pub(crate) fn gz_take_owned_state_with_mode(
+    state_key: usize,
+    mode: ::core::ffi::c_int,
+) -> Option<Box<crate::gzguts_h::gz_state>> {
+    if state_key == 0 {
+        return None;
+    }
+    let mut states = gz_owned_states().lock().expect("gzip state registry poisoned");
+    let index = states.iter().position(|(key, _)| *key == state_key)?;
+    if !gz_has_mode(states[index].1.0.as_ref(), mode) {
+        return None;
+    }
+    Some(states.swap_remove(index).1.0)
+}
+
+pub(crate) fn gz_take_owned_state(
+    state_key: usize,
+) -> Option<Box<crate::gzguts_h::gz_state>> {
+    if state_key == 0 {
+        return None;
+    }
+    let mut states = gz_owned_states().lock().expect("gzip state registry poisoned");
+    let index = states.iter().position(|(key, _)| *key == state_key)?;
+    let state = states[index].1.0.as_ref();
+    let closes_as_read = state.mode == crate::gzguts_h::GZ_READ;
+    if !(if closes_as_read {
+        gz_has_mode(state, crate::gzguts_h::GZ_READ)
+    } else {
+        gz_has_mode(state, crate::gzguts_h::GZ_WRITE)
+    }) {
+        return None;
+    }
+    Some(states.swap_remove(index).1.0)
+}
+
 fn gz_owned_buffers() -> &'static ::std::sync::Mutex<Vec<(usize, GzOwnedBuffers)>> {
     GZ_OWNED_BUFFERS.get_or_init(|| ::std::sync::Mutex::new(Vec::new()))
 }

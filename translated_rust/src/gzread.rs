@@ -1239,7 +1239,14 @@ fn gzclose_r_dispatch(state: Option<&mut crate::gzguts_h::gz_state>) -> ::core::
 #[export_name = "gzclose_r"]
 
 pub unsafe extern "C" fn gzclose_r_ffi(mut file: crate::zlib_h::gzFile) -> ::core::ffi::c_int {
-    // SAFETY: this ABI adapter only binds the optional opaque gzip handle.
-    let state = unsafe { (file as crate::gzguts_h::gz_statep).as_mut() };
-    gzclose_r_dispatch(state)
+    // The address-keyed registry owns every live gzip state. Taking the box
+    // makes close reference-bound without dereferencing the foreign handle.
+    // `gzclose_r()`'s legacy registry-release step is then a harmless no-op.
+    let Some(mut state) = crate::src::gzlib::gz_take_owned_state_with_mode(
+        file.addr(),
+        crate::gzguts_h::GZ_READ,
+    ) else {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    };
+    gzclose_r(&mut state)
 }

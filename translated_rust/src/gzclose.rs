@@ -33,8 +33,10 @@ pub fn gzclose(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
 #[export_name = "gzclose"]
 
 pub unsafe extern "C" fn gzclose_ffi(mut file: crate::zlib_h::gzFile) -> ::core::ffi::c_int {
-    if file.is_null() {
+    // The registry is the sole owner of live gzip state. Consume that owned
+    // box by handle address, keeping the ABI adapter free of raw dereference.
+    let Some(mut state) = crate::src::gzlib::gz_take_owned_state(file.addr()) else {
         return crate::zlib_h::Z_STREAM_ERROR;
-    }
-    gzclose(&mut *(file as crate::gzguts_h::gz_statep))
+    };
+    gzclose(&mut state)
 }

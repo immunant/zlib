@@ -911,8 +911,13 @@ pub fn gzclose_w(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
 #[export_name = "gzclose_w"]
 
 pub unsafe extern "C" fn gzclose_w_ffi(mut file: crate::zlib_h::gzFile) -> ::core::ffi::c_int {
-    if file.is_null() {
+    // See `gzclose_r_ffi`: close takes the registry-owned box, rather than
+    // binding the opaque foreign handle as a mutable reference.
+    let Some(mut state) = crate::src::gzlib::gz_take_owned_state_with_mode(
+        file.addr(),
+        crate::gzguts_h::GZ_WRITE,
+    ) else {
         return crate::zlib_h::Z_STREAM_ERROR;
-    }
-    gzclose_w(&mut *(file as crate::gzguts_h::gz_statep))
+    };
+    gzclose_w(&mut state)
 }
