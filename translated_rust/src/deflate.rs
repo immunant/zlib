@@ -3191,15 +3191,17 @@ fn deflate_bound_impl(
     }
 }
 
+// The ABI wrappers observe the stream's allocator slots before entering this
+// state-only adapter.  The bound calculation itself neither needs caller
+// cursors nor may retain the ABI stream carrier.
 unsafe fn deflate_bound_state_for_stream(
-    stream: &crate::zlib_h::z_stream_s,
-    _stream_ptr: crate::zlib_h::z_streamp,
+    state: Option<::core::ptr::NonNull<crate::zlib_h::z_stream_state_opaque>>,
+    has_allocators: bool,
 ) -> Option<DeflateBoundState> {
-    if stream.zalloc.is_none() || stream.zfree.is_none() {
+    if !has_allocators {
         return None;
     }
-    let state = stream
-        .state?
+    let state = state?
         .cast::<crate::src::deflate::deflate_state>()
         .as_ref();
     if state.status != crate::src::deflate::INIT_STATE
@@ -3254,7 +3256,12 @@ pub unsafe extern "C" fn deflateBound_z_ffi(
 ) -> crate::stdlib::z_size_t {
     let state = strm
         .as_ref()
-        .and_then(|stream| deflate_bound_state_for_stream(stream, strm));
+        .and_then(|stream| {
+            deflate_bound_state_for_stream(
+                stream.state,
+                stream.zalloc.is_some() && stream.zfree.is_some(),
+            )
+        });
     deflateBound_z(sourceLen, state)
 }
 #[export_name = "deflateBound"]
@@ -3265,7 +3272,12 @@ pub unsafe extern "C" fn deflateBound_ffi(
 ) -> crate::stdlib::uLong {
     let state = strm
         .as_ref()
-        .and_then(|stream| deflate_bound_state_for_stream(stream, strm));
+        .and_then(|stream| {
+            deflate_bound_state_for_stream(
+                stream.state,
+                stream.zalloc.is_some() && stream.zfree.is_some(),
+            )
+        });
     deflateBound_z(sourceLen as crate::stdlib::z_size_t, state) as crate::stdlib::uLong
 }
 
