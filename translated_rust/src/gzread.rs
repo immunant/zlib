@@ -382,6 +382,10 @@ fn gzgets_copied_any(initial_left: ::core::ffi::c_uint, left: ::core::ffi::c_uin
     initial_left != left
 }
 
+fn gzgets_needs_fetch(have: ::core::ffi::c_uint) -> bool {
+    have == 0
+}
+
 #[derive(Debug, Eq, PartialEq)]
 enum GzgetsPostFetchDecision {
     Stop,
@@ -1774,10 +1778,7 @@ mod tests {
     #[test]
     fn gz_ungetc_progress_wraps_minimum_position_and_buffered_count() {
         assert_eq!(
-            gz_ungetc_progress(
-                ::core::ffi::c_uint::MAX,
-                crate::stdlib::off64_t::MIN,
-            ),
+            gz_ungetc_progress(::core::ffi::c_uint::MAX, crate::stdlib::off64_t::MIN,),
             (0, crate::stdlib::off64_t::MAX, 0)
         );
     }
@@ -2018,6 +2019,13 @@ mod tests {
         assert!(!gzgets_copied_any(8, 8));
         assert!(gzgets_copied_any(8, 7));
         assert!(gzgets_copied_any(::core::ffi::c_uint::MAX, 0));
+    }
+
+    #[test]
+    fn gzgets_needs_fetch_only_without_buffered_bytes() {
+        assert!(gzgets_needs_fetch(0));
+        assert!(!gzgets_needs_fetch(1));
+        assert!(!gzgets_needs_fetch(::core::ffi::c_uint::MAX));
     }
 
     #[test]
@@ -2390,7 +2398,7 @@ pub unsafe extern "C" fn gzgets(
     left = initial_left;
     if left != 0 {
         loop {
-            let fetch = if (*state).x.have == 0 {
+            let fetch = if gzgets_needs_fetch((*state).x.have) {
                 gz_fetch(state)
             } else {
                 0

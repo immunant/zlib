@@ -3735,6 +3735,13 @@ fn select_block_encoding(
     }
 }
 
+fn block_header_bits(
+    block_type: ::core::ffi::c_int,
+    last: ::core::ffi::c_int,
+) -> ::core::ffi::c_int {
+    (block_type << 1 as ::core::ffi::c_int) + last
+}
+
 fn bi_windup_core(
     bi_buf: &mut crate::zutil_h::ush,
     bi_valid: &mut ::core::ffi::c_int,
@@ -5040,9 +5047,9 @@ pub unsafe extern "C" fn _tr_flush_block(
         _tr_stored_block(s, buf, stored_len, last);
     } else if encoding == BlockEncoding::Static {
         let mut len: ::core::ffi::c_int = 3 as ::core::ffi::c_int;
+        let header = block_header_bits(1 as ::core::ffi::c_int, last);
         if (*s).bi_valid > crate::src::deflate::Buf_size - len {
-            let mut val: ::core::ffi::c_int =
-                ((1 as ::core::ffi::c_int) << 1 as ::core::ffi::c_int) + last;
+            let mut val: ::core::ffi::c_int = header;
             (*s).bi_buf = ((*s).bi_buf as ::core::ffi::c_int
                 | (val as crate::zutil_h::ush as ::core::ffi::c_int) << (*s).bi_valid)
                 as crate::zutil_h::ush;
@@ -5062,9 +5069,8 @@ pub unsafe extern "C" fn _tr_flush_block(
             (*s).bi_valid += len - crate::src::deflate::Buf_size;
         } else {
             (*s).bi_buf = ((*s).bi_buf as ::core::ffi::c_int
-                | ((((1 as ::core::ffi::c_int) << 1 as ::core::ffi::c_int) + last)
-                    as crate::zutil_h::ush as ::core::ffi::c_int)
-                    << (*s).bi_valid) as crate::zutil_h::ush;
+                | (header as crate::zutil_h::ush as ::core::ffi::c_int) << (*s).bi_valid)
+                as crate::zutil_h::ush;
             (*s).bi_valid += len;
         }
         compress_block(
@@ -5074,9 +5080,9 @@ pub unsafe extern "C" fn _tr_flush_block(
         );
     } else {
         let mut len_0: ::core::ffi::c_int = 3 as ::core::ffi::c_int;
+        let header = block_header_bits(2 as ::core::ffi::c_int, last);
         if (*s).bi_valid > crate::src::deflate::Buf_size - len_0 {
-            let mut val_0: ::core::ffi::c_int =
-                ((2 as ::core::ffi::c_int) << 1 as ::core::ffi::c_int) + last;
+            let mut val_0: ::core::ffi::c_int = header;
             (*s).bi_buf = ((*s).bi_buf as ::core::ffi::c_int
                 | (val_0 as crate::zutil_h::ush as ::core::ffi::c_int) << (*s).bi_valid)
                 as crate::zutil_h::ush;
@@ -5096,9 +5102,8 @@ pub unsafe extern "C" fn _tr_flush_block(
             (*s).bi_valid += len_0 - crate::src::deflate::Buf_size;
         } else {
             (*s).bi_buf = ((*s).bi_buf as ::core::ffi::c_int
-                | ((((2 as ::core::ffi::c_int) << 1 as ::core::ffi::c_int) + last)
-                    as crate::zutil_h::ush as ::core::ffi::c_int)
-                    << (*s).bi_valid) as crate::zutil_h::ush;
+                | (header as crate::zutil_h::ush as ::core::ffi::c_int) << (*s).bi_valid)
+                as crate::zutil_h::ush;
             (*s).bi_valid += len_0;
         }
         send_all_trees(
@@ -5168,11 +5173,12 @@ pub unsafe extern "C" fn _tr_tally_ffi(
 mod tests {
     use super::{
         bi_flush_core, bi_reverse, bi_windup_core, bl_order, block_bit_length_bytes,
-        detect_data_type_from_ltree, dist_code_index, heap_node_precedes, next_code_for_len,
-        next_codes, pending_cursor_after_bytes, rebalance_overflowed_bit_lengths,
-        reset_block_trees, select_block_encoding, static_bl_desc, static_d_desc, static_l_desc,
-        symbol_triplet_cursors, tally_match_tree_indices, tally_symbol_bytes, tree_next_cursor,
-        tree_run_continues, tree_run_limits, BlockEncoding, END_BLOCK, MAX_BITS,
+        block_header_bits, detect_data_type_from_ltree, dist_code_index, heap_node_precedes,
+        next_code_for_len, next_codes, pending_cursor_after_bytes,
+        rebalance_overflowed_bit_lengths, reset_block_trees, select_block_encoding, static_bl_desc,
+        static_d_desc, static_l_desc, symbol_triplet_cursors, tally_match_tree_indices,
+        tally_symbol_bytes, tree_next_cursor, tree_run_continues, tree_run_limits, BlockEncoding,
+        END_BLOCK, MAX_BITS,
     };
 
     fn ltree_with_frequency(
@@ -5433,6 +5439,14 @@ mod tests {
             select_block_encoding(crate::zutil_h::ulg::MAX - 2, 1, 2, true),
             BlockEncoding::Stored
         );
+    }
+
+    #[test]
+    fn block_header_bits_encode_type_and_final_flag() {
+        assert_eq!(block_header_bits(1, 0), 2);
+        assert_eq!(block_header_bits(1, 1), 3);
+        assert_eq!(block_header_bits(2, 0), 4);
+        assert_eq!(block_header_bits(2, 1), 5);
     }
 
     #[test]

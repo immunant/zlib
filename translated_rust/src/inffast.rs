@@ -740,6 +740,9 @@ mod tests {
             window_match_start(::core::ffi::c_uint::MAX, 0, 1),
             (::core::ffi::c_uint::MAX - 1) as usize,
         );
-        assert_eq!(window_match_start(0, 1, 2), ::core::ffi::c_uint::MAX as usize);
+        assert_eq!(
+            window_match_start(0, 1, 2),
+            ::core::ffi::c_uint::MAX as usize
+        );
     }
 }

@@ -1511,17 +1511,22 @@ fn short_msb_bytes(b: crate::stdlib::uInt) -> [crate::stdlib::Byte; 2] {
     ]
 }
 
+fn pending_short_cursors(
+    pending: crate::zutil_h::ulg,
+) -> ([crate::zutil_h::ulg; 2], crate::zutil_h::ulg) {
+    let second = pending.wrapping_add(1);
+    ([pending, second], second.wrapping_add(1))
+}
+
 unsafe extern "C" fn putShortMSB(
     mut s: *mut crate::src::deflate::deflate_state,
     mut b: crate::stdlib::uInt,
 ) {
     let bytes = short_msb_bytes(b);
-    let c2rust_fresh33 = (*s).pending;
-    (*s).pending = (*s).pending.wrapping_add(1);
-    *(*s).pending_buf.offset(c2rust_fresh33 as isize) = bytes[0];
-    let c2rust_fresh34 = (*s).pending;
-    (*s).pending = (*s).pending.wrapping_add(1);
-    *(*s).pending_buf.offset(c2rust_fresh34 as isize) = bytes[1];
+    let (cursors, next_pending) = pending_short_cursors((*s).pending);
+    (*s).pending = next_pending;
+    *(*s).pending_buf.offset(cursors[0] as isize) = bytes[0];
+    *(*s).pending_buf.offset(cursors[1] as isize) = bytes[1];
 }
 
 fn pending_output_len(
@@ -3684,9 +3689,10 @@ mod tests {
         deflate_state_status_valid, deflate_version_matches, fill_window_available_space,
         fill_window_cursor, fill_window_insert_after_slide, fill_window_zero_range,
         flush_pending_accounting, gzip_header_crc, gzip_header_crc_pending,
-        gzip_header_crc_pending_range, normalize_deflate_params, pending_output_len, read_buf_len,
-        read_buf_total_in_after_copy, short_msb_bytes, slide_hash_entry, stored_block_min_size,
-        stored_insert_after_input, symbol_triplet_cursors, zlib_header,
+        gzip_header_crc_pending_range, normalize_deflate_params, pending_output_len,
+        pending_short_cursors, read_buf_len, read_buf_total_in_after_copy, short_msb_bytes,
+        slide_hash_entry, stored_block_min_size, stored_insert_after_input, symbol_triplet_cursors,
+        zlib_header,
     };
 
     #[test]
@@ -3739,6 +3745,15 @@ mod tests {
         assert_eq!(short_msb_bytes(0), [0, 0]);
         assert_eq!(short_msb_bytes(0x1234), [0x12, 0x34]);
         assert_eq!(short_msb_bytes(0xabcd_1234), [0x12, 0x34]);
+    }
+
+    #[test]
+    fn pending_short_cursors_preserve_order_and_wrapping_accounting() {
+        assert_eq!(pending_short_cursors(7), ([7, 8], 9));
+        assert_eq!(
+            pending_short_cursors(crate::zutil_h::ulg::MAX),
+            ([crate::zutil_h::ulg::MAX, 0], 1)
+        );
     }
 
     #[test]

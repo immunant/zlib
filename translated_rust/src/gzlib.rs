@@ -17,7 +17,6 @@ pub use crate::stdlib::fcntl;
 
 pub use crate::stdlib::open;
 
-pub use crate::stdlib::__O_CLOEXEC;
 pub use crate::stdlib::F_GETFD;
 pub use crate::stdlib::F_GETFL;
 pub use crate::stdlib::F_SETFD;
@@ -34,6 +33,7 @@ pub use crate::stdlib::O_WRONLY;
 pub use crate::stdlib::SEEK_CUR;
 pub use crate::stdlib::SEEK_END;
 pub use crate::stdlib::SEEK_SET;
+pub use crate::stdlib::__O_CLOEXEC;
 
 pub use crate::stdlib::__off64_t;
 pub use crate::stdlib::__off_t;
@@ -212,12 +212,8 @@ fn gzseek_read_buffer_consumed(
     int_and_off64_same_width: bool,
     int_max: crate::stdlib::uInt,
 ) -> crate::stdlib::uInt {
-    if gzseek_read_buffer_uses_requested_offset(
-        avail_in,
-        offset,
-        int_and_off64_same_width,
-        int_max,
-    ) {
+    if gzseek_read_buffer_uses_requested_offset(avail_in, offset, int_and_off64_same_width, int_max)
+    {
         offset as crate::stdlib::uInt
     } else {
         avail_in
@@ -230,8 +226,7 @@ fn gzseek_read_buffer_uses_requested_offset(
     int_and_off64_same_width: bool,
     int_max: crate::stdlib::uInt,
 ) -> bool {
-    (int_and_off64_same_width && avail_in > int_max)
-        || avail_in as crate::stdlib::off64_t > offset
+    (int_and_off64_same_width && avail_in > int_max) || avail_in as crate::stdlib::off64_t > offset
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -259,7 +254,10 @@ fn gzseek_apply_read_buffer_plan(
 ) {
     state.x.have = state.x.have.wrapping_sub(plan.consumed);
     state.x.next = state.x.next.wrapping_add(plan.consumed as usize);
-    state.x.pos = state.x.pos.wrapping_add(plan.consumed as crate::stdlib::off64_t);
+    state.x.pos = state
+        .x
+        .pos
+        .wrapping_add(plan.consumed as crate::stdlib::off64_t);
 }
 
 fn gzseek_request_is_valid(
@@ -1138,9 +1136,9 @@ mod tests {
         gzseek_error_allows_positioning, gzseek_fast_forward_lseek_offset,
         gzseek_fast_forward_reset, gzseek_plan_read_buffer_consumption,
         gzseek_plan_remaining_offset, gzseek_read_buffer_consumed,
-        gzseek_read_buffer_uses_requested_offset, gzseek_request_is_valid,
-        gztell64_core, gztell64_result, GzErrorMessage, GzErrorPlan, GzOpenOffsetPlan,
-        GzResetFields, GzSeekOffsetPlan, GzSeekReadBufferPlan,
+        gzseek_read_buffer_uses_requested_offset, gzseek_request_is_valid, gztell64_core,
+        gztell64_result, GzErrorMessage, GzErrorPlan, GzOpenOffsetPlan, GzResetFields,
+        GzSeekOffsetPlan, GzSeekReadBufferPlan,
     };
 
     #[test]

@@ -162,7 +162,10 @@ fn inflate_back_match_copy_plan(
             left.wrapping_sub(copy).min(length),
         )
     } else {
-        (InflateBackMatchSource::Behind(offset as usize), left.min(length))
+        (
+            InflateBackMatchSource::Behind(offset as usize),
+            left.min(length),
+        )
     }
 }
 
