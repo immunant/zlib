@@ -134,8 +134,12 @@ fn allocation_uses_malloc(uint_size: usize) -> bool {
     uint_size > 2
 }
 
-fn allocation_request(items: ::core::ffi::c_uint, size: ::core::ffi::c_uint) -> AllocationRequest {
-    if allocation_uses_malloc(::core::mem::size_of::<crate::stdlib::uInt>()) {
+fn allocation_request_for_uint_size(
+    uint_size: usize,
+    items: ::core::ffi::c_uint,
+    size: ::core::ffi::c_uint,
+) -> AllocationRequest {
+    if allocation_uses_malloc(uint_size) {
         AllocationRequest::Malloc(allocation_byte_count(items, size))
     } else {
         AllocationRequest::Calloc {
@@ -145,13 +149,16 @@ fn allocation_request(items: ::core::ffi::c_uint, size: ::core::ffi::c_uint) -> 
     }
 }
 
+fn allocation_request(items: ::core::ffi::c_uint, size: ::core::ffi::c_uint) -> AllocationRequest {
+    allocation_request_for_uint_size(::core::mem::size_of::<crate::stdlib::uInt>(), items, size)
+}
+
 #[export_name = "zcalloc"]
 pub unsafe extern "C" fn zcalloc_ffi(
-    opaque: crate::stdlib::voidpf,
+    _opaque: crate::stdlib::voidpf,
     items: ::core::ffi::c_uint,
     size: ::core::ffi::c_uint,
 ) -> crate::stdlib::voidpf {
-    let _ = opaque;
     match allocation_request(items, size) {
         AllocationRequest::Malloc(bytes) => crate::stdlib::malloc(bytes),
         AllocationRequest::Calloc { items, size } => crate::stdlib::calloc(items, size),
@@ -159,17 +166,17 @@ pub unsafe extern "C" fn zcalloc_ffi(
 }
 
 #[export_name = "zcfree"]
-pub unsafe extern "C" fn zcfree_ffi(opaque: crate::stdlib::voidpf, ptr: crate::stdlib::voidpf) {
-    let _ = opaque;
+pub unsafe extern "C" fn zcfree_ffi(_opaque: crate::stdlib::voidpf, ptr: crate::stdlib::voidpf) {
     crate::stdlib::free(ptr);
 }
 
 #[cfg(test)]
 mod tests {
     use super::{
-        allocation_byte_count, allocation_request, allocation_uses_malloc, compile_flags_for_sizes,
-        error_message, error_message_index, has_error_message_index, size_class, size_flag, size_t,
-        zlib_compile_flags, zlib_version, AllocationRequest, EMPTY_ERROR,
+        allocation_byte_count, allocation_request, allocation_request_for_uint_size,
+        allocation_uses_malloc, compile_flags_for_sizes, error_message, error_message_index,
+        has_error_message_index, size_class, size_flag, size_t, zlib_compile_flags, zlib_version,
+        AllocationRequest, EMPTY_ERROR,
     };
 
     #[test]
@@ -256,6 +263,17 @@ mod tests {
     fn allocation_request_preserves_the_platform_choice() {
         match allocation_request(3, 4) {
             AllocationRequest::Malloc(bytes) => assert_eq!(bytes, 12),
+            AllocationRequest::Calloc { items, size } => {
+                assert_eq!(items, 3);
+                assert_eq!(size, 4);
+            }
+        }
+    }
+
+    #[test]
+    fn allocation_request_uses_calloc_for_two_byte_uints() {
+        match allocation_request_for_uint_size(2, 3, 4) {
+            AllocationRequest::Malloc(_) => panic!("two-byte uInt must use calloc"),
             AllocationRequest::Calloc { items, size } => {
                 assert_eq!(items, 3);
                 assert_eq!(size, 4);
