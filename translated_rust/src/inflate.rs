@@ -2402,7 +2402,7 @@ pub fn inflate(
                 &[]
             } else {
                 ::core::slice::from_raw_parts(
-                    (*strm).next_out.offset(-(copy as isize)),
+                    (*strm).next_out.wrapping_offset(-(copy as isize)),
                     copy as usize,
                 )
             };
@@ -2421,7 +2421,7 @@ pub fn inflate(
                 crate::src::crc32::crc32(
                     (*state).check as crate::stdlib::uLong,
                     Some(::core::slice::from_raw_parts(
-                        (*strm).next_out.offset(-(out as isize)),
+                        (*strm).next_out.wrapping_offset(-(out as isize)),
                         out as usize,
                     )),
                 )
@@ -2429,7 +2429,7 @@ pub fn inflate(
                 crate::src::adler32::adler32(
                     (*state).check as crate::stdlib::uLong,
                     Some(::core::slice::from_raw_parts(
-                        (*strm).next_out.offset(-(out as isize)),
+                        (*strm).next_out.wrapping_offset(-(out as isize)),
                         out as crate::stdlib::z_size_t,
                     )),
                 )
