@@ -873,9 +873,8 @@ fn inflate_back_copy_match_window(
 }
 
 // Literal output follows the same configured-window path as match output.
-// The raw `put` cursor still belongs to callback flow, but the actual byte
-// store is bounded by the active window rather than dereferencing that cursor
-// in the decoder loop.
+// The actual byte store is bounded by the active window rather than using a
+// raw output cursor in the decoder loop.
 fn inflate_back_write_literal(
     strm: &mut crate::zlib_h::z_stream,
     state: &mut crate::src::inflate::inflate_state,
@@ -936,8 +935,8 @@ fn inflate_back_copy_stored_window(
 }
 
 // Both stored and match copies consume decoded bytes from the same output
-// window.  The actual pointer advances remain in the caller; this transition
-// keeps their length/window accounting reference-based.
+// window.  This transition keeps their length/window accounting
+// reference-based.
 fn inflate_back_consume_output_copy(
     state: &mut crate::src::inflate::inflate_state,
     left: &mut ::core::ffi::c_uint,
@@ -1160,7 +1159,6 @@ pub(crate) fn inflateBack(
     // Rust callers of the implementation.
     unsafe {
     let mut next: *mut ::core::ffi::c_uchar = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
-    let mut put: *mut ::core::ffi::c_uchar = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
     let mut have: ::core::ffi::c_uint = 0;
     let mut left: ::core::ffi::c_uint = 0;
     let mut hold: ::core::ffi::c_ulong = 0;
@@ -1195,7 +1193,6 @@ pub(crate) fn inflateBack(
     have = inflate_back_initial_input_available(strm, !next.is_null());
     hold = 0 as ::core::ffi::c_ulong;
     bits = 0 as ::core::ffi::c_uint;
-    put = state_ref.window;
     '_inf_leave: loop {
         match inflate_back_decode_mode(state_ref.mode) {
             InflateBackDecodeMode::Type => {
@@ -1259,8 +1256,7 @@ pub(crate) fn inflateBack(
                             }
                         }
                         if inflate_back_prepare_output_window(state_ref, &mut left) {
-                            put = state_ref.window;
-                            if out.expect("non-null function pointer")(out_desc, put, left) != 0 {
+                            if out.expect("non-null function pointer")(out_desc, state_ref.window, left) != 0 {
                                 ret = crate::zlib_h::Z_BUF_ERROR;
                                 break '_inf_leave;
                             }
@@ -1274,7 +1270,6 @@ pub(crate) fn inflateBack(
                         inflate_back_copy_stored_window(strm, state_ref, left, source);
                         have = have.wrapping_sub(copy);
                         next = next.wrapping_add(copy as usize);
-                        put = put.wrapping_add(copy as usize);
                         inflate_back_consume_output_copy(state_ref, &mut left, copy);
                     }
                     inflate_back_finish_stored_block(state_ref);
@@ -1536,8 +1531,7 @@ pub(crate) fn inflateBack(
             match inflate_back_start_length_code(state_ref, here) {
                 InflateBackLengthCode::Literal => {
                     if inflate_back_prepare_output_window(state_ref, &mut left) {
-                        put = state_ref.window;
-                        if out.expect("non-null function pointer")(out_desc, put, left) != 0 {
+                        if out.expect("non-null function pointer")(out_desc, state_ref.window, left) != 0 {
                             ret = crate::zlib_h::Z_BUF_ERROR;
                             break;
                         }
@@ -1548,7 +1542,6 @@ pub(crate) fn inflateBack(
                         left,
                         inflate_back_literal_byte(state_ref),
                     );
-                    put = put.wrapping_add(1);
                     inflate_back_commit_literal(state_ref, &mut left);
                 }
                 InflateBackLengthCode::End => {
@@ -1690,9 +1683,8 @@ pub(crate) fn inflateBack(
                             } else {
                                 loop {
                                     if inflate_back_prepare_output_window(state_ref, &mut left) {
-                                        put = state_ref.window;
                                         if out.expect("non-null function pointer")(
-                                            out_desc, put, left,
+                                            out_desc, state_ref.window, left,
                                         ) != 0
                                         {
                                             ret = crate::zlib_h::Z_BUF_ERROR;
@@ -1727,7 +1719,6 @@ pub(crate) fn inflateBack(
                                         },
                                     )
                                     .expect("inflateBack existing window access cannot fail");
-                                    put = put.wrapping_add(match_copy.count as usize);
                                     inflate_back_consume_output_copy(
                                         state_ref,
                                         &mut left,
