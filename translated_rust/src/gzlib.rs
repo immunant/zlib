@@ -806,16 +806,16 @@ fn gzdopen_path_buffer_len() -> crate::__stddef_size_t_h::size_t {
     )
 }
 
-pub unsafe extern "C" fn gzdopen(
+#[export_name = "gzdopen"]
+
+pub unsafe extern "C" fn gzdopen_ffi(
     mut fd: ::core::ffi::c_int,
     mut mode: *const ::core::ffi::c_char,
 ) -> crate::zlib_h::gzFile {
-    let mut path: *mut ::core::ffi::c_char = ::core::ptr::null_mut::<::core::ffi::c_char>();
-    let mut gz: crate::zlib_h::gzFile = ::core::ptr::null_mut::<crate::zlib_h::gzFile_s>();
     if !gzdopen_has_valid_descriptor(fd) {
         return ::core::ptr::null_mut::<crate::zlib_h::gzFile_s>();
     }
-    path = crate::stdlib::malloc(gzdopen_path_buffer_len()) as *mut ::core::ffi::c_char;
+    let path = crate::stdlib::malloc(gzdopen_path_buffer_len()) as *mut ::core::ffi::c_char;
     if path.is_null() {
         return ::core::ptr::null_mut::<crate::zlib_h::gzFile_s>();
     }
@@ -825,17 +825,9 @@ pub unsafe extern "C" fn gzdopen(
         b"<fd:%d>\0".as_ptr() as *const ::core::ffi::c_char,
         fd,
     );
-    gz = gz_open(path as *const ::core::ffi::c_void, fd, mode);
+    let gz = gz_open(path as *const ::core::ffi::c_void, fd, mode);
     crate::stdlib::free(path as *mut ::core::ffi::c_void);
-    return gz;
-}
-#[export_name = "gzdopen"]
-
-pub unsafe extern "C" fn gzdopen_ffi(
-    mut fd: ::core::ffi::c_int,
-    mut mode: *const ::core::ffi::c_char,
-) -> crate::zlib_h::gzFile {
-    gzdopen(fd, mode)
+    gz
 }
 fn gzbuffer_normalized_want(size: ::core::ffi::c_uint) -> Option<::core::ffi::c_uint> {
     size.checked_mul(2)?;
