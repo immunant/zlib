@@ -43,6 +43,14 @@ fn compress2_final_status(err: ::core::ffi::c_int) -> ::core::ffi::c_int {
     }
 }
 
+fn compress2_produced(
+    capacity: crate::stdlib::z_size_t,
+    unissued: crate::stdlib::z_size_t,
+    available: crate::stdlib::uInt,
+) -> crate::stdlib::z_size_t {
+    capacity.wrapping_sub(unissued.wrapping_add(available as crate::stdlib::z_size_t))
+}
+
 #[export_name = "compress2_z"]
 pub unsafe extern "C" fn compress2_z_ffi(
     mut dest: *mut crate::stdlib::Bytef,
@@ -68,6 +76,7 @@ pub unsafe extern "C" fn compress2_z_ffi(
         reserved: 0,
     };
     let mut err: ::core::ffi::c_int = 0;
+    let mut capacity: crate::stdlib::z_size_t = 0;
     let mut left: crate::stdlib::z_size_t = 0;
     if sourceLen > 0 as crate::stdlib::z_size_t && source.is_null()
         || destLen.is_null()
@@ -76,6 +85,7 @@ pub unsafe extern "C" fn compress2_z_ffi(
         return crate::zlib_h::Z_STREAM_ERROR;
     }
     left = *destLen;
+    capacity = left;
     *destLen = 0 as crate::stdlib::z_size_t;
     stream.zalloc = None;
     stream.zfree = None;
@@ -112,7 +122,7 @@ pub unsafe extern "C" fn compress2_z_ffi(
             break;
         }
     }
-    *destLen = stream.next_out.offset_from(dest) as ::core::ffi::c_long as crate::stdlib::z_size_t;
+    *destLen = compress2_produced(capacity, left, stream.avail_out);
     crate::src::deflate::deflateEnd_ffi(
         &raw mut stream as *mut _ as *mut crate::zlib_h::z_stream_s,
     );

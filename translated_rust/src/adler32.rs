@@ -76,6 +76,13 @@ fn adler32_slice(
     return adler | (sum2 as crate::stdlib::uLong) << 16 as ::core::ffi::c_int;
 }
 
+pub fn adler32_update(
+    adler: crate::stdlib::uLong,
+    buf: &[crate::stdlib::Bytef],
+) -> crate::stdlib::uLong {
+    adler32_slice(adler, buf)
+}
+
 enum Adler32InputPlan {
     Initial,
     Slice { len: usize },
@@ -101,7 +108,7 @@ pub unsafe extern "C" fn adler32_z_ffi(
     match adler32_input_plan(buf.is_null(), len) {
         Adler32InputPlan::Initial => adler32_initial(),
         Adler32InputPlan::Slice { len } => {
-            adler32_slice(adler, ::core::slice::from_raw_parts(buf, len))
+            adler32_update(adler, ::core::slice::from_raw_parts(buf, len))
         }
     }
 }

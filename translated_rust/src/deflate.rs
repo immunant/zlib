@@ -352,6 +352,20 @@ fn deflate_hash_update(
     (ins_h << hash_shift ^ byte as crate::stdlib::uInt) & hash_mask
 }
 
+fn read_buf_updated_adler(
+    wrap: ::core::ffi::c_int,
+    adler: crate::stdlib::uLong,
+    bytes: &[crate::stdlib::Bytef],
+) -> crate::stdlib::uLong {
+    if wrap == 1 as ::core::ffi::c_int {
+        crate::src::adler32::adler32_update(adler, bytes)
+    } else if wrap == 2 as ::core::ffi::c_int {
+        crate::src::crc32::crc32_update(adler, bytes)
+    } else {
+        adler
+    }
+}
+
 unsafe fn read_buf(
     mut strm: crate::zlib_h::z_streamp,
     mut buf: *mut crate::stdlib::Bytef,
@@ -370,13 +384,8 @@ unsafe fn read_buf(
         (*strm).next_in as *const ::core::ffi::c_void,
         len as crate::__stddef_size_t_h::size_t,
     );
-    if (*(*strm).state).wrap == 1 as ::core::ffi::c_int {
-        (*strm).adler =
-            crate::src::adler32::adler32_ffi((*strm).adler, buf, len as crate::stdlib::uInt);
-    } else if (*(*strm).state).wrap == 2 as ::core::ffi::c_int {
-        (*strm).adler =
-            crate::src::crc32::crc32_ffi((*strm).adler, buf, len as crate::stdlib::uInt);
-    }
+    let copied = ::core::slice::from_raw_parts(buf, len as usize);
+    (*strm).adler = read_buf_updated_adler((*(*strm).state).wrap, (*strm).adler, copied);
     (*strm).next_in = (*strm).next_in.wrapping_add(len as usize);
     (*strm).total_in = (*strm).total_in.wrapping_add(len as crate::stdlib::uLong);
     return len;
