@@ -1246,7 +1246,10 @@ fn lm_init_state(
     let Ok(hash_size) = usize::try_from(s.hash_size) else {
         return false;
     };
-    let Some(config) = configuration_table.get(s.level as usize) else {
+    let Ok(level) = usize::try_from(s.level) else {
+        return false;
+    };
+    let Some(config) = configuration_table.get(level) else {
         return false;
     };
     if head.len() != hash_size {
@@ -1289,6 +1292,7 @@ unsafe extern "C" fn lm_init(mut s: *mut crate::src::deflate::deflate_state) {
     };
     let _ = lm_init_state(&mut *s, head);
 }
+
 pub unsafe extern "C" fn deflateReset(mut strm: crate::zlib_h::z_streamp) -> ::core::ffi::c_int {
     let mut ret: ::core::ffi::c_int = 0;
     ret = deflateResetKeep(strm);
