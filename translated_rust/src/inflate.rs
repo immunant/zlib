@@ -949,7 +949,6 @@ pub fn inflate(
     let mut len: ::core::ffi::c_uint = 0;
     let mut ret: ::core::ffi::c_int = 0;
     let mut hbuf: [::core::ffi::c_uchar; 4] = [0; 4];
-    let mut output_start: *const ::core::ffi::c_uchar = ::core::ptr::null::<::core::ffi::c_uchar>();
     let mut output_capacity: usize = 0;
     static order: [::core::ffi::c_ushort; 19] = [
         16 as ::core::ffi::c_ushort,
@@ -987,7 +986,6 @@ pub fn inflate(
     }
     put = (*strm).next_out as *mut ::core::ffi::c_uchar;
     left = (*strm).avail_out as ::core::ffi::c_uint;
-    output_start = put;
     output_capacity = left as usize;
     next = (*strm).next_in as *mut ::core::ffi::c_uchar;
     have = (*strm).avail_in as ::core::ffi::c_uint;
@@ -998,6 +996,14 @@ pub fn inflate(
         // `next_in` cursor; the guard above enforces the null half before
         // this implementation binds the range.
         ::core::slice::from_raw_parts(next, have as usize)
+    };
+    // The entry checks accepted this caller-owned range. Keep one binding for
+    // the complete output cursor so the decoder can use checked sub-slices
+    // instead of repeatedly recreating overlapping raw views as `put` moves.
+    let mut output_storage = if left == 0 {
+        &mut []
+    } else {
+        ::core::slice::from_raw_parts_mut(put, output_capacity)
     };
     hold = (*state).hold;
     bits = (*state).bits;
@@ -1367,10 +1373,7 @@ pub fn inflate(
                                                                                                     if left == 0 as ::core::ffi::c_uint {
                                                                                                         break '_inf_leave;
                                                                                                     }
-                                                                                                    let output = ::core::slice::from_raw_parts_mut(
-                                                                                                        put,
-                                                                                                        left as usize,
-                                                                                                    );
+                                                                                                    let output = &mut output_storage[output_capacity - left as usize..];
                                                                                                     output[0] = (*state).length as ::core::ffi::c_uchar;
                                                                                                     put = output[1..].as_mut_ptr();
                                                                                                     left = left.wrapping_sub(1);
@@ -1401,10 +1404,7 @@ pub fn inflate(
                                                                                                             .wrapping_add(out as ::core::ffi::c_ulong);
                                                                                                         if (*state).wrap & 4 as ::core::ffi::c_int != 0 && out != 0
                                                                                                         {
-                                                                                                            let output = ::core::slice::from_raw_parts(
-                                                                                                                output_start,
-                                                                                                                output_capacity,
-                                                                                                            );
+                                                                                                            let output = &output_storage[..];
                                                                                                             let output_start = output_capacity
                                                                                                                 .wrapping_sub(left as usize)
                                                                                                                 .wrapping_sub(out as usize);
@@ -1875,10 +1875,9 @@ pub fn inflate(
                                                                         let input_start = in_0
                                                                             .wrapping_sub(have)
                                                                             as usize;
-                                                                        let output = ::core::slice::from_raw_parts_mut(
-                                                                            put,
-                                                                            copy as usize,
-                                                                        );
+                                                                        let output_start = output_capacity - left as usize;
+                                                                        let output = &mut output_storage[output_start
+                                                                            ..output_start + copy as usize];
                                                                         output.copy_from_slice(
                                                                             &input[input_start
                                                                                 ..input_start
@@ -2123,9 +2122,14 @@ pub fn inflate(
                                             (*strm).avail_in = have as crate::stdlib::uInt;
                                             (*state).hold = hold;
                                             (*state).bits = bits;
-                                            crate::src::inffast::inflate_fast(
-                                                strm as *mut crate::zlib_h::z_stream_s,
+                                            let input_start = in_0.wrapping_sub(have) as usize;
+                                            let output_start = output_capacity - out as usize;
+                                            crate::src::inffast::inflate_fast_bound_cursors(
+                                                strm,
+                                                state,
                                                 out,
+                                                &input[input_start..],
+                                                &mut output_storage[output_start..],
                                             );
                                             put = (*strm).next_out as *mut ::core::ffi::c_uchar;
                                             left = (*strm).avail_out as ::core::ffi::c_uint;
@@ -2573,12 +2577,6 @@ pub fn inflate(
             break;
         }
         let written = output_capacity - left as usize;
-        // SAFETY: the entry checks accepted the caller's output pointer and
-        // capacity. `written` is derived from the same capacity and cursor.
-        let output = ::core::slice::from_raw_parts_mut(
-            output_start as *mut crate::stdlib::Bytef,
-            output_capacity,
-        );
         let copied = {
             let state_ref = &mut *state;
             let window = if state_ref.window.is_null() {
@@ -2592,12 +2590,12 @@ pub fn inflate(
                     state_ref.wsize as usize,
                 ))
             };
-            inflate_match_copy(state_ref, output, written, window)
+            inflate_match_copy(state_ref, &mut output_storage, written, window)
         };
         match copied {
             InflateMatchCopy::Copied(copied) => {
                 left = left.wrapping_sub(copied as ::core::ffi::c_uint);
-                put = output[written + copied..].as_mut_ptr();
+                put = output_storage[written + copied..].as_mut_ptr();
             }
             InflateMatchCopy::InvalidDistance => {
                 (*strm).msg = INFLATE_MSG_DISTANCE_TOO_FAR_BACK.as_ptr()
@@ -2631,13 +2629,8 @@ pub fn inflate(
             return crate::zlib_h::Z_MEM_ERROR;
         }
     }
-    let output = if produced == 0 {
-        &[]
-    } else {
-        // SAFETY: the validated output cursor advanced by exactly `produced`
-        // bytes during this call, so this is the completed output range.
-        ::core::slice::from_raw_parts(put.wrapping_sub(produced as usize), produced as usize)
-    };
+    let output = &output_storage[output_capacity - out as usize
+        ..output_capacity - out as usize + produced as usize];
     if update_window {
         let _ = updatewindow(strm, state, InflateWindowAccess::Update(output), |_, _| ());
     }

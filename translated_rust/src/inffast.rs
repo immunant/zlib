@@ -448,6 +448,28 @@ fn inflate_fast_dispatch(
     inflate_fast_slices(strm, state, cursors.used, input, output)
 }
 
+// Regular `inflate()` has already bound its complete input and output ranges.
+// Reuse those checked views for the fast loop so it does not recreate raw
+// cursor slices after the main decoder has validated them.
+pub(crate) fn inflate_fast_bound_cursors(
+    strm: &mut crate::zlib_h::z_stream,
+    state: &mut crate::src::inflate::inflate_state,
+    start: ::core::ffi::c_uint,
+    input: &[crate::stdlib::Bytef],
+    output: &mut [crate::stdlib::Bytef],
+) {
+    let Some(cursors) = inflate_fast_cursor_lengths(strm, start) else {
+        return;
+    };
+    if !inflate_fast_state_is_usable(state)
+        || input.len() != strm.avail_in as usize
+        || output.len() != cursors.output_len
+    {
+        return;
+    }
+    inflate_fast_dispatch(strm, state, cursors, input, output)
+}
+
 // This adapter retains the existing raw cursor boundary for translated
 // callers. Its preflight must happen before either foreign cursor is bound;
 // the dispatch target above receives only bounded slices.
