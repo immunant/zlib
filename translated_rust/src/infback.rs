@@ -90,6 +90,22 @@ macro_rules! inflate_back_refill {
     }};
 }
 
+// Keep the callback's failure publication identical at every byte-loading
+// site.  The decoder still owns the raw cursor that follows this check; this
+// macro only makes the safe refill/exhaustion transition uniform.
+macro_rules! inflate_back_require_input {
+    ($input:expr, $input_desc:expr, $next:ident, $have:ident, $ret:ident, $leave:lifetime) => {{
+        if $have == 0 {
+            $have = inflate_back_refill!($input, $input_desc, $next);
+            if $have == 0 {
+                $next = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
+                $ret = crate::zlib_h::Z_BUF_ERROR;
+                break $leave;
+            }
+        }
+    }};
+}
+
 // Keep the public initializer's validation order independent of its raw
 // stream and window bindings.  In particular, a bad version must win over
 // every other error, as it does in zlib.
@@ -1200,14 +1216,7 @@ pub(crate) fn inflateBack(
                     continue;
                 } else {
                     while bits < 3 as ::core::ffi::c_int as ::core::ffi::c_uint {
-                        if have == 0 as ::core::ffi::c_uint {
-                            have = inflate_back_refill!(in_0, in_desc, next);
-                            if have == 0 as ::core::ffi::c_uint {
-                                next = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
-                                ret = crate::zlib_h::Z_BUF_ERROR;
-                                break '_inf_leave;
-                            }
-                        }
+                        inflate_back_require_input!(in_0, in_desc, next, have, ret, '_inf_leave);
                         have = have.wrapping_sub(1);
                         let c2rust_fresh0 = next;
                         next = next.wrapping_add(1);
@@ -1227,14 +1236,7 @@ pub(crate) fn inflateBack(
                 let padding = bits & 7;
                 inflate_back_drop_bits(&mut hold, &mut bits, padding);
                 while bits < 32 as ::core::ffi::c_int as ::core::ffi::c_uint {
-                    if have == 0 as ::core::ffi::c_uint {
-                        have = inflate_back_refill!(in_0, in_desc, next);
-                        if have == 0 as ::core::ffi::c_uint {
-                            next = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
-                            ret = crate::zlib_h::Z_BUF_ERROR;
-                            break '_inf_leave;
-                        }
-                    }
+                    inflate_back_require_input!(in_0, in_desc, next, have, ret, '_inf_leave);
                     have = have.wrapping_sub(1);
                     let c2rust_fresh1 = next;
                     next = next.wrapping_add(1);
@@ -1244,14 +1246,7 @@ pub(crate) fn inflateBack(
                     inflate_back_begin_stored_copy(state_ref, length, &mut hold, &mut bits);
                     while state_ref.length != 0 as ::core::ffi::c_uint {
                         copy = state_ref.length;
-                        if have == 0 as ::core::ffi::c_uint {
-                            have = inflate_back_refill!(in_0, in_desc, next);
-                            if have == 0 as ::core::ffi::c_uint {
-                                next = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
-                                ret = crate::zlib_h::Z_BUF_ERROR;
-                                break '_inf_leave;
-                            }
-                        }
+                        inflate_back_require_input!(in_0, in_desc, next, have, ret, '_inf_leave);
                         if inflate_back_prepare_output_window(state_ref, &mut left) {
                             if out.expect("non-null function pointer")(out_desc, state_ref.window, left) != 0 {
                                 ret = crate::zlib_h::Z_BUF_ERROR;
@@ -1282,14 +1277,7 @@ pub(crate) fn inflateBack(
             }
             InflateBackDecodeMode::Table => {
                 while bits < 14 as ::core::ffi::c_int as ::core::ffi::c_uint {
-                    if have == 0 as ::core::ffi::c_uint {
-                        have = inflate_back_refill!(in_0, in_desc, next);
-                        if have == 0 as ::core::ffi::c_uint {
-                            next = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
-                            ret = crate::zlib_h::Z_BUF_ERROR;
-                            break '_inf_leave;
-                        }
-                    }
+                    inflate_back_require_input!(in_0, in_desc, next, have, ret, '_inf_leave);
                     have = have.wrapping_sub(1);
                     let c2rust_fresh2 = next;
                     next = next.wrapping_add(1);
@@ -1307,14 +1295,7 @@ pub(crate) fn inflateBack(
                     inflate_back_start_code_length_order(state_ref);
                     while state_ref.have < state_ref.ncode {
                         while bits < 3 as ::core::ffi::c_int as ::core::ffi::c_uint {
-                            if have == 0 as ::core::ffi::c_uint {
-                                have = inflate_back_refill!(in_0, in_desc, next);
-                                if have == 0 as ::core::ffi::c_uint {
-                                    next = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
-                                    ret = crate::zlib_h::Z_BUF_ERROR;
-                                    break '_inf_leave;
-                                }
-                            }
+                            inflate_back_require_input!(in_0, in_desc, next, have, ret, '_inf_leave);
                             have = have.wrapping_sub(1);
                             let c2rust_fresh3 = next;
                             next = next.wrapping_add(1);
@@ -1358,14 +1339,7 @@ pub(crate) fn inflateBack(
                                 if here.bits as ::core::ffi::c_uint <= bits {
                                     break;
                                 }
-                                if have == 0 as ::core::ffi::c_uint {
-                                    have = inflate_back_refill!(in_0, in_desc, next);
-                                    if have == 0 as ::core::ffi::c_uint {
-                                        next = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
-                                        ret = crate::zlib_h::Z_BUF_ERROR;
-                                        break '_inf_leave;
-                                    }
-                                }
+                                inflate_back_require_input!(in_0, in_desc, next, have, ret, '_inf_leave);
                                 have = have.wrapping_sub(1);
                                 let c2rust_fresh6 = next;
                                 next = next.wrapping_add(1);
@@ -1377,14 +1351,7 @@ pub(crate) fn inflateBack(
                             }
                             if here.val >= 16 {
                                 while bits < inflate_back_code_length_bits_required(here) {
-                                    if have == 0 as ::core::ffi::c_uint {
-                                        have = inflate_back_refill!(in_0, in_desc, next);
-                                        if have == 0 as ::core::ffi::c_uint {
-                                            next = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
-                                            ret = crate::zlib_h::Z_BUF_ERROR;
-                                            break '_inf_leave;
-                                        }
-                                    }
+                                    inflate_back_require_input!(in_0, in_desc, next, have, ret, '_inf_leave);
                                     have = have.wrapping_sub(1);
                                     let c2rust_fresh8 = next;
                                     next = next.wrapping_add(1);
@@ -1482,14 +1449,7 @@ pub(crate) fn inflateBack(
                 if here.bits as ::core::ffi::c_uint <= bits {
                     break;
                 }
-                if have == 0 as ::core::ffi::c_uint {
-                    have = inflate_back_refill!(in_0, in_desc, next);
-                    if have == 0 as ::core::ffi::c_uint {
-                        next = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
-                        ret = crate::zlib_h::Z_BUF_ERROR;
-                        break '_inf_leave;
-                    }
-                }
+                inflate_back_require_input!(in_0, in_desc, next, have, ret, '_inf_leave);
                 have = have.wrapping_sub(1);
                 let c2rust_fresh13 = next;
                 next = next.wrapping_add(1);
@@ -1509,14 +1469,7 @@ pub(crate) fn inflateBack(
                     {
                         break;
                     }
-                    if have == 0 as ::core::ffi::c_uint {
-                        have = inflate_back_refill!(in_0, in_desc, next);
-                        if have == 0 as ::core::ffi::c_uint {
-                            next = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
-                            ret = crate::zlib_h::Z_BUF_ERROR;
-                            break '_inf_leave;
-                        }
-                    }
+                    inflate_back_require_input!(in_0, in_desc, next, have, ret, '_inf_leave);
                     have = have.wrapping_sub(1);
                     let c2rust_fresh14 = next;
                     next = next.wrapping_add(1);
@@ -1554,14 +1507,7 @@ pub(crate) fn inflateBack(
                 InflateBackLengthCode::Match { .. } => {
                     if state_ref.extra != 0 as ::core::ffi::c_uint {
                         while bits < state_ref.extra {
-                            if have == 0 as ::core::ffi::c_uint {
-                                have = inflate_back_refill!(in_0, in_desc, next);
-                                if have == 0 as ::core::ffi::c_uint {
-                                    next = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
-                                    ret = crate::zlib_h::Z_BUF_ERROR;
-                                    break '_inf_leave;
-                                }
-                            }
+                            inflate_back_require_input!(in_0, in_desc, next, have, ret, '_inf_leave);
                             have = have.wrapping_sub(1);
                             let c2rust_fresh16 = next;
                             next = next.wrapping_add(1);
@@ -1583,14 +1529,7 @@ pub(crate) fn inflateBack(
                         if here.bits as ::core::ffi::c_uint <= bits {
                             break;
                         }
-                        if have == 0 as ::core::ffi::c_uint {
-                            have = inflate_back_refill!(in_0, in_desc, next);
-                            if have == 0 as ::core::ffi::c_uint {
-                                next = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
-                                ret = crate::zlib_h::Z_BUF_ERROR;
-                                break '_inf_leave;
-                            }
-                        }
+                        inflate_back_require_input!(in_0, in_desc, next, have, ret, '_inf_leave);
                         have = have.wrapping_sub(1);
                         let c2rust_fresh17 = next;
                         next = next.wrapping_add(1);
@@ -1610,14 +1549,7 @@ pub(crate) fn inflateBack(
                             {
                                 break;
                             }
-                            if have == 0 as ::core::ffi::c_uint {
-                                have = inflate_back_refill!(in_0, in_desc, next);
-                                if have == 0 as ::core::ffi::c_uint {
-                                    next = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
-                                    ret = crate::zlib_h::Z_BUF_ERROR;
-                                    break '_inf_leave;
-                                }
-                            }
+                            inflate_back_require_input!(in_0, in_desc, next, have, ret, '_inf_leave);
                             have = have.wrapping_sub(1);
                             let c2rust_fresh18 = next;
                             next = next.wrapping_add(1);
@@ -1645,14 +1577,7 @@ pub(crate) fn inflateBack(
                         InflateBackDistanceCode::Distance { .. } => {
                             if state_ref.extra != 0 as ::core::ffi::c_uint {
                                 while bits < state_ref.extra {
-                                    if have == 0 as ::core::ffi::c_uint {
-                                        have = inflate_back_refill!(in_0, in_desc, next);
-                                        if have == 0 as ::core::ffi::c_uint {
-                                            next = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
-                                            ret = crate::zlib_h::Z_BUF_ERROR;
-                                            break '_inf_leave;
-                                        }
-                                    }
+                                    inflate_back_require_input!(in_0, in_desc, next, have, ret, '_inf_leave);
                                     have = have.wrapping_sub(1);
                                     let c2rust_fresh19 = next;
                                     next = next.wrapping_add(1);
