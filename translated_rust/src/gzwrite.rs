@@ -1397,67 +1397,6 @@ struct GzWriteStateOwner {
     input_available: crate::stdlib::uInt,
 }
 
-impl GzWriteStateOwner {
-    // Preserve the established C4 boundary: publish the scalar/buffer owner,
-    // run exactly one codec request, then recover the complete transaction.
-    // `strm` and `x.next` remain projected only for this call.
-    unsafe fn run_compressor(
-        &mut self,
-        state: &mut crate::gzguts_h::gz_state,
-        flush: ::core::ffi::c_int,
-        external_input: Option<&[u8]>,
-        retune: Option<GzDeflateRetune>,
-        close: Option<GzWriteCloseCodec<'_>>,
-        skip_materialization: GzSkipMaterialization,
-    ) -> ::core::ffi::c_int {
-        state.buffers =
-            ::core::mem::replace(&mut self.buffers, crate::gzguts_h::GzBuffers::empty());
-        state.fd = self.fd.take();
-        state.path = self.path.take();
-        state.msg = self.message.take();
-        state.err = self.error;
-        state.x.have = self.buffered;
-        state.x.pos = self.position;
-        state.mode = self.mode;
-        state.want = self.want;
-        state.direct = self.direct;
-        state.level = self.level;
-        state.strategy = self.strategy;
-        state.skip = self.skip;
-        state.again = self.again;
-        state.reset = self.reset;
-        state.strm.avail_in = self.input_available;
-
-        let status = gz_comp(
-            state,
-            flush,
-            external_input,
-            retune,
-            close,
-            skip_materialization,
-        );
-
-        self.buffers =
-            ::core::mem::replace(&mut state.buffers, crate::gzguts_h::GzBuffers::empty());
-        self.fd = state.fd.take();
-        self.path = state.path.take();
-        self.message = state.msg.take();
-        self.error = state.err;
-        self.buffered = state.x.have;
-        self.position = state.x.pos;
-        self.mode = state.mode;
-        self.want = state.want;
-        self.direct = state.direct;
-        self.level = state.level;
-        self.strategy = state.strategy;
-        self.skip = state.skip;
-        self.again = state.again;
-        self.reset = state.reset;
-        self.input_available = state.strm.avail_in;
-        status
-    }
-}
-
 // This is the only ABI-shaped write adapter.  The persistent `GzWriteOwner`
 // supplies the owned input cursor and deflater lifecycle; the adapter merely
 // projects those bounded requests through the legacy gzip/deflate state.
@@ -1811,7 +1750,47 @@ pub(crate) unsafe fn gzip_write_state_adapter(
         &mut owner,
         operation,
         |owner, flush, input, retune, close, materialization| {
-            owner.run_compressor(state, flush, input, retune, close, materialization)
+            // Preserve the established C4 boundary: publish the scalar/buffer
+            // owner, run exactly one codec request, then recover the complete
+            // transaction. `strm` and `x.next` remain projected only here.
+            state.buffers =
+                ::core::mem::replace(&mut owner.buffers, crate::gzguts_h::GzBuffers::empty());
+            state.fd = owner.fd.take();
+            state.path = owner.path.take();
+            state.msg = owner.message.take();
+            state.err = owner.error;
+            state.x.have = owner.buffered;
+            state.x.pos = owner.position;
+            state.mode = owner.mode;
+            state.want = owner.want;
+            state.direct = owner.direct;
+            state.level = owner.level;
+            state.strategy = owner.strategy;
+            state.skip = owner.skip;
+            state.again = owner.again;
+            state.reset = owner.reset;
+            state.strm.avail_in = owner.input_available;
+
+            let status = gz_comp(state, flush, input, retune, close, materialization);
+
+            owner.buffers =
+                ::core::mem::replace(&mut state.buffers, crate::gzguts_h::GzBuffers::empty());
+            owner.fd = state.fd.take();
+            owner.path = state.path.take();
+            owner.message = state.msg.take();
+            owner.error = state.err;
+            owner.buffered = state.x.have;
+            owner.position = state.x.pos;
+            owner.mode = state.mode;
+            owner.want = state.want;
+            owner.direct = state.direct;
+            owner.level = state.level;
+            owner.strategy = state.strategy;
+            owner.skip = state.skip;
+            owner.again = state.again;
+            owner.reset = state.reset;
+            owner.input_available = state.strm.avail_in;
+            status
         },
     );
     state.buffers = owner.buffers;
