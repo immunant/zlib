@@ -1668,7 +1668,10 @@ pub unsafe extern "C" fn gztell_ffi(mut file: crate::zlib_h::gzFile) -> crate::s
 }
 // Offset querying only needs bound state.  Keep the descriptor query in its
 // narrow raw block, so the FFI entry point only validates and binds `file`.
-fn gzoffset64(state: &mut crate::gzguts_h::gz_state) -> crate::stdlib::off64_t {
+// Offset queries observe gzip state while asking the descriptor for its
+// current position. Keep that state binding immutable; only `lseek64` crosses
+// the descriptor boundary below.
+fn gzoffset64(state: &crate::gzguts_h::gz_state) -> crate::stdlib::off64_t {
     if !gz_has_mode(state, crate::gzguts_h::GZ_READ)
         && !gz_has_mode(state, crate::gzguts_h::GZ_WRITE)
     {
@@ -1693,9 +1696,9 @@ pub unsafe extern "C" fn gzoffset64_ffi(mut file: crate::zlib_h::gzFile) -> crat
     if file.is_null() {
         return -1 as crate::stdlib::off64_t;
     }
-    gzoffset64(&mut *(file as crate::gzguts_h::gz_statep))
+    gzoffset64(&*(file as crate::gzguts_h::gz_statep))
 }
-fn gzoffset(state: &mut crate::gzguts_h::gz_state) -> crate::stdlib::off_t {
+fn gzoffset(state: &crate::gzguts_h::gz_state) -> crate::stdlib::off_t {
     let ret = gzoffset64(state);
     if ret == ret {
         ret
@@ -1709,7 +1712,7 @@ pub unsafe extern "C" fn gzoffset_ffi(mut file: crate::zlib_h::gzFile) -> crate:
     if file.is_null() {
         return -1 as crate::stdlib::off_t;
     }
-    gzoffset(&mut *(file as crate::gzguts_h::gz_statep))
+    gzoffset(&*(file as crate::gzguts_h::gz_statep))
 }
 fn gzeof(state: &crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
     if !gz_has_mode(state, crate::gzguts_h::GZ_READ)
@@ -1731,8 +1734,10 @@ pub unsafe extern "C" fn gzeof_ffi(mut file: crate::zlib_h::gzFile) -> ::core::f
     }
     gzeof(&*(file as crate::gzguts_h::gz_statep))
 }
+// Error querying reads the bound gzip state and optionally writes only the
+// caller's separate error-number output. Keep the state side immutable.
 fn gzerror(
-    state: &mut crate::gzguts_h::gz_state,
+    state: &crate::gzguts_h::gz_state,
     errnum: Option<&mut ::core::ffi::c_int>,
 ) -> *const ::core::ffi::c_char {
     if !gz_has_mode(state, crate::gzguts_h::GZ_READ)
@@ -1761,7 +1766,7 @@ pub unsafe extern "C" fn gzerror_ffi(
         return ::core::ptr::null::<::core::ffi::c_char>();
     }
     gzerror(
-        &mut *(file as crate::gzguts_h::gz_statep),
+        &*(file as crate::gzguts_h::gz_statep),
         errnum.as_mut(),
     )
 }
