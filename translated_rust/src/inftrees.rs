@@ -2807,12 +2807,57 @@ pub use crate::zlib_h::z_streamp;
 
 pub const MAXBITS: ::core::ffi::c_int = 15 as ::core::ffi::c_int;
 #[no_mangle]
-
-pub static mut inflate_copyright: [::core::ffi::c_char; 49] = unsafe {
-    ::core::mem::transmute::<[u8; 49], [::core::ffi::c_char; 49]>(
-        *b" inflate 1.3.2.1 Copyright 1995-2026 Mark Adler \0",
-    )
-};
+pub static inflate_copyright: [::core::ffi::c_char; 49] = [
+    b' ' as ::core::ffi::c_char,
+    b'i' as ::core::ffi::c_char,
+    b'n' as ::core::ffi::c_char,
+    b'f' as ::core::ffi::c_char,
+    b'l' as ::core::ffi::c_char,
+    b'a' as ::core::ffi::c_char,
+    b't' as ::core::ffi::c_char,
+    b'e' as ::core::ffi::c_char,
+    b' ' as ::core::ffi::c_char,
+    b'1' as ::core::ffi::c_char,
+    b'.' as ::core::ffi::c_char,
+    b'3' as ::core::ffi::c_char,
+    b'.' as ::core::ffi::c_char,
+    b'2' as ::core::ffi::c_char,
+    b'.' as ::core::ffi::c_char,
+    b'1' as ::core::ffi::c_char,
+    b' ' as ::core::ffi::c_char,
+    b'C' as ::core::ffi::c_char,
+    b'o' as ::core::ffi::c_char,
+    b'p' as ::core::ffi::c_char,
+    b'y' as ::core::ffi::c_char,
+    b'r' as ::core::ffi::c_char,
+    b'i' as ::core::ffi::c_char,
+    b'g' as ::core::ffi::c_char,
+    b'h' as ::core::ffi::c_char,
+    b't' as ::core::ffi::c_char,
+    b' ' as ::core::ffi::c_char,
+    b'1' as ::core::ffi::c_char,
+    b'9' as ::core::ffi::c_char,
+    b'9' as ::core::ffi::c_char,
+    b'5' as ::core::ffi::c_char,
+    b'-' as ::core::ffi::c_char,
+    b'2' as ::core::ffi::c_char,
+    b'0' as ::core::ffi::c_char,
+    b'2' as ::core::ffi::c_char,
+    b'6' as ::core::ffi::c_char,
+    b' ' as ::core::ffi::c_char,
+    b'M' as ::core::ffi::c_char,
+    b'a' as ::core::ffi::c_char,
+    b'r' as ::core::ffi::c_char,
+    b'k' as ::core::ffi::c_char,
+    b' ' as ::core::ffi::c_char,
+    b'A' as ::core::ffi::c_char,
+    b'd' as ::core::ffi::c_char,
+    b'l' as ::core::ffi::c_char,
+    b'e' as ::core::ffi::c_char,
+    b'r' as ::core::ffi::c_char,
+    b' ' as ::core::ffi::c_char,
+    0,
+];
 pub unsafe extern "C" fn inflate_table(
     mut type_0: crate::src::inftrees::codetype,
     mut lens: *mut ::core::ffi::c_ushort,
