@@ -4132,6 +4132,14 @@ fn last_nonzero_bl_code_rank(
     rank
 }
 
+fn bl_tree_header_bit_length(max_blindex: ::core::ffi::c_int) -> crate::zutil_h::ulg {
+    (3 as crate::zutil_h::ulg)
+        .wrapping_mul((max_blindex as crate::zutil_h::ulg).wrapping_add(1))
+        .wrapping_add(5)
+        .wrapping_add(5)
+        .wrapping_add(4)
+}
+
 unsafe extern "C" fn scan_tree(
     mut s: *mut crate::src::deflate::deflate_state,
     mut tree: *mut crate::src::deflate::ct_data,
@@ -4479,15 +4487,9 @@ unsafe extern "C" fn build_bl_tree(
         rank += 1;
     }
     max_blindex = last_nonzero_bl_code_rank(&nonzero_at_rank);
-    (*s).opt_len = (*s).opt_len.wrapping_add(
-        (3 as crate::zutil_h::ulg)
-            .wrapping_mul(
-                (max_blindex as crate::zutil_h::ulg).wrapping_add(1 as crate::zutil_h::ulg),
-            )
-            .wrapping_add(5 as crate::zutil_h::ulg)
-            .wrapping_add(5 as crate::zutil_h::ulg)
-            .wrapping_add(4 as crate::zutil_h::ulg),
-    );
+    (*s).opt_len = (*s)
+        .opt_len
+        .wrapping_add(bl_tree_header_bit_length(max_blindex));
     return max_blindex;
 }
 
@@ -5185,13 +5187,14 @@ pub unsafe extern "C" fn _tr_tally_ffi(
 #[cfg(test)]
 mod tests {
     use super::{
-        bi_flush_core, bi_reverse, bi_windup_core, bl_order, block_bit_length_bytes,
-        block_header_bits, detect_data_type_from_ltree, dist_code_index, heap_node_precedes,
-        last_nonzero_bl_code_rank, next_code_for_len, next_codes, pending_cursor_after_bytes,
-        rebalance_overflowed_bit_lengths, reset_block_trees, select_block_encoding, static_bl_desc,
-        static_d_desc, static_l_desc, supplemental_tree_node, symbol_buffer_is_full,
-        symbol_triplet_cursors, tally_match_tree_indices, tally_symbol_bytes, tree_next_cursor,
-        tree_run_continues, tree_run_limits, BlockEncoding, END_BLOCK, MAX_BITS,
+        bi_flush_core, bi_reverse, bi_windup_core, bl_order, bl_tree_header_bit_length,
+        block_bit_length_bytes, block_header_bits, detect_data_type_from_ltree, dist_code_index,
+        heap_node_precedes, last_nonzero_bl_code_rank, next_code_for_len, next_codes,
+        pending_cursor_after_bytes, rebalance_overflowed_bit_lengths, reset_block_trees,
+        select_block_encoding, static_bl_desc, static_d_desc, static_l_desc,
+        supplemental_tree_node, symbol_buffer_is_full, symbol_triplet_cursors,
+        tally_match_tree_indices, tally_symbol_bytes, tree_next_cursor, tree_run_continues,
+        tree_run_limits, BlockEncoding, END_BLOCK, MAX_BITS,
     };
 
     fn ltree_with_frequency(
@@ -5518,5 +5521,14 @@ mod tests {
     fn block_bit_length_bytes_preserves_ulong_wrapping() {
         assert_eq!(block_bit_length_bytes(crate::zutil_h::ulg::MAX - 2), 0);
         assert_eq!(block_bit_length_bytes(crate::zutil_h::ulg::MAX - 9), 0);
+    }
+
+    #[test]
+    fn bl_tree_header_bit_length_covers_required_rank_bounds() {
+        assert_eq!(bl_tree_header_bit_length(3), 26);
+        assert_eq!(
+            bl_tree_header_bit_length(crate::src::deflate::BL_CODES - 1),
+            71
+        );
     }
 }

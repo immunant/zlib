@@ -622,6 +622,10 @@ fn gz_is_gzip_header(
     first == 31 && second == 139 && third == 8 && fourth < 32
 }
 
+fn gz_look_header_is_available(avail_in: crate::stdlib::uInt) -> bool {
+    avail_in > 3
+}
+
 fn gz_look_forces_gzip(direct: ::core::ffi::c_int, junk: ::core::ffi::c_int) -> bool {
     direct == -1 || junk == 0
 }
@@ -721,7 +725,7 @@ unsafe extern "C" fn gz_look(mut state: crate::gzguts_h::gz_statep) -> ::core::f
     if gz_avail(state) == -1 as ::core::ffi::c_int {
         return -1 as ::core::ffi::c_int;
     }
-    let header = if (*strm).avail_in > 3 as crate::stdlib::uInt {
+    let header = if gz_look_header_is_available((*strm).avail_in) {
         let next_in = (*strm).next_in;
         Some([
             *next_in,
@@ -1907,6 +1911,13 @@ mod tests {
     fn gz_is_gzip_header_rejects_invalid_magic_or_flags() {
         assert!(!gz_is_gzip_header(30, 139, 8, 0));
         assert!(!gz_is_gzip_header(31, 139, 8, 32));
+    }
+
+    #[test]
+    fn gz_look_header_is_available_requires_all_four_header_bytes() {
+        assert!(!gz_look_header_is_available(3));
+        assert!(gz_look_header_is_available(4));
+        assert!(gz_look_header_is_available(crate::stdlib::uInt::MAX));
     }
 
     #[test]
