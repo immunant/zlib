@@ -2999,7 +2999,9 @@ fn deflate_stored(
     }
 }
 
-fn flush_pending_stored(
+// Stored and symbol-block compression share this reference-only drain path;
+// `flush_pending_bound()` retains the bounded pending/output transfer.
+fn flush_pending_output(
     state: &mut crate::src::deflate::deflate_state,
     stream: &mut crate::zlib_h::z_stream,
     pending: &mut [crate::zutil_h::uch],
@@ -3088,7 +3090,7 @@ fn deflate_stored_impl(
         crate::src::trees::tr_stored_block(state, pending, &[], last);
         let header_start = state.pending.wrapping_sub(4 as crate::zutil_h::ulg) as usize;
         stored_block_length_bytes(&mut pending[header_start..header_start + 4], len);
-        flush_pending_stored(state, stream, pending, output, &mut output_used);
+        flush_pending_output(state, stream, pending, output, &mut output_used);
         if left != 0 {
             if left > len {
                 left = len;
@@ -3225,7 +3227,7 @@ fn deflate_stored_impl(
         if let Some(block) = stored_window_bytes(window, state.block_start, len) {
             crate::src::trees::tr_stored_block(state, pending, block, last);
             state.block_start += len as ::core::ffi::c_long;
-            flush_pending_stored(state, stream, pending, output, &mut output_used);
+            flush_pending_output(state, stream, pending, output, &mut output_used);
         }
     }
     if last != 0 {
@@ -3764,28 +3766,6 @@ fn deflate_huff(
     deflate_fast(state, stream, flush)
 }
 
-fn flush_pending_symbols(
-    state: &mut crate::src::deflate::deflate_state,
-    stream: &mut crate::zlib_h::z_stream,
-    pending: &mut [crate::zutil_h::uch],
-    output: &mut [crate::stdlib::Bytef],
-    output_used: &mut usize,
-) {
-    let available = stream.avail_out as usize;
-    if available == 0 {
-        flush_pending_bound(state, stream, pending, None);
-        return;
-    }
-    let start = *output_used;
-    flush_pending_bound(
-        state,
-        stream,
-        pending,
-        Some(&mut output[start..start + available]),
-    );
-    *output_used += available - stream.avail_out as usize;
-}
-
 fn flush_symbol_block(
     state: &mut crate::src::deflate::deflate_state,
     stream: &mut crate::zlib_h::z_stream,
@@ -3813,7 +3793,7 @@ fn flush_symbol_block(
         last,
     );
     state.block_start = state.strstart as ::core::ffi::c_long;
-    flush_pending_symbols(state, stream, pending, output, output_used);
+    flush_pending_output(state, stream, pending, output, output_used);
 }
 
 fn deflate_huff_impl(
