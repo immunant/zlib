@@ -2563,7 +2563,11 @@ pub unsafe fn deflate(
         }) as usize] as *const ::core::ffi::c_char as *mut ::core::ffi::c_char;
         return -2 as ::core::ffi::c_int;
     }
-    if (&*strm).avail_out == 0 as crate::stdlib::uInt {
+    let output_is_full = {
+        let stream = &*strm;
+        stream.avail_out == 0 as crate::stdlib::uInt
+    };
+    if output_is_full {
         let stream = &mut *strm;
         stream.msg = crate::src::zutil::z_errmsg[(if (-5 as ::core::ffi::c_int)
             < -6 as ::core::ffi::c_int
@@ -2625,7 +2629,10 @@ pub unsafe fn deflate(
             state.status = crate::src::deflate::BUSY_STATE;
         }
     }
-    let initialized_zlib_header = (&*s).status == crate::src::deflate::INIT_STATE;
+    let initialized_zlib_header = {
+        let state = &*s;
+        state.status == crate::src::deflate::INIT_STATE
+    };
     if initialized_zlib_header {
         let stream = &mut *strm;
         let state = &mut *s;
@@ -2661,15 +2668,27 @@ pub unsafe fn deflate(
         stream.adler = crate::src::adler32::ADLER32_INITIAL;
         state.status = crate::src::deflate::BUSY_STATE;
     }
-    if initialized_zlib_header && (&*s).pending != 0 {
+    let zlib_header_is_pending = initialized_zlib_header && {
+        let state = &*s;
+        state.pending != 0
+    };
+    if zlib_header_is_pending {
         flush_pending(strm);
-        if (&*s).pending != 0 as crate::zutil_h::ulg {
+        let pending_after_flush = {
+            let state = &mut *s;
+            state.pending
+        };
+        if pending_after_flush != 0 as crate::zutil_h::ulg {
             let state = &mut *s;
             state.last_flush = -1 as ::core::ffi::c_int;
             return crate::zlib_h::Z_OK;
         }
     }
-    if (&*s).status == crate::src::deflate::GZIP_STATE {
+    let gzip_header_pending = {
+        let state = &*s;
+        state.status == crate::src::deflate::GZIP_STATE
+    };
+    if gzip_header_pending {
         // Keep fixed-header construction within one ordinary stream/state
         // borrow.  The pending buffer is still lent only here, and the
         // borrow ends before `flush_pending()` can revisit compatibility
@@ -2731,7 +2750,11 @@ pub unsafe fn deflate(
             }
         }
     }
-    if (&*s).status == crate::src::deflate::EXTRA_STATE {
+    let gzip_extra_pending = {
+        let state = &*s;
+        state.status == crate::src::deflate::EXTRA_STATE
+    };
+    if gzip_extra_pending {
         // Keep the gzip-header compatibility pointer at this codec boundary,
         // but use ordinary state and stream borrows for every chunk commit.
         let header = &*(&*s).gzhead;
@@ -2780,7 +2803,11 @@ pub unsafe fn deflate(
         let state = &mut *s;
         state.status = crate::src::deflate::NAME_STATE;
     }
-    if (&*s).status == crate::src::deflate::NAME_STATE {
+    let gzip_name_pending = {
+        let state = &*s;
+        state.status == crate::src::deflate::NAME_STATE
+    };
+    if gzip_name_pending {
         let header = &*(&*s).gzhead;
         if !header.name.is_null() {
             let name = ::std::ffi::CStr::from_ptr(header.name.cast()).to_bytes_with_nul();
@@ -2826,7 +2853,11 @@ pub unsafe fn deflate(
         let state = &mut *s;
         state.status = crate::src::deflate::COMMENT_STATE;
     }
-    if (&*s).status == crate::src::deflate::COMMENT_STATE {
+    let gzip_comment_pending = {
+        let state = &*s;
+        state.status == crate::src::deflate::COMMENT_STATE
+    };
+    if gzip_comment_pending {
         let header = &*(&*s).gzhead;
         if !header.comment.is_null() {
             let comment = ::std::ffi::CStr::from_ptr(header.comment.cast()).to_bytes_with_nul();
@@ -2872,7 +2903,11 @@ pub unsafe fn deflate(
         let state = &mut *s;
         state.status = crate::src::deflate::HCRC_STATE;
     }
-    if (&*s).status == crate::src::deflate::HCRC_STATE {
+    let gzip_hcrc_pending = {
+        let state = &*s;
+        state.status == crate::src::deflate::HCRC_STATE
+    };
+    if gzip_hcrc_pending {
         let hcrc_enabled = {
             let state = &mut *s;
             (&*state.gzhead).hcrc != 0
@@ -2890,7 +2925,10 @@ pub unsafe fn deflate(
                     return crate::zlib_h::Z_OK;
                 }
             }
-            let hcrc = (&*strm).adler;
+            let hcrc = {
+                let stream = &*strm;
+                stream.adler
+            };
             let state = &mut *s;
             let Ok(pending_len) = usize::try_from(state.pending_buf_size) else {
                 return crate::zlib_h::Z_STREAM_ERROR;
@@ -2955,14 +2993,20 @@ pub unsafe fn deflate(
             || bstate as ::core::ffi::c_uint
                 == finish_done as ::core::ffi::c_int as ::core::ffi::c_uint
         {
-            (&mut *s).status = crate::src::deflate::FINISH_STATE;
+            let state = &mut *s;
+            state.status = crate::src::deflate::FINISH_STATE;
         }
         if bstate as ::core::ffi::c_uint == need_more as ::core::ffi::c_int as ::core::ffi::c_uint
             || bstate as ::core::ffi::c_uint
                 == finish_started as ::core::ffi::c_int as ::core::ffi::c_uint
         {
-            if (&*strm).avail_out == 0 as crate::stdlib::uInt {
-                (&mut *s).last_flush = -1 as ::core::ffi::c_int;
+            let output_is_full = {
+                let stream = &*strm;
+                stream.avail_out == 0 as crate::stdlib::uInt
+            };
+            if output_is_full {
+                let state = &mut *s;
+                state.last_flush = -1 as ::core::ffi::c_int;
             }
             return crate::zlib_h::Z_OK;
         }
@@ -3038,8 +3082,13 @@ pub unsafe fn deflate(
                 }
             }
             flush_pending(strm);
-            if (&*strm).avail_out == 0 as crate::stdlib::uInt {
-                (&mut *s).last_flush = -1 as ::core::ffi::c_int;
+            let output_is_full = {
+                let stream = &*strm;
+                stream.avail_out == 0 as crate::stdlib::uInt
+            };
+            if output_is_full {
+                let state = &mut *s;
+                state.last_flush = -1 as ::core::ffi::c_int;
                 return crate::zlib_h::Z_OK;
             }
         }
