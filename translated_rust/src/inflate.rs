@@ -406,17 +406,10 @@ fn inflate_reset2_window_bits(
 
 fn inflate_reset2_impl(
     strm: &mut crate::zlib_h::z_stream_s,
+    state: &mut InflateState,
     window_bits: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
-    if strm.zalloc.is_none() || strm.zfree.is_none() {
-        return crate::zlib_h::Z_STREAM_ERROR;
-    }
-    let state = strm.state as *mut crate::src::inflate::inflate_state;
-    if state.is_null() {
-        return crate::zlib_h::Z_STREAM_ERROR;
-    }
-    let state = unsafe { &mut *state };
-    if !inflate_state_mode_valid(state) {
+    if !inflate_state_valid(strm, state) {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
     let Some((wrap, window_bits)) = inflate_reset2_window_bits(window_bits) else {
@@ -439,10 +432,15 @@ pub unsafe extern "C" fn inflateReset2_ffi(
     mut strm: crate::zlib_h::z_streamp,
     mut windowBits: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
-    if strm.is_null() {
+    let Some(strm) = (unsafe { strm.as_mut() }) else {
         return crate::zlib_h::Z_STREAM_ERROR;
-    }
-    inflate_reset2_impl(&mut *strm, windowBits)
+    };
+    let state = strm.state.cast::<crate::src::inflate::inflate_state>();
+    let Some(state) = (unsafe { state.as_mut() }) else {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    };
+    let mut state = InflateState(state);
+    inflate_reset2_impl(strm, &mut state, windowBits)
 }
 pub unsafe extern "C" fn inflateInit2_(
     mut strm: crate::zlib_h::z_streamp,
@@ -492,13 +490,16 @@ pub unsafe extern "C" fn inflateInit2_(
     }
     state.write(new_inflate_state());
     (*strm).state = state as *mut crate::src::deflate::internal_state;
-    (*state).mode = crate::src::inflate::HEAD;
-    ret = inflate_reset2_impl(&mut *strm, windowBits);
+    let state = &mut *state;
+    state.mode = crate::src::inflate::HEAD;
+    let mut state = InflateState(state);
+    ret = inflate_reset2_impl(&mut *strm, &mut state, windowBits);
     if ret != crate::zlib_h::Z_OK {
-        ::core::ptr::drop_in_place(state);
+        let state_ptr = state.0 as *mut crate::src::inflate::inflate_state;
+        ::core::ptr::drop_in_place(state_ptr);
         Some((*strm).zfree.expect("non-null function pointer")).expect("non-null function pointer")(
             (*strm).opaque,
-            state as crate::stdlib::voidpf,
+            state_ptr as crate::stdlib::voidpf,
         );
         (*strm).state = ::core::ptr::null_mut::<crate::src::deflate::internal_state>();
     }
