@@ -1384,7 +1384,7 @@ pub fn inflate(
                                                                                 loop {
                                                                                     here = crate::src::inftrees::copy_code(&*(*state)
                                                                                         .lencode
-                                                                                        .offset(
+                                                                                        .wrapping_offset(
                                                                                         (hold as ::core::ffi::c_uint
                                                                                             & ((1 as ::core::ffi::c_uint) << (*state).lenbits)
                                                                                                 .wrapping_sub(1 as ::core::ffi::c_uint)) as isize,
@@ -1912,7 +1912,7 @@ pub fn inflate(
                                             } else {
                                                 (*state).back = 0 as ::core::ffi::c_int;
                                                 loop {
-                                                    here = crate::src::inftrees::copy_code(&*(*state).lencode.offset(
+                                                    here = crate::src::inftrees::copy_code(&*(*state).lencode.wrapping_offset(
                                                         (hold as ::core::ffi::c_uint
                                                             & ((1 as ::core::ffi::c_uint)
                                                                 << (*state).lenbits)
@@ -1944,7 +1944,7 @@ pub fn inflate(
                                                 {
                                                     last = here;
                                                     loop {
-                                                        here = crate::src::inftrees::copy_code(&*(*state).lencode.offset(
+                                                        here = crate::src::inftrees::copy_code(&*(*state).lencode.wrapping_offset(
                                                         (last.val as ::core::ffi::c_uint)
                                                             .wrapping_add(
                                                             (hold as ::core::ffi::c_uint
@@ -2155,7 +2155,7 @@ pub fn inflate(
                                 break 'c_2325;
                             }
                             loop {
-                                here = crate::src::inftrees::copy_code(&*(*state).distcode.offset(
+                                here = crate::src::inftrees::copy_code(&*(*state).distcode.wrapping_offset(
                                     (hold as ::core::ffi::c_uint
                                         & ((1 as ::core::ffi::c_uint) << (*state).distbits)
                                             .wrapping_sub(1 as ::core::ffi::c_uint))
@@ -2180,7 +2180,7 @@ pub fn inflate(
                             {
                                 last = here;
                                 loop {
-                                    here = crate::src::inftrees::copy_code(&*(*state).distcode.offset(
+                                    here = crate::src::inftrees::copy_code(&*(*state).distcode.wrapping_offset(
                                         (last.val as ::core::ffi::c_uint).wrapping_add(
                                             (hold as ::core::ffi::c_uint
                                                 & ((1 as ::core::ffi::c_uint)
