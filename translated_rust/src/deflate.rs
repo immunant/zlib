@@ -436,6 +436,16 @@ enum DeflateStorageSlot {
     Pending,
 }
 
+// Keep one callback request as a self-contained, pointer-free value.  The
+// allocation boundary still invokes zalloc and publishes its returned handle,
+// but init, copy, and teardown can share this exact schedule without
+// rebuilding its geometry from ABI state or retaining a borrow of the layout.
+#[derive(Clone, Copy)]
+struct DeflateStorageRequest {
+    slot: DeflateStorageSlot,
+    allocation: DeflateAllocation,
+}
+
 // Callback-owned storage has two representations at the ABI boundary: the
 // provenance-carrying handles in `internal_state`, and this pointer-free
 // ownership ledger. The ledger decides which handles a stream may release,
@@ -1248,12 +1258,24 @@ impl DeflateStorageLayout {
         }
     }
 
-    fn callback_requests(&self) -> [(DeflateStorageSlot, &DeflateAllocation); 4] {
+    fn callback_requests(&self) -> [DeflateStorageRequest; 4] {
         [
-            (DeflateStorageSlot::Window, &self.window),
-            (DeflateStorageSlot::Prev, &self.prev),
-            (DeflateStorageSlot::Head, &self.head),
-            (DeflateStorageSlot::Pending, &self.pending),
+            DeflateStorageRequest {
+                slot: DeflateStorageSlot::Window,
+                allocation: self.window,
+            },
+            DeflateStorageRequest {
+                slot: DeflateStorageSlot::Prev,
+                allocation: self.prev,
+            },
+            DeflateStorageRequest {
+                slot: DeflateStorageSlot::Head,
+                allocation: self.head,
+            },
+            DeflateStorageRequest {
+                slot: DeflateStorageSlot::Pending,
+                allocation: self.pending,
+            },
         ]
     }
 }
@@ -1266,10 +1288,10 @@ impl DeflateStorageLayout {
 // transaction can reuse this pointer-free schedule unchanged.
 fn request_deflate_storage(
     storage: &DeflateStorageLayout,
-    mut request: impl FnMut(&DeflateStorageSlot, &DeflateAllocation),
+    mut request: impl FnMut(DeflateStorageRequest),
 ) {
-    for (slot, allocation) in storage.callback_requests() {
-        request(&slot, allocation);
+    for request_item in storage.callback_requests() {
+        request(request_item);
     }
 }
 
@@ -1705,10 +1727,12 @@ pub unsafe fn deflateInit2_(
     // callback: a caller allocator may observe the stream re-entrantly.
     // Each callback result is instead published through a short projection,
     // and all work after the final callback uses an ordinary Rust borrow.
-    request_deflate_storage(&storage, |slot, request| {
+    request_deflate_storage(&storage, |request| {
         let allocation = Some(stream.zalloc.expect("non-null function pointer"))
             .expect("non-null function pointer")(
-            stream.opaque, request.items, request.size
+            stream.opaque,
+            request.allocation.items,
+            request.allocation.size,
         );
         let allocated = !allocation.is_null();
         // Publish every callback result before requesting the next region:
@@ -1717,7 +1741,7 @@ pub unsafe fn deflateInit2_(
         // inspect the stream before the next request.  The lifecycle decision
         // itself remains in the pointer-free owner above.
         let state = &mut *s.as_ptr();
-        match slot {
+        match request.slot {
             DeflateStorageSlot::Window => {
                 state.window = ::core::ptr::NonNull::new(allocation.cast());
             }
@@ -1731,7 +1755,9 @@ pub unsafe fn deflateInit2_(
                 state.pending_buf = ::core::ptr::NonNull::new(allocation.cast());
             }
         }
-        state.callback_storage.record_storage(*slot, allocated);
+        state
+            .callback_storage
+            .record_storage(request.slot, allocated);
     });
     // The same shared projection lends the completed hash table to the reset
     // core.  Incomplete callback storage has no hash view, allowing the
@@ -6289,12 +6315,14 @@ unsafe fn deflate_copy_from_abi_boundary(
     // Preserve the source implementation's callback-visible order.  Reload
     // the callback and opaque value for every request: a re-entrant custom
     // allocator is allowed to inspect or update the stream between calls.
-    request_deflate_storage(&storage, |slot, request| {
+    request_deflate_storage(&storage, |request| {
         let allocation = Some(dest.zalloc.expect("non-null function pointer"))
             .expect("non-null function pointer")(
-            dest.opaque, request.items, request.size
+            dest.opaque,
+            request.allocation.items,
+            request.allocation.size,
         );
-        match slot {
+        match request.slot {
             DeflateStorageSlot::Window => {
                 ds.window = ::core::ptr::NonNull::new(allocation.cast());
             }
@@ -6309,7 +6337,7 @@ unsafe fn deflate_copy_from_abi_boundary(
             }
         }
         let allocated = !allocation.is_null();
-        ds.callback_storage.record_storage(*slot, allocated);
+        ds.callback_storage.record_storage(request.slot, allocated);
     });
     if !ds.callback_storage.is_complete() {
         deflateEnd(::core::ptr::NonNull::from(dest));
