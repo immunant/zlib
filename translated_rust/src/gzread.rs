@@ -403,10 +403,23 @@ fn gz_fetch(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
             }
             crate::src::gzlib::GzFetchPlan::Copy { requested } => {
                 // COPY mode is reached after `gz_look()` has allocated the
-                // gzip output buffer.
-                let output = ::core::ptr::NonNull::new(state.out)
-                    .expect("gzip output buffer initialized");
-                let result = gz_load(state, output, requested);
+                // gzip output buffer. Borrow that owned allocation rather
+                // than passing its C-facing cursor through this coordinator.
+                let state_key = crate::src::gzlib::gz_owned_buffer_key(state);
+                let result = crate::src::gzlib::gz_with_owned_output_buffer(state_key, |output| {
+                    if state.out != output.as_mut_ptr() || requested as usize > output.len() {
+                        return None;
+                    }
+                    Some(gz_load_slice(state, &mut output[..requested as usize]))
+                });
+                let Some(Some(result)) = result else {
+                    crate::src::gzlib::gz_error(
+                        state,
+                        crate::zlib_h::Z_STREAM_ERROR,
+                        Some(b"state corrupt\0"),
+                    );
+                    return -1;
+                };
                 crate::src::gzlib::gz_fetch_copy_loaded(state, result.received);
                 if result.status == -1 as ::core::ffi::c_int {
                     return -1 as ::core::ffi::c_int;
@@ -519,14 +532,38 @@ fn gz_read(
         match crate::src::gzlib::gz_read_plan(state, len) {
             crate::src::gzlib::GzReadPlan::Buffered(chunk) => {
                 n = chunk;
-                // SAFETY: the public reader entry point supplied a writable
-                // caller buffer of the requested length, and `x.next` plus
-                // `x.have` identifies the initialized internal output range.
-                // `gz_read_plan` bounds this source view and the destination
-                // subslice by both ranges. The copy itself is then checked
-                // Rust slice work rather than a raw C `memcpy` call.
-                let source = unsafe { ::core::slice::from_raw_parts(state.x.next, n as usize) };
-                buf[got as usize..got as usize + n as usize].copy_from_slice(source);
+                // The fetched bytes live in the registry-owned output Vec.
+                // Keep its cursor-range check and the caller copy within that
+                // one bounded borrow instead of rebuilding a raw source slice.
+                let state_key = crate::src::gzlib::gz_owned_buffer_key(state);
+                let copied = crate::src::gzlib::gz_with_owned_output_buffer(state_key, |output| {
+                    if state.out != output.as_mut_ptr() {
+                        return false;
+                    }
+                    let Some(source) = gz_buffered_input_range(
+                        output.as_ptr().addr(),
+                        state.x.next.addr(),
+                        n,
+                        output.len(),
+                    ) else {
+                        return false;
+                    };
+                    let end = match (got as usize).checked_add(n as usize) {
+                        Some(end) if end <= buf.len() => end,
+                        _ => return false,
+                    };
+                    buf[got as usize..end].copy_from_slice(&output[source]);
+                    true
+                });
+                if copied != Some(true) {
+                    crate::src::gzlib::gz_error(
+                        state,
+                        crate::zlib_h::Z_STREAM_ERROR,
+                        Some(b"state corrupt\0"),
+                    );
+                    err = -1;
+                    break 's_140;
+                }
                 n = gz_consume(state, n as crate::stdlib::off64_t);
                 consumed_buffered = true;
                 if state.err != crate::zlib_h::Z_OK {
