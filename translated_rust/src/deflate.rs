@@ -772,14 +772,24 @@ fn deflate_status_is_valid(status: ::core::ffi::c_int) -> bool {
         || status == crate::src::deflate::FINISH_STATE
 }
 
+fn deflate_state_fields_are_valid(state: &crate::src::deflate::deflate_state) -> bool {
+    deflate_status_is_valid(state.status)
+}
+
 unsafe extern "C" fn deflateStateCheck(mut strm: crate::zlib_h::z_streamp) -> ::core::ffi::c_int {
-    let mut s: *mut crate::src::deflate::deflate_state =
-        ::core::ptr::null_mut::<crate::src::deflate::deflate_state>();
-    if strm.is_null() || (*strm).zalloc.is_none() || (*strm).zfree.is_none() {
+    if strm.is_null() {
         return 1 as ::core::ffi::c_int;
     }
-    s = (*strm).state as *mut crate::src::deflate::deflate_state;
-    if s.is_null() || (*s).strm != strm || !deflate_status_is_valid((*s).status) {
+    let strm_ref = &*strm;
+    if strm_ref.zalloc.is_none() || strm_ref.zfree.is_none() {
+        return 1 as ::core::ffi::c_int;
+    }
+    let s = strm_ref.state as *mut crate::src::deflate::deflate_state;
+    if s.is_null() {
+        return 1 as ::core::ffi::c_int;
+    }
+    let state = &*s;
+    if state.strm != strm || !deflate_state_fields_are_valid(state) {
         return 1 as ::core::ffi::c_int;
     }
     return 0 as ::core::ffi::c_int;
@@ -2694,13 +2704,10 @@ unsafe extern "C" fn deflate_fast(
                 *(*s).sym_buf.offset(sym_next as isize) = byte;
             }
             dist = dist.wrapping_sub(1);
-            let length_code = *(&raw const crate::src::trees::_length_code
-                as *const crate::zutil_h::uch)
-                .offset(len as isize) as ::core::ffi::c_int;
-            let dist_code =
-                *(&raw const crate::src::trees::_dist_code as *const crate::zutil_h::uch).offset(
-                    crate::src::trees::dist_code_table_index(dist as ::core::ffi::c_uint) as isize,
-                ) as ::core::ffi::c_int;
+            let length_code = crate::src::trees::_length_code[len as usize] as ::core::ffi::c_int;
+            let dist_code = crate::src::trees::_dist_code
+                [crate::src::trees::dist_code_table_index(dist as ::core::ffi::c_uint)]
+                as ::core::ffi::c_int;
             crate::src::trees::tr_tally_update_match_counts(
                 &mut (*s).dyn_ltree,
                 &mut (*s).dyn_dtree,
@@ -2913,13 +2920,10 @@ unsafe extern "C" fn deflate_slow(
                 *(*s).sym_buf.offset(sym_next as isize) = byte;
             }
             dist = dist.wrapping_sub(1);
-            let length_code = *(&raw const crate::src::trees::_length_code
-                as *const crate::zutil_h::uch)
-                .offset(len as isize) as ::core::ffi::c_int;
-            let dist_code =
-                *(&raw const crate::src::trees::_dist_code as *const crate::zutil_h::uch).offset(
-                    crate::src::trees::dist_code_table_index(dist as ::core::ffi::c_uint) as isize,
-                ) as ::core::ffi::c_int;
+            let length_code = crate::src::trees::_length_code[len as usize] as ::core::ffi::c_int;
+            let dist_code = crate::src::trees::_dist_code
+                [crate::src::trees::dist_code_table_index(dist as ::core::ffi::c_uint)]
+                as ::core::ffi::c_int;
             crate::src::trees::tr_tally_update_match_counts(
                 &mut (*s).dyn_ltree,
                 &mut (*s).dyn_dtree,
@@ -3193,13 +3197,10 @@ unsafe extern "C" fn deflate_rle(
                 *(*s).sym_buf.offset(sym_next as isize) = byte;
             }
             dist = dist.wrapping_sub(1);
-            let length_code = *(&raw const crate::src::trees::_length_code
-                as *const crate::zutil_h::uch)
-                .offset(len as isize) as ::core::ffi::c_int;
-            let dist_code =
-                *(&raw const crate::src::trees::_dist_code as *const crate::zutil_h::uch).offset(
-                    crate::src::trees::dist_code_table_index(dist as ::core::ffi::c_uint) as isize,
-                ) as ::core::ffi::c_int;
+            let length_code = crate::src::trees::_length_code[len as usize] as ::core::ffi::c_int;
+            let dist_code = crate::src::trees::_dist_code
+                [crate::src::trees::dist_code_table_index(dist as ::core::ffi::c_uint)]
+                as ::core::ffi::c_int;
             crate::src::trees::tr_tally_update_match_counts(
                 &mut (*s).dyn_ltree,
                 &mut (*s).dyn_dtree,

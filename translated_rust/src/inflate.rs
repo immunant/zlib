@@ -293,14 +293,24 @@ fn inflate_data_type(
         })
 }
 
+fn inflate_state_fields_are_valid(state: &crate::src::inflate::inflate_state) -> bool {
+    inflate_mode_is_valid(state.mode)
+}
+
 unsafe extern "C" fn inflateStateCheck(mut strm: crate::zlib_h::z_streamp) -> ::core::ffi::c_int {
-    let mut state: *mut crate::src::inflate::inflate_state =
-        ::core::ptr::null_mut::<crate::src::inflate::inflate_state>();
-    if strm.is_null() || (*strm).zalloc.is_none() || (*strm).zfree.is_none() {
+    if strm.is_null() {
         return 1 as ::core::ffi::c_int;
     }
-    state = (*strm).state as *mut crate::src::inflate::inflate_state;
-    if state.is_null() || (*state).strm != strm || !inflate_mode_is_valid((*state).mode) {
+    let strm_ref = &*strm;
+    if strm_ref.zalloc.is_none() || strm_ref.zfree.is_none() {
+        return 1 as ::core::ffi::c_int;
+    }
+    let state = strm_ref.state as *mut crate::src::inflate::inflate_state;
+    if state.is_null() {
+        return 1 as ::core::ffi::c_int;
+    }
+    let state_ref = &*state;
+    if state_ref.strm != strm || !inflate_state_fields_are_valid(state_ref) {
         return 1 as ::core::ffi::c_int;
     }
     return 0 as ::core::ffi::c_int;
