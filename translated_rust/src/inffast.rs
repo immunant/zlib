@@ -259,7 +259,7 @@ pub unsafe extern "C" fn inflate_fast(
                     if extra_bits != 0 {
                         if bits < extra_bits {
                             let c2rust_fresh3 = in_0;
-                            in_0 = in_0.offset(1);
+                            in_0 = in_0.wrapping_add(1);
                             input_remaining = input_remaining_after_read(input_remaining);
                             (hold, bits) = append_input_byte(hold, bits, *c2rust_fresh3);
                         }
@@ -267,11 +267,11 @@ pub unsafe extern "C" fn inflate_fast(
                     }
                     if bits < 15 as ::core::ffi::c_uint {
                         let c2rust_fresh4 = in_0;
-                        in_0 = in_0.offset(1);
+                        in_0 = in_0.wrapping_add(1);
                         input_remaining = input_remaining_after_read(input_remaining);
                         (hold, bits) = append_input_byte(hold, bits, *c2rust_fresh4);
                         let c2rust_fresh5 = in_0;
-                        in_0 = in_0.offset(1);
+                        in_0 = in_0.wrapping_add(1);
                         input_remaining = input_remaining_after_read(input_remaining);
                         (hold, bits) = append_input_byte(hold, bits, *c2rust_fresh5);
                     }
@@ -303,12 +303,12 @@ pub unsafe extern "C" fn inflate_fast(
                             dist = (*here).val as ::core::ffi::c_uint;
                             if bits < extra_bits {
                                 let c2rust_fresh6 = in_0;
-                                in_0 = in_0.offset(1);
+                                in_0 = in_0.wrapping_add(1);
                                 input_remaining = input_remaining_after_read(input_remaining);
                                 (hold, bits) = append_input_byte(hold, bits, *c2rust_fresh6);
                                 if bits < extra_bits {
                                     let c2rust_fresh7 = in_0;
-                                    in_0 = in_0.offset(1);
+                                    in_0 = in_0.wrapping_add(1);
                                     input_remaining = input_remaining_after_read(input_remaining);
                                     (hold, bits) = append_input_byte(hold, bits, *c2rust_fresh7);
                                 }
