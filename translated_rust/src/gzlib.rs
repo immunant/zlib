@@ -1033,17 +1033,8 @@ pub unsafe extern "C" fn gzdopen_ffi(
 ) -> crate::zlib_h::gzFile {
     gzdopen(fd, mode)
 }
-pub unsafe extern "C" fn gzbuffer(
-    mut file: crate::zlib_h::gzFile,
-    mut size: ::core::ffi::c_uint,
-) -> ::core::ffi::c_int {
-    if file.is_null() {
-        return -1 as ::core::ffi::c_int;
-    }
-    let state = &mut *(file as crate::gzguts_h::gz_statep);
-    gz_buffer(state, size)
-}
-
+// Buffer configuration only needs an already-bound gzip state.  Leave handle
+// validation and binding in the exported entry point.
 fn gz_buffer(
     state: &mut crate::gzguts_h::gz_state,
     mut size: ::core::ffi::c_uint,
@@ -1071,7 +1062,10 @@ pub unsafe extern "C" fn gzbuffer_ffi(
     mut file: crate::zlib_h::gzFile,
     mut size: ::core::ffi::c_uint,
 ) -> ::core::ffi::c_int {
-    gzbuffer(file, size)
+    if file.is_null() {
+        return -1 as ::core::ffi::c_int;
+    }
+    gz_buffer(&mut *(file as crate::gzguts_h::gz_statep), size)
 }
 // Rewind receives an already-bound state from its FFI entry point. Its
 // descriptor and error-record calls retain their established raw boundaries.
@@ -1417,24 +1411,27 @@ pub unsafe extern "C" fn gzerror_ffi(
         errnum.as_mut(),
     )
 }
-pub unsafe extern "C" fn gzclearerr(mut file: crate::zlib_h::gzFile) {
-    if file.is_null() {
-        return;
-    }
-    let state = &mut *(file as crate::gzguts_h::gz_statep);
+fn gzclearerr(state: &mut crate::gzguts_h::gz_state) {
     if !gz_clear_error_state(state) {
         return;
     }
-    gz_error(
-        state as *mut crate::gzguts_h::gz_state,
-        crate::zlib_h::Z_OK,
-        ::core::ptr::null::<::core::ffi::c_char>(),
-    );
+    // SAFETY: the bound state owns this error record; the null message does
+    // not dereference caller memory.
+    unsafe {
+        gz_error(
+            state,
+            crate::zlib_h::Z_OK,
+            ::core::ptr::null::<::core::ffi::c_char>(),
+        );
+    }
 }
 #[export_name = "gzclearerr"]
 
 pub unsafe extern "C" fn gzclearerr_ffi(mut file: crate::zlib_h::gzFile) {
-    gzclearerr(file)
+    if file.is_null() {
+        return;
+    }
+    gzclearerr(&mut *(file as crate::gzguts_h::gz_statep))
 }
 
 // Clearing a gzip error only changes already-bound state.  Keep the message

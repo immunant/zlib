@@ -810,14 +810,9 @@ pub unsafe extern "C" fn gzgets_ffi(
 ) -> *mut ::core::ffi::c_char {
     gzgets(file, buf, len)
 }
-pub unsafe extern "C" fn gzdirect(mut file: crate::zlib_h::gzFile) -> ::core::ffi::c_int {
-    let mut state: crate::gzguts_h::gz_statep =
-        ::core::ptr::null_mut::<crate::gzguts_h::gz_state>();
-    if file.is_null() {
-        return 0 as ::core::ffi::c_int;
-    }
-    state = file as crate::gzguts_h::gz_statep;
-    let state = &mut *state;
+// Direct-mode querying only needs a validated, bound state. `gz_look` keeps
+// its allocation and descriptor boundaries scoped inside that coordinator.
+fn gzdirect(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
     if crate::src::gzlib::gz_has_mode(state, crate::gzguts_h::GZ_READ)
         && state.how == crate::gzguts_h::LOOK
         && state.x.have == 0 as ::core::ffi::c_uint
@@ -829,7 +824,10 @@ pub unsafe extern "C" fn gzdirect(mut file: crate::zlib_h::gzFile) -> ::core::ff
 #[export_name = "gzdirect"]
 
 pub unsafe extern "C" fn gzdirect_ffi(mut file: crate::zlib_h::gzFile) -> ::core::ffi::c_int {
-    gzdirect(file)
+    if file.is_null() {
+        return 0 as ::core::ffi::c_int;
+    }
+    gzdirect(&mut *(file as crate::gzguts_h::gz_statep))
 }
 pub unsafe extern "C" fn gzclose_r(mut file: crate::zlib_h::gzFile) -> ::core::ffi::c_int {
     let mut ret: ::core::ffi::c_int = 0;
