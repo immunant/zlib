@@ -68,62 +68,70 @@ fn gz_alloc_byte_vec(len: usize) -> Option<Vec<crate::stdlib::Bytef>> {
     Some(buf)
 }
 
-fn gz_init(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
-    let mut ret: ::core::ffi::c_int = 0;
-    let input_len = (state.want << 1 as ::core::ffi::c_int) as usize;
-    let Some(mut input_buf) = gz_alloc_byte_vec(input_len) else {
-        crate::src::gzlib::gz_error_static(state, crate::zlib_h::Z_MEM_ERROR, b"out of memory\0");
-        return -1 as ::core::ffi::c_int;
-    };
-    let mut output_buf = None;
-    if state.direct == 0 {
-        let Some(buf) = gz_alloc_byte_vec(state.want as usize) else {
-            crate::src::gzlib::gz_error_static(
-                state,
-                crate::zlib_h::Z_MEM_ERROR,
-                b"out of memory\0",
-            );
-            return -1 as ::core::ffi::c_int;
-        };
-        output_buf = Some(buf);
-        state.strm.zalloc = None;
-        state.strm.zfree = None;
-        state.strm.opaque = ::core::ptr::null_mut::<::core::ffi::c_void>();
-        ret = unsafe {
-            crate::src::deflate::deflateInit2__ffi(
-                &raw mut state.strm as *mut _ as *mut crate::zlib_h::z_stream_s,
-                state.level,
-                8 as ::core::ffi::c_int,
-                15 as ::core::ffi::c_int + 16 as ::core::ffi::c_int,
-                8 as ::core::ffi::c_int,
-                state.strategy,
-                crate::zlib_h::ZLIB_VERSION.as_ptr(),
-                ::core::mem::size_of::<crate::zlib_h::z_stream>() as ::core::ffi::c_int,
-            )
-        };
-        if ret != crate::zlib_h::Z_OK {
-            crate::src::gzlib::gz_error_static(
-                state,
-                crate::zlib_h::Z_MEM_ERROR,
-                b"out of memory\0",
-            );
-            return -1 as ::core::ffi::c_int;
+macro_rules! gz_init {
+    ($state:expr) => {{
+        let state: &mut crate::gzguts_h::gz_state = &mut *$state;
+        'gz_init_result: {
+            let input_len = (state.want << 1 as ::core::ffi::c_int) as usize;
+            let Some(mut input_buf) = gz_alloc_byte_vec(input_len) else {
+                crate::src::gzlib::gz_error_static(
+                    state,
+                    crate::zlib_h::Z_MEM_ERROR,
+                    b"out of memory\0",
+                );
+                break 'gz_init_result -1 as ::core::ffi::c_int;
+            };
+            let mut output_buf = None;
+            if state.direct == 0 {
+                let Some(buf) = gz_alloc_byte_vec(state.want as usize) else {
+                    crate::src::gzlib::gz_error_static(
+                        state,
+                        crate::zlib_h::Z_MEM_ERROR,
+                        b"out of memory\0",
+                    );
+                    break 'gz_init_result -1 as ::core::ffi::c_int;
+                };
+                output_buf = Some(buf);
+                state.strm.zalloc = None;
+                state.strm.zfree = None;
+                state.strm.opaque = ::core::ptr::null_mut::<::core::ffi::c_void>();
+                let ret = unsafe {
+                    crate::src::deflate::deflateInit2__ffi(
+                        &raw mut state.strm as *mut _ as *mut crate::zlib_h::z_stream_s,
+                        state.level,
+                        8 as ::core::ffi::c_int,
+                        15 as ::core::ffi::c_int + 16 as ::core::ffi::c_int,
+                        8 as ::core::ffi::c_int,
+                        state.strategy,
+                        crate::zlib_h::ZLIB_VERSION.as_ptr(),
+                        ::core::mem::size_of::<crate::zlib_h::z_stream>() as ::core::ffi::c_int,
+                    )
+                };
+                if ret != crate::zlib_h::Z_OK {
+                    crate::src::gzlib::gz_error_static(
+                        state,
+                        crate::zlib_h::Z_MEM_ERROR,
+                        b"out of memory\0",
+                    );
+                    break 'gz_init_result -1 as ::core::ffi::c_int;
+                }
+                state.strm.next_in = ::core::ptr::null_mut::<crate::stdlib::Bytef>();
+            }
+            state.in_0 = input_buf.as_mut_ptr();
+            let output_buf = if let Some(mut output_buf) = output_buf {
+                state.out = output_buf.as_mut_ptr();
+                output_buf
+            } else {
+                Vec::new()
+            };
+            gz_store_owned_buffers(state, input_buf, output_buf);
+            state.size = state.want;
+            if state.direct == 0 {
+                gz_reset_write_output(state);
+            }
+            break 'gz_init_result 0 as ::core::ffi::c_int;
         }
-        state.strm.next_in = ::core::ptr::null_mut::<crate::stdlib::Bytef>();
-    }
-    state.in_0 = input_buf.as_mut_ptr();
-    let output_buf = if let Some(mut output_buf) = output_buf {
-        state.out = output_buf.as_mut_ptr();
-        output_buf
-    } else {
-        Vec::new()
-    };
-    gz_store_owned_buffers(state, input_buf, output_buf);
-    state.size = state.want;
-    if state.direct == 0 {
-        gz_reset_write_output(state);
-    }
-    return 0 as ::core::ffi::c_int;
+    }};
 }
 
 fn gz_comp(
@@ -135,7 +143,12 @@ fn gz_comp(
     let mut have: ::core::ffi::c_uint = 0;
     let mut put: ::core::ffi::c_uint = 0;
     let mut max: ::core::ffi::c_uint = gz_io_chunk_limit();
-    if state.size == 0 as ::core::ffi::c_uint && gz_init(state) == -1 as ::core::ffi::c_int {
+    if state.size == 0 as ::core::ffi::c_uint {
+        crate::src::gzlib::gz_error_static(
+            state,
+            crate::zlib_h::Z_STREAM_ERROR,
+            b"internal error: write buffers not initialized\0",
+        );
         return -1 as ::core::ffi::c_int;
     }
     if state.direct != 0 {
@@ -618,7 +631,7 @@ pub unsafe extern "C" fn gzwrite_ffi(
         let mut empty_input_buf = [];
         return gz_write(state, &mut empty_input_buf[..], input) as ::core::ffi::c_int;
     }
-    if state.size == 0 as ::core::ffi::c_uint && gz_init(state) == -1 as ::core::ffi::c_int {
+    if state.size == 0 as ::core::ffi::c_uint && gz_init!(state) == -1 as ::core::ffi::c_int {
         return 0 as ::core::ffi::c_int;
     }
     return gz_with_input_buffer_mut(state, |state, input_buf| {
@@ -652,7 +665,7 @@ pub unsafe extern "C" fn gzfwrite_ffi(
     };
     let completed = if len != 0 {
         let input = ::core::slice::from_raw_parts(buf as *const crate::stdlib::Bytef, len);
-        if state.size == 0 as ::core::ffi::c_uint && gz_init(state) == -1 as ::core::ffi::c_int {
+        if state.size == 0 as ::core::ffi::c_uint && gz_init!(state) == -1 as ::core::ffi::c_int {
             return 0 as crate::stdlib::z_size_t;
         }
         gz_with_input_buffer_mut(state, |state, input_buf| {
@@ -678,7 +691,7 @@ pub unsafe extern "C" fn gzputc_ffi(
         return -1 as ::core::ffi::c_int;
     }
     crate::src::gzlib::gz_error_clear(state, crate::zlib_h::Z_OK);
-    if state.size == 0 as ::core::ffi::c_uint && gz_init(state) == -1 as ::core::ffi::c_int {
+    if state.size == 0 as ::core::ffi::c_uint && gz_init!(state) == -1 as ::core::ffi::c_int {
         return -1 as ::core::ffi::c_int;
     }
     return gz_with_input_buffer_mut(state, |state, input_buf| {
@@ -751,7 +764,7 @@ pub unsafe extern "C" fn gzputs_ffi(
         let mut empty_input_buf = [];
         return gzputs_impl(state, &mut empty_input_buf[..], input, len);
     }
-    if state.size == 0 as ::core::ffi::c_uint && gz_init(state) == -1 as ::core::ffi::c_int {
+    if state.size == 0 as ::core::ffi::c_uint && gz_init!(state) == -1 as ::core::ffi::c_int {
         return -1 as ::core::ffi::c_int;
     }
     return gz_with_input_buffer_mut(state, |state, input_buf| {
@@ -781,7 +794,7 @@ pub unsafe extern "C" fn gzflush_ffi(
         return crate::zlib_h::Z_STREAM_ERROR;
     }
     if state.skip != 0 {
-        if state.size == 0 as ::core::ffi::c_uint && gz_init(state) == -1 as ::core::ffi::c_int {
+        if state.size == 0 as ::core::ffi::c_uint && gz_init!(state) == -1 as ::core::ffi::c_int {
             return state.err;
         }
         if gz_with_input_buffer_mut(state, |state, input_buf| {
@@ -791,6 +804,9 @@ pub unsafe extern "C" fn gzflush_ffi(
         {
             return state.err;
         }
+    }
+    if state.size == 0 as ::core::ffi::c_uint && gz_init!(state) == -1 as ::core::ffi::c_int {
+        return state.err;
     }
     gz_comp_with_state_input(state, flush);
     return state.err;
@@ -842,7 +858,7 @@ pub unsafe extern "C" fn gzsetparams_ffi(
         return crate::zlib_h::Z_OK;
     }
     if state.skip != 0 {
-        if state.size == 0 as ::core::ffi::c_uint && gz_init(state) == -1 as ::core::ffi::c_int {
+        if state.size == 0 as ::core::ffi::c_uint && gz_init!(state) == -1 as ::core::ffi::c_int {
             return state.err;
         }
         if gz_with_input_buffer_mut(state, |state, input_buf| {
@@ -880,7 +896,7 @@ pub unsafe extern "C" fn gzclose_w_ffi(mut file: crate::zlib_h::gzFile) -> ::cor
         return crate::zlib_h::Z_STREAM_ERROR;
     }
     let zero_failed = if state.skip != 0 {
-        if state.size == 0 as ::core::ffi::c_uint && gz_init(state) == -1 as ::core::ffi::c_int {
+        if state.size == 0 as ::core::ffi::c_uint && gz_init!(state) == -1 as ::core::ffi::c_int {
             true
         } else {
             gz_with_input_buffer_mut(state, |state, input_buf| {
@@ -892,8 +908,13 @@ pub unsafe extern "C" fn gzclose_w_ffi(mut file: crate::zlib_h::gzFile) -> ::cor
         false
     };
     ret = gzclose_w_after_step(ret, zero_failed, state.err);
-    let comp_failed =
-        gz_comp_with_state_input(state, crate::zlib_h::Z_FINISH) == -1 as ::core::ffi::c_int;
+    let init_failed =
+        state.size == 0 as ::core::ffi::c_uint && gz_init!(state) == -1 as ::core::ffi::c_int;
+    if init_failed {
+        ret = gzclose_w_after_step(ret, true, state.err);
+    }
+    let comp_failed = init_failed
+        || gz_comp_with_state_input(state, crate::zlib_h::Z_FINISH) == -1 as ::core::ffi::c_int;
     ret = gzclose_w_after_step(ret, comp_failed, state.err);
     if state.size != 0 {
         if state.direct == 0 {
