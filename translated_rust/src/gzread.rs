@@ -758,6 +758,76 @@ pub unsafe extern "C" fn gzgetc_(mut file: crate::zlib_h::gzFile) -> ::core::ffi
 pub unsafe extern "C" fn gzgetc__ffi(mut file: crate::zlib_h::gzFile) -> ::core::ffi::c_int {
     gzgetc_(file)
 }
+
+/// Describe where an ungot byte belongs in the existing read buffer without
+/// touching its ABI cursor.  The caller keeps the pointer adjustment and byte
+/// store at the raw boundary.
+#[derive(Clone, Copy)]
+enum GzUngetcBufferPlan {
+    InvalidCharacter,
+    Full,
+    Empty {
+        capacity: crate::stdlib::uInt,
+    },
+    Buffered {
+        shift_to_end: bool,
+        capacity: crate::stdlib::uInt,
+    },
+}
+
+fn gzungetc_buffer_plan(
+    c: ::core::ffi::c_int,
+    have: crate::stdlib::uInt,
+    size: crate::stdlib::uInt,
+    next_is_output_start: bool,
+) -> GzUngetcBufferPlan {
+    if c < 0 {
+        return GzUngetcBufferPlan::InvalidCharacter;
+    }
+    let capacity = size.wrapping_shl(1);
+    if have == 0 {
+        return GzUngetcBufferPlan::Empty { capacity };
+    }
+    if have >= capacity {
+        return GzUngetcBufferPlan::Full;
+    }
+    GzUngetcBufferPlan::Buffered {
+        shift_to_end: next_is_output_start,
+        capacity,
+    }
+}
+
+/// Commit only the scalar consequences of a successful ungetc buffer write.
+/// `x.next` is deliberately left to the boundary, where it remains a raw ABI
+/// cursor.
+fn gzungetc_buffer_commit_state(
+    state: &mut crate::gzguts_h::gz_state,
+    plan: GzUngetcBufferPlan,
+) -> bool {
+    let capacity = match plan {
+        GzUngetcBufferPlan::InvalidCharacter | GzUngetcBufferPlan::Full => return false,
+        GzUngetcBufferPlan::Empty { capacity } => {
+            if state.x.have != 0 {
+                return false;
+            }
+            capacity
+        }
+        GzUngetcBufferPlan::Buffered { capacity, .. } => {
+            if state.x.have == 0 || state.x.have >= capacity {
+                return false;
+            }
+            capacity
+        }
+    };
+    if state.size.wrapping_shl(1) != capacity {
+        return false;
+    }
+    state.x.have = state.x.have.wrapping_add(1);
+    state.x.pos = state.x.pos.wrapping_sub(1);
+    state.past = 0;
+    true
+}
+
 pub unsafe extern "C" fn gzungetc(
     mut c: ::core::ffi::c_int,
     mut file: crate::zlib_h::gzFile,
@@ -788,29 +858,39 @@ pub unsafe extern "C" fn gzungetc(
     if (*state).skip != 0 && gz_skip(state) == -1 as ::core::ffi::c_int {
         return -1 as ::core::ffi::c_int;
     }
-    if c < 0 as ::core::ffi::c_int {
-        return -1 as ::core::ffi::c_int;
-    }
-    if (*state).x.have == 0 as ::core::ffi::c_uint {
-        (*state).x.have = 1 as ::core::ffi::c_uint;
+    let plan = gzungetc_buffer_plan(
+        c,
+        (*state).x.have,
+        (*state).size,
+        (*state).x.next == (*state).out,
+    );
+    match plan {
+        GzUngetcBufferPlan::InvalidCharacter => return -1 as ::core::ffi::c_int,
+        GzUngetcBufferPlan::Full => {
+            crate::src::gzlib::gz_error(
+                state as *mut crate::gzguts_h::gz_state,
+                crate::zlib_h::Z_DATA_ERROR,
+                b"out of room to push characters\0".as_ptr() as *const ::core::ffi::c_char,
+            );
+            return -1 as ::core::ffi::c_int;
+        }
+        GzUngetcBufferPlan::Empty { .. } | GzUngetcBufferPlan::Buffered { .. } => {}
+    };
+    if let GzUngetcBufferPlan::Empty { capacity } = plan {
         (*state).x.next = (*state)
             .out
-            .offset(((*state).size << 1 as ::core::ffi::c_int) as isize)
+            .offset(capacity as isize)
             .offset(-(1 as ::core::ffi::c_int as isize));
         *(*state).x.next.offset(0 as ::core::ffi::c_int as isize) = c as ::core::ffi::c_uchar;
-        (*state).x.pos -= 1;
-        (*state).past = 0 as ::core::ffi::c_int;
+        if !gzungetc_buffer_commit_state(&mut *state, plan) {
+            return -1 as ::core::ffi::c_int;
+        }
         return c;
     }
-    if (*state).x.have == (*state).size << 1 as ::core::ffi::c_int {
-        crate::src::gzlib::gz_error(
-            state as *mut crate::gzguts_h::gz_state,
-            crate::zlib_h::Z_DATA_ERROR,
-            b"out of room to push characters\0".as_ptr() as *const ::core::ffi::c_char,
-        );
+    let GzUngetcBufferPlan::Buffered { shift_to_end, .. } = plan else {
         return -1 as ::core::ffi::c_int;
-    }
-    if (*state).x.next == (*state).out {
+    };
+    if shift_to_end {
         let mut src: *mut ::core::ffi::c_uchar = (*state).out.offset((*state).x.have as isize);
         let mut dest: *mut ::core::ffi::c_uchar = (*state)
             .out
@@ -822,11 +902,11 @@ pub unsafe extern "C" fn gzungetc(
         }
         (*state).x.next = dest;
     }
-    (*state).x.have = (*state).x.have.wrapping_add(1);
     (*state).x.next = (*state).x.next.offset(-1);
     *(*state).x.next.offset(0 as ::core::ffi::c_int as isize) = c as ::core::ffi::c_uchar;
-    (*state).x.pos -= 1;
-    (*state).past = 0 as ::core::ffi::c_int;
+    if !gzungetc_buffer_commit_state(&mut *state, plan) {
+        return -1 as ::core::ffi::c_int;
+    }
     return c;
 }
 #[export_name = "gzungetc"]
