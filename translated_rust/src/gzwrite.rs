@@ -107,10 +107,36 @@ fn clear_buffered_input(buffer: &mut [u8]) {
     buffer.fill(0);
 }
 
+// The write side's owned buffers are allocated as one pointer-free
+// transaction.  In particular, a failed output allocation drops the input
+// allocation before any ABI-shaped gzip state is changed.  Keeping this owner
+// separate lets a later gzip-core facade take over resource ownership without
+// reintroducing cursor or stream pointers into its setup path.
+struct GzWriteBuffers {
+    input: Box<[u8]>,
+    output: Option<Box<[u8]>>,
+    size: ::core::ffi::c_uint,
+}
+
+impl GzWriteBuffers {
+    fn allocate(want: ::core::ffi::c_uint, direct: ::core::ffi::c_int) -> Option<Self> {
+        let input = crate::src::gzlib::gz_buffer(want << 1)?;
+        let output = if direct == 0 {
+            Some(crate::src::gzlib::gz_buffer(want)?)
+        } else {
+            None
+        };
+        Some(Self {
+            input,
+            output,
+            size: want,
+        })
+    }
+}
+
 unsafe fn gz_init(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
     let mut ret: ::core::ffi::c_int = 0;
-    state.in_0 = crate::src::gzlib::gz_buffer(state.want << 1);
-    if state.in_0.is_none() {
+    let Some(buffers) = GzWriteBuffers::allocate(state.want, state.direct) else {
         crate::src::gzlib::GzErrorState {
             message: &mut state.msg,
             error: &mut state.err,
@@ -120,21 +146,10 @@ unsafe fn gz_init(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
         }
         .set(crate::zlib_h::Z_MEM_ERROR, Some(b"out of memory"));
         return -1 as ::core::ffi::c_int;
-    }
+    };
+    state.in_0 = Some(buffers.input);
+    state.out = buffers.output;
     if state.direct == 0 {
-        state.out = crate::src::gzlib::gz_buffer(state.want);
-        if state.out.is_none() {
-            state.in_0 = None;
-            crate::src::gzlib::GzErrorState {
-                message: &mut state.msg,
-                error: &mut state.err,
-                buffered: &mut state.x.have,
-                again: state.again,
-                path: state.path.as_deref(),
-            }
-            .set(crate::zlib_h::Z_MEM_ERROR, Some(b"out of memory"));
-            return -1 as ::core::ffi::c_int;
-        }
         state.strm.zalloc = None;
         state.strm.zfree = None;
         state.strm.opaque = ::core::ptr::null_mut::<::core::ffi::c_void>();
@@ -163,7 +178,7 @@ unsafe fn gz_init(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
         }
         state.strm.next_in = ::core::ptr::null_mut::<crate::stdlib::Bytef>();
     }
-    state.size = state.want;
+    state.size = buffers.size;
     if state.direct == 0 {
         state.strm.avail_out = state.size as crate::stdlib::uInt;
         state.strm.next_out = state.out.as_deref_mut().unwrap().as_mut_ptr();
