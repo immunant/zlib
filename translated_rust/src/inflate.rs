@@ -686,10 +686,11 @@ pub fn inflate(
             return crate::zlib_h::Z_STREAM_ERROR;
         }
         // `inflateGetHeader` installs this caller-owned sink before decoding
-        // begins. Keep its ABI pointer local, so the decoder can retain one
-        // ordinary mutable state borrow. Each optional header write remains
-        // at this existing raw boundary.
-        let header = state_ref.head;
+        // begins. Validate that one ABI pointer once, then retain the
+        // resulting borrow while the decoder updates its independent state.
+        // The header's caller-owned byte buffers remain raw boundaries below:
+        // this only removes repeated raw borrows of the header structure.
+        let mut header = state_ref.head.as_mut();
         let state = state_ref;
         let mut next: *mut ::core::ffi::c_uchar = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
         let mut put: *mut ::core::ffi::c_uchar = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
