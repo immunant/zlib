@@ -50,6 +50,16 @@ enum GzLoadBuffer<'a> {
     Output,
 }
 
+/// Read from a descriptor that is owned by the gzip state for the duration of
+/// the call. The borrowed descriptor and slice cover exactly one `read`.
+unsafe fn gz_read_fd(
+    fd: ::core::ffi::c_int,
+    buffer: &mut [u8],
+) -> Result<usize, std::io::Error> {
+    let fd = std::os::fd::BorrowedFd::borrow_raw(fd);
+    rustix::io::read(fd, buffer).map_err(std::io::Error::from)
+}
+
 unsafe fn gz_load(
     state: &mut crate::gzguts_h::gz_state,
     buffer: GzLoadBuffer<'_>,
@@ -66,45 +76,40 @@ unsafe fn gz_load(
             &mut state.out[..len]
         }
     };
-    let mut ret: ::core::ffi::c_int = 0;
     let mut have = 0usize;
     let max = ((-1 as ::core::ffi::c_int as ::core::ffi::c_uint >> 2) + 1) as usize;
     state.again = 0 as ::core::ffi::c_int;
     *crate::stdlib::__errno_location() = 0 as ::core::ffi::c_int;
     loop {
         let get = (buf.len() - have).min(max);
-        ret = crate::stdlib::read(
-            state.fd,
-            buf[have..].as_mut_ptr() as *mut ::core::ffi::c_void,
-            get,
-        ) as ::core::ffi::c_int;
-        if ret <= 0 as ::core::ffi::c_int {
-            break;
-        }
-        have += ret as usize;
-        if have >= buf.len() {
-            break;
-        }
-    }
-    if ret < 0 as ::core::ffi::c_int {
-        if *crate::stdlib::__errno_location() == crate::stdlib::EAGAIN
-            || *crate::stdlib::__errno_location() == crate::stdlib::EWOULDBLOCK
-        {
-            state.again = 1 as ::core::ffi::c_int;
-            if have != 0 {
-                return Ok(have);
+        match gz_read_fd(state.fd, &mut buf[have..have + get]) {
+            Ok(0) => {
+                state.eof = 1 as ::core::ffi::c_int;
+                break;
+            }
+            Ok(read) => {
+                have += read;
+                if have >= buf.len() {
+                    break;
+                }
+            }
+            Err(error) => {
+                let errno = error.raw_os_error().unwrap_or(0);
+                if errno == crate::stdlib::EAGAIN || errno == crate::stdlib::EWOULDBLOCK {
+                    state.again = 1 as ::core::ffi::c_int;
+                    if have != 0 {
+                        return Ok(have);
+                    }
+                }
+                let message = crate::stdlib::strerror(errno);
+                crate::src::gzlib::gz_error_state(
+                    state,
+                    crate::zlib_h::Z_ERRNO,
+                    (!message.is_null()).then(|| ::core::ffi::CStr::from_ptr(message)),
+                );
+                return Err(());
             }
         }
-        let message = crate::stdlib::strerror(*crate::stdlib::__errno_location());
-        crate::src::gzlib::gz_error_state(
-            state,
-            crate::zlib_h::Z_ERRNO,
-            (!message.is_null()).then(|| ::core::ffi::CStr::from_ptr(message)),
-        );
-        return Err(());
-    }
-    if ret == 0 as ::core::ffi::c_int {
-        state.eof = 1 as ::core::ffi::c_int;
     }
     Ok(have)
 }

@@ -12,6 +12,8 @@ path = "lib.rs"
 crate-type = [ "cdylib",]
 
 [dependencies]
+# Checked descriptor I/O replaces direct libc reads in gzip implementation code.
+rustix = { version = "1", default-features = false, features = ["std"] }
 
 [workspace]
 members = []
