@@ -2405,15 +2405,21 @@ pub unsafe extern "C" fn deflateCopy(
         deflateEnd(dest);
         return crate::zlib_h::Z_MEM_ERROR;
     }
-    let pending_offset = (*ss).pending_out.offset_from((*ss).pending_buf) as usize;
+    // `pending_out` is an offset into the source pending allocation. Retain
+    // that byte offset while rebinding it to the destination allocation
+    // without requiring raw-pointer in-bounds arithmetic.
+    let pending_offset = (*ss)
+        .pending_out
+        .addr()
+        .wrapping_sub((*ss).pending_buf.addr());
     deflate_copy_state(&mut *ds, &*ss);
     (*ds).strm = dest;
     (*ds).window = window;
     (*ds).prev = prev;
     (*ds).head = head;
     (*ds).pending_buf = pending_buf;
-    (*ds).pending_out = pending_buf.offset(pending_offset as isize);
-    (*ds).sym_buf = pending_buf.offset((*ds).lit_bufsize as isize) as *mut crate::zutil_h::uchf;
+    (*ds).pending_out = pending_buf.wrapping_add(pending_offset);
+    (*ds).sym_buf = pending_buf.wrapping_add((*ds).lit_bufsize as usize) as *mut crate::zutil_h::uchf;
     crate::stdlib::memcpy(
         (*ds).window as *mut ::core::ffi::c_void,
         (*ss).window as *const ::core::ffi::c_void,
