@@ -198,6 +198,38 @@ fn inflate_back_subtable_index(
     ) as isize
 }
 
+fn inflate_back_distance_fits(
+    offset: ::core::ffi::c_uint,
+    wsize: ::core::ffi::c_uint,
+    whave: ::core::ffi::c_uint,
+    left: ::core::ffi::c_uint,
+) -> bool {
+    offset <= wsize.wrapping_sub(if whave < wsize { left } else { 0 })
+}
+
+struct InflateBackMatchCopy {
+    from_offset: isize,
+    count: ::core::ffi::c_uint,
+}
+
+fn inflate_back_match_copy(
+    wsize: ::core::ffi::c_uint,
+    offset: ::core::ffi::c_uint,
+    left: ::core::ffi::c_uint,
+    length: ::core::ffi::c_uint,
+) -> InflateBackMatchCopy {
+    let distance_to_end = wsize.wrapping_sub(offset);
+    let (from_offset, available) = if distance_to_end < left {
+        (distance_to_end as isize, left.wrapping_sub(distance_to_end))
+    } else {
+        (-(offset as isize), left)
+    };
+    InflateBackMatchCopy {
+        from_offset,
+        count: available.min(length),
+    }
+}
+
 fn inflate_back_push_code_length(
     lens: &mut [::core::ffi::c_ushort; 320],
     have: &mut ::core::ffi::c_uint,
@@ -972,15 +1004,12 @@ pub unsafe extern "C" fn inflateBack(
                             (*state).extra,
                         ));
                     }
-                    if (*state).offset
-                        > (*state).wsize.wrapping_sub(
-                            if (*state).whave < (*state).wsize {
-                                left
-                            } else {
-                                0 as ::core::ffi::c_uint
-                            } ,
-                        )
-                    {
+                    if !inflate_back_distance_fits(
+                        (*state).offset,
+                        (*state).wsize,
+                        (*state).whave,
+                        left,
+                    ) {
                         (*strm).msg = b"invalid distance too far back\0".as_ptr()
                             as *const ::core::ffi::c_char
                             as *mut ::core::ffi::c_char;
@@ -997,19 +1026,16 @@ pub unsafe extern "C" fn inflateBack(
                                     break '_inf_leave;
                                 }
                             }
-                            copy = (*state).wsize.wrapping_sub((*state).offset);
-                            if copy < left {
-                                from = put.offset(copy as isize);
-                                copy = left.wrapping_sub(copy);
-                            } else {
-                                from = put.offset(-((*state).offset as isize));
-                                copy = left;
-                            }
-                            if copy > (*state).length {
-                                copy = (*state).length;
-                            }
-                            (*state).length = (*state).length.wrapping_sub(copy);
-                            left = left.wrapping_sub(copy);
+                            let match_copy = inflate_back_match_copy(
+                                (*state).wsize,
+                                (*state).offset,
+                                left,
+                                (*state).length,
+                            );
+                            from = put.offset(match_copy.from_offset);
+                            copy = match_copy.count;
+                            (*state).length = (*state).length.wrapping_sub(match_copy.count);
+                            left = left.wrapping_sub(match_copy.count);
                             loop {
                                 let c2rust_fresh20 = from;
                                 from = from.offset(1);
