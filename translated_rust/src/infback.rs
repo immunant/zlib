@@ -260,6 +260,15 @@ fn inflate_back_stored_length(hold: ::core::ffi::c_ulong) -> Option<::core::ffi:
     }
 }
 
+// A validated stored-block length begins a decoder-owned copy operation.  The
+// caller still owns the bit-buffer reset and the raw input/output boundary.
+fn inflate_back_start_stored_copy(
+    state: &mut crate::src::inflate::inflate_state,
+    length: ::core::ffi::c_uint,
+) {
+    state.length = length;
+}
+
 fn inflate_back_dynamic_header(hold: ::core::ffi::c_ulong) -> InflateBackDynamicHeader {
     InflateBackDynamicHeader {
         nlen: (hold as ::core::ffi::c_uint & 31).wrapping_add(257),
@@ -270,6 +279,19 @@ fn inflate_back_dynamic_header(hold: ::core::ffi::c_ulong) -> InflateBackDynamic
 
 fn inflate_back_dynamic_header_is_valid(header: InflateBackDynamicHeader) -> bool {
     header.nlen <= 286 && header.ndist <= 30
+}
+
+fn inflate_back_set_dynamic_header(
+    state: &mut crate::src::inflate::inflate_state,
+    header: InflateBackDynamicHeader,
+) {
+    state.nlen = header.nlen;
+    state.ndist = header.ndist;
+    state.ncode = header.ncode;
+}
+
+fn inflate_back_start_code_length_order(state: &mut crate::src::inflate::inflate_state) {
+    state.have = 0;
 }
 
 fn inflate_back_code_length_repeat(
@@ -336,6 +358,24 @@ fn inflate_back_start_distance_code(
         state.extra = extra;
     }
     decoded
+}
+
+fn inflate_back_add_length_extra(
+    state: &mut crate::src::inflate::inflate_state,
+    extra: ::core::ffi::c_uint,
+) {
+    state.length = state.length.wrapping_add(extra);
+}
+
+fn inflate_back_add_distance_extra(
+    state: &mut crate::src::inflate::inflate_state,
+    extra: ::core::ffi::c_uint,
+) {
+    state.offset = state.offset.wrapping_add(extra);
+}
+
+fn inflate_back_finish_dynamic_tables(state: &mut crate::src::inflate::inflate_state) {
+    state.mode = crate::src::inflate::LEN;
 }
 
 fn inflate_back_length_code_needs_subtable(code: crate::src::inftrees::code) -> bool {
@@ -718,7 +758,7 @@ pub unsafe extern "C" fn inflateBack(
                     bits = bits.wrapping_add(8 as ::core::ffi::c_uint);
                 }
                 if let Some(length) = inflate_back_stored_length(hold) {
-                    (*state).length = length;
+                    inflate_back_start_stored_copy(&mut *state, length);
                     hold = 0 as ::core::ffi::c_ulong;
                     bits = 0 as ::core::ffi::c_uint;
                     while (*state).length != 0 as ::core::ffi::c_uint {
@@ -779,9 +819,7 @@ pub unsafe extern "C" fn inflateBack(
                     bits = bits.wrapping_add(8 as ::core::ffi::c_uint);
                 }
                 let header = inflate_back_dynamic_header(hold);
-                (*state).nlen = header.nlen;
-                (*state).ndist = header.ndist;
-                (*state).ncode = header.ncode;
+                inflate_back_set_dynamic_header(&mut *state, header);
                 inflate_back_drop_bits(&mut hold, &mut bits, 14);
                 if !inflate_back_dynamic_header_is_valid(header) {
                     (*strm).msg = b"too many length or distance symbols\0".as_ptr()
@@ -790,7 +828,7 @@ pub unsafe extern "C" fn inflateBack(
                     (*state).mode = crate::src::inflate::BAD;
                     continue;
                 } else {
-                    (*state).have = 0 as ::core::ffi::c_uint;
+                    inflate_back_start_code_length_order(&mut *state);
                     while (*state).have < (*state).ncode {
                         while bits < 3 as ::core::ffi::c_int as ::core::ffi::c_uint {
                             if have == 0 as ::core::ffi::c_uint {
@@ -1012,7 +1050,7 @@ pub unsafe extern "C" fn inflateBack(
                                     (*state).mode = crate::src::inflate::BAD;
                                     continue;
                                 } else {
-                                    (*state).mode = crate::src::inflate::LEN;
+                                    inflate_back_finish_dynamic_tables(&mut *state);
                                 }
                             }
                         }
@@ -1156,11 +1194,8 @@ pub unsafe extern "C" fn inflateBack(
                         hold = hold.wrapping_add((*c2rust_fresh16 as ::core::ffi::c_ulong) << bits);
                         bits = bits.wrapping_add(8 as ::core::ffi::c_uint);
                     }
-                    (*state).length = (*state).length.wrapping_add(inflate_back_take_bits(
-                        &mut hold,
-                        &mut bits,
-                        (*state).extra,
-                    ));
+                    let extra = inflate_back_take_bits(&mut hold, &mut bits, (*state).extra);
+                    inflate_back_add_length_extra(&mut *state, extra);
                 }
                 loop {
                     here = inflate_back_code_table_entry(
@@ -1251,11 +1286,9 @@ pub unsafe extern "C" fn inflateBack(
                                 .wrapping_add((*c2rust_fresh19 as ::core::ffi::c_ulong) << bits);
                             bits = bits.wrapping_add(8 as ::core::ffi::c_uint);
                         }
-                        (*state).offset = (*state).offset.wrapping_add(inflate_back_take_bits(
-                            &mut hold,
-                            &mut bits,
-                            (*state).extra,
-                        ));
+                        let extra =
+                            inflate_back_take_bits(&mut hold, &mut bits, (*state).extra);
+                        inflate_back_add_distance_extra(&mut *state, extra);
                     }
                     if !inflate_back_distance_fits(
                         (*state).offset,
