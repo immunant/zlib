@@ -75,7 +75,7 @@ pub type Posf = crate::src::deflate::Pos;
 pub type IPos = ::core::ffi::c_uint;
 
 pub type deflate_state = crate::src::deflate::internal_state;
-#[derive(Copy, Clone)]
+#[derive(Clone)]
 #[repr(C)]
 
 pub struct internal_state {
@@ -140,6 +140,10 @@ pub struct internal_state {
     pub bi_used: ::core::ffi::c_int,
     pub high_water: crate::zutil_h::ulg,
     pub slid: ::core::ffi::c_int,
+    // Keep compressor-owned pending bytes in a Rust allocation. `pending_buf`
+    // remains the callback allocation that zlib publishes and releases, so
+    // custom allocator callbacks and pointer identity stay observable.
+    pending_storage: ::std::vec::Vec<crate::stdlib::Bytef>,
 }
 
 // `deflateSetHeader()` receives caller-owned header storage, but the header
@@ -316,6 +320,7 @@ fn deflate_state_zero_value() -> internal_state {
         bi_used: 0,
         high_water: 0,
         slid: 0,
+        pending_storage: ::std::vec::Vec::new(),
     }
 }
 
@@ -1039,6 +1044,7 @@ pub fn deflateInit2_(
         deflateEnd(stream);
         return crate::zlib_h::Z_MEM_ERROR;
     }
+    state.pending_storage = vec![0; layout.pending_buf_size as usize];
     // The allocation above reserves four bytes for every literal entry, so
     // this cursor remains within that allocation.  Wrapping arithmetic keeps
     // the pointer calculation explicit without requiring `offset`'s unsafe
@@ -2360,11 +2366,25 @@ fn flush_pending_bound(
     }
 }
 
-// Pending output is an allocation owned by the validated deflater. Bind it
-// once at this narrow boundary so the several block strategies that need it
-// can keep their transfer logic slice-based.  Output is bound only for an
-// operation that will actually transfer bytes, preserving callers that only
-// manipulate pending state from touching an unrelated output cursor.
+// Move the Rust-owned pending bytes out for the duration of an operation.
+// That gives the operation a normal slice alongside the mutable C-layout
+// state reference without aliasing the storage field.
+fn with_pending_storage<T>(
+    state: &mut crate::src::deflate::deflate_state,
+    stream: &mut crate::zlib_h::z_stream,
+    operation: impl FnOnce(
+        &mut crate::src::deflate::deflate_state,
+        &mut crate::zlib_h::z_stream,
+        &mut [crate::zutil_h::uch],
+    ) -> T,
+) -> T {
+    debug_assert_eq!(state.pending_storage.len(), state.pending_buf_size as usize);
+    let mut pending_storage = ::core::mem::take(&mut state.pending_storage);
+    let result = operation(state, stream, &mut pending_storage[..]);
+    state.pending_storage = pending_storage;
+    result
+}
+
 fn flush_pending<T>(
     state: &mut crate::src::deflate::deflate_state,
     stream: &mut crate::zlib_h::z_stream,
@@ -2374,14 +2394,7 @@ fn flush_pending<T>(
         &mut [crate::zutil_h::uch],
     ) -> T,
 ) -> T {
-    // SAFETY: the validated deflater owns `pending_buf` for
-    // `pending_buf_size` bytes. Caller output is bound at the public or
-    // direct Rust caller and threaded separately to transfer operations.
-    unsafe {
-        let pending_buf =
-            ::core::slice::from_raw_parts_mut(state.pending_buf, state.pending_buf_size as usize);
-        operation(state, stream, pending_buf)
-    }
+    with_pending_storage(state, stream, operation)
 }
 
 fn deflate_output_current<'a>(
@@ -2916,7 +2929,7 @@ pub fn deflateEnd(stream: &mut crate::zlib_h::z_stream) -> ::core::ffi::c_int {
     // `deflateStateCheck()` has established both links. Snapshot the release
     // plan before invoking user-supplied deallocators, so no Rust reference
     // spans one of those callbacks.
-    let (zfree, opaque, status, pending_buf, head, prev, window, state_ptr) = {
+    let (zfree, opaque, status, pending_buf, head, prev, window, state_ptr, pending_storage) = {
         (
             stream.zfree.expect("non-null function pointer"),
             stream.opaque,
@@ -2926,8 +2939,10 @@ pub fn deflateEnd(stream: &mut crate::zlib_h::z_stream) -> ::core::ffi::c_int {
             state.prev,
             state.window,
             stream.state,
+            ::core::mem::take(&mut state.pending_storage),
         )
     };
+    drop(pending_storage);
     if !pending_buf.is_null() {
         zfree(opaque, pending_buf as crate::stdlib::voidpf);
     }
@@ -2955,7 +2970,7 @@ pub fn deflateEnd(stream: &mut crate::zlib_h::z_stream) -> ::core::ffi::c_int {
 pub(crate) fn deflate_end_default_bound(
     stream: &mut crate::zlib_h::z_stream,
 ) -> ::core::ffi::c_int {
-    let (status, pending_buf, head, prev, window, state_ptr) = {
+    let (status, pending_buf, head, prev, window, state_ptr, pending_storage) = {
         let Some((bound_stream, state)) = deflateStateCheck(stream, None) else {
             return crate::zlib_h::Z_STREAM_ERROR;
         };
@@ -2966,8 +2981,10 @@ pub(crate) fn deflate_end_default_bound(
             state.prev,
             state.window,
             bound_stream.state,
+            ::core::mem::take(&mut state.pending_storage),
         )
     };
+    drop(pending_storage);
     if !pending_buf.is_null() {
         crate::src::zutil::zcfree(
             ::core::ptr::null_mut(),
