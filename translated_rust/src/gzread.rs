@@ -538,6 +538,17 @@ unsafe fn gz_look(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
 unsafe fn gz_decomp(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
     let mut ret: ::core::ffi::c_int = crate::zlib_h::Z_OK;
     let mut had: ::core::ffi::c_uint = 0;
+    let output_len = (state.size << 1 as ::core::ffi::c_int) as usize;
+    // Publish the ABI codec cursor only after a pointer-free view proves that
+    // its complete advertised output range lies in the owned gzip buffer.
+    let Some(next_out) = state.out.as_deref_mut().and_then(|buffer| {
+        crate::src::gzlib::GzCodecOutputView::prefix(buffer, output_len)
+            .map(|mut output| output.bytes_mut().as_mut_ptr())
+    }) else {
+        return -1 as ::core::ffi::c_int;
+    };
+    state.strm.avail_out = output_len as crate::stdlib::uInt;
+    state.strm.next_out = next_out;
     // The stream itself is embedded in the state we already exclusively own.
     // Keep field access through that borrow; only `inflate()` needs the ABI
     // pointer projection at its call boundary.
@@ -661,7 +672,6 @@ unsafe fn gz_decomp(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int
 }
 
 unsafe fn gz_fetch(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
-    let mut strm: crate::zlib_h::z_streamp = &raw mut state.strm;
     loop {
         match state.how {
             crate::gzguts_h::LOOK => {
@@ -696,8 +706,6 @@ unsafe fn gz_fetch(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int 
                 return 0 as ::core::ffi::c_int;
             }
             crate::gzguts_h::GZIP => {
-                (*strm).avail_out = (state.size << 1 as ::core::ffi::c_int) as crate::stdlib::uInt;
-                (*strm).next_out = state.out.as_deref_mut().unwrap().as_mut_ptr();
                 if gz_decomp(state) == -1 as ::core::ffi::c_int {
                     return -1 as ::core::ffi::c_int;
                 }
@@ -715,7 +723,8 @@ unsafe fn gz_fetch(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int 
                 return -1 as ::core::ffi::c_int;
             }
         }
-        if !(state.x.have == 0 as ::core::ffi::c_uint && (state.eof == 0 || (*strm).avail_in != 0))
+        if !(state.x.have == 0 as ::core::ffi::c_uint
+            && (state.eof == 0 || state.strm.avail_in != 0))
         {
             break;
         }
