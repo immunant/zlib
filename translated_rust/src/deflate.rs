@@ -799,18 +799,8 @@ pub unsafe extern "C" fn deflateSetDictionary_ffi(
     (*s).wrap = 0 as ::core::ffi::c_int;
     if dictLength >= (*s).w_size {
         if wrap == 0 as ::core::ffi::c_int {
-            *(*s)
-                .head
-                .offset((*s).hash_size.wrapping_sub(1 as crate::stdlib::uInt) as isize) =
-                NIL as crate::src::deflate::Posf;
-            crate::stdlib::memset(
-                (*s).head as *mut ::core::ffi::c_void,
-                0 as ::core::ffi::c_int,
-                ((*s).hash_size.wrapping_sub(1 as crate::stdlib::uInt)
-                    as crate::__stddef_size_t_h::size_t)
-                    .wrapping_mul(::core::mem::size_of::<crate::src::deflate::Posf>()
-                        as crate::__stddef_size_t_h::size_t),
-            );
+            let head = ::core::slice::from_raw_parts_mut((*s).head, (*s).hash_size as usize);
+            deflate_clear_hash_head(head);
             (*s).slid = 0 as ::core::ffi::c_int;
             (*s).strstart = 0 as crate::stdlib::uInt;
             (*s).block_start = 0 as ::core::ffi::c_long;
@@ -895,11 +885,10 @@ pub unsafe extern "C" fn deflateGetDictionary_ffi(
     let state = &*((*strm).state as *mut crate::src::deflate::deflate_state);
     let (offset, len) = deflateGetDictionary(state);
     if !dictionary.is_null() && len != 0 {
-        crate::stdlib::memcpy(
-            dictionary as *mut ::core::ffi::c_void,
-            state.window.offset(offset as isize) as *const ::core::ffi::c_void,
-            len as crate::__stddef_size_t_h::size_t,
-        );
+        let dictionary = ::core::slice::from_raw_parts_mut(dictionary, len as usize);
+        let window =
+            ::core::slice::from_raw_parts(state.window.wrapping_add(offset as usize), len as usize);
+        copy_deflate_dictionary(dictionary, window);
     }
     if !dictLength.is_null() {
         *dictLength = len;
@@ -963,11 +952,22 @@ pub unsafe extern "C" fn deflateResetKeep_ffi(
 fn lm_init(state: &mut crate::src::deflate::deflate_state, head: &mut [crate::src::deflate::Posf]) {
     state.window_size = (2 as ::core::ffi::c_long as crate::zutil_h::ulg)
         .wrapping_mul(state.w_size as crate::zutil_h::ulg);
+    deflate_clear_hash_head(head);
+    deflate_lm_init_reset_fields(state);
+}
+
+fn deflate_clear_hash_head(head: &mut [crate::src::deflate::Posf]) {
     if let Some((last, prefix)) = head.split_last_mut() {
         *last = NIL as crate::src::deflate::Posf;
         prefix.fill(0 as crate::src::deflate::Posf);
     }
-    deflate_lm_init_reset_fields(state);
+}
+
+fn copy_deflate_dictionary(
+    dictionary: &mut [crate::stdlib::Bytef],
+    window: &[crate::stdlib::Bytef],
+) {
+    dictionary.copy_from_slice(window);
 }
 
 fn deflate_lm_init_reset_fields(state: &mut crate::src::deflate::deflate_state) {
@@ -1245,18 +1245,8 @@ pub unsafe extern "C" fn deflateParams_ffi(
             if (*s).matches == 1 as crate::stdlib::uInt {
                 slide_hash(&mut *s);
             } else {
-                *(*s)
-                    .head
-                    .offset((*s).hash_size.wrapping_sub(1 as crate::stdlib::uInt) as isize) =
-                    NIL as crate::src::deflate::Posf;
-                crate::stdlib::memset(
-                    (*s).head as *mut ::core::ffi::c_void,
-                    0 as ::core::ffi::c_int,
-                    ((*s).hash_size.wrapping_sub(1 as crate::stdlib::uInt)
-                        as crate::__stddef_size_t_h::size_t)
-                        .wrapping_mul(::core::mem::size_of::<crate::src::deflate::Posf>()
-                            as crate::__stddef_size_t_h::size_t),
-                );
+                let head = ::core::slice::from_raw_parts_mut((*s).head, (*s).hash_size as usize);
+                deflate_clear_hash_head(head);
                 (*s).slid = 0 as ::core::ffi::c_int;
             }
             (*s).matches = 0 as crate::stdlib::uInt;

@@ -362,7 +362,8 @@ unsafe fn gz_decomp(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int
             }
         }
     }
-    gz_record_decompressed_output(state, had);
+    state.x.have = gz_decompressed_output_have(had, state.strm.avail_out);
+    state.x.next = state.strm.next_out.wrapping_sub(state.x.have as usize);
     if ret == crate::zlib_h::Z_STREAM_END {
         state.junk = 0 as ::core::ffi::c_int;
         state.how = crate::gzguts_h::LOOK;
@@ -594,9 +595,11 @@ fn gz_fetch_needs_more_output(
     have == 0 as ::core::ffi::c_uint && (eof == 0 || avail_in != 0)
 }
 
-fn gz_record_decompressed_output(state: &mut crate::gzguts_h::gz_state, had: ::core::ffi::c_uint) {
-    state.x.have = had.wrapping_sub(state.strm.avail_out) as ::core::ffi::c_uint;
-    state.x.next = state.strm.next_out.wrapping_sub(state.x.have as usize);
+fn gz_decompressed_output_have(
+    had: ::core::ffi::c_uint,
+    avail_out: crate::stdlib::uInt,
+) -> crate::stdlib::uInt {
+    had.wrapping_sub(avail_out) as ::core::ffi::c_uint
 }
 
 fn gz_consume_skip_buffer(state: &mut crate::gzguts_h::gz_state) {

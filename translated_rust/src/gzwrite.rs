@@ -141,7 +141,11 @@ unsafe fn gz_comp(
             };
             match write_result {
                 GzWriteSyscallResult::Wrote(written) => {
-                    gz_note_direct_input_written(&mut state.strm, written);
+                    state.strm.avail_in = state
+                        .strm
+                        .avail_in
+                        .wrapping_sub(written as ::core::ffi::c_uint);
+                    state.strm.next_in = state.strm.next_in.wrapping_add(written as usize);
                 }
                 GzWriteSyscallResult::Error { errno, again } => {
                     state.again = again;
@@ -187,7 +191,7 @@ unsafe fn gz_comp(
                 };
                 match write_result {
                     GzWriteSyscallResult::Wrote(written) => {
-                        gz_note_pending_output_written(state, written);
+                        state.x.next = state.x.next.wrapping_add(written as usize);
                     }
                     GzWriteSyscallResult::Error { errno, again } => {
                         state.again = again;
@@ -417,18 +421,6 @@ fn gz_note_input_consumed(
     let consumed = requested.wrapping_sub(state.strm.avail_in as ::core::ffi::c_uint);
     state.x.pos += consumed as crate::stdlib::off64_t;
     consumed
-}
-
-fn gz_note_direct_input_written(strm: &mut crate::zlib_h::z_stream, written: ::core::ffi::c_int) {
-    strm.avail_in = strm.avail_in.wrapping_sub(written as ::core::ffi::c_uint);
-    strm.next_in = strm.next_in.wrapping_add(written as usize);
-}
-
-fn gz_note_pending_output_written(
-    state: &mut crate::gzguts_h::gz_state,
-    written: ::core::ffi::c_int,
-) {
-    state.x.next = state.x.next.wrapping_add(written as usize);
 }
 
 fn gz_reset_write_output(state: &mut crate::gzguts_h::gz_state) {
