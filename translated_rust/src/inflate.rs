@@ -1908,34 +1908,11 @@ pub unsafe fn inflate(
                                             }
                                             (*state).mode = crate::src::inflate::LEN;
                                         }
-                                        if have >= 6 as ::core::ffi::c_uint
-                                            && left >= 258 as ::core::ffi::c_uint
-                                        {
-                                            (*strm).next_out = output.as_mut_ptr().wrapping_add(put);
-                                            (*strm).avail_out = left as crate::stdlib::uInt;
-                                            (*strm).next_in = input.as_ptr().wrapping_add(next.index) as *mut crate::stdlib::Bytef;
-                                            (*strm).avail_in = have as crate::stdlib::uInt;
-                                            (*state).hold = hold;
-                                            (*state).bits = bits;
-                                            crate::src::inffast::inflate_fast(
-                                                strm.0,
-                                                out,
-                                            );
-                                            left = (*strm).avail_out as ::core::ffi::c_uint;
-                                            put = output.len() - left as usize;
-                                            have = (*strm).avail_in as ::core::ffi::c_uint;
-                                            next = InflateInput::at(input, input.len() - have as usize);
-                                            hold = (*state).hold;
-                                            bits = (*state).bits;
-                                            if (*state).mode as ::core::ffi::c_uint
-                                                == crate::src::inflate::TYPE as ::core::ffi::c_int
-                                                    as ::core::ffi::c_uint
-                                            {
-                                                (*state).back = -1 as ::core::ffi::c_int;
-                                            }
-                                            continue '_inf_leave;
-                                        } else {
-                                            (*state).back = 0 as ::core::ffi::c_int;
+                                        // The regular decoder below uses bounded slice cursors.
+                                        // It is also the semantic fallback for the former raw
+                                        // fast-path, so keeping one path avoids handing the ABI
+                                        // stream back to the pointer-based implementation here.
+                                        (*state).back = 0 as ::core::ffi::c_int;
                                             loop {
                                                 here = (*state).lencode.entry(
                                                     &(*state).codes,
@@ -2042,7 +2019,6 @@ pub unsafe fn inflate(
                                                 (*state).mode = crate::src::inflate::LENEXT;
                                                 break 'c_2410;
                                             }
-                                        }
                                     }
                                     if (*state).flags & 0x400 as ::core::ffi::c_int != 0 {
                                         copy = (*state).length;
