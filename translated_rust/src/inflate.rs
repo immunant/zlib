@@ -3196,10 +3196,28 @@ pub unsafe extern "C" fn inflate_ffi(
                 }
                 put = put.wrapping_add(count as usize);
             }
-            InflateMatchSource::Window { index } => {
+            InflateMatchSource::Window { segment } => {
                 // `window` can be caller-owned foreign storage and may alias
                 // the output buffer.  Keep this crossing raw until the
                 // persistent window owner can enforce a non-aliasing view.
+                let mut from = (*state).window.wrapping_add(segment.start);
+                copy = count;
+                loop {
+                    let c2rust_fresh30 = from;
+                    from = from.wrapping_add(1);
+                    let c2rust_fresh31 = put;
+                    put = put.wrapping_add(1);
+                    *c2rust_fresh31 = *c2rust_fresh30;
+                    copy = copy.wrapping_sub(1);
+                    if !(copy != 0) {
+                        break;
+                    }
+                }
+            }
+            InflateMatchSource::WindowFallback { index } => {
+                // This preserves the legacy scalar path for malformed opaque
+                // metadata until the persistent window owner validates every
+                // cursor before reaching this boundary.
                 let mut from = (*state).window.wrapping_add(index as usize);
                 copy = count;
                 loop {
@@ -3708,8 +3726,21 @@ fn inflate_match_is_complete(remaining_length: ::core::ffi::c_uint) -> bool {
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 enum InflateMatchSource {
-    Window { index: ::core::ffi::c_uint },
-    Output { offset: ::core::ffi::c_uint },
+    /// A normal window source whose contiguous initialized range was checked
+    /// by `WindowHistory`.  The byte copy still stays at the raw boundary:
+    /// foreign window storage may alias the caller output buffer.
+    Window {
+        segment: WindowMatchSegment,
+    },
+    /// Preserve zlib's existing scalar behavior for malformed opaque state.
+    /// A later owner migration can remove this once every window cursor is
+    /// validated at the FFI boundary.
+    WindowFallback {
+        index: ::core::ffi::c_uint,
+    },
+    Output {
+        offset: ::core::ffi::c_uint,
+    },
 }
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
@@ -3733,6 +3764,7 @@ fn inflate_match_copy_plan(
     left: ::core::ffi::c_uint,
     sane: bool,
 ) -> InflateMatchPlan {
+    let requested = length.min(left);
     let source = if offset > output_written {
         let distance = offset.wrapping_sub(output_written);
         if distance > whave && sane {
@@ -3744,25 +3776,28 @@ fn inflate_match_copy_plan(
         } else {
             wnext.wrapping_sub(distance)
         };
-        InflateMatchSource::Window { index }
+        // The window is circular, but its allocation is not.  Limit this
+        // pass to one initialized contiguous segment; after the caller copies
+        // that suffix, its output progress changes and the next plan either
+        // starts at the prefix or uses newly written output.
+        //
+        // Keep the old scalar fallback for malformed opaque state, whose
+        // validation remains at the FFI/state boundary.
+        WindowHistory::new(wsize, wnext, whave)
+            .and_then(|history| history.match_step(index, requested))
+            .map_or(InflateMatchSource::WindowFallback { index }, |step| {
+                InflateMatchSource::Window {
+                    segment: step.segment,
+                }
+            })
     } else {
         InflateMatchSource::Output { offset }
     };
-    let requested = length.min(left);
     let count = match source {
-        InflateMatchSource::Window { index } => {
-            // The window is circular, but its allocation is not.  Limit this
-            // pass to one initialized contiguous segment; after the caller
-            // copies that suffix, its output progress changes and the next
-            // plan either starts at the prefix or uses newly written output.
-            // Preserve the old scalar fallback for malformed opaque state,
-            // whose validation remains at the FFI/state boundary.
-            WindowHistory::new(wsize, wnext, whave)
-                .and_then(|history| history.match_step(index, requested))
-                .and_then(|step| ::core::ffi::c_uint::try_from(step.segment.len).ok())
-                .unwrap_or(requested)
+        InflateMatchSource::Window { segment } => {
+            ::core::ffi::c_uint::try_from(segment.len).expect("window segment fits C count")
         }
-        InflateMatchSource::Output { .. } => requested,
+        InflateMatchSource::WindowFallback { .. } | InflateMatchSource::Output { .. } => requested,
     };
 
     InflateMatchPlan::Copy {
@@ -4241,9 +4276,9 @@ mod tests {
         InflateCopyProgress, InflateGzipExtraProgress, InflateGzipFlags, InflateGzipFlagsError,
         InflateGzipHeaderCompletion, InflateMatchPlan, InflateMatchSource, InflateOutputChecksum,
         InflatePrimeUpdate, InflateSyncSearch, InflateZlibHeaderError, InflateZlibHeaderTransition,
-        InflateZlibWindowParams, WindowAllocationPlan, WindowClonePlan, WindowOwnership, BAD,
-        CHECK, CODE_LENGTH_ORDER, COPY_, COPY_1, DICT, DICTID, HEAD, LEN, LEN_, MATCH, STORED,
-        SYNC, TYPE, TYPEDO,
+        InflateZlibWindowParams, WindowAllocationPlan, WindowClonePlan, WindowMatchSegment,
+        WindowOwnership, BAD, CHECK, CODE_LENGTH_ORDER, COPY_, COPY_1, DICT, DICTID, HEAD, LEN,
+        LEN_, MATCH, STORED, SYNC, TYPE, TYPEDO,
     };
 
     #[test]
@@ -4572,7 +4607,9 @@ mod tests {
         assert_eq!(
             inflate_match_copy_plan(9, 2, 8, 6, 8, 3, 5, true),
             InflateMatchPlan::Copy {
-                source: InflateMatchSource::Window { index: 7 },
+                source: InflateMatchSource::Window {
+                    segment: WindowMatchSegment { start: 7, len: 1 },
+                },
                 count: 1,
                 remaining_output: 4,
                 remaining_length: 2,
@@ -4581,7 +4618,7 @@ mod tests {
         assert_eq!(
             inflate_match_copy_plan(5, 2, 3, 6, 8, 7, 4, true),
             InflateMatchPlan::Copy {
-                source: InflateMatchSource::Window { index: 3 },
+                source: InflateMatchSource::WindowFallback { index: 3 },
                 count: 4,
                 remaining_output: 0,
                 remaining_length: 3,
@@ -4597,7 +4634,9 @@ mod tests {
         assert_eq!(
             inflate_match_copy_plan(9, 3, 8, 6, 8, 2, 4, true),
             InflateMatchPlan::Copy {
-                source: InflateMatchSource::Window { index: 0 },
+                source: InflateMatchSource::Window {
+                    segment: WindowMatchSegment { start: 0, len: 2 },
+                },
                 count: 2,
                 remaining_output: 2,
                 remaining_length: 0,
@@ -4627,7 +4666,7 @@ mod tests {
         assert_eq!(
             inflate_match_copy_plan(10, 2, 7, 4, 8, 3, 3, false),
             InflateMatchPlan::Copy {
-                source: InflateMatchSource::Window { index: 4 },
+                source: InflateMatchSource::WindowFallback { index: 4 },
                 count: 3,
                 remaining_output: 0,
                 remaining_length: 0,
@@ -4656,7 +4695,9 @@ mod tests {
         assert_eq!(
             inflate_match_plan_from_state(&state, 2, 5),
             InflateMatchPlan::Copy {
-                source: InflateMatchSource::Window { index: 7 },
+                source: InflateMatchSource::Window {
+                    segment: WindowMatchSegment { start: 7, len: 1 },
+                },
                 count: 1,
                 remaining_output: 4,
                 remaining_length: 2,
