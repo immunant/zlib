@@ -108,20 +108,20 @@ struct GzCompressor<'a> {
 /// its existing stream and state validation on every operation.
 struct GzDeflater<'a> {
     stream: &'a mut crate::zlib_h::z_stream_s,
+    state: &'a mut crate::src::deflate::deflate_state,
 }
 
 impl GzDeflater<'_> {
     fn initialize(
-        &mut self,
+        stream: &mut crate::zlib_h::z_stream_s,
         level: ::core::ffi::c_int,
         strategy: ::core::ffi::c_int,
-    ) -> ::core::ffi::c_int {
-        crate::src::deflate::deflate_initialize_gzip(self.stream, level, strategy)
+    ) -> Result<crate::src::deflate::deflate_state, ::core::ffi::c_int> {
+        crate::src::deflate::deflate_initialize_gzip(stream, level, strategy)
     }
 
     fn reset(&mut self) -> ::core::ffi::c_int {
-        let state = unsafe { self.stream.state.as_mut() };
-        crate::src::deflate::deflate_reset_impl(self.stream, state)
+        crate::src::deflate::deflate_reset_gzip(self.stream, self.state)
     }
 
     fn compress(
@@ -130,20 +130,13 @@ impl GzDeflater<'_> {
         output: &mut [crate::stdlib::Bytef],
         flush: ::core::ffi::c_int,
     ) -> ::core::ffi::c_int {
-        let Some(state) = (unsafe { self.stream.state.as_mut() }) else {
-            return crate::zlib_h::Z_STREAM_ERROR;
-        };
-        crate::src::deflate::DeflateCall::new(self.stream, state, input, output).compress(flush)
+        crate::src::deflate::deflate_compress_gzip(self.stream, self.state, Some(input), Some(output), flush)
     }
 
     fn set_params(&mut self, level: ::core::ffi::c_int, strategy: ::core::ffi::c_int) {
-        // The legacy deflate stream keeps its state link in the ABI carrier.
-        // Keep that crossing in the same narrow facade as initialization and
-        // compression, rather than exposing it to gzip's safe state logic.
-        unsafe {
-            crate::src::deflate::deflateParams(self.stream, level, strategy);
-        }
+        crate::src::deflate::deflate_params_update(self.stream, self.state, level, strategy, true);
     }
+
 }
 
 fn gz_save_direct_input(state: &mut crate::gzguts_h::gz_state, input: &[u8]) -> bool {
@@ -337,12 +330,9 @@ impl GzCompressor<'_> {
         if state.size == 0 && gz_initialize_buffers(state) == -1 {
             return -1;
         }
-        if state.strm.state.is_null() {
-            let initialized = GzDeflater {
-                stream: &mut state.strm,
-            }
-            .initialize(state.level, state.strategy);
-            if initialized != crate::zlib_h::Z_OK {
+        if state.deflater.is_none() {
+            let initialized = GzDeflater::initialize(&mut state.strm, state.level, state.strategy);
+            let Ok(deflater) = initialized else {
                 state.in_0.clear();
                 state.out.clear();
                 state.size = 0;
@@ -357,7 +347,14 @@ impl GzCompressor<'_> {
                     Some(c"out of memory"),
                 );
                 return -1;
-            }
+            };
+            state.deflater = Some(Box::new(deflater));
+            state.strm.state = state
+                .deflater
+                .as_deref_mut()
+                .map_or(::core::ptr::null_mut(), |deflater| {
+                    deflater as *mut crate::src::deflate::internal_state
+                });
         }
         let mut reset = state.reset != 0;
         if reset {
@@ -429,8 +426,17 @@ impl GzCompressor<'_> {
             }
             have = state.strm.avail_out as ::core::ffi::c_uint;
             if reset {
+                let Some(deflater) = state.deflater.as_deref_mut() else {
+                    crate::src::gzlib::gz_error_state(
+                        state,
+                        crate::zlib_h::Z_STREAM_ERROR,
+                        Some(c"internal error: deflater missing"),
+                    );
+                    return -1;
+                };
                 GzDeflater {
                     stream: &mut state.strm,
+                    state: deflater,
                 }
                 .reset();
                 state.reset = 0;
@@ -498,8 +504,17 @@ impl GzCompressor<'_> {
                 );
                 return -1;
             };
+            let Some(deflater) = state.deflater.as_deref_mut() else {
+                crate::src::gzlib::gz_error_state(
+                    state,
+                    crate::zlib_h::Z_STREAM_ERROR,
+                    Some(c"internal error: deflater missing"),
+                );
+                return -1;
+            };
             ret = GzDeflater {
                 stream: &mut state.strm,
+                state: deflater,
             }
             .compress(input, output, flush);
             buffers_ready = true;
@@ -943,6 +958,10 @@ fn gzsetparams_impl(
     if state.size != 0 {
         GzDeflater {
             stream: &mut state.strm,
+            state: match state.deflater.as_deref_mut() {
+                Some(deflater) => deflater,
+                None => return crate::zlib_h::Z_STREAM_ERROR,
+            },
         }
         .set_params(level, strategy);
     }
@@ -985,7 +1004,10 @@ pub unsafe fn gzclose_w(mut owned: Box<crate::gzguts_h::gz_state>) -> ::core::ff
         }
         if state.size != 0 {
             if state.direct == 0 {
-                crate::src::deflate::deflate_end_release(&mut state.strm);
+                if let Some(mut deflater) = state.deflater.take() {
+                    crate::src::deflate::deflate_end_gzip(deflater.as_mut());
+                    state.strm.state = ::core::ptr::null_mut();
+                }
             }
             state.in_0.clear();
         }

@@ -1299,21 +1299,55 @@ pub unsafe fn deflateInit2_(
 /// perform an unsafe initialization call itself.
 pub(crate) fn deflate_initialize_gzip(
     strm: &mut crate::zlib_h::z_stream_s,
-    level: ::core::ffi::c_int,
+    mut level: ::core::ffi::c_int,
     strategy: ::core::ffi::c_int,
-) -> ::core::ffi::c_int {
-    unsafe {
-        deflateInit2_(
-            Some(strm),
-            level,
-            crate::zlib_h::Z_DEFLATED,
-            crate::stdlib::MAX_WBITS + 16,
-            crate::zutil_h::DEF_MEM_LEVEL,
-            strategy,
-            Some(crate::zlib_h::ZLIB_VERSION[0]),
-            ::core::mem::size_of::<crate::zlib_h::z_stream>() as ::core::ffi::c_int,
-        )
+) -> Result<crate::src::deflate::deflate_state, ::core::ffi::c_int> {
+    if level == crate::zlib_h::Z_DEFAULT_COMPRESSION {
+        level = 6;
     }
+    if !(0..=9).contains(&level) || !(0..=crate::zlib_h::Z_FIXED).contains(&strategy) {
+        return Err(crate::zlib_h::Z_STREAM_ERROR);
+    }
+    strm.zalloc = Some(crate::src::zutil::zcalloc);
+    strm.zfree = Some(crate::src::zutil::zcfree);
+    strm.opaque = ::core::ptr::null_mut();
+
+    let mut state = new_deflate_state();
+    state.status = crate::src::deflate::INIT_STATE;
+    state.wrap = 2;
+    state.w_bits = crate::stdlib::MAX_WBITS as crate::stdlib::uInt;
+    state.w_size = 1u32 << state.w_bits;
+    state.w_mask = state.w_size - 1;
+    state.hash_bits = crate::zutil_h::DEF_MEM_LEVEL as crate::stdlib::uInt + 7;
+    state.hash_size = 1u32 << state.hash_bits;
+    state.hash_mask = state.hash_size - 1;
+    state.hash_shift = (state.hash_bits + crate::zutil_h::MIN_MATCH as crate::stdlib::uInt - 1)
+        / crate::zutil_h::MIN_MATCH as crate::stdlib::uInt;
+    state.window = allocate_window(state.w_size as usize * 2);
+    state.prev = allocate_prev_table(state.w_size as usize);
+    state.head = allocate_head_table(state.hash_size as usize);
+    state.high_water = 0;
+    state.lit_bufsize = 1u32 << (crate::zutil_h::DEF_MEM_LEVEL + 6);
+    state.pending_buf_size = state.lit_bufsize as crate::zutil_h::ulg * 4;
+    state.pending_buf = allocate_pending_buffer(state.pending_buf_size as usize);
+    if state.window.is_none()
+        || state.prev.is_none()
+        || state
+            .head
+            .as_ref()
+            .is_none_or(|head| head.len() != state.hash_size as usize)
+        || state.pending_buf.is_none()
+    {
+        strm.msg = crate::src::zutil::z_errmsg[6].load(::core::sync::atomic::Ordering::Relaxed);
+        return Err(crate::zlib_h::Z_MEM_ERROR);
+    }
+    state.sym_buf = state.lit_bufsize as usize;
+    state.sym_end = (state.lit_bufsize - 1) * 3;
+    state.level = level;
+    state.strategy = strategy;
+    state.method = crate::zlib_h::Z_DEFLATED as crate::stdlib::Byte;
+    deflate_reset_state(strm, &mut state);
+    Ok(state)
 }
 #[export_name = "deflateInit2_"]
 
@@ -1662,6 +1696,19 @@ pub(crate) fn deflate_reset_impl(
     }
     deflate_reset_state(strm, s)
 }
+
+/// Reset the state owned by the gzip writer.  Unlike the ABI stream path,
+/// this owner does not use allocator callbacks, so only the codec state
+/// itself needs validation.
+pub(crate) fn deflate_reset_gzip(
+    strm: &mut crate::zlib_h::z_stream_s,
+    state: &mut crate::src::deflate::deflate_state,
+) -> ::core::ffi::c_int {
+    if !deflate_params_state_is_valid(state) {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    }
+    deflate_reset_state(strm, state)
+}
 #[export_name = "deflateReset"]
 
 pub unsafe extern "C" fn deflateReset_ffi(
@@ -1853,6 +1900,7 @@ struct DeflatePrimeStream<'a> {
 /// crossing back into the raw-stream implementation.
 struct DeflateParamsStream<'a> {
     stream: &'a mut crate::zlib_h::z_stream_s,
+    gzip_owned: bool,
 }
 
 /// A short-lived, fully borrowed view of one deflate step.
@@ -1867,6 +1915,7 @@ pub(crate) struct DeflateCall<'stream, 'input, 'output> {
     input_pos: usize,
     output: &'output mut [crate::stdlib::Bytef],
     output_pos: usize,
+    gzip_owned: bool,
 }
 
 impl<'stream, 'input, 'output> DeflateCall<'stream, 'input, 'output> {
@@ -1883,11 +1932,29 @@ impl<'stream, 'input, 'output> DeflateCall<'stream, 'input, 'output> {
             input_pos: 0,
             output,
             output_pos: 0,
+            gzip_owned: false,
+        }
+    }
+
+    pub(crate) fn new_gzip(
+        stream: &'stream mut crate::zlib_h::z_stream_s,
+        state: &'stream mut crate::src::deflate::deflate_state,
+        input: &'input [crate::stdlib::Bytef],
+        output: &'output mut [crate::stdlib::Bytef],
+    ) -> Self {
+        Self {
+            stream,
+            state,
+            input,
+            input_pos: 0,
+            output,
+            output_pos: 0,
+            gzip_owned: true,
         }
     }
 
     pub(crate) fn compress(&mut self, flush: ::core::ffi::c_int) -> ::core::ffi::c_int {
-        deflate_impl(self, flush)
+        deflate_impl(self, flush, self.gzip_owned)
     }
 }
 
@@ -1925,7 +1992,11 @@ impl DeflateParamsStream<'_> {
                 )
             })
         };
-        deflate_stream_impl(self.stream, Some(state), input, output, crate::zlib_h::Z_BLOCK)
+        if self.gzip_owned {
+            deflate_compress_gzip(self.stream, state, input, output, crate::zlib_h::Z_BLOCK)
+        } else {
+            deflate_stream_impl(self.stream, Some(state), input, output, crate::zlib_h::Z_BLOCK)
+        }
     }
 }
 
@@ -2012,6 +2083,19 @@ pub unsafe fn deflateParams(
         return crate::zlib_h::Z_STREAM_ERROR;
     }
     let s = &mut *(strm.state as *mut crate::src::deflate::deflate_state);
+    deflate_params_update(strm, s, level, strategy, false)
+}
+
+/// Update a gzip-owned deflater after its state ownership has been made
+/// explicit.  The stream remains the ABI cursor carrier, while the caller
+/// supplies the state it owns instead of traversing `strm.state` here.
+pub(crate) fn deflate_params_update(
+    strm: &mut crate::zlib_h::z_stream_s,
+    s: &mut crate::src::deflate::deflate_state,
+    mut level: ::core::ffi::c_int,
+    strategy: ::core::ffi::c_int,
+    gzip_owned: bool,
+) -> ::core::ffi::c_int {
     if !deflate_params_state_is_valid(s) {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
@@ -2029,7 +2113,11 @@ pub unsafe fn deflateParams(
     if (strategy != s.strategy || func != configuration_table[level as usize].func)
         && s.last_flush != -2 as ::core::ffi::c_int
     {
-        let err = DeflateParamsStream { stream: strm }.flush_block(s);
+        let err = DeflateParamsStream {
+            stream: strm,
+            gzip_owned,
+        }
+        .flush_block(s);
         if err == crate::zlib_h::Z_STREAM_ERROR {
             return err;
         }
@@ -2349,6 +2437,7 @@ fn commit_deflate_progress(
 fn deflate_impl(
     call: &mut DeflateCall<'_, '_, '_>,
     mut flush: ::core::ffi::c_int,
+    gzip_owned: bool,
 ) -> ::core::ffi::c_int {
     let mut old_flush: ::core::ffi::c_int = 0;
     let strm = &mut *call.stream;
@@ -2362,7 +2451,7 @@ fn deflate_impl(
     // Validate the ABI carrier before following its state link.  The state
     // machine validation then operates on the borrowed state below, rather
     // than dispatching through the raw-pointer checker.
-    if !deflate_params_stream_is_valid(strm)
+    if (!gzip_owned && !deflate_params_stream_is_valid(strm))
         || flush > crate::zlib_h::Z_BLOCK
         || flush < 0 as ::core::ffi::c_int
     {
@@ -3026,6 +3115,37 @@ fn deflate_stream_impl(
         strm.msg = crate::src::zutil::z_errmsg[7].load(::core::sync::atomic::Ordering::Relaxed);
         return crate::zlib_h::Z_BUF_ERROR;
     }
+    DeflateCall::new_gzip(strm, state, input, output).compress(flush)
+}
+
+/// Run a codec step for the gzip writer's directly-owned deflater.  Its stream
+/// retains ABI cursors, but it intentionally has no ABI allocator callbacks.
+pub(crate) fn deflate_compress_gzip(
+    strm: &mut crate::zlib_h::z_stream_s,
+    state: &mut crate::src::deflate::deflate_state,
+    input: Option<&[crate::stdlib::Bytef]>,
+    output: Option<&mut [crate::stdlib::Bytef]>,
+    flush: ::core::ffi::c_int,
+) -> ::core::ffi::c_int {
+    if flush > crate::zlib_h::Z_BLOCK || flush < 0 {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    }
+    let Some(input) = input else {
+        strm.msg = crate::src::zutil::z_errmsg[4].load(::core::sync::atomic::Ordering::Relaxed);
+        return crate::zlib_h::Z_STREAM_ERROR;
+    };
+    let Some(output) = output else {
+        strm.msg = crate::src::zutil::z_errmsg[4].load(::core::sync::atomic::Ordering::Relaxed);
+        return crate::zlib_h::Z_STREAM_ERROR;
+    };
+    if state.status == crate::src::deflate::FINISH_STATE && flush != crate::zlib_h::Z_FINISH {
+        strm.msg = crate::src::zutil::z_errmsg[4].load(::core::sync::atomic::Ordering::Relaxed);
+        return crate::zlib_h::Z_STREAM_ERROR;
+    }
+    if output.is_empty() {
+        strm.msg = crate::src::zutil::z_errmsg[7].load(::core::sync::atomic::Ordering::Relaxed);
+        return crate::zlib_h::Z_BUF_ERROR;
+    }
     DeflateCall::new(strm, state, input, output).compress(flush)
 }
 
@@ -3096,6 +3216,47 @@ pub fn deflateEnd(state: &mut crate::src::deflate::deflate_state) -> ::core::ffi
     } else {
         crate::zlib_h::Z_OK
     };
+}
+
+/// Tear down a deflater owned exclusively by the gzip writer.
+///
+/// Gzip never installs a caller-owned gzip header on this internal stream, so
+/// its state can be released without traversing the legacy header pointer.
+pub(crate) fn deflate_end_gzip(
+    state: &mut crate::src::deflate::deflate_state,
+) -> ::core::ffi::c_int {
+    if state.gzhead != 0 {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    }
+    let (status, head, prev, pending, allocations) = {
+        if state.status != crate::src::deflate::INIT_STATE
+            && state.status != crate::src::deflate::GZIP_STATE
+            && state.status != crate::src::deflate::EXTRA_STATE
+            && state.status != crate::src::deflate::NAME_STATE
+            && state.status != crate::src::deflate::COMMENT_STATE
+            && state.status != crate::src::deflate::HCRC_STATE
+            && state.status != crate::src::deflate::BUSY_STATE
+            && state.status != crate::src::deflate::FINISH_STATE
+        {
+            return crate::zlib_h::Z_STREAM_ERROR;
+        }
+        (
+            state.status,
+            state.head.take(),
+            state.prev.take(),
+            state.pending_buf.take(),
+            state.window.take(),
+        )
+    };
+    drop(head);
+    drop(prev);
+    drop(pending);
+    drop(allocations);
+    if status == crate::src::deflate::BUSY_STATE {
+        crate::zlib_h::Z_DATA_ERROR
+    } else {
+        crate::zlib_h::Z_OK
+    }
 }
 
 /// Release the ABI allocation around the safe state teardown.  The pointer

@@ -66,6 +66,9 @@ pub mod gzguts_h {
         pub skip: crate::stdlib::off64_t,
         pub err: ::core::ffi::c_int,
         pub msg: Option<std::ffi::CString>,
+        /// The gzip writer owns its deflater directly.  `strm.state` mirrors
+        /// this owner only while legacy stream-oriented helpers still need it.
+        pub deflater: Option<Box<crate::src::deflate::deflate_state>>,
         pub strm: crate::zlib_h::z_stream,
     }
 
