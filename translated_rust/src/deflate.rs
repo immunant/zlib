@@ -4802,7 +4802,7 @@ fn fast_tally_match_state(
 /// callback-owned symbol buffer.  The legacy adapter lends that buffer only
 /// after this window read has completed.
 fn huff_literal_plan_state(
-    s: &mut crate::src::deflate::deflate_state,
+    s: &crate::src::deflate::deflate_state,
     window: &[crate::stdlib::Byte],
 ) -> Option<crate::stdlib::uInt> {
     Some((*window.get(usize::try_from(s.strstart).ok()?)?).into())
@@ -5105,7 +5105,7 @@ unsafe fn deflate_huff(
             } else {
                 ::core::slice::from_raw_parts(state.window, window_len)
             };
-            let Some(literal) = huff_literal_plan_state(state, window) else {
+            let Some(literal) = huff_literal_plan_state(&*state, window) else {
                 return need_more;
             };
             literal
