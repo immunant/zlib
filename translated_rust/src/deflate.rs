@@ -374,7 +374,7 @@ pub(crate) struct PendingStorageReadView<'a> {
 /// it is not an owner and must never be stored in `internal_state`: custom
 /// allocators and `deflateCopy` still define the allocation lifetimes.
 pub(crate) struct DeflateWorkingSet<'a> {
-    pending: PendingStorageView<'a>,
+    pending: Option<PendingStorageView<'a>>,
     window: &'a mut [crate::stdlib::Bytef],
     head: &'a mut [crate::src::deflate::Posf],
     prev: &'a mut [crate::src::deflate::Posf],
@@ -396,15 +396,36 @@ impl<'a> DeflateWorkingSet<'a> {
         let prev_len = usize::try_from(state.w_size).ok()?;
 
         Some(Self {
-            pending: PendingStorageView::new(pending, layout)?,
+            pending: Some(PendingStorageView::new(pending, layout)?),
             window: window.get_mut(..window_len)?,
             head: head.get_mut(..head_len)?,
             prev: prev.get_mut(..prev_len)?,
         })
     }
 
-    pub(crate) fn pending(&mut self) -> &mut PendingStorageView<'a> {
-        &mut self.pending
+    /// Bind only the window and hash storage needed by refill.  Pending
+    /// storage is intentionally not borrowed here: it is unrelated to refill
+    /// and forming an unused raw view would widen that FFI crossing.
+    pub(crate) fn for_refill(
+        state: &internal_state,
+        window: &'a mut [crate::stdlib::Bytef],
+        head: &'a mut [crate::src::deflate::Posf],
+        prev: &'a mut [crate::src::deflate::Posf],
+    ) -> Option<Self> {
+        let window_len = usize::try_from(state.window_size).ok()?;
+        let head_len = usize::try_from(state.hash_size).ok()?;
+        let prev_len = usize::try_from(state.w_size).ok()?;
+
+        Some(Self {
+            pending: None,
+            window: window.get_mut(..window_len)?,
+            head: head.get_mut(..head_len)?,
+            prev: prev.get_mut(..prev_len)?,
+        })
+    }
+
+    pub(crate) fn pending(&mut self) -> Option<&mut PendingStorageView<'a>> {
+        self.pending.as_mut()
     }
 
     pub(crate) fn window(&self) -> &[crate::stdlib::Bytef] {
@@ -431,6 +452,29 @@ impl<'a> DeflateWorkingSet<'a> {
             state.hash_shift,
             state.hash_mask,
             &mut state.ins_h,
+        )
+    }
+
+    /// Refill the bounded window and rebuild its hash chains.  The caller
+    /// provides only a call-scoped input view and scalar stream progress;
+    /// this working set retains the callback-backed storage borrows.
+    fn refill(
+        &mut self,
+        state: &mut internal_state,
+        input: &[crate::stdlib::Bytef],
+        avail_in: crate::stdlib::uInt,
+        total_in: crate::stdlib::uLong,
+        adler: crate::stdlib::uLong,
+    ) -> FillWindowInputProgress {
+        fill_window_core(
+            state,
+            input,
+            avail_in,
+            total_in,
+            adler,
+            self.window,
+            self.head,
+            self.prev,
         )
     }
 }
@@ -1846,27 +1890,25 @@ unsafe fn fill_window(mut s: *mut crate::src::deflate::deflate_state) {
     if stream.avail_in != 0 && stream.next_in.is_null() {
         return;
     }
+    if state.window.is_null() || state.head.is_null() || state.prev.is_null() {
+        return;
+    }
     // The callback allocation has exactly these lengths.  This boundary
-    // creates short-lived views; the refill algorithm itself is slice-based.
+    // creates the three refill views once; the refill algorithm itself only
+    // receives the established safe working set.
     let window =
         &mut *::core::ptr::slice_from_raw_parts_mut(state.window, state.window_size as usize);
     let head = &mut *::core::ptr::slice_from_raw_parts_mut(state.head, state.hash_size as usize);
     let prev = &mut *::core::ptr::slice_from_raw_parts_mut(state.prev, state.w_size as usize);
+    let Some(mut working) = DeflateWorkingSet::for_refill(state, window, head, prev) else {
+        return;
+    };
     let input = if stream.avail_in == 0 {
         &[]
     } else {
         core::slice::from_raw_parts(stream.next_in, stream.avail_in as usize)
     };
-    let progress = fill_window_core(
-        state,
-        input,
-        stream.avail_in,
-        stream.total_in,
-        stream.adler,
-        window,
-        head,
-        prev,
-    );
+    let progress = working.refill(state, input, stream.avail_in, stream.total_in, stream.adler);
     stream.avail_in = progress.avail_in;
     stream.total_in = progress.total_in;
     stream.adler = progress.adler;
@@ -7362,6 +7404,7 @@ mod tests {
                 .unwrap();
         assert!(working
             .pending()
+            .unwrap()
             .append_pending(&mut state.pending, &[0xaa]));
         assert_eq!(working.slow_insert_hash(&mut state), Some(11));
         assert_eq!(working.window(), &[0, 1, 2, 3, 4, 5, 6, 7]);
@@ -8059,6 +8102,38 @@ mod tests {
             &mut head,
             &mut prev,
         );
+
+        assert_eq!(
+            progress,
+            super::FillWindowInputProgress {
+                avail_in: 0,
+                total_in: 8,
+                adler: crate::src::adler32::adler32_z(1, &input),
+                consumed: input.len(),
+            }
+        );
+        assert_eq!(&window[..3], &input);
+        assert!(window[3..].iter().all(|byte| *byte == 0));
+        assert_eq!(state.lookahead, input.len() as crate::stdlib::uInt);
+        assert_eq!(state.high_water, 16);
+    }
+
+    #[test]
+    fn deflate_working_set_refill_updates_only_its_bounded_views() {
+        let mut state = super::internal_state::newly_allocated();
+        state.w_size = 8;
+        state.w_mask = 7;
+        state.window_size = 16;
+        state.hash_size = 1;
+        state.wrap = 1;
+        let input = *b"abc";
+        let mut window = [0xff; 16];
+        let mut head = [0; 1];
+        let mut prev = [0; 8];
+
+        let progress = DeflateWorkingSet::for_refill(&state, &mut window, &mut head, &mut prev)
+            .unwrap()
+            .refill(&mut state, &input, input.len() as crate::stdlib::uInt, 5, 1);
 
         assert_eq!(
             progress,
