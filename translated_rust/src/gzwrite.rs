@@ -106,41 +106,58 @@ unsafe fn gz_init(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
     return 0 as ::core::ffi::c_int;
 }
 
-unsafe fn gz_comp(
+// All callers have already validated and bound the gzip state. Descriptor
+// writes, errno access, deflater calls, and error-string bridges remain
+// documented raw boundaries within this coordinator.
+fn gz_comp(
     state: &mut crate::gzguts_h::gz_state,
     mut flush: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
     let mut ret: ::core::ffi::c_int = 0;
-    let mut writ: ::core::ffi::c_int = 0;
     let mut have: ::core::ffi::c_uint = 0;
     let mut put: ::core::ffi::c_uint = 0;
     if crate::src::gzlib::gz_write_needs_init(state)
-        && gz_init(state) == -1 as ::core::ffi::c_int
+        // SAFETY: the validated write state is uninitialized exactly when
+        // this predicate is true, so `gz_init` may allocate and configure its
+        // gzip buffers and deflater.
+        && unsafe { gz_init(state) } == -1 as ::core::ffi::c_int
     {
         return -1 as ::core::ffi::c_int;
     }
     match crate::src::gzlib::gz_comp_mode(state, flush) {
         crate::src::gzlib::GzCompMode::Direct => {
             while state.strm.avail_in != 0 {
-                *crate::stdlib::__errno_location() = 0 as ::core::ffi::c_int;
-                crate::src::gzlib::gz_begin_io(state);
-                put = crate::src::gzlib::gz_comp_direct_write_request(state);
-                writ = crate::stdlib::write(
-                    state.fd,
-                    state.strm.next_in as *const ::core::ffi::c_void,
-                    put as crate::__stddef_size_t_h::size_t,
-                ) as ::core::ffi::c_int;
-                let errno = *crate::stdlib::__errno_location();
-                if let Err(errno) = crate::src::gzlib::gz_io_result(state, writ, errno) {
-                    crate::src::gzlib::gz_error(
-                        state,
-                        crate::zlib_h::Z_ERRNO,
-                        crate::stdlib::strerror(errno),
-                    );
+                // SAFETY: the direct write state exposes `avail_in` bytes at
+                // `next_in`; this request is capped by that count. The errno
+                // slot and descriptor are used only for this POSIX write.
+                let (written, errno) = unsafe {
+                    *crate::stdlib::__errno_location() = 0 as ::core::ffi::c_int;
+                    crate::src::gzlib::gz_begin_io(state);
+                    put = crate::src::gzlib::gz_comp_direct_write_request(state);
+                    let written = crate::stdlib::write(
+                        state.fd,
+                        state.strm.next_in as *const ::core::ffi::c_void,
+                        put as crate::__stddef_size_t_h::size_t,
+                    ) as ::core::ffi::c_int;
+                    (written, *crate::stdlib::__errno_location())
+                };
+                if let Err(errno) = crate::src::gzlib::gz_io_result(state, written, errno) {
+                    // SAFETY: `state` is the validated gzip state and the
+                    // errno string is owned by the C runtime for this call.
+                    unsafe {
+                        crate::src::gzlib::gz_error(
+                            state,
+                            crate::zlib_h::Z_ERRNO,
+                            crate::stdlib::strerror(errno),
+                        );
+                    }
                     return -1 as ::core::ffi::c_int;
                 }
-                crate::src::gzlib::gz_direct_write_progress(state, writ as ::core::ffi::c_uint);
-                state.strm.next_in = state.strm.next_in.wrapping_add(writ as usize);
+                crate::src::gzlib::gz_direct_write_progress(
+                    state,
+                    written as ::core::ffi::c_uint,
+                );
+                state.strm.next_in = state.strm.next_in.wrapping_add(written as usize);
             }
             return 0 as ::core::ffi::c_int;
         }
@@ -148,7 +165,9 @@ unsafe fn gz_comp(
             return 0 as ::core::ffi::c_int;
         }
         crate::src::gzlib::GzCompMode::Reset => {
-            crate::src::deflate::deflateReset(&mut state.strm);
+            // SAFETY: initialization created the deflater stored in this
+            // validated write state before it can reach the reset path.
+            unsafe { crate::src::deflate::deflateReset(&mut state.strm) };
             crate::src::gzlib::gz_comp_reset_complete(state);
         }
         crate::src::gzlib::GzCompMode::Deflate => {}
@@ -157,26 +176,35 @@ unsafe fn gz_comp(
     loop {
         if let Some(plan) = crate::src::gzlib::gz_comp_output_plan(state, flush, ret) {
             while state.strm.next_out > state.x.next {
-                *crate::stdlib::__errno_location() = 0 as ::core::ffi::c_int;
-                crate::src::gzlib::gz_begin_io(state);
-                put = crate::src::gzlib::gz_comp_output_write_request(state);
-                writ = crate::stdlib::write(
-                    state.fd,
-                    state.x.next as *const ::core::ffi::c_void,
-                    put as crate::__stddef_size_t_h::size_t,
-                ) as ::core::ffi::c_int;
-                let errno = *crate::stdlib::__errno_location();
-                if let Err(errno) = crate::src::gzlib::gz_io_result(state, writ, errno) {
-                    crate::src::gzlib::gz_error(
-                        state,
-                        crate::zlib_h::Z_ERRNO,
-                        crate::stdlib::strerror(errno),
-                    );
+                // SAFETY: the output plan bounds the pending range from
+                // `x.next`, and this scope owns the descriptor/errno bridge
+                // for draining that initialized output buffer.
+                let (written, errno) = unsafe {
+                    *crate::stdlib::__errno_location() = 0 as ::core::ffi::c_int;
+                    crate::src::gzlib::gz_begin_io(state);
+                    put = crate::src::gzlib::gz_comp_output_write_request(state);
+                    let written = crate::stdlib::write(
+                        state.fd,
+                        state.x.next as *const ::core::ffi::c_void,
+                        put as crate::__stddef_size_t_h::size_t,
+                    ) as ::core::ffi::c_int;
+                    (written, *crate::stdlib::__errno_location())
+                };
+                if let Err(errno) = crate::src::gzlib::gz_io_result(state, written, errno) {
+                    // SAFETY: `state` is valid and this reports the string
+                    // returned by the C runtime for the failed write.
+                    unsafe {
+                        crate::src::gzlib::gz_error(
+                            state,
+                            crate::zlib_h::Z_ERRNO,
+                            crate::stdlib::strerror(errno),
+                        );
+                    }
                     return -1 as ::core::ffi::c_int;
                 }
                 crate::src::gzlib::gz_comp_output_write_progress(
                     state,
-                    writ as ::core::ffi::c_uint,
+                    written as ::core::ffi::c_uint,
                 );
             }
             if plan.reset {
@@ -184,13 +212,20 @@ unsafe fn gz_comp(
             }
         }
         have = state.strm.avail_out as ::core::ffi::c_uint;
-        ret = crate::src::deflate::deflate(&mut state.strm, flush);
+        // SAFETY: `gz_init` configured this deflater and its input/output
+        // fields are maintained by this validated write-state machine.
+        ret = unsafe { crate::src::deflate::deflate(&mut state.strm, flush) };
         if ret == crate::zlib_h::Z_STREAM_ERROR {
-            crate::src::gzlib::gz_error(
-                state,
-                crate::zlib_h::Z_STREAM_ERROR,
-                b"internal error: deflate stream corrupt\0".as_ptr() as *const ::core::ffi::c_char,
-            );
+            // SAFETY: this updates only the validated gzip state's error
+            // record with a static message.
+            unsafe {
+                crate::src::gzlib::gz_error(
+                    state,
+                    crate::zlib_h::Z_STREAM_ERROR,
+                    b"internal error: deflate stream corrupt\0".as_ptr()
+                        as *const ::core::ffi::c_char,
+                );
+            }
             return -1 as ::core::ffi::c_int;
         }
         have = crate::src::gzlib::gz_produced(have, state.strm.avail_out);
@@ -211,9 +246,9 @@ fn gz_zero(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
     let mut ret: ::core::ffi::c_int = 0;
     let mut n: ::core::ffi::c_uint = 0;
     if state.strm.avail_in != 0
-        // SAFETY: the validated gzip state owns the initialized stream and
-        // buffers required by the compression adapter.
-        && unsafe { gz_comp(state, crate::zlib_h::Z_NO_FLUSH) } == -1 as ::core::ffi::c_int
+        // The validated gzip state owns the initialized stream and buffers
+        // required by the compression adapter.
+        && gz_comp(state, crate::zlib_h::Z_NO_FLUSH) == -1 as ::core::ffi::c_int
     {
         return -1 as ::core::ffi::c_int;
     }
@@ -234,9 +269,9 @@ fn gz_zero(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
         }
         state.strm.avail_in = n as crate::stdlib::uInt;
         state.strm.next_in = state.in_0;
-        // SAFETY: the validated gzip state owns the stream and the `in_0`
-        // range configured immediately above for this compression request.
-        ret = unsafe { gz_comp(state, crate::zlib_h::Z_NO_FLUSH) };
+        // The validated gzip state owns the stream and the `in_0` range
+        // configured immediately above for this compression request.
+        ret = gz_comp(state, crate::zlib_h::Z_NO_FLUSH);
         crate::src::gzlib::gz_zero_progress(state, n);
         if ret == -1 as ::core::ffi::c_int {
             return -1 as ::core::ffi::c_int;
@@ -248,10 +283,10 @@ fn gz_zero(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
     return 0 as ::core::ffi::c_int;
 }
 
-// Exported entry points validate their handle before calling this helper.  Keep
-// the internal state reference-bound; `buf` remains a caller-owned raw buffer
-// at the FFI boundary.
-unsafe fn gz_write(
+// Exported entry points validate their handle before calling this helper. Keep
+// the internal state reference-bound; only the caller-buffer copy remains a
+// scoped raw boundary.
+fn gz_write(
     state: &mut crate::gzguts_h::gz_state,
     mut buf: crate::stdlib::voidpc,
     mut len: crate::stdlib::z_size_t,
@@ -262,7 +297,9 @@ unsafe fn gz_write(
         match crate::src::gzlib::gz_write_plan(state, len) {
             crate::src::gzlib::GzWritePlan::Empty => return 0 as crate::stdlib::z_size_t,
             crate::src::gzlib::GzWritePlan::Initialize => {
-                if gz_init(state) == -1 as ::core::ffi::c_int {
+                // SAFETY: this plan is selected only for an uninitialized,
+                // validated write state, which `gz_init` configures.
+                if unsafe { gz_init(state) } == -1 as ::core::ffi::c_int {
                     return 0 as crate::stdlib::z_size_t;
                 }
             }
@@ -278,11 +315,16 @@ unsafe fn gz_write(
     if buffered {
         loop {
             let plan = crate::src::gzlib::gz_buffered_copy_plan(state, len);
-            crate::stdlib::memcpy(
-                state.in_0.wrapping_add(plan.offset as usize) as *mut ::core::ffi::c_void,
-                buf as *const ::core::ffi::c_void,
-                plan.len as crate::__stddef_size_t_h::size_t,
-            );
+            // SAFETY: the plan limits the destination to free bytes in the
+            // initialized gzip input buffer; the FFI caller supplied at least
+            // the remaining source bytes. These ranges do not overlap.
+            unsafe {
+                crate::stdlib::memcpy(
+                    state.in_0.wrapping_add(plan.offset as usize) as *mut ::core::ffi::c_void,
+                    buf as *const ::core::ffi::c_void,
+                    plan.len as crate::__stddef_size_t_h::size_t,
+                );
+            }
             crate::src::gzlib::gz_buffered_copy_progress(state, &mut len, plan.len);
             buf = (buf as *const crate::stdlib::Bytef)
                 .wrapping_add(plan.len as usize)
