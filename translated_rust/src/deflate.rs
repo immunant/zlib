@@ -389,43 +389,34 @@ static configuration_table: [config; 10] = [
     },
 ];
 
-unsafe extern "C" fn slide_hash(mut s: *mut crate::src::deflate::deflate_state) {
-    let mut n: ::core::ffi::c_uint = 0;
-    let mut m: ::core::ffi::c_uint = 0;
-    let mut p: *mut crate::src::deflate::Posf =
-        ::core::ptr::null_mut::<crate::src::deflate::Posf>();
-    let mut wsize: crate::stdlib::uInt = (*s).w_size;
-    n = (*s).hash_size as ::core::ffi::c_uint;
-    p = (*s).head.offset(n as isize);
-    loop {
-        p = p.offset(-1);
-        m = *p as ::core::ffi::c_uint;
-        *p = (if m >= wsize {
-            m.wrapping_sub(wsize as ::core::ffi::c_uint)
-        } else {
-            NIL as ::core::ffi::c_uint
-        }) as crate::src::deflate::Pos as crate::src::deflate::Posf;
-        n = n.wrapping_sub(1);
-        if n == 0 {
-            break;
-        }
+fn slide_hash(
+    state: &mut crate::src::deflate::deflate_state,
+    head: &mut [crate::src::deflate::Posf],
+    prev: &mut [crate::src::deflate::Posf],
+) -> bool {
+    let wsize = state.w_size as usize;
+    let hash_size = state.hash_size as usize;
+    if head.len() < hash_size || prev.len() < wsize {
+        return false;
     }
-    n = wsize as ::core::ffi::c_uint;
-    p = (*s).prev.offset(n as isize);
-    loop {
-        p = p.offset(-1);
-        m = *p as ::core::ffi::c_uint;
-        *p = (if m >= wsize {
-            m.wrapping_sub(wsize as ::core::ffi::c_uint)
+    for entry in head[..hash_size].iter_mut() {
+        let value = *entry as usize;
+        *entry = if value >= wsize {
+            value.wrapping_sub(wsize) as crate::src::deflate::Posf
         } else {
-            NIL as ::core::ffi::c_uint
-        }) as crate::src::deflate::Pos as crate::src::deflate::Posf;
-        n = n.wrapping_sub(1);
-        if n == 0 {
-            break;
-        }
+            NIL as crate::src::deflate::Posf
+        };
     }
-    (*s).slid = 1 as ::core::ffi::c_int;
+    for entry in prev[..wsize].iter_mut() {
+        let value = *entry as usize;
+        *entry = if value >= wsize {
+            value.wrapping_sub(wsize) as crate::src::deflate::Posf
+        } else {
+            NIL as crate::src::deflate::Posf
+        };
+    }
+    state.slid = 1 as ::core::ffi::c_int;
+    true
 }
 
 unsafe extern "C" fn read_buf(
@@ -499,7 +490,14 @@ unsafe extern "C" fn fill_window(mut s: *mut crate::src::deflate::deflate_state)
             if (*s).insert > (*s).strstart {
                 (*s).insert = (*s).strstart;
             }
-            slide_hash(s);
+            let head = ::core::slice::from_raw_parts_mut(
+                (*s).head,
+                (*s).hash_size as usize,
+            );
+            let prev = ::core::slice::from_raw_parts_mut((*s).prev, (*s).w_size as usize);
+            if !slide_hash(&mut *s, head, prev) {
+                return;
+            }
             more = more.wrapping_add(wsize as ::core::ffi::c_uint);
         }
         if (*(*s).strm).avail_in == 0 as crate::stdlib::uInt {
@@ -1384,7 +1382,14 @@ pub unsafe extern "C" fn deflateParams(
     if (*s).level != level {
         if (*s).level == 0 as ::core::ffi::c_int && (*s).matches != 0 as crate::stdlib::uInt {
             if (*s).matches == 1 as crate::stdlib::uInt {
-                slide_hash(s);
+                let head = ::core::slice::from_raw_parts_mut(
+                    (*s).head,
+                    (*s).hash_size as usize,
+                );
+                let prev = ::core::slice::from_raw_parts_mut((*s).prev, (*s).w_size as usize);
+                if !slide_hash(&mut *s, head, prev) {
+                    return crate::zlib_h::Z_STREAM_ERROR;
+                }
             } else {
                 *(*s)
                     .head
