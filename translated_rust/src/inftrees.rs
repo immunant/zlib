@@ -2842,12 +2842,12 @@ pub unsafe extern "C" fn inflate_table(
     };
     let mut next: *mut crate::src::inftrees::code =
         ::core::ptr::null_mut::<crate::src::inftrees::code>();
-    let mut base: *const ::core::ffi::c_ushort = ::core::ptr::null::<::core::ffi::c_ushort>();
-    let mut extra: *const ::core::ffi::c_ushort = ::core::ptr::null::<::core::ffi::c_ushort>();
+    let mut base: &[::core::ffi::c_ushort] = &[];
+    let mut extra: &[::core::ffi::c_ushort] = &[];
     let mut match_0: ::core::ffi::c_uint = 0 as ::core::ffi::c_uint;
     let mut count: [::core::ffi::c_ushort; 16] = [0; 16];
     let mut offs: [::core::ffi::c_ushort; 16] = [0; 16];
-    static mut lbase: [::core::ffi::c_ushort; 31] = [
+    static LBASE: [::core::ffi::c_ushort; 31] = [
         3 as ::core::ffi::c_ushort,
         4 as ::core::ffi::c_ushort,
         5 as ::core::ffi::c_ushort,
@@ -2880,7 +2880,7 @@ pub unsafe extern "C" fn inflate_table(
         0 as ::core::ffi::c_ushort,
         0 as ::core::ffi::c_ushort,
     ];
-    static mut lext: [::core::ffi::c_ushort; 31] = [
+    static LEXT: [::core::ffi::c_ushort; 31] = [
         16 as ::core::ffi::c_ushort,
         16 as ::core::ffi::c_ushort,
         16 as ::core::ffi::c_ushort,
@@ -2913,7 +2913,7 @@ pub unsafe extern "C" fn inflate_table(
         68 as ::core::ffi::c_ushort,
         193 as ::core::ffi::c_ushort,
     ];
-    static mut dbase: [::core::ffi::c_ushort; 32] = [
+    static DBASE: [::core::ffi::c_ushort; 32] = [
         1 as ::core::ffi::c_ushort,
         2 as ::core::ffi::c_ushort,
         3 as ::core::ffi::c_ushort,
@@ -2947,7 +2947,7 @@ pub unsafe extern "C" fn inflate_table(
         0 as ::core::ffi::c_ushort,
         0 as ::core::ffi::c_ushort,
     ];
-    static mut dext: [::core::ffi::c_ushort; 32] = [
+    static DEXT: [::core::ffi::c_ushort; 32] = [
         16 as ::core::ffi::c_ushort,
         16 as ::core::ffi::c_ushort,
         16 as ::core::ffi::c_ushort,
@@ -3066,13 +3066,13 @@ pub unsafe extern "C" fn inflate_table(
             match_0 = 20 as ::core::ffi::c_uint;
         }
         1 => {
-            base = &raw const lbase as *const ::core::ffi::c_ushort;
-            extra = &raw const lext as *const ::core::ffi::c_ushort;
+            base = &LBASE;
+            extra = &LEXT;
             match_0 = 257 as ::core::ffi::c_uint;
         }
         2 => {
-            base = &raw const dbase as *const ::core::ffi::c_ushort;
-            extra = &raw const dext as *const ::core::ffi::c_ushort;
+            base = &DBASE;
+            extra = &DEXT;
         }
         _ => {}
     }
@@ -3103,12 +3103,10 @@ pub unsafe extern "C" fn inflate_table(
             here.op = 0 as ::core::ffi::c_int as ::core::ffi::c_uchar;
             here.val = *work.offset(sym as isize);
         } else if *work.offset(sym as isize) as ::core::ffi::c_uint >= match_0 {
-            here.op = *extra.offset(
-                (*work.offset(sym as isize) as ::core::ffi::c_uint).wrapping_sub(match_0) as isize,
-            ) as ::core::ffi::c_uchar;
-            here.val = *base.offset(
-                (*work.offset(sym as isize) as ::core::ffi::c_uint).wrapping_sub(match_0) as isize,
-            );
+            let index = (*work.offset(sym as isize) as ::core::ffi::c_uint)
+                .wrapping_sub(match_0) as usize;
+            here.op = extra[index] as ::core::ffi::c_uchar;
+            here.val = base[index];
         } else {
             here.op = (32 as ::core::ffi::c_int + 64 as ::core::ffi::c_int) as ::core::ffi::c_uchar;
             here.val = 0 as ::core::ffi::c_ushort;
