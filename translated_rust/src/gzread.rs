@@ -154,10 +154,6 @@ fn gz_avail_impl(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
     return 0 as ::core::ffi::c_int;
 }
 
-unsafe fn gz_avail(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
-    gz_avail_impl(state)
-}
-
 unsafe fn gz_look(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
     if state.size == 0 as ::core::ffi::c_uint {
         let input_len = state.want as usize;
