@@ -989,10 +989,10 @@ pub unsafe extern "C" fn inflateBack(
                             }
                             copy = (*state).wsize.wrapping_sub((*state).offset);
                             if copy < left {
-                                from = put.offset(copy as isize);
+                                from = put.wrapping_add(copy as usize);
                                 copy = left.wrapping_sub(copy);
                             } else {
-                                from = put.offset(-((*state).offset as isize));
+                                from = put.wrapping_offset(-((*state).offset as isize));
                                 copy = left;
                             }
                             if copy > (*state).length {

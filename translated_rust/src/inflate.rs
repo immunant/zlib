@@ -2360,7 +2360,7 @@ pub fn inflate(
                     copy = (*state).length;
                 }
             } else {
-                from = put.offset(-((*state).offset as isize));
+                from = put.wrapping_offset(-((*state).offset as isize));
                 copy = (*state).length;
             }
             if copy > left {
