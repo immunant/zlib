@@ -1897,24 +1897,19 @@ impl DeflateDictionaryRequest<'_> {
 unsafe fn deflateGetDictionary<'stream>(
     strm: &'stream mut crate::zlib_h::z_stream_s,
 ) -> Option<DeflateDictionaryRequest<'stream>> {
-    let (_strm, state, _storage) =
-        deflate_stream_and_state(strm, DeflateStorageProjection::None)?;
+    let (_strm, state, storage) =
+        deflate_stream_and_state(strm, DeflateStorageProjection::Dictionary)?;
     let mut len = state.strstart.wrapping_add(state.lookahead);
     if len > state.w_size {
         len = state.w_size;
     }
     let len = len as usize;
     let end = state.strstart.wrapping_add(state.lookahead) as usize;
-    let window = if len == 0 {
-        &[]
-    } else {
-        // The callback allocation has exactly `window_size` bytes, and the
-        // validated deflate state keeps this history range within it.
-        ::core::slice::from_raw_parts(
-            state.window.expect("initialized window").as_ptr(),
-            state.window_size as usize,
-        )
-    };
+    // `Dictionary` establishes the bounded callback window together with the
+    // state projection.  Reuse that view instead of rebuilding it here.
+    let window: &[crate::stdlib::Bytef] = storage
+        .window
+        .expect("dictionary window projection");
     Some(DeflateDictionaryRequest {
         window,
         start: end - len,
