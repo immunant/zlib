@@ -363,12 +363,14 @@ pub(crate) fn gz_consume(
     n
 }
 
-unsafe extern "C" fn gz_read(
-    mut state: crate::gzguts_h::gz_statep,
+// Public entry points have already checked and bound the gzip state.  Keep
+// this internal reader reference-bound; the caller buffer remains its only
+// raw input boundary.
+unsafe fn gz_read(
+    state: &mut crate::gzguts_h::gz_state,
     mut buf: crate::stdlib::voidp,
     mut len: crate::stdlib::z_size_t,
 ) -> crate::stdlib::z_size_t {
-    let state = &mut *state;
     let mut got: crate::stdlib::z_size_t = 0;
     let mut n: ::core::ffi::c_uint = 0;
     let mut err: ::core::ffi::c_int = 0;
