@@ -5090,7 +5090,9 @@ fn tr_stored_block_core(
     assert!(storage.append_pending(&mut state.pending, stored_data));
 }
 
-pub unsafe extern "C" fn _tr_stored_block(
+#[export_name = "_tr_stored_block"]
+
+pub unsafe extern "C" fn _tr_stored_block_ffi(
     mut s: *mut crate::src::deflate::deflate_state,
     mut buf: *mut crate::stdlib::charf,
     mut stored_len: crate::zutil_h::ulg,
@@ -5110,16 +5112,8 @@ pub unsafe extern "C" fn _tr_stored_block(
     })
     .expect("pending storage layout matches its allocation");
 }
-#[export_name = "_tr_stored_block"]
+pub use _tr_stored_block_ffi as _tr_stored_block;
 
-pub unsafe extern "C" fn _tr_stored_block_ffi(
-    mut s: *mut crate::src::deflate::deflate_state,
-    mut buf: *mut crate::stdlib::charf,
-    mut stored_len: crate::zutil_h::ulg,
-    mut last: ::core::ffi::c_int,
-) {
-    _tr_stored_block(s, buf, stored_len, last)
-}
 #[export_name = "_tr_flush_bits"]
 
 pub unsafe extern "C" fn _tr_flush_bits_ffi(mut s: *mut crate::src::deflate::deflate_state) {
@@ -5382,7 +5376,9 @@ fn tr_flush_block_core(
     }
 }
 
-pub unsafe extern "C" fn _tr_flush_block(
+#[export_name = "_tr_flush_block"]
+
+pub unsafe extern "C" fn _tr_flush_block_ffi(
     mut s: *mut crate::src::deflate::deflate_state,
     mut buf: *mut crate::stdlib::charf,
     mut stored_len: crate::zutil_h::ulg,
@@ -5412,16 +5408,8 @@ pub unsafe extern "C" fn _tr_flush_block(
     })
     .expect("pending storage layout matches its allocation");
 }
-#[export_name = "_tr_flush_block"]
+pub use _tr_flush_block_ffi as _tr_flush_block;
 
-pub unsafe extern "C" fn _tr_flush_block_ffi(
-    mut s: *mut crate::src::deflate::deflate_state,
-    mut buf: *mut crate::stdlib::charf,
-    mut stored_len: crate::zutil_h::ulg,
-    mut last: ::core::ffi::c_int,
-) {
-    _tr_flush_block(s, buf, stored_len, last)
-}
 fn tr_tally_core(
     storage: &mut crate::src::deflate::PendingStorageView<'_>,
     sym_next: &mut crate::stdlib::uInt,
