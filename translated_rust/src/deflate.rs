@@ -599,6 +599,14 @@ pub unsafe extern "C" fn deflateInit__ffi(
 ) -> ::core::ffi::c_int {
     deflateInit_(strm, level, version, stream_size)
 }
+fn deflate_version_matches(
+    version_first: ::core::ffi::c_char,
+    stream_size: ::core::ffi::c_int,
+) -> bool {
+    version_first as ::core::ffi::c_int == crate::zlib_h::ZLIB_VERSION[0] as ::core::ffi::c_int
+        && stream_size as usize == ::core::mem::size_of::<crate::zlib_h::z_stream>()
+}
+
 pub unsafe extern "C" fn deflateInit2_(
     mut strm: crate::zlib_h::z_streamp,
     mut level: ::core::ffi::c_int,
@@ -612,11 +620,11 @@ pub unsafe extern "C" fn deflateInit2_(
     let mut s: *mut crate::src::deflate::deflate_state =
         ::core::ptr::null_mut::<crate::src::deflate::deflate_state>();
     let mut wrap: ::core::ffi::c_int = 1 as ::core::ffi::c_int;
-    static mut my_version: [::core::ffi::c_char; 15] = crate::zlib_h::ZLIB_VERSION;
     if version.is_null()
-        || *version.offset(0 as ::core::ffi::c_int as isize) as ::core::ffi::c_int
-            != my_version[0 as ::core::ffi::c_int as usize] as ::core::ffi::c_int
-        || stream_size as usize != ::core::mem::size_of::<crate::zlib_h::z_stream>() as usize
+        || !deflate_version_matches(
+            *version.offset(0 as ::core::ffi::c_int as isize),
+            stream_size,
+        )
     {
         return crate::zlib_h::Z_VERSION_ERROR;
     }
@@ -3547,7 +3555,10 @@ unsafe extern "C" fn deflate_huff(
 
 #[cfg(test)]
 mod tests {
-    use super::{deflate_copyright, gzip_header_crc, gzip_header_crc_pending, pending_output_len};
+    use super::{
+        deflate_copyright, deflate_version_matches, gzip_header_crc, gzip_header_crc_pending,
+        pending_output_len,
+    };
 
     #[test]
     fn copyright_export_has_stable_bytes() {
@@ -3591,5 +3602,23 @@ mod tests {
         assert_eq!(pending_output_len(3, 5), 3);
         assert_eq!(pending_output_len(5, 5), 5);
         assert_eq!(pending_output_len(8, 5), 5);
+    }
+
+    #[test]
+    fn deflate_version_matches_only_the_first_version_byte_and_stream_size() {
+        let expected_size = ::core::mem::size_of::<crate::zlib_h::z_stream>() as ::core::ffi::c_int;
+
+        assert!(deflate_version_matches(
+            b'1' as ::core::ffi::c_char,
+            expected_size
+        ));
+        assert!(!deflate_version_matches(
+            b'2' as ::core::ffi::c_char,
+            expected_size
+        ));
+        assert!(!deflate_version_matches(
+            b'1' as ::core::ffi::c_char,
+            expected_size.wrapping_add(1),
+        ));
     }
 }

@@ -1033,13 +1033,11 @@ pub unsafe extern "C" fn gz_intmax_ffi() -> ::core::ffi::c_uint {
 #[cfg(test)]
 mod tests {
     use super::{
-        gz_clear_read_flags, gz_is_read_or_write_mode, gz_open_offset_plan,
-        gz_open_recorded_offset, gz_parse_open_mode,
-        gz_post_open_metadata, gz_prepare_open, gz_reset_core, gzbuffer_normalized_want,
-        gzclearerr_core, gzerror_core, gzoffset64_adjust_for_buffered_read,
-        gz_legacy_offset_result,
-        gzrewind_request_is_valid, gzseek_adjust_offset, gzseek_can_fast_forward,
-        gzseek_error_allows_positioning, gzseek_fast_forward_lseek_offset,
+        gz_clear_read_flags, gz_is_read_or_write_mode, gz_legacy_offset_result,
+        gz_open_offset_plan, gz_open_recorded_offset, gz_parse_open_mode, gz_post_open_metadata,
+        gz_prepare_open, gz_reset_core, gzbuffer_normalized_want, gzclearerr_core, gzerror_core,
+        gzoffset64_adjust_for_buffered_read, gzrewind_request_is_valid, gzseek_adjust_offset,
+        gzseek_can_fast_forward, gzseek_error_allows_positioning, gzseek_fast_forward_lseek_offset,
         gzseek_fast_forward_reset, gzseek_plan_read_buffer_consumption,
         gzseek_plan_remaining_offset, gzseek_read_buffer_consumed, gzseek_request_is_valid,
         gztell64_core, GzErrorMessage, GzOpenOffsetPlan, GzResetFields, GzSeekOffsetPlan,
@@ -1251,14 +1249,8 @@ mod tests {
 
     #[test]
     fn legacy_offset_result_preserves_signed_offsets() {
-        assert_eq!(
-            gz_legacy_offset_result(27),
-            27 as crate::stdlib::off_t
-        );
-        assert_eq!(
-            gz_legacy_offset_result(-1),
-            -1 as crate::stdlib::off_t
-        );
+        assert_eq!(gz_legacy_offset_result(27), 27 as crate::stdlib::off_t);
+        assert_eq!(gz_legacy_offset_result(-1), -1 as crate::stdlib::off_t);
     }
 
     #[test]
