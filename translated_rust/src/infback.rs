@@ -89,6 +89,10 @@ struct InflateBackDynamicHeader {
     ncode: ::core::ffi::c_uint,
 }
 
+const INFLATE_BACK_CODE_LENGTH_ORDER: [::core::ffi::c_ushort; 19] = [
+    16, 17, 18, 0, 8, 7, 9, 6, 10, 5, 11, 4, 12, 3, 13, 2, 14, 1, 15,
+];
+
 #[derive(Copy, Clone)]
 enum InflateBackCodeLengthRepeat {
     Previous,
@@ -133,6 +137,10 @@ fn inflate_back_dynamic_header(hold: ::core::ffi::c_ulong) -> InflateBackDynamic
     }
 }
 
+fn inflate_back_dynamic_header_is_valid(header: InflateBackDynamicHeader) -> bool {
+    header.nlen <= 286 && header.ndist <= 30
+}
+
 fn inflate_back_code_length_repeat(
     code: ::core::ffi::c_ushort,
 ) -> (InflateBackCodeLengthRepeat, ::core::ffi::c_uint, ::core::ffi::c_uint) {
@@ -149,6 +157,69 @@ fn inflate_back_low_bits(
 ) -> ::core::ffi::c_uint {
     hold as ::core::ffi::c_uint
         & ((1 as ::core::ffi::c_uint) << bits).wrapping_sub(1 as ::core::ffi::c_uint)
+}
+
+fn inflate_back_push_code_length(
+    lens: &mut [::core::ffi::c_ushort; 320],
+    have: &mut ::core::ffi::c_uint,
+    length: ::core::ffi::c_ushort,
+) {
+    lens[*have as usize] = length;
+    *have = have.wrapping_add(1);
+}
+
+fn inflate_back_set_code_length_order(
+    lens: &mut [::core::ffi::c_ushort; 320],
+    have: &mut ::core::ffi::c_uint,
+    hold: ::core::ffi::c_ulong,
+) {
+    let order_index = INFLATE_BACK_CODE_LENGTH_ORDER[*have as usize] as usize;
+    lens[order_index] = inflate_back_low_bits(hold, 3) as ::core::ffi::c_ushort;
+    *have = have.wrapping_add(1);
+}
+
+fn inflate_back_finish_code_length_order(
+    lens: &mut [::core::ffi::c_ushort; 320],
+    have: &mut ::core::ffi::c_uint,
+) {
+    while *have < INFLATE_BACK_CODE_LENGTH_ORDER.len() as ::core::ffi::c_uint {
+        let order_index = INFLATE_BACK_CODE_LENGTH_ORDER[*have as usize] as usize;
+        lens[order_index] = 0;
+        *have = have.wrapping_add(1);
+    }
+}
+
+fn inflate_back_repeat_length(
+    lens: &[::core::ffi::c_ushort; 320],
+    have: ::core::ffi::c_uint,
+    repeat_kind: InflateBackCodeLengthRepeat,
+) -> Option<::core::ffi::c_uint> {
+    match repeat_kind {
+        InflateBackCodeLengthRepeat::Previous => have
+            .checked_sub(1)
+            .map(|index| lens[index as usize] as ::core::ffi::c_uint),
+        InflateBackCodeLengthRepeat::Zero => Some(0),
+    }
+}
+
+fn inflate_back_repeat_fits(
+    have: ::core::ffi::c_uint,
+    repeat: ::core::ffi::c_uint,
+    nlen: ::core::ffi::c_uint,
+    ndist: ::core::ffi::c_uint,
+) -> bool {
+    have.wrapping_add(repeat) <= nlen.wrapping_add(ndist)
+}
+
+fn inflate_back_push_repeated_code_length(
+    lens: &mut [::core::ffi::c_ushort; 320],
+    have: &mut ::core::ffi::c_uint,
+    length: ::core::ffi::c_uint,
+    repeat: ::core::ffi::c_uint,
+) {
+    let end = have.wrapping_add(repeat) as usize;
+    lens[*have as usize..end].fill(length as ::core::ffi::c_ushort);
+    *have = end as ::core::ffi::c_uint;
 }
 
 pub unsafe fn inflateBackInit_(
@@ -251,27 +322,6 @@ pub unsafe extern "C" fn inflateBack(
     };
     let mut len: ::core::ffi::c_uint = 0;
     let mut ret: ::core::ffi::c_int = 0;
-    static order: [::core::ffi::c_ushort; 19] = [
-        16 as ::core::ffi::c_ushort,
-        17 as ::core::ffi::c_ushort,
-        18 as ::core::ffi::c_ushort,
-        0 as ::core::ffi::c_ushort,
-        8 as ::core::ffi::c_ushort,
-        7 as ::core::ffi::c_ushort,
-        9 as ::core::ffi::c_ushort,
-        6 as ::core::ffi::c_ushort,
-        10 as ::core::ffi::c_ushort,
-        5 as ::core::ffi::c_ushort,
-        11 as ::core::ffi::c_ushort,
-        4 as ::core::ffi::c_ushort,
-        12 as ::core::ffi::c_ushort,
-        3 as ::core::ffi::c_ushort,
-        13 as ::core::ffi::c_ushort,
-        2 as ::core::ffi::c_ushort,
-        14 as ::core::ffi::c_ushort,
-        1 as ::core::ffi::c_ushort,
-        15 as ::core::ffi::c_ushort,
-    ];
     if strm.state.is_null() {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
@@ -430,9 +480,7 @@ pub unsafe extern "C" fn inflateBack(
                 (*state).ncode = header.ncode;
                 hold >>= 14;
                 bits = bits.wrapping_sub(14);
-                if (*state).nlen > 286 as ::core::ffi::c_uint
-                    || (*state).ndist > 30 as ::core::ffi::c_uint
-                {
+                if !inflate_back_dynamic_header_is_valid(header) {
                     (*strm).msg = b"too many length or distance symbols\0".as_ptr()
                         as *const ::core::ffi::c_char
                         as *mut ::core::ffi::c_char;
@@ -460,22 +508,18 @@ pub unsafe extern "C" fn inflateBack(
                                 hold.wrapping_add((*c2rust_fresh3 as ::core::ffi::c_ulong) << bits);
                             bits = bits.wrapping_add(8 as ::core::ffi::c_uint);
                         }
-                        let c2rust_fresh4 = (*state).have;
-                        (*state).have = (*state).have.wrapping_add(1);
-                        (*state).lens[order[c2rust_fresh4 as usize] as usize] = (hold
-                            as ::core::ffi::c_uint
-                            & ((1 as ::core::ffi::c_uint) << 3 as ::core::ffi::c_int)
-                                .wrapping_sub(1 as ::core::ffi::c_uint))
-                            as ::core::ffi::c_ushort;
+                        inflate_back_set_code_length_order(
+                            &mut (*state).lens,
+                            &mut (*state).have,
+                            hold,
+                        );
                         hold >>= 3 as ::core::ffi::c_int;
                         bits = bits.wrapping_sub(3 as ::core::ffi::c_int as ::core::ffi::c_uint);
                     }
-                    while (*state).have < 19 as ::core::ffi::c_uint {
-                        let c2rust_fresh5 = (*state).have;
-                        (*state).have = (*state).have.wrapping_add(1);
-                        (*state).lens[order[c2rust_fresh5 as usize] as usize] =
-                            0 as ::core::ffi::c_ushort;
-                    }
+                    inflate_back_finish_code_length_order(
+                        &mut (*state).lens,
+                        &mut (*state).have,
+                    );
                     (*state).next = &raw mut (*state).codes as *mut crate::src::inftrees::code;
                     (*state).lencode = (*state).next as *const crate::src::inftrees::code;
                     (*state).lenbits = 7 as ::core::ffi::c_uint;
@@ -527,9 +571,11 @@ pub unsafe extern "C" fn inflateBack(
                             if (here.val as ::core::ffi::c_int) < 16 as ::core::ffi::c_int {
                                 hold >>= here.bits as ::core::ffi::c_int;
                                 bits = bits.wrapping_sub(here.bits as ::core::ffi::c_uint);
-                                let c2rust_fresh7 = (*state).have;
-                                (*state).have = (*state).have.wrapping_add(1);
-                                (*state).lens[c2rust_fresh7 as usize] = here.val;
+                                inflate_back_push_code_length(
+                                    &mut (*state).lens,
+                                    &mut (*state).have,
+                                    here.val,
+                                );
                             } else {
                                 let (repeat_kind, repeat_base, repeat_bits) =
                                     inflate_back_code_length_repeat(here.val);
@@ -555,48 +601,39 @@ pub unsafe extern "C" fn inflateBack(
                                 }
                                 hold >>= here.bits as ::core::ffi::c_int;
                                 bits = bits.wrapping_sub(here.bits as ::core::ffi::c_uint);
-                                match repeat_kind {
-                                    InflateBackCodeLengthRepeat::Previous => {
-                                        if (*state).have == 0 as ::core::ffi::c_uint {
-                                            (*strm).msg = b"invalid bit length repeat\0".as_ptr()
-                                                as *const ::core::ffi::c_char
-                                                as *mut ::core::ffi::c_char;
-                                            (*state).mode = crate::src::inflate::BAD;
-                                            break;
-                                        }
-                                        len = (*state).lens[(*state)
-                                            .have
-                                            .wrapping_sub(1 as ::core::ffi::c_uint)
-                                            as usize]
-                                            as ::core::ffi::c_uint;
-                                    }
-                                    InflateBackCodeLengthRepeat::Zero => {
-                                        len = 0 as ::core::ffi::c_uint;
-                                    }
-                                }
+                                let Some(repeated_length) = inflate_back_repeat_length(
+                                    &(*state).lens,
+                                    (*state).have,
+                                    repeat_kind,
+                                ) else {
+                                    (*strm).msg = b"invalid bit length repeat\0".as_ptr()
+                                        as *const ::core::ffi::c_char
+                                        as *mut ::core::ffi::c_char;
+                                    (*state).mode = crate::src::inflate::BAD;
+                                    break;
+                                };
+                                len = repeated_length;
                                 copy = repeat_base.wrapping_add(inflate_back_low_bits(hold, repeat_bits));
                                 hold >>= repeat_bits;
                                 bits = bits.wrapping_sub(repeat_bits);
-                                if (*state).have.wrapping_add(copy)
-                                    > (*state).nlen.wrapping_add((*state).ndist)
-                                {
+                                if !inflate_back_repeat_fits(
+                                    (*state).have,
+                                    copy,
+                                    (*state).nlen,
+                                    (*state).ndist,
+                                ) {
                                     (*strm).msg = b"invalid bit length repeat\0".as_ptr()
                                         as *const ::core::ffi::c_char
                                         as *mut ::core::ffi::c_char;
                                     (*state).mode = crate::src::inflate::BAD;
                                     break;
                                 } else {
-                                    loop {
-                                        let c2rust_fresh11 = copy;
-                                        copy = copy.wrapping_sub(1);
-                                        if c2rust_fresh11 == 0 {
-                                            break;
-                                        }
-                                        let c2rust_fresh12 = (*state).have;
-                                        (*state).have = (*state).have.wrapping_add(1);
-                                        (*state).lens[c2rust_fresh12 as usize] =
-                                            len as ::core::ffi::c_ushort;
-                                    }
+                                    inflate_back_push_repeated_code_length(
+                                        &mut (*state).lens,
+                                        &mut (*state).have,
+                                        len,
+                                        copy,
+                                    );
                                 }
                             }
                         }
