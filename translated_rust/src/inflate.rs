@@ -964,6 +964,25 @@ impl<'a> WindowStorage<'a> {
             .get(step.segment.start..step.segment.start.checked_add(step.segment.len)?)?;
         Some((bytes, step.remaining, step.next_index))
     }
+
+    /// Copy one contiguous, initialized history segment into a caller-owned
+    /// destination.  A wrapped history deliberately returns the remaining
+    /// count and asks its caller to make a second request at index zero,
+    /// rather than treating the backing allocation as a wrapping slice.
+    fn copy_match_to(
+        &self,
+        index: ::core::ffi::c_uint,
+        requested: ::core::ffi::c_uint,
+        destination: &mut [crate::stdlib::Bytef],
+    ) -> Option<WindowMatchStep> {
+        let step = self.history.match_step(index, requested)?;
+        let source = self
+            .bytes
+            .get(step.segment.start..step.segment.start.checked_add(step.segment.len)?)?;
+        let destination = destination.get_mut(..source.len())?;
+        destination.copy_from_slice(source);
+        Some(step)
+    }
 }
 
 /// A validated mutable view of the initialized inflate history window.
@@ -5978,6 +5997,33 @@ mod tests {
         // A partial history has no initialized prefix to wrap into.
         assert_eq!(partial.match_step(1, 8), Some((&b"bc"[..], 6, None)));
         assert_eq!(partial.match_step(3, 1), None);
+    }
+
+    #[test]
+    fn window_storage_copy_match_copies_only_one_initialized_segment() {
+        let wrapped_window = *b"abcdefgh";
+        let wrapped = super::WindowStorage::new(&wrapped_window, 3, 8).unwrap();
+        let mut destination = *b"____";
+
+        assert_eq!(
+            wrapped.copy_match_to(6, 5, &mut destination),
+            Some(super::WindowMatchStep {
+                segment: super::WindowMatchSegment { start: 6, len: 2 },
+                remaining: 3,
+                next_index: Some(0),
+            })
+        );
+        assert_eq!(destination, *b"gh__");
+    }
+
+    #[test]
+    fn window_storage_copy_match_rejects_short_destination_without_writing() {
+        let window = *b"abcdefgh";
+        let storage = super::WindowStorage::new(&window, 3, 8).unwrap();
+        let mut destination = *b"_";
+
+        assert_eq!(storage.copy_match_to(6, 2, &mut destination), None);
+        assert_eq!(destination, *b"_");
     }
 
     #[test]
