@@ -842,19 +842,47 @@ impl WindowHistory {
     }
 }
 
-/// A validated mutable view of the initialized inflate history window.
+/// A validated read-only view of the initialized inflate history window.
 ///
 /// This is deliberately only a short-lived safe view: the ABI state still
 /// keeps callback- or caller-provided storage as an opaque pointer.  Keeping
-/// the history metadata tied to the slice here lets callers update it without
-/// recreating the partial-versus-wrapped invariants, and is the seam for the
-/// eventual owned/borrowed window representation.
+/// the history metadata tied to the slice here lets dictionary readers use
+/// the same partial-versus-wrapped invariant as writers, and is the seam for
+/// the eventual owned/borrowed window representation.
 struct WindowStorage<'a> {
+    history: WindowHistory,
+    bytes: &'a [crate::stdlib::Bytef],
+}
+
+impl<'a> WindowStorage<'a> {
+    fn new(
+        bytes: &'a [crate::stdlib::Bytef],
+        next: ::core::ffi::c_uint,
+        have: ::core::ffi::c_uint,
+    ) -> Option<Self> {
+        let size = window_size_from_len(bytes.len())?;
+        Some(Self {
+            history: WindowHistory::new(size, next, have)?,
+            bytes,
+        })
+    }
+
+    fn copy_dictionary_to(&self, dictionary: &mut [crate::stdlib::Bytef]) -> Option<()> {
+        self.history.copy_dictionary_to(self.bytes, dictionary)
+    }
+}
+
+/// A validated mutable view of the initialized inflate history window.
+///
+/// Mutation is intentionally a distinct view from `WindowStorage`: callers
+/// that only need dictionary bytes cannot accidentally acquire write access
+/// while the persistent ABI representation is still pointer-backed.
+struct WindowStorageMut<'a> {
     history: WindowHistory,
     bytes: &'a mut [crate::stdlib::Bytef],
 }
 
-impl<'a> WindowStorage<'a> {
+impl<'a> WindowStorageMut<'a> {
     fn new(
         bytes: &'a mut [crate::stdlib::Bytef],
         next: ::core::ffi::c_uint,
@@ -1152,9 +1180,8 @@ fn copy_dictionary_from_window(
         return Some(());
     }
 
-    let size = crate::stdlib::uInt::try_from(window.len()).ok()?;
     let have = crate::stdlib::uInt::try_from(dictionary.len()).ok()?;
-    WindowHistory::new(size, wnext, have)?.copy_dictionary_to(window, dictionary)
+    WindowStorage::new(window, wnext, have)?.copy_dictionary_to(dictionary)
 }
 
 fn inflate_get_dictionary_result(
@@ -1684,7 +1711,7 @@ fn update_window_state_core(
     let (next, have) = initial
         .map(|metadata| (metadata.wnext, metadata.whave))
         .unwrap_or((state.wnext, state.whave));
-    let mut storage = WindowStorage::new(window, next, have)?;
+    let mut storage = WindowStorageMut::new(window, next, have)?;
     storage.apply(produced)?;
     let metadata = storage.metadata();
     state.wsize = metadata.wsize;
@@ -5745,6 +5772,24 @@ mod tests {
     #[test]
     fn window_history_rejects_non_wrapped_partial_dictionary_cursor() {
         assert_eq!(super::WindowHistory::new(8, 3, 5), None);
+    }
+
+    #[test]
+    fn window_storage_reads_a_wrapped_dictionary_in_history_order() {
+        let window = *b"abcdefgh";
+        let storage = super::WindowStorage::new(&window, 3, 8).unwrap();
+        let mut dictionary = [0; 8];
+
+        assert_eq!(storage.copy_dictionary_to(&mut dictionary), Some(()));
+        assert_eq!(dictionary, *b"defghabc");
+    }
+
+    #[test]
+    fn window_storage_mut_rejects_invalid_partial_history_without_writing() {
+        let mut window = *b"abcdefgh";
+
+        assert!(super::WindowStorageMut::new(&mut window, 2, 5).is_none());
+        assert_eq!(window, *b"abcdefgh");
     }
 
     #[test]
