@@ -27,14 +27,20 @@ enum GzCloseAction {
     Write,
 }
 
+impl GzCloseAction {
+    fn for_mode(mode: ::core::ffi::c_int) -> Self {
+        match mode {
+            crate::gzguts_h::GZ_READ => Self::Read,
+            _ => Self::Write,
+        }
+    }
+}
+
 fn gz_close_action_for_mode(
     mode: Option<::core::ffi::c_int>,
 ) -> Result<GzCloseAction, ::core::ffi::c_int> {
-    match mode {
-        None => Err(crate::zlib_h::Z_STREAM_ERROR),
-        Some(crate::gzguts_h::GZ_READ) => Ok(GzCloseAction::Read),
-        Some(_) => Ok(GzCloseAction::Write),
-    }
+    mode.map(GzCloseAction::for_mode)
+        .ok_or(crate::zlib_h::Z_STREAM_ERROR)
 }
 
 #[export_name = "gzclose"]
@@ -78,6 +84,11 @@ mod tests {
             gz_close_action_for_mode(Some(crate::gzguts_h::GZ_NONE)),
             Ok(GzCloseAction::Write)
         );
+    }
+
+    #[test]
+    fn dispatches_unrecognized_modes_to_write_close() {
+        assert_eq!(gz_close_action_for_mode(Some(-1)), Ok(GzCloseAction::Write));
     }
 
     #[test]

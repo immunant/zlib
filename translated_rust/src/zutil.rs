@@ -43,11 +43,25 @@ fn size_flag<T>(shift: u32) -> crate::stdlib::uLong {
     size_class(::core::mem::size_of::<T>()) << shift
 }
 
+fn compile_flags_for_sizes(
+    uint_size: usize,
+    ulong_size: usize,
+    pointer_size: usize,
+    off_t_size: usize,
+) -> crate::stdlib::uLong {
+    (size_class(uint_size) << 0)
+        .wrapping_add(size_class(ulong_size) << 2)
+        .wrapping_add(size_class(pointer_size) << 4)
+        .wrapping_add(size_class(off_t_size) << 6)
+}
+
 fn zlib_compile_flags() -> crate::stdlib::uLong {
-    size_flag::<crate::stdlib::uInt>(0)
-        .wrapping_add(size_flag::<crate::stdlib::uLong>(2))
-        .wrapping_add(size_flag::<usize>(4))
-        .wrapping_add(size_flag::<crate::stdlib::off_t>(6))
+    compile_flags_for_sizes(
+        ::core::mem::size_of::<crate::stdlib::uInt>(),
+        ::core::mem::size_of::<crate::stdlib::uLong>(),
+        ::core::mem::size_of::<usize>(),
+        ::core::mem::size_of::<crate::stdlib::off_t>(),
+    )
 }
 
 #[export_name = "zlibCompileFlags"]
@@ -114,8 +128,9 @@ pub unsafe extern "C" fn zcfree_ffi(opaque: crate::stdlib::voidpf, ptr: crate::s
 #[cfg(test)]
 mod tests {
     use super::{
-        allocation_byte_count, allocation_request, error_message_index, has_error_message_index,
-        size_class, size_flag, size_t, zlib_version, AllocationRequest,
+        allocation_byte_count, allocation_request, compile_flags_for_sizes, error_message_index,
+        has_error_message_index, size_class, size_flag, size_t, zlib_compile_flags, zlib_version,
+        AllocationRequest,
     };
 
     #[test]
@@ -154,6 +169,25 @@ mod tests {
         assert_eq!(size_flag::<u16>(0), 0);
         assert_eq!(size_flag::<u32>(2), 4);
         assert_eq!(size_flag::<u64>(4), 32);
+    }
+
+    #[test]
+    fn compile_flags_pack_each_size_class_into_its_zlib_field() {
+        assert_eq!(compile_flags_for_sizes(2, 4, 8, 1), 0 | 4 | 32 | 192);
+        assert_eq!(compile_flags_for_sizes(1, 16, 1, 16), 3 | 12 | 48 | 192);
+    }
+
+    #[test]
+    fn compile_flags_use_the_platform_type_sizes() {
+        assert_eq!(
+            zlib_compile_flags(),
+            compile_flags_for_sizes(
+                ::core::mem::size_of::<crate::stdlib::uInt>(),
+                ::core::mem::size_of::<crate::stdlib::uLong>(),
+                ::core::mem::size_of::<usize>(),
+                ::core::mem::size_of::<crate::stdlib::off_t>(),
+            )
+        );
     }
 
     #[test]

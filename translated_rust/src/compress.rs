@@ -86,17 +86,36 @@ impl CompressProgress {
     }
 }
 
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+struct CompressChunk {
+    input_len: usize,
+    output_len: usize,
+    flush: ::core::ffi::c_int,
+}
+
+fn next_compress_chunk(
+    source_progress: CompressProgress,
+    dest_progress: CompressProgress,
+) -> CompressChunk {
+    let input_len = source_progress.next_chunk_len();
+
+    CompressChunk {
+        input_len,
+        output_len: dest_progress.next_chunk_len(),
+        flush: source_progress.flush_mode(input_len),
+    }
+}
+
 fn next_compress_chunk_slices<'a>(
     source: &'a [crate::stdlib::Bytef],
     dest: &'a mut [crate::stdlib::Bytef],
     source_progress: CompressProgress,
     dest_progress: CompressProgress,
+    chunk: CompressChunk,
 ) -> (&'a [crate::stdlib::Bytef], &'a mut [crate::stdlib::Bytef]) {
-    let input_len = source_progress.next_chunk_len();
-    let output_len = dest_progress.next_chunk_len();
     (
-        &source[source_progress.used..source_progress.used + input_len],
-        &mut dest[dest_progress.used..dest_progress.used + output_len],
+        &source[source_progress.used..source_progress.used + chunk.input_len],
+        &mut dest[dest_progress.used..dest_progress.used + chunk.output_len],
     )
 }
 
@@ -182,10 +201,14 @@ pub unsafe extern "C" fn compress2_z_ffi(
     let mut source_progress = CompressProgress::new(source_slice.len());
     let mut dest_progress = CompressProgress::new(dest_slice.len());
     let status = loop {
-        let (input, output) =
-            next_compress_chunk_slices(source_slice, dest_slice, source_progress, dest_progress);
-        let input_len = input.len();
-        let output_len = output.len();
+        let chunk = next_compress_chunk(source_progress, dest_progress);
+        let (input, output) = next_compress_chunk_slices(
+            source_slice,
+            dest_slice,
+            source_progress,
+            dest_progress,
+            chunk,
+        );
 
         stream.next_in = if input.is_empty() {
             source as *mut crate::stdlib::Bytef
@@ -200,10 +223,9 @@ pub unsafe extern "C" fn compress2_z_ffi(
         };
         stream.avail_out = output.len() as crate::stdlib::uInt;
 
-        let status =
-            crate::src::deflate::deflate(&mut stream, source_progress.flush_mode(input_len));
-        source_progress.record_available(input_len, stream.avail_in);
-        dest_progress.record_available(output_len, stream.avail_out);
+        let status = crate::src::deflate::deflate(&mut stream, chunk.flush);
+        source_progress.record_available(chunk.input_len, stream.avail_in);
+        dest_progress.record_available(chunk.output_len, stream.avail_out);
 
         if status != crate::zlib_h::Z_OK {
             break status;
@@ -288,7 +310,7 @@ pub unsafe extern "C" fn compressBound_ffi(
 #[cfg(test)]
 mod tests {
     use super::{
-        compress2_buffers_are_valid, compress_bound, compress_bound_z_impl,
+        compress2_buffers_are_valid, compress_bound, compress_bound_z_impl, next_compress_chunk,
         next_compress_chunk_slices, normalize_compress_status, CompressProgress, MAX_CHUNK,
     };
 
@@ -327,28 +349,50 @@ mod tests {
             total: dest.len(),
             used: 3,
         };
+        let chunk = next_compress_chunk(source_progress, dest_progress);
         let (input, output) =
-            next_compress_chunk_slices(source, &mut dest, source_progress, dest_progress);
+            next_compress_chunk_slices(source, &mut dest, source_progress, dest_progress, chunk);
         assert_eq!(input, b"cdef");
         assert_eq!(output.len(), 5);
         output[0] = b'x';
         assert_eq!(dest[3], b'x');
 
         let dest_len = dest.len();
-        let (input, output) = next_compress_chunk_slices(
-            source,
-            &mut dest,
-            CompressProgress {
-                total: source.len(),
-                used: source.len(),
-            },
-            CompressProgress {
-                total: dest_len,
-                used: dest_len,
-            },
-        );
+        let source_progress = CompressProgress {
+            total: source.len(),
+            used: source.len(),
+        };
+        let dest_progress = CompressProgress {
+            total: dest_len,
+            used: dest_len,
+        };
+        let chunk = next_compress_chunk(source_progress, dest_progress);
+        let (input, output) =
+            next_compress_chunk_slices(source, &mut dest, source_progress, dest_progress, chunk);
         assert!(input.is_empty());
         assert!(output.is_empty());
+    }
+
+    #[test]
+    fn chunk_plan_keeps_input_output_and_flush_selection_together() {
+        let source_progress = CompressProgress { total: 5, used: 2 };
+        let dest_progress = CompressProgress { total: 8, used: 3 };
+        assert_eq!(
+            next_compress_chunk(source_progress, dest_progress),
+            super::CompressChunk {
+                input_len: 3,
+                output_len: 5,
+                flush: crate::zlib_h::Z_FINISH,
+            }
+        );
+
+        let Some(total) = MAX_CHUNK.checked_add(1) else {
+            return;
+        };
+        assert_eq!(
+            next_compress_chunk(CompressProgress::new(total), CompressProgress::new(0)).flush,
+            crate::zlib_h::Z_NO_FLUSH
+        );
     }
 
     #[test]
