@@ -665,11 +665,11 @@ pub fn gzungetc(
         crate::src::gzlib::GzUngetcPlan::First { buffer_end } => {
             // SAFETY: the ungetc plan reserves the final byte of the
             // initialized output buffer for this first pushed-back byte.
+            state.x.next = state
+                .out
+                .wrapping_add(buffer_end as usize)
+                .wrapping_sub(1);
             unsafe {
-                state.x.next = state
-                    .out
-                    .wrapping_add(buffer_end as usize)
-                    .wrapping_sub(1);
                 *state.x.next = c as ::core::ffi::c_uchar;
             }
             crate::src::gzlib::gz_ungetc_progress(state, true);
@@ -686,21 +686,23 @@ pub fn gzungetc(
             // SAFETY: this plan is derived from the initialized output
             // buffer's available capacity. The backwards copy stays within
             // that buffer and preserves the translated overlapping move.
-            unsafe {
-                if move_to_end {
-                    let mut src: *mut ::core::ffi::c_uchar =
-                        state.out.wrapping_add(state.x.have as usize);
-                    let mut dest: *mut ::core::ffi::c_uchar = state
-                        .out
-                        .wrapping_add((state.size << 1 as ::core::ffi::c_int) as usize);
+            if move_to_end {
+                let mut src: *mut ::core::ffi::c_uchar =
+                    state.out.wrapping_add(state.x.have as usize);
+                let mut dest: *mut ::core::ffi::c_uchar = state
+                    .out
+                    .wrapping_add((state.size << 1 as ::core::ffi::c_int) as usize);
+                unsafe {
                     while src > state.out {
                         src = src.wrapping_sub(1);
                         dest = dest.wrapping_sub(1);
                         *dest = *src;
                     }
-                    state.x.next = dest;
                 }
-                state.x.next = state.x.next.wrapping_sub(1);
+                state.x.next = dest;
+            }
+            state.x.next = state.x.next.wrapping_sub(1);
+            unsafe {
                 *state.x.next = c as ::core::ffi::c_uchar;
             }
             crate::src::gzlib::gz_ungetc_progress(state, false);
