@@ -2139,6 +2139,65 @@ unsafe extern "C" fn flush_pending(mut strm: crate::zlib_h::z_streamp) {
     };
     let _ = flush_pending_impl(strm, state, pending_buf, pending_start, output);
 }
+
+// The legacy stream engine owns the one raw-to-slice conversion for this
+// update. Keep strategy selection here, over ordinary Rust borrows, so the
+// compression modes cannot grow their own raw stream paths.
+fn deflate_update(
+    state: &mut crate::src::deflate::deflate_state,
+    strm: &mut crate::zlib_h::z_stream,
+    window: &mut [crate::stdlib::Bytef],
+    head: Option<&mut [crate::src::deflate::Posf]>,
+    prev: Option<&mut [crate::src::deflate::Posf]>,
+    input: &[crate::stdlib::Bytef],
+    pending_buf: &mut [crate::stdlib::Bytef],
+    output: &mut [crate::stdlib::Bytef],
+    flush: ::core::ffi::c_int,
+) -> Option<block_state> {
+    if state.level == 0 {
+        return Some(deflate_stored(
+            state, strm, window, input, pending_buf, output, flush,
+        ));
+    }
+    if state.strategy == crate::zlib_h::Z_HUFFMAN_ONLY {
+        let (Some(head), Some(prev)) = (head, prev) else {
+            return None;
+        };
+        return Some(deflate_huff(
+            state, strm, window, head, prev, input, pending_buf, output, flush,
+        ));
+    }
+    if state.strategy == crate::zlib_h::Z_RLE {
+        let (Some(head), Some(prev)) = (head, prev) else {
+            return None;
+        };
+        return Some(deflate_rle(
+            state, strm, window, head, prev, input, pending_buf, output, flush,
+        ));
+    }
+    match &configuration_table.get(state.level as usize)?.func {
+        CompressorKind::Stored => Some(deflate_stored(
+            state, strm, window, input, pending_buf, output, flush,
+        )),
+        CompressorKind::Fast => {
+            let (Some(head), Some(prev)) = (head, prev) else {
+                return None;
+            };
+            Some(deflate_fast(
+                state, strm, window, head, prev, input, pending_buf, output, flush,
+            ))
+        }
+        CompressorKind::Slow => {
+            let (Some(head), Some(prev)) = (head, prev) else {
+                return None;
+            };
+            Some(deflate_slow(
+                state, strm, window, head, prev, input, pending_buf, output, flush,
+            ))
+        }
+    }
+}
+
 pub unsafe fn deflate(
     strm: &mut crate::zlib_h::z_stream,
     mut flush: ::core::ffi::c_int,
@@ -2495,200 +2554,57 @@ pub unsafe fn deflate(
         || (*s).lookahead != 0 as crate::stdlib::uInt
         || flush != crate::zlib_h::Z_NO_FLUSH && (*s).status != crate::src::deflate::FINISH_STATE
     {
-        let mut bstate: block_state = need_more;
-        bstate = (if (*s).level == 0 as ::core::ffi::c_int {
-            let state = &mut *s;
-            let strm = &mut *state.strm;
-            let window = ::core::slice::from_raw_parts_mut(state.window, state.window_size as usize);
-            let input = if strm.avail_in == 0 {
-                &[]
-            } else {
-                ::core::slice::from_raw_parts(strm.next_in, strm.avail_in as usize)
-            };
-            let pending_buf = ::core::slice::from_raw_parts_mut(
-                state.pending_buf,
-                state.pending_buf_size as usize,
-            );
-            let output = if strm.avail_out == 0 {
-                &mut []
-            } else {
-                ::core::slice::from_raw_parts_mut(strm.next_out, strm.avail_out as usize)
-            };
-            deflate_stored(state, strm, window, input, pending_buf, output, flush)
-                as ::core::ffi::c_uint
-        } else if (*s).strategy == crate::zlib_h::Z_HUFFMAN_ONLY {
-            let state = &mut *s;
-            let strm = &mut *state.strm;
-            let window = ::core::slice::from_raw_parts_mut(state.window, state.window_size as usize);
-            let head = ::core::slice::from_raw_parts_mut(state.head, state.hash_size as usize);
-            let prev = ::core::slice::from_raw_parts_mut(state.prev, state.w_size as usize);
-            let input = if strm.avail_in == 0 {
-                &[]
-            } else {
-                ::core::slice::from_raw_parts(strm.next_in, strm.avail_in as usize)
-            };
-            let pending_buf = ::core::slice::from_raw_parts_mut(
-                state.pending_buf,
-                state.pending_buf_size as usize,
-            );
-            let output = ::core::slice::from_raw_parts_mut(strm.next_out, strm.avail_out as usize);
-            deflate_huff(
-                state,
-                strm,
-                window,
-                head,
-                prev,
-                input,
-                pending_buf,
-                output,
-                flush,
-            ) as ::core::ffi::c_uint
-        } else if (*s).strategy == crate::zlib_h::Z_RLE {
-            let state = &mut *s;
-            let strm = &mut *state.strm;
-            let window = ::core::slice::from_raw_parts_mut(state.window, state.window_size as usize);
-            let head = ::core::slice::from_raw_parts_mut(state.head, state.hash_size as usize);
-            let prev = ::core::slice::from_raw_parts_mut(state.prev, state.w_size as usize);
-            let input = if strm.avail_in == 0 {
-                &[]
-            } else {
-                ::core::slice::from_raw_parts(strm.next_in, strm.avail_in as usize)
-            };
-            let pending_buf = ::core::slice::from_raw_parts_mut(
-                state.pending_buf,
-                state.pending_buf_size as usize,
-            );
-            let output = if strm.avail_out == 0 {
-                &mut []
-            } else {
-                ::core::slice::from_raw_parts_mut(strm.next_out, strm.avail_out as usize)
-            };
-            deflate_rle(
-                state,
-                strm,
-                window,
-                head,
-                prev,
-                input,
-                pending_buf,
-                output,
-                flush,
-            ) as ::core::ffi::c_uint
+        // This is the last raw stream/storage bridge. The named safe update
+        // below owns level and strategy selection.
+        let state = &mut *s;
+        let stream = &mut *strm;
+        if state.window.is_null() || state.pending_buf.is_null() {
+            return crate::zlib_h::Z_STREAM_ERROR;
+        }
+        let window = ::core::slice::from_raw_parts_mut(state.window, state.window_size as usize);
+        let head = if state.head.is_null() {
+            None
         } else {
-            let Some(kind) = configuration_table
-                .get((*s).level as usize)
-                .map(|configuration| &configuration.func)
-            else {
-                return crate::zlib_h::Z_STREAM_ERROR;
-            };
-            (match kind {
-                CompressorKind::Stored => {
-                    let state = &mut *s;
-                    let strm = &mut *state.strm;
-                    let window = ::core::slice::from_raw_parts_mut(
-                        state.window,
-                        state.window_size as usize,
-                    );
-                    let input = if strm.avail_in == 0 {
-                        &[]
-                    } else {
-                        ::core::slice::from_raw_parts(strm.next_in, strm.avail_in as usize)
-                    };
-                    let pending_buf = ::core::slice::from_raw_parts_mut(
-                        state.pending_buf,
-                        state.pending_buf_size as usize,
-                    );
-                    let output = if strm.avail_out == 0 {
-                        &mut []
-                    } else {
-                        ::core::slice::from_raw_parts_mut(strm.next_out, strm.avail_out as usize)
-                    };
-                    deflate_stored(state, strm, window, input, pending_buf, output, flush)
-                }
-                CompressorKind::Fast => {
-                    let state = &mut *s;
-                    let strm = &mut *state.strm;
-                    let window = ::core::slice::from_raw_parts_mut(
-                        state.window,
-                        state.window_size as usize,
-                    );
-                    let head = ::core::slice::from_raw_parts_mut(
-                        state.head,
-                        state.hash_size as usize,
-                    );
-                    let prev = ::core::slice::from_raw_parts_mut(
-                        state.prev,
-                        state.w_size as usize,
-                    );
-                    let input = if strm.avail_in == 0 {
-                        &[]
-                    } else {
-                        ::core::slice::from_raw_parts(strm.next_in, strm.avail_in as usize)
-                    };
-                    let pending_buf = ::core::slice::from_raw_parts_mut(
-                        state.pending_buf,
-                        state.pending_buf_size as usize,
-                    );
-                    let output = if strm.avail_out == 0 {
-                        &mut []
-                    } else {
-                        ::core::slice::from_raw_parts_mut(strm.next_out, strm.avail_out as usize)
-                    };
-                    deflate_fast(
-                        state,
-                        strm,
-                        window,
-                        head,
-                        prev,
-                        input,
-                        pending_buf,
-                        output,
-                        flush,
-                    )
-                }
-                CompressorKind::Slow => {
-                    let state = &mut *s;
-                    let strm = &mut *state.strm;
-                    let window = ::core::slice::from_raw_parts_mut(
-                        state.window,
-                        state.window_size as usize,
-                    );
-                    let head = ::core::slice::from_raw_parts_mut(
-                        state.head,
-                        state.hash_size as usize,
-                    );
-                    let prev = ::core::slice::from_raw_parts_mut(
-                        state.prev,
-                        state.w_size as usize,
-                    );
-                    let input = if strm.avail_in == 0 {
-                        &[]
-                    } else {
-                        ::core::slice::from_raw_parts(strm.next_in, strm.avail_in as usize)
-                    };
-                    let pending_buf = ::core::slice::from_raw_parts_mut(
-                        state.pending_buf,
-                        state.pending_buf_size as usize,
-                    );
-                    let output = if strm.avail_out == 0 {
-                        &mut []
-                    } else {
-                        ::core::slice::from_raw_parts_mut(strm.next_out, strm.avail_out as usize)
-                    };
-                    deflate_slow(
-                        state,
-                        strm,
-                        window,
-                        head,
-                        prev,
-                        input,
-                        pending_buf,
-                        output,
-                        flush,
-                    )
-                }
-            }) as ::core::ffi::c_uint
-        }) as block_state;
+            Some(::core::slice::from_raw_parts_mut(
+                state.head,
+                state.hash_size as usize,
+            ))
+        };
+        let prev = if state.prev.is_null() {
+            None
+        } else {
+            Some(::core::slice::from_raw_parts_mut(
+                state.prev,
+                state.w_size as usize,
+            ))
+        };
+        let input = if stream.avail_in == 0 {
+            &[]
+        } else {
+            ::core::slice::from_raw_parts(stream.next_in, stream.avail_in as usize)
+        };
+        let pending_buf = ::core::slice::from_raw_parts_mut(
+            state.pending_buf,
+            state.pending_buf_size as usize,
+        );
+        let output = if stream.avail_out == 0 {
+            &mut []
+        } else {
+            ::core::slice::from_raw_parts_mut(stream.next_out, stream.avail_out as usize)
+        };
+        let Some(bstate) = deflate_update(
+            state,
+            stream,
+            window,
+            head,
+            prev,
+            input,
+            pending_buf,
+            output,
+            flush,
+        ) else {
+            return crate::zlib_h::Z_STREAM_ERROR;
+        };
         if bstate as ::core::ffi::c_uint
             == finish_started as ::core::ffi::c_int as ::core::ffi::c_uint
             || bstate as ::core::ffi::c_uint
