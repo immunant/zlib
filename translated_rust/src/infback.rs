@@ -144,8 +144,8 @@ pub unsafe extern "C" fn inflateBackInit__ffi(
 ) -> ::core::ffi::c_int {
     inflateBackInit_(strm, windowBits, window, version, stream_size)
 }
-pub unsafe extern "C" fn inflateBack(
-    mut strm: crate::zlib_h::z_streamp,
+pub unsafe fn inflateBack(
+    strm: &mut crate::zlib_h::z_stream_s,
     mut in_0: crate::zlib_h::in_func,
     mut in_desc: *mut ::core::ffi::c_void,
     mut out: crate::zlib_h::out_func,
@@ -192,10 +192,6 @@ pub unsafe extern "C" fn inflateBack(
         1 as ::core::ffi::c_ushort,
         15 as ::core::ffi::c_ushort,
     ];
-    if strm.is_null() {
-        return crate::zlib_h::Z_STREAM_ERROR;
-    }
-    let strm = &mut *strm;
     if strm.state.is_null() {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
@@ -1007,7 +1003,10 @@ pub unsafe extern "C" fn inflateBack_ffi(
     mut out: crate::zlib_h::out_func,
     mut out_desc: *mut ::core::ffi::c_void,
 ) -> ::core::ffi::c_int {
-    inflateBack(strm, in_0, in_desc, out, out_desc)
+    if strm.is_null() {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    }
+    inflateBack(&mut *strm, in_0, in_desc, out, out_desc)
 }
 pub unsafe extern "C" fn inflateBackEnd(mut strm: crate::zlib_h::z_streamp) -> ::core::ffi::c_int {
     if strm.is_null() || (*strm).state.is_null() || (*strm).zfree.is_none() {
