@@ -327,31 +327,12 @@ pub unsafe extern "C" fn gzdopen(
     mut fd: ::core::ffi::c_int,
     mut mode: *const ::core::ffi::c_char,
 ) -> crate::zlib_h::gzFile {
-    let mut path: *mut ::core::ffi::c_char = ::core::ptr::null_mut::<::core::ffi::c_char>();
-    let mut gz: crate::zlib_h::gzFile = ::core::ptr::null_mut::<crate::zlib_h::gzFile_s>();
-    if fd == -1 as ::core::ffi::c_int || {
-        path = crate::stdlib::malloc(
-            (7 as crate::__stddef_size_t_h::size_t).wrapping_add(
-                (3 as crate::__stddef_size_t_h::size_t)
-                    .wrapping_mul(::core::mem::size_of::<::core::ffi::c_int>()),
-            ),
-        ) as *mut ::core::ffi::c_char;
-        path.is_null()
-    } {
+    if fd == -1 as ::core::ffi::c_int {
         return ::core::ptr::null_mut::<crate::zlib_h::gzFile_s>();
     }
-    crate::stdlib::snprintf(
-        path,
-        (7 as crate::__stddef_size_t_h::size_t).wrapping_add(
-            (3 as crate::__stddef_size_t_h::size_t)
-                .wrapping_mul(::core::mem::size_of::<::core::ffi::c_int>()),
-        ),
-        b"<fd:%d>\0".as_ptr() as *const ::core::ffi::c_char,
-        fd,
-    );
-    gz = gz_open(path as *const ::core::ffi::c_void, fd, mode);
-    crate::stdlib::free(path as *mut ::core::ffi::c_void);
-    return gz;
+    let path = std::ffi::CString::new(format!("<fd:{fd}>"))
+        .expect("a formatted file descriptor cannot contain a NUL byte");
+    gz_open(path.as_ptr().cast(), fd, mode)
 }
 #[export_name = "gzdopen"]
 
