@@ -148,6 +148,86 @@ pub struct internal_state {
     pub slid: ::core::ffi::c_int,
 }
 
+impl internal_state {
+    /// Initializes the callback-allocated deflate state without relying on a
+    /// foreign whole-struct memset.  The zero values intentionally match the
+    /// translated C allocation state before `deflateInit2_` fills its fields.
+    fn newly_allocated() -> Self {
+        let zero_tree = ct_data_s {
+            fc: C2Rust_Unnamed_1 { value: 0 },
+            dl: C2Rust_Unnamed_0 { value: 0 },
+        };
+        let zero_desc = tree_desc_s {
+            dynamic_tree: DynamicTree::Literal,
+            max_code: 0,
+        };
+
+        Self {
+            strm: ::core::ptr::null_mut(),
+            status: 0,
+            pending_buf: ::core::ptr::null_mut(),
+            pending_buf_size: 0,
+            pending_out_offset: 0,
+            pending: 0,
+            wrap: 0,
+            gzhead: ::core::ptr::null_mut(),
+            gzindex: 0,
+            method: 0,
+            last_flush: 0,
+            w_size: 0,
+            w_bits: 0,
+            w_mask: 0,
+            window: ::core::ptr::null_mut(),
+            window_size: 0,
+            prev: ::core::ptr::null_mut(),
+            head: ::core::ptr::null_mut(),
+            ins_h: 0,
+            hash_size: 0,
+            hash_bits: 0,
+            hash_mask: 0,
+            hash_shift: 0,
+            block_start: 0,
+            match_length: 0,
+            prev_match: 0,
+            match_available: 0,
+            strstart: 0,
+            match_start: 0,
+            lookahead: 0,
+            prev_length: 0,
+            max_chain_length: 0,
+            max_lazy_match: 0,
+            level: 0,
+            strategy: 0,
+            good_match: 0,
+            nice_match: 0,
+            dyn_ltree: [zero_tree; 573],
+            dyn_dtree: [zero_tree; 61],
+            bl_tree: [zero_tree; 39],
+            l_desc: zero_desc,
+            d_desc: zero_desc,
+            bl_desc: zero_desc,
+            bl_count: [0; 16],
+            heap: [0; 573],
+            heap_len: 0,
+            heap_max: 0,
+            depth: [0; 573],
+            sym_buf: ::core::ptr::null_mut(),
+            lit_bufsize: 0,
+            sym_next: 0,
+            sym_end: 0,
+            opt_len: 0,
+            static_len: 0,
+            matches: 0,
+            insert: 0,
+            bi_buf: 0,
+            bi_valid: 0,
+            bi_used: 0,
+            high_water: 0,
+            slid: 0,
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) struct PendingStorageLayout {
     pub total_len: usize,
@@ -1330,12 +1410,7 @@ pub unsafe extern "C" fn deflateInit2_(
     if s.is_null() {
         return crate::zlib_h::Z_MEM_ERROR;
     }
-    crate::stdlib::memset(
-        s as *mut ::core::ffi::c_void,
-        0 as ::core::ffi::c_int,
-        ::core::mem::size_of::<crate::src::deflate::deflate_state>()
-            as crate::__stddef_size_t_h::size_t,
-    );
+    core::ptr::write(s, internal_state::newly_allocated());
     (*strm).state = s as *mut crate::src::deflate::internal_state;
     (*s).strm = strm;
     (*s).status = crate::src::deflate::INIT_STATE;
@@ -4692,6 +4767,39 @@ mod tests {
         DeflateRleRefillAction, DeflateRleTallyPlan, FlushPendingResult, PendingDrainState,
         PendingStorageView, ReadBufChecksum, ReadBufResult,
     };
+
+    #[test]
+    fn newly_allocated_deflate_state_matches_c_zero_initialization() {
+        let state = super::internal_state::newly_allocated();
+
+        assert!(state.strm.is_null());
+        assert!(state.pending_buf.is_null());
+        assert!(state.gzhead.is_null());
+        assert!(state.window.is_null());
+        assert!(state.prev.is_null());
+        assert!(state.head.is_null());
+        assert!(state.sym_buf.is_null());
+        assert_eq!(state.status, 0);
+        assert_eq!(state.pending_out_offset, 0);
+        assert_eq!(state.window_size, 0);
+        assert_eq!(state.block_start, 0);
+        assert_eq!(state.high_water, 0);
+        assert!(state
+            .dyn_ltree
+            .iter()
+            .chain(state.dyn_dtree.iter())
+            .chain(state.bl_tree.iter())
+            .all(|entry| entry.fc.value == 0 && entry.dl.value == 0));
+        assert!(state.bl_count.iter().all(|count| *count == 0));
+        assert!(state.heap.iter().all(|entry| *entry == 0));
+        assert!(state.depth.iter().all(|entry| *entry == 0));
+        assert_eq!(state.l_desc.dynamic_tree as u8, 0);
+        assert_eq!(state.d_desc.dynamic_tree as u8, 0);
+        assert_eq!(state.bl_desc.dynamic_tree as u8, 0);
+        assert_eq!(state.l_desc.max_code, 0);
+        assert_eq!(state.d_desc.max_code, 0);
+        assert_eq!(state.bl_desc.max_code, 0);
+    }
 
     #[test]
     fn deflate_tune_core_updates_all_tuning_fields() {

@@ -1836,10 +1836,7 @@ fn updatewindow(
         let Some(ownership) = state_window_ownership(state) else {
             return 1;
         };
-        let slices = match update_window_slices_after_allocation(
-            plan,
-            ownership,
-        ) {
+        let slices = match update_window_slices_after_allocation(plan, ownership) {
             Ok(slices) => slices,
             Err(status) => return status,
         };
