@@ -1947,6 +1947,44 @@ fn deflate_dictionary_state_after_load(
     )
 }
 
+/// Insert the current dictionary lookahead into the deflate hash chains.
+///
+/// This is the slice-based counterpart of the translated `INSERT_STRING`
+/// loop.  It deliberately retains its wrapping cursor arithmetic: dictionary
+/// preparation relies on the same hash order as normal match insertion.
+fn deflate_dictionary_insert_hashes(
+    window: &[crate::stdlib::Bytef],
+    head: &mut [crate::src::deflate::Posf],
+    prev: &mut [crate::src::deflate::Posf],
+    mut strstart: crate::stdlib::uInt,
+    lookahead: crate::stdlib::uInt,
+    ins_h: &mut crate::stdlib::uInt,
+    hash_shift: crate::stdlib::uInt,
+    hash_mask: crate::stdlib::uInt,
+    w_mask: crate::stdlib::uInt,
+) -> Option<crate::stdlib::uInt> {
+    let min_match_minus_one =
+        (crate::zutil_h::MIN_MATCH - 1 as ::core::ffi::c_int) as crate::stdlib::uInt;
+    let mut remaining = lookahead.checked_sub(min_match_minus_one)?;
+
+    while remaining != 0 {
+        let byte_index = usize::try_from(strstart.wrapping_add(2)).ok()?;
+        let next_byte = *window.get(byte_index)? as crate::stdlib::uInt;
+        *ins_h = (*ins_h << hash_shift ^ next_byte) & hash_mask;
+
+        let hash_index = usize::try_from(*ins_h).ok()?;
+        let previous = *head.get(hash_index)?;
+        let prev_index = usize::try_from(strstart & w_mask).ok()?;
+        *prev.get_mut(prev_index)? = previous;
+        *head.get_mut(hash_index)? = strstart as crate::src::deflate::Posf;
+
+        strstart = strstart.wrapping_add(1);
+        remaining = remaining.wrapping_sub(1);
+    }
+
+    Some(strstart)
+}
+
 #[export_name = "deflateSetDictionary"]
 pub unsafe extern "C" fn deflateSetDictionary_ffi(
     mut strm: crate::zlib_h::z_streamp,
@@ -1955,8 +1993,6 @@ pub unsafe extern "C" fn deflateSetDictionary_ffi(
 ) -> ::core::ffi::c_int {
     let mut s: *mut crate::src::deflate::deflate_state =
         ::core::ptr::null_mut::<crate::src::deflate::deflate_state>();
-    let mut str: crate::stdlib::uInt = 0;
-    let mut n: crate::stdlib::uInt = 0;
     let mut wrap: ::core::ffi::c_int = 0;
     let mut avail: ::core::ffi::c_uint = 0;
     let mut next: *mut ::core::ffi::c_uchar = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
@@ -1966,6 +2002,36 @@ pub unsafe extern "C" fn deflateSetDictionary_ffi(
     s = (*strm).state as *mut crate::src::deflate::deflate_state;
     wrap = (*s).wrap;
     if !deflate_set_dictionary_allowed(wrap, (*s).status, (*s).lookahead) {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    }
+    let Ok(window_len) = usize::try_from((*s).window_size) else {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    };
+    let Ok(head_len) = usize::try_from((*s).hash_size) else {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    };
+    let Ok(prev_len) = usize::try_from((*s).w_size) else {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    };
+    if (*s).window.is_null()
+        || (*s).head.is_null()
+        || (*s).prev.is_null()
+        || (*s)
+            .window
+            .align_offset(::core::mem::align_of::<crate::stdlib::Bytef>())
+            != 0
+        || (*s)
+            .head
+            .align_offset(::core::mem::align_of::<crate::src::deflate::Posf>())
+            != 0
+        || (*s)
+            .prev
+            .align_offset(::core::mem::align_of::<crate::src::deflate::Posf>())
+            != 0
+        || window_len > isize::MAX as usize / ::core::mem::size_of::<crate::stdlib::Bytef>()
+        || head_len > isize::MAX as usize / ::core::mem::size_of::<crate::src::deflate::Posf>()
+        || prev_len > isize::MAX as usize / ::core::mem::size_of::<crate::src::deflate::Posf>()
+    {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
     if wrap == 1 as ::core::ffi::c_int {
@@ -1990,28 +2056,28 @@ pub unsafe extern "C" fn deflateSetDictionary_ffi(
     (*strm).next_in = dictionary as *mut crate::stdlib::Bytef;
     fill_window(s);
     while (*s).lookahead >= crate::zutil_h::MIN_MATCH as crate::stdlib::uInt {
-        str = (*s).strstart;
-        n = (*s).lookahead.wrapping_sub(
-            (crate::zutil_h::MIN_MATCH - 1 as ::core::ffi::c_int) as crate::stdlib::uInt,
-        );
-        loop {
-            (*s).ins_h = ((*s).ins_h << (*s).hash_shift
-                ^ *(*s).window.wrapping_add(
-                    str.wrapping_add(3 as crate::stdlib::uInt)
-                        .wrapping_sub(1 as crate::stdlib::uInt) as usize,
-                ) as crate::stdlib::uInt)
-                & (*s).hash_mask;
-            *(*s).prev.wrapping_add((str & (*s).w_mask) as usize) =
-                *(*s).head.wrapping_add((*s).ins_h as usize);
-            *(*s).head.wrapping_add((*s).ins_h as usize) =
-                str as crate::src::deflate::Pos as crate::src::deflate::Posf;
-            str = str.wrapping_add(1);
-            n = n.wrapping_sub(1);
-            if !(n != 0) {
-                break;
-            }
-        }
-        (*s).strstart = str;
+        // `fill_window()` may update the state before each iteration, so make
+        // fresh short-lived views and release them before the next refill.
+        let window = core::slice::from_raw_parts((*s).window, window_len);
+        let head = core::slice::from_raw_parts_mut((*s).head, head_len);
+        let prev = core::slice::from_raw_parts_mut((*s).prev, prev_len);
+        let Some(strstart) = deflate_dictionary_insert_hashes(
+            window,
+            head,
+            prev,
+            (*s).strstart,
+            (*s).lookahead,
+            &mut (*s).ins_h,
+            (*s).hash_shift,
+            (*s).hash_mask,
+            (*s).w_mask,
+        ) else {
+            (*strm).next_in = next as *mut crate::stdlib::Bytef;
+            (*strm).avail_in = avail as crate::stdlib::uInt;
+            (*s).wrap = wrap;
+            return crate::zlib_h::Z_STREAM_ERROR;
+        };
+        (*s).strstart = strstart;
         (*s).lookahead =
             (crate::zutil_h::MIN_MATCH - 1 as ::core::ffi::c_int) as crate::stdlib::uInt;
         fill_window(s);
@@ -5367,16 +5433,16 @@ mod tests {
     use super::{
         can_search_hash_match, clamped_copy_len, clear_hash, deflate_block_len,
         deflate_block_state_actions, deflate_bound_lengths, deflate_bound_z_core,
-        deflate_copy_prev_len, deflate_copyright, deflate_dictionary_len,
-        deflate_dictionary_state_after_load, deflate_distance_tree_code, deflate_fast_match_codes,
-        deflate_fast_match_progress, deflate_fast_should_insert_match, deflate_final_flush_action,
-        deflate_flush_block_state_after_output, deflate_flush_rank, deflate_huff_literal_progress,
-        deflate_insert_after_block, deflate_literal_state_after_emit, deflate_literal_tally_plan,
-        deflate_match_refill_action, deflate_pending_value, deflate_preflight,
-        deflate_prime_bits_valid, deflate_prime_has_pending_space, deflate_prime_insert_bits,
-        deflate_request_is_invalid, deflate_reset_status_and_adler, deflate_rle_can_scan_match,
-        deflate_rle_clamp_match_length, deflate_rle_match_length,
-        deflate_rle_match_state_after_emit, deflate_rle_match_tally_plan,
+        deflate_copy_prev_len, deflate_copyright, deflate_dictionary_insert_hashes,
+        deflate_dictionary_len, deflate_dictionary_state_after_load, deflate_distance_tree_code,
+        deflate_fast_match_codes, deflate_fast_match_progress, deflate_fast_should_insert_match,
+        deflate_final_flush_action, deflate_flush_block_state_after_output, deflate_flush_rank,
+        deflate_huff_literal_progress, deflate_insert_after_block,
+        deflate_literal_state_after_emit, deflate_literal_tally_plan, deflate_match_refill_action,
+        deflate_pending_value, deflate_preflight, deflate_prime_bits_valid,
+        deflate_prime_has_pending_space, deflate_prime_insert_bits, deflate_request_is_invalid,
+        deflate_reset_status_and_adler, deflate_rle_can_scan_match, deflate_rle_clamp_match_length,
+        deflate_rle_match_length, deflate_rle_match_state_after_emit, deflate_rle_match_tally_plan,
         deflate_rle_next_scan_indices, deflate_rle_refill_action, deflate_rle_scan_indices,
         deflate_rle_tally_plan, deflate_set_dictionary_allowed, deflate_should_return_buf_error,
         deflate_slow_can_search_match, deflate_state_is_usable, deflate_state_status_valid,
@@ -6285,6 +6351,42 @@ mod tests {
             deflate_dictionary_state_after_load(crate::stdlib::uInt::MAX, 1),
             (0, 0, 1, 0, previous_match_length, previous_match_length, 0),
         );
+    }
+
+    #[test]
+    fn dictionary_hash_insert_preserves_hash_chain_order() {
+        let window = [10, 11, 2, 3, 4];
+        let mut head: [crate::src::deflate::Posf; 8] = [0, 0, 7, 8, 9, 0, 0, 0];
+        let mut prev: [crate::src::deflate::Posf; 4] = [0; 4];
+        let mut ins_h = 0;
+
+        assert_eq!(
+            deflate_dictionary_insert_hashes(
+                &window, &mut head, &mut prev, 0, 5, &mut ins_h, 5, 7, 3,
+            ),
+            Some(3)
+        );
+        assert_eq!(ins_h, 4);
+        assert_eq!(prev, [7, 8, 9, 0]);
+        assert_eq!(head, [0, 0, 0, 1, 2, 0, 0, 0]);
+    }
+
+    #[test]
+    fn dictionary_hash_insert_rejects_short_window_without_mutation() {
+        let window = [0, 1];
+        let mut head: [crate::src::deflate::Posf; 8] = [4; 8];
+        let mut prev: [crate::src::deflate::Posf; 4] = [5; 4];
+        let mut ins_h = 6;
+
+        assert_eq!(
+            deflate_dictionary_insert_hashes(
+                &window, &mut head, &mut prev, 0, 3, &mut ins_h, 5, 7, 3,
+            ),
+            None
+        );
+        assert_eq!(ins_h, 6);
+        assert_eq!(head, [4; 8]);
+        assert_eq!(prev, [5; 4]);
     }
 
     #[test]
