@@ -170,6 +170,14 @@ struct InflateOwnedWindow {
     bytes: Vec<crate::stdlib::Bytef>,
 }
 
+/// A validated mutable history-window view.  Both the legacy allocation
+/// bridge and the eventual owned window hand the update core this same safe
+/// facade, so the update algorithm never needs to know how the bytes are
+/// stored.
+struct InflateWindow<'a> {
+    bytes: &'a mut [crate::stdlib::Bytef],
+}
+
 impl InflateWindowLayout {
     /// Derive the one allocation size used by inflate's legacy window.
     ///
@@ -204,11 +212,26 @@ impl InflateWindowLayout {
 }
 
 impl InflateOwnedWindow {
-    /// The existing `update_window` core already accepts this safe view.
-    /// Keeping that hand-off explicit prevents a future owner conversion from
-    /// recreating a raw allocation-derived slice.
-    fn as_mut_slice(&mut self) -> &mut [crate::stdlib::Bytef] {
-        &mut self.bytes
+    /// Keep the owned hand-off explicit so a future allocator-facade switch
+    /// cannot recreate an allocation-derived raw slice for history updates.
+    fn window(&mut self) -> InflateWindow<'_> {
+        InflateWindow {
+            bytes: &mut self.bytes,
+        }
+    }
+}
+
+impl<'a> InflateWindow<'a> {
+    fn borrowed(bytes: &'a mut [crate::stdlib::Bytef]) -> Self {
+        Self { bytes }
+    }
+
+    fn update(
+        &mut self,
+        state: &mut crate::src::inflate::inflate_state,
+        input: &[crate::stdlib::Bytef],
+    ) -> Result<(), ()> {
+        update_window(state, self.bytes, input)
     }
 }
 
@@ -796,7 +819,7 @@ fn updatewindow(
     // initialized stream state.  Keep the ABI allocation handle confined to
     // this bridge; callers use only references and slices.
     let window = unsafe { ::core::slice::from_raw_parts_mut(state.window, layout.len) };
-    update_window(state, window, input).is_err() as ::core::ffi::c_int
+    InflateWindow::borrowed(window).update(state, input).is_err() as ::core::ffi::c_int
 }
 
 fn copy_literal_block(input: &[crate::stdlib::Bytef], output: &mut [crate::stdlib::Bytef]) {
