@@ -98,6 +98,11 @@ fn gz_write_failure(errno_value: ::core::ffi::c_int) -> GzWriteFailure {
     }
 }
 
+fn gz_direct_write(fd: &rustix::fd::OwnedFd, input: &[u8]) -> Result<usize, GzWriteFailure> {
+    errno::set_errno(errno::Errno(0));
+    rustix::io::write(fd, input).map_err(|error| gz_write_failure(error.raw_os_error()))
+}
+
 fn clear_buffered_input(buffer: &mut [u8]) {
     buffer.fill(0);
 }
@@ -183,41 +188,53 @@ unsafe fn gz_comp(
     }
     if state.direct != 0 {
         while state.strm.avail_in != 0 {
-            *crate::stdlib::__errno_location() = 0 as ::core::ffi::c_int;
-            state.again = 0 as ::core::ffi::c_int;
+            state.again = 0;
             put = if state.strm.avail_in > max {
                 max
             } else {
                 state.strm.avail_in as ::core::ffi::c_uint
             };
-            writ = crate::stdlib::write(
-                <rustix::fd::OwnedFd as rustix::fd::AsRawFd>::as_raw_fd(state.fd.as_ref().unwrap()),
-                state.strm.next_in as *const ::core::ffi::c_void,
-                put as crate::__stddef_size_t_h::size_t,
-            ) as ::core::ffi::c_int;
-            if writ < 0 as ::core::ffi::c_int {
-                let failure = gz_write_failure(*crate::stdlib::__errno_location());
-                if failure.would_block {
-                    state.again = 1 as ::core::ffi::c_int;
+            let write = {
+                let Some(buffer) = state.in_0.as_deref() else {
+                    return -1;
+                };
+                let Some(buffered) = crate::src::gzlib::GzBufferedCursor::from_owned_buffer(
+                    buffer,
+                    state.strm.next_in.addr(),
+                    state.strm.avail_in,
+                ) else {
+                    return -1;
+                };
+                let Some((input, _)) = buffered.consume(put as usize) else {
+                    return -1;
+                };
+                gz_direct_write(state.fd.as_ref().unwrap(), input)
+            };
+            match write {
+                Ok(written) => writ = written as ::core::ffi::c_int,
+                Err(failure) => {
+                    if failure.would_block {
+                        state.again = 1;
+                    }
+                    let message = errno::Errno(failure.errno_value).to_string();
+                    crate::src::gzlib::GzErrorState {
+                        message: &mut state.msg,
+                        error: &mut state.err,
+                        buffered: &mut state.x.have,
+                        again: state.again,
+                        path: state.path.as_deref(),
+                    }
+                    .set(crate::zlib_h::Z_ERRNO, Some(message.as_bytes()));
+                    return -1;
                 }
-                let message = errno::Errno(failure.errno_value).to_string();
-                crate::src::gzlib::GzErrorState {
-                    message: &mut state.msg,
-                    error: &mut state.err,
-                    buffered: &mut state.x.have,
-                    again: state.again,
-                    path: state.path.as_deref(),
-                }
-                .set(crate::zlib_h::Z_ERRNO, Some(message.as_bytes()));
-                return -1 as ::core::ffi::c_int;
             }
             state.strm.avail_in = state
                 .strm
                 .avail_in
-                .wrapping_sub(writ as ::core::ffi::c_uint);
+                .wrapping_sub(writ as crate::stdlib::uInt);
             state.strm.next_in = state.strm.next_in.wrapping_add(writ as usize);
         }
-        return 0 as ::core::ffi::c_int;
+        return 0;
     }
     if state.reset != 0 {
         if state.strm.avail_in == 0 as crate::stdlib::uInt && flush == crate::zlib_h::Z_NO_FLUSH {
@@ -400,6 +417,41 @@ unsafe fn gz_write(
             && gz_comp(state, crate::zlib_h::Z_NO_FLUSH) == -1 as ::core::ffi::c_int
         {
             return 0 as crate::stdlib::z_size_t;
+        }
+        if state.direct != 0 {
+            while len != 0 {
+                let max = ((-1 as ::core::ffi::c_int as ::core::ffi::c_uint >> 2).wrapping_add(1))
+                    as usize;
+                let count = input.len().min(max);
+                state.again = 0;
+                match gz_direct_write(state.fd.as_ref().unwrap(), &input[..count]) {
+                    Ok(written) => {
+                        state.x.pos += written as crate::stdlib::off64_t;
+                        input = &input[written..];
+                        len = len.wrapping_sub(written as crate::stdlib::z_size_t);
+                    }
+                    Err(failure) => {
+                        if failure.would_block {
+                            state.again = 1;
+                        }
+                        let message = errno::Errno(failure.errno_value).to_string();
+                        crate::src::gzlib::GzErrorState {
+                            message: &mut state.msg,
+                            error: &mut state.err,
+                            buffered: &mut state.x.have,
+                            again: state.again,
+                            path: state.path.as_deref(),
+                        }
+                        .set(crate::zlib_h::Z_ERRNO, Some(message.as_bytes()));
+                        return if state.again != 0 {
+                            put.wrapping_sub(len)
+                        } else {
+                            0
+                        };
+                    }
+                }
+            }
+            return put;
         }
         state.strm.next_in = input.as_ptr() as *mut crate::stdlib::Bytef;
         loop {
