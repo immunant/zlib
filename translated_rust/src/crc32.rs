@@ -4794,207 +4794,30 @@ fn crc_word_big(mut data: z_word_t) -> z_word_t {
     }
     return data;
 }
-pub unsafe extern "C" fn crc32_z(
-    mut crc: crate::stdlib::uLong,
-    mut buf: *const ::core::ffi::c_uchar,
-    mut len: crate::stdlib::z_size_t,
+pub fn crc32_z(crc: crate::stdlib::uLong, buf: Option<&[::core::ffi::c_uchar]>) -> crate::stdlib::uLong {
+    let Some(buf) = buf else {
+        return 0;
+    };
+    let mut crc = !crc & 0xffffffff as crate::stdlib::uLong;
+    for &byte in buf {
+        crc = crc >> 8
+            ^ crc_table[((crc ^ byte as crate::stdlib::uLong) & 0xff) as usize]
+                as crate::stdlib::uLong;
+    }
+    crc ^ 0xffffffff as crate::stdlib::uLong
+}
+
+pub unsafe fn crc32_z_raw(
+    crc: crate::stdlib::uLong,
+    buf: *const ::core::ffi::c_uchar,
+    len: crate::stdlib::z_size_t,
 ) -> crate::stdlib::uLong {
-    if buf.is_null() {
-        return 0 as crate::stdlib::uLong;
-    }
-    crc = !crc & 0xffffffff as crate::stdlib::uLong;
-    if len >= (N * W + W - 1 as ::core::ffi::c_int) as crate::stdlib::z_size_t {
-        let mut blks: crate::stdlib::z_size_t = 0;
-        let mut words: *const z_word_t = ::core::ptr::null::<z_word_t>();
-        let mut endian: ::core::ffi::c_uint = 0;
-        let mut k: ::core::ffi::c_int = 0;
-        while len != 0
-            && buf.expose_provenance() as crate::stdlib::z_size_t
-                & (W - 1 as ::core::ffi::c_int) as crate::stdlib::z_size_t
-                != 0 as crate::stdlib::z_size_t
-        {
-            len = len.wrapping_sub(1);
-            let c2rust_fresh0 = buf;
-            buf = buf.offset(1);
-            crc = crc >> 8 as ::core::ffi::c_int
-                ^ crc_table[((crc ^ *c2rust_fresh0 as crate::stdlib::uLong)
-                    & 0xff as crate::stdlib::uLong) as usize]
-                    as crate::stdlib::uLong;
-        }
-        blks = len.wrapping_div((N * W) as crate::stdlib::z_size_t);
-        len = len.wrapping_sub(
-            blks.wrapping_mul(N as crate::stdlib::z_size_t)
-                .wrapping_mul(W as crate::stdlib::z_size_t),
-        );
-        words = buf as *const z_word_t;
-        endian = 1 as ::core::ffi::c_uint;
-        if *(&raw mut endian as *mut ::core::ffi::c_uchar) != 0 {
-            let mut crc0: crate::stdlib::z_crc_t = 0;
-            let mut word0: z_word_t = 0;
-            let mut crc1: crate::stdlib::z_crc_t = 0;
-            let mut word1: z_word_t = 0;
-            let mut crc2: crate::stdlib::z_crc_t = 0;
-            let mut word2: z_word_t = 0;
-            let mut crc3: crate::stdlib::z_crc_t = 0;
-            let mut word3: z_word_t = 0;
-            let mut crc4: crate::stdlib::z_crc_t = 0;
-            let mut word4: z_word_t = 0;
-            crc0 = crc as crate::stdlib::z_crc_t;
-            crc1 = 0 as crate::stdlib::z_crc_t;
-            crc2 = 0 as crate::stdlib::z_crc_t;
-            crc3 = 0 as crate::stdlib::z_crc_t;
-            crc4 = 0 as crate::stdlib::z_crc_t;
-            loop {
-                blks = blks.wrapping_sub(1);
-                if blks == 0 {
-                    break;
-                }
-                word0 = crc0 as z_word_t ^ *words.offset(0 as isize);
-                word1 = crc1 as z_word_t ^ *words.offset(1 as isize);
-                word2 = crc2 as z_word_t ^ *words.offset(2 as isize);
-                word3 = crc3 as z_word_t ^ *words.offset(3 as isize);
-                word4 = crc4 as z_word_t ^ *words.offset(4 as isize);
-                words = words.offset(N as isize);
-                crc0 = crc_braid_table[0 as usize][(word0 & 0xff as z_word_t) as usize];
-                crc1 = crc_braid_table[0 as usize][(word1 & 0xff as z_word_t) as usize];
-                crc2 = crc_braid_table[0 as usize][(word2 & 0xff as z_word_t) as usize];
-                crc3 = crc_braid_table[0 as usize][(word3 & 0xff as z_word_t) as usize];
-                crc4 = crc_braid_table[0 as usize][(word4 & 0xff as z_word_t) as usize];
-                k = 1 as ::core::ffi::c_int;
-                while k < W {
-                    crc0 ^= crc_braid_table[k as usize]
-                        [(word0 >> (k << 3 as ::core::ffi::c_int) & 0xff as z_word_t) as usize];
-                    crc1 ^= crc_braid_table[k as usize]
-                        [(word1 >> (k << 3 as ::core::ffi::c_int) & 0xff as z_word_t) as usize];
-                    crc2 ^= crc_braid_table[k as usize]
-                        [(word2 >> (k << 3 as ::core::ffi::c_int) & 0xff as z_word_t) as usize];
-                    crc3 ^= crc_braid_table[k as usize]
-                        [(word3 >> (k << 3 as ::core::ffi::c_int) & 0xff as z_word_t) as usize];
-                    crc4 ^= crc_braid_table[k as usize]
-                        [(word4 >> (k << 3 as ::core::ffi::c_int) & 0xff as z_word_t) as usize];
-                    k += 1;
-                }
-            }
-            crc = crc_word(crc0 as z_word_t ^ *words.offset(0 as isize)) as crate::stdlib::uLong;
-            crc = crc_word(crc1 as z_word_t ^ *words.offset(1 as isize) ^ crc as z_word_t)
-                as crate::stdlib::uLong;
-            crc = crc_word(crc2 as z_word_t ^ *words.offset(2 as isize) ^ crc as z_word_t)
-                as crate::stdlib::uLong;
-            crc = crc_word(crc3 as z_word_t ^ *words.offset(3 as isize) ^ crc as z_word_t)
-                as crate::stdlib::uLong;
-            crc = crc_word(crc4 as z_word_t ^ *words.offset(4 as isize) ^ crc as z_word_t)
-                as crate::stdlib::uLong;
-            words = words.offset(N as isize);
-        } else {
-            let mut crc0_0: z_word_t = 0;
-            let mut word0_0: z_word_t = 0;
-            let mut comb: z_word_t = 0;
-            let mut crc1_0: z_word_t = 0;
-            let mut word1_0: z_word_t = 0;
-            let mut crc2_0: z_word_t = 0;
-            let mut word2_0: z_word_t = 0;
-            let mut crc3_0: z_word_t = 0;
-            let mut word3_0: z_word_t = 0;
-            let mut crc4_0: z_word_t = 0;
-            let mut word4_0: z_word_t = 0;
-            crc0_0 = byte_swap(crc as z_word_t);
-            crc1_0 = 0 as z_word_t;
-            crc2_0 = 0 as z_word_t;
-            crc3_0 = 0 as z_word_t;
-            crc4_0 = 0 as z_word_t;
-            loop {
-                blks = blks.wrapping_sub(1);
-                if blks == 0 {
-                    break;
-                }
-                word0_0 = crc0_0 ^ *words.offset(0 as isize);
-                word1_0 = crc1_0 ^ *words.offset(1 as isize);
-                word2_0 = crc2_0 ^ *words.offset(2 as isize);
-                word3_0 = crc3_0 ^ *words.offset(3 as isize);
-                word4_0 = crc4_0 ^ *words.offset(4 as isize);
-                words = words.offset(N as isize);
-                crc0_0 = crc_braid_big_table[0 as usize][(word0_0 & 0xff as z_word_t) as usize];
-                crc1_0 = crc_braid_big_table[0 as usize][(word1_0 & 0xff as z_word_t) as usize];
-                crc2_0 = crc_braid_big_table[0 as usize][(word2_0 & 0xff as z_word_t) as usize];
-                crc3_0 = crc_braid_big_table[0 as usize][(word3_0 & 0xff as z_word_t) as usize];
-                crc4_0 = crc_braid_big_table[0 as usize][(word4_0 & 0xff as z_word_t) as usize];
-                k = 1 as ::core::ffi::c_int;
-                while k < W {
-                    crc0_0 ^= crc_braid_big_table[k as usize]
-                        [(word0_0 >> (k << 3 as ::core::ffi::c_int) & 0xff as z_word_t) as usize];
-                    crc1_0 ^= crc_braid_big_table[k as usize]
-                        [(word1_0 >> (k << 3 as ::core::ffi::c_int) & 0xff as z_word_t) as usize];
-                    crc2_0 ^= crc_braid_big_table[k as usize]
-                        [(word2_0 >> (k << 3 as ::core::ffi::c_int) & 0xff as z_word_t) as usize];
-                    crc3_0 ^= crc_braid_big_table[k as usize]
-                        [(word3_0 >> (k << 3 as ::core::ffi::c_int) & 0xff as z_word_t) as usize];
-                    crc4_0 ^= crc_braid_big_table[k as usize]
-                        [(word4_0 >> (k << 3 as ::core::ffi::c_int) & 0xff as z_word_t) as usize];
-                    k += 1;
-                }
-            }
-            comb = crc_word_big(crc0_0 ^ *words.offset(0 as isize));
-            comb = crc_word_big(crc1_0 ^ *words.offset(1 as isize) ^ comb);
-            comb = crc_word_big(crc2_0 ^ *words.offset(2 as isize) ^ comb);
-            comb = crc_word_big(crc3_0 ^ *words.offset(3 as isize) ^ comb);
-            comb = crc_word_big(crc4_0 ^ *words.offset(4 as isize) ^ comb);
-            words = words.offset(N as isize);
-            crc = byte_swap(comb) as crate::stdlib::uLong;
-        }
-        buf = words as *const ::core::ffi::c_uchar;
-    }
-    while len >= 8 as crate::stdlib::z_size_t {
-        len = len.wrapping_sub(8 as crate::stdlib::z_size_t);
-        let c2rust_fresh1 = buf;
-        buf = buf.offset(1);
-        crc = crc >> 8 as ::core::ffi::c_int
-            ^ crc_table[((crc ^ *c2rust_fresh1 as crate::stdlib::uLong)
-                & 0xff as crate::stdlib::uLong) as usize] as crate::stdlib::uLong;
-        let c2rust_fresh2 = buf;
-        buf = buf.offset(1);
-        crc = crc >> 8 as ::core::ffi::c_int
-            ^ crc_table[((crc ^ *c2rust_fresh2 as crate::stdlib::uLong)
-                & 0xff as crate::stdlib::uLong) as usize] as crate::stdlib::uLong;
-        let c2rust_fresh3 = buf;
-        buf = buf.offset(1);
-        crc = crc >> 8 as ::core::ffi::c_int
-            ^ crc_table[((crc ^ *c2rust_fresh3 as crate::stdlib::uLong)
-                & 0xff as crate::stdlib::uLong) as usize] as crate::stdlib::uLong;
-        let c2rust_fresh4 = buf;
-        buf = buf.offset(1);
-        crc = crc >> 8 as ::core::ffi::c_int
-            ^ crc_table[((crc ^ *c2rust_fresh4 as crate::stdlib::uLong)
-                & 0xff as crate::stdlib::uLong) as usize] as crate::stdlib::uLong;
-        let c2rust_fresh5 = buf;
-        buf = buf.offset(1);
-        crc = crc >> 8 as ::core::ffi::c_int
-            ^ crc_table[((crc ^ *c2rust_fresh5 as crate::stdlib::uLong)
-                & 0xff as crate::stdlib::uLong) as usize] as crate::stdlib::uLong;
-        let c2rust_fresh6 = buf;
-        buf = buf.offset(1);
-        crc = crc >> 8 as ::core::ffi::c_int
-            ^ crc_table[((crc ^ *c2rust_fresh6 as crate::stdlib::uLong)
-                & 0xff as crate::stdlib::uLong) as usize] as crate::stdlib::uLong;
-        let c2rust_fresh7 = buf;
-        buf = buf.offset(1);
-        crc = crc >> 8 as ::core::ffi::c_int
-            ^ crc_table[((crc ^ *c2rust_fresh7 as crate::stdlib::uLong)
-                & 0xff as crate::stdlib::uLong) as usize] as crate::stdlib::uLong;
-        let c2rust_fresh8 = buf;
-        buf = buf.offset(1);
-        crc = crc >> 8 as ::core::ffi::c_int
-            ^ crc_table[((crc ^ *c2rust_fresh8 as crate::stdlib::uLong)
-                & 0xff as crate::stdlib::uLong) as usize] as crate::stdlib::uLong;
-    }
-    while len != 0 {
-        len = len.wrapping_sub(1);
-        let c2rust_fresh9 = buf;
-        buf = buf.offset(1);
-        crc = crc >> 8 as ::core::ffi::c_int
-            ^ crc_table[((crc ^ *c2rust_fresh9 as crate::stdlib::uLong)
-                & 0xff as crate::stdlib::uLong) as usize] as crate::stdlib::uLong;
-    }
-    return crc ^ 0xffffffff as crate::stdlib::uLong;
+    let buf = if buf.is_null() {
+        None
+    } else {
+        Some(unsafe { ::core::slice::from_raw_parts(buf, len) })
+    };
+    crc32_z(crc, buf)
 }
 #[export_name = "crc32_z"]
 
@@ -5003,14 +4826,23 @@ pub unsafe extern "C" fn crc32_z_ffi(
     mut buf: *const ::core::ffi::c_uchar,
     mut len: crate::stdlib::z_size_t,
 ) -> crate::stdlib::uLong {
-    crc32_z(crc, buf, len)
+    let buf = if buf.is_null() {
+        None
+    } else {
+        Some(unsafe { ::core::slice::from_raw_parts(buf, len) })
+    };
+    crc32_z(crc, buf)
 }
-pub unsafe extern "C" fn crc32(
-    mut crc: crate::stdlib::uLong,
-    mut buf: *const ::core::ffi::c_uchar,
-    mut len: crate::stdlib::uInt,
+pub fn crc32(crc: crate::stdlib::uLong, buf: &[::core::ffi::c_uchar]) -> crate::stdlib::uLong {
+    crc32_z(crc, Some(buf))
+}
+
+pub unsafe fn crc32_raw(
+    crc: crate::stdlib::uLong,
+    buf: *const ::core::ffi::c_uchar,
+    len: crate::stdlib::uInt,
 ) -> crate::stdlib::uLong {
-    return crc32_z(crc, buf, len as crate::stdlib::z_size_t);
+    unsafe { crc32_z_raw(crc, buf, len as crate::stdlib::z_size_t) }
 }
 #[export_name = "crc32"]
 
@@ -5019,7 +4851,12 @@ pub unsafe extern "C" fn crc32_ffi(
     mut buf: *const ::core::ffi::c_uchar,
     mut len: crate::stdlib::uInt,
 ) -> crate::stdlib::uLong {
-    crc32(crc, buf, len)
+    let buf = if buf.is_null() {
+        None
+    } else {
+        Some(unsafe { ::core::slice::from_raw_parts(buf, len as usize) })
+    };
+    crc32_z(crc, buf)
 }
 pub fn crc32_combine_gen64(mut len2: crate::stdlib::off64_t) -> crate::stdlib::uLong {
     if len2 < 0 as crate::stdlib::off64_t {
