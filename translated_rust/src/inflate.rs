@@ -2698,10 +2698,16 @@ pub unsafe extern "C" fn inflateSetDictionary_ffi(
     let mut state: *mut crate::src::inflate::inflate_state =
         ::core::ptr::null_mut::<crate::src::inflate::inflate_state>();
     let mut dictid: ::core::ffi::c_ulong = 0;
-    let mut ret: ::core::ffi::c_int = 0;
     if crate::src::inflate::inflate_state_check_at_boundary!(strm) != 0 {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
+    let dictionary = if dictLength == 0 {
+        &[][..]
+    } else if dictionary.is_null() {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    } else {
+        core::slice::from_raw_parts(dictionary, dictLength as usize)
+    };
     state = (*strm).state as *mut crate::src::inflate::inflate_state;
     if (*state).wrap != 0 as ::core::ffi::c_int
         && (*state).mode as ::core::ffi::c_uint
@@ -2713,26 +2719,55 @@ pub unsafe extern "C" fn inflateSetDictionary_ffi(
         == crate::src::inflate::DICT as ::core::ffi::c_int as ::core::ffi::c_uint
     {
         dictid = crate::src::adler32::ADLER32_INITIAL as ::core::ffi::c_ulong;
-        dictid = crate::src::adler32::adler32_z(
-            dictid as crate::stdlib::uLong,
-            core::slice::from_raw_parts(dictionary, dictLength as usize),
-        ) as ::core::ffi::c_ulong;
+        dictid = crate::src::adler32::adler32_z(dictid as crate::stdlib::uLong, dictionary)
+            as ::core::ffi::c_ulong;
         if dictid != (*state).check {
             return crate::zlib_h::Z_DATA_ERROR;
         }
     }
-    ret = updatewindow(
-        strm,
-        // `dictLength` has already bounded the dictionary view above.  The
-        // legacy window adapter needs its end cursor, but forming that cursor
-        // does not itself need unsafe pointer arithmetic.
-        dictionary.wrapping_add(dictLength as usize),
-        dictLength as ::core::ffi::c_uint,
-    );
-    if ret != 0 {
+
+    // This exported boundary owns the allocator callback and the raw window
+    // lend.  The circular-buffer planning and copying stay in the checked
+    // slice core, so dictionary setup no longer enters the private raw
+    // `updatewindow` codec adapter.
+    if (*state).window.is_null() {
+        (*state).window = Some((*strm).zalloc.expect("non-null function pointer"))
+            .expect("non-null function pointer")(
+            (*strm).opaque,
+            (1 as crate::stdlib::uInt) << (*state).wbits,
+            ::core::mem::size_of::<::core::ffi::c_uchar>() as crate::stdlib::uInt,
+        ) as *mut ::core::ffi::c_uchar;
+        if (*state).window.is_null() {
+            (*state).mode = crate::src::inflate::MEM;
+            return crate::zlib_h::Z_MEM_ERROR;
+        }
+    }
+    if (*state).wsize == 0 {
+        (*state).wsize = (1 as ::core::ffi::c_uint) << (*state).wbits;
+        (*state).wnext = 0;
+        (*state).whave = 0;
+    }
+    let Some(plan) =
+        inflate_window_copy_plan((*state).wsize, (*state).wnext, (*state).whave, dictLength)
+    else {
+        (*state).mode = crate::src::inflate::MEM;
+        return crate::zlib_h::Z_MEM_ERROR;
+    };
+    let Some((next, have)) = plan.cursor_values() else {
+        (*state).mode = crate::src::inflate::MEM;
+        return crate::zlib_h::Z_MEM_ERROR;
+    };
+    let Ok(window_len) = usize::try_from((*state).wsize) else {
+        (*state).mode = crate::src::inflate::MEM;
+        return crate::zlib_h::Z_MEM_ERROR;
+    };
+    let window = core::slice::from_raw_parts_mut((*state).window, window_len);
+    if inflate_window_copy(window, dictionary, plan).is_none() {
         (*state).mode = crate::src::inflate::MEM;
         return crate::zlib_h::Z_MEM_ERROR;
     }
+    (*state).wnext = next;
+    (*state).whave = have;
     (*state).havedict = 1 as ::core::ffi::c_int;
     return crate::zlib_h::Z_OK;
 }
