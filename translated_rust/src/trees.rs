@@ -3637,16 +3637,13 @@ pub fn _tr_flush_bits(
     }
 }
 
-pub(crate) unsafe extern "C" fn bi_flush(s: *mut crate::src::deflate::deflate_state) {
-    let pending_buf = (*s).pending_buf;
-    let pending = (*s).pending;
-    let (bytes, len) = _tr_flush_bits(&mut *s);
-    if len != 0 {
-        *pending_buf.offset(pending as isize) = bytes[0];
-    }
-    if len == 2 {
-        *pending_buf.offset(pending.wrapping_add(1) as isize) = bytes[1];
-    }
+pub(crate) fn bi_flush(
+    s: &mut crate::src::deflate::deflate_state,
+    pending_buf: &mut [crate::stdlib::Bytef],
+) {
+    let pending = s.pending as usize;
+    let (bytes, len) = _tr_flush_bits(s);
+    pending_buf[pending..pending + len].copy_from_slice(&bytes[..len]);
 }
 
 fn bi_windup_bits(
@@ -3680,16 +3677,13 @@ fn bi_windup_bits(
     }
 }
 
-unsafe extern "C" fn bi_windup(s: *mut crate::src::deflate::deflate_state) {
-    let pending_buf = (*s).pending_buf;
-    let pending = (*s).pending;
-    let (bytes, len) = bi_windup_bits(&mut *s);
-    if len != 0 {
-        *pending_buf.offset(pending as isize) = bytes[0];
-    }
-    if len == 2 {
-        *pending_buf.offset(pending.wrapping_add(1) as isize) = bytes[1];
-    }
+fn bi_windup(
+    s: &mut crate::src::deflate::deflate_state,
+    pending_buf: &mut [crate::stdlib::Bytef],
+) {
+    let pending = s.pending as usize;
+    let (bytes, len) = bi_windup_bits(s);
+    pending_buf[pending..pending + len].copy_from_slice(&bytes[..len]);
 }
 
 unsafe extern "C" fn gen_codes(
@@ -4525,6 +4519,7 @@ pub unsafe extern "C" fn _tr_stored_block(
     mut stored_len: crate::zutil_h::ulg,
     mut last: ::core::ffi::c_int,
 ) {
+    let s = &mut *s;
     let mut len: ::core::ffi::c_int = 3 as ::core::ffi::c_int;
     if (*s).bi_valid > crate::src::deflate::Buf_size - len {
         let mut val: ::core::ffi::c_int =
@@ -4551,7 +4546,11 @@ pub unsafe extern "C" fn _tr_stored_block(
                 << (*s).bi_valid) as crate::zutil_h::ush;
         (*s).bi_valid += len;
     }
-    bi_windup(s);
+    let pending_buf = ::core::slice::from_raw_parts_mut(
+        (*s).pending_buf,
+        (*s).pending_buf_size as usize,
+    );
+    bi_windup(s, pending_buf);
     let c2rust_fresh51 = (*s).pending;
     (*s).pending = (*s).pending.wrapping_add(1);
     *(*s).pending_buf.offset(c2rust_fresh51 as isize) =
@@ -4594,9 +4593,14 @@ pub unsafe extern "C" fn _tr_stored_block_ffi(
 #[export_name = "_tr_flush_bits"]
 
 pub unsafe extern "C" fn _tr_flush_bits_ffi(mut s: *mut crate::src::deflate::deflate_state) {
-    bi_flush(s)
+    let pending_buf = ::core::slice::from_raw_parts_mut(
+        (*s).pending_buf,
+        (*s).pending_buf_size as usize,
+    );
+    bi_flush(&mut *s, pending_buf)
 }
 pub unsafe extern "C" fn _tr_align(mut s: *mut crate::src::deflate::deflate_state) {
+    let s = &mut *s;
     let mut len: ::core::ffi::c_int = 3 as ::core::ffi::c_int;
     if (*s).bi_valid > crate::src::deflate::Buf_size - len {
         let mut val: ::core::ffi::c_int = (1 as ::core::ffi::c_int) << 1 as ::core::ffi::c_int;
@@ -4647,7 +4651,11 @@ pub unsafe extern "C" fn _tr_align(mut s: *mut crate::src::deflate::deflate_stat
             as crate::zutil_h::ush;
         (*s).bi_valid += len_0;
     }
-    bi_flush(s);
+    let pending_buf = ::core::slice::from_raw_parts_mut(
+        (*s).pending_buf,
+        (*s).pending_buf_size as usize,
+    );
+    bi_flush(s, pending_buf);
 }
 #[export_name = "_tr_align"]
 
@@ -4914,6 +4922,8 @@ pub unsafe extern "C" fn _tr_flush_block(
     mut stored_len: crate::zutil_h::ulg,
     mut last: ::core::ffi::c_int,
 ) {
+    let s_raw = s;
+    let s = &mut *s;
     let mut opt_lenb: crate::zutil_h::ulg = 0;
     let mut static_lenb: crate::zutil_h::ulg = 0;
     let mut max_blindex: ::core::ffi::c_int = 0 as ::core::ffi::c_int;
@@ -4923,14 +4933,14 @@ pub unsafe extern "C" fn _tr_flush_block(
             (*strm).data_type = detect_data_type(&(*s).dyn_ltree);
         }
         build_tree(
-            s,
+            s_raw,
             &raw mut (*s).l_desc as *mut crate::src::deflate::tree_desc,
         );
         build_tree(
-            s,
+            s_raw,
             &raw mut (*s).d_desc as *mut crate::src::deflate::tree_desc,
         );
-        max_blindex = build_bl_tree(s);
+        max_blindex = build_bl_tree(s_raw);
         opt_lenb = (*s)
             .opt_len
             .wrapping_add(3 as crate::zutil_h::ulg)
@@ -4949,7 +4959,7 @@ pub unsafe extern "C" fn _tr_flush_block(
         opt_lenb = static_lenb;
     }
     if stored_len.wrapping_add(4 as crate::zutil_h::ulg) <= opt_lenb && !buf.is_null() {
-        _tr_stored_block(s, buf, stored_len, last);
+        _tr_stored_block(s_raw, buf, stored_len, last);
     } else if static_lenb == opt_lenb {
         let mut len: ::core::ffi::c_int = 3 as ::core::ffi::c_int;
         if (*s).bi_valid > crate::src::deflate::Buf_size - len {
@@ -4980,7 +4990,7 @@ pub unsafe extern "C" fn _tr_flush_block(
             (*s).bi_valid += len;
         }
         compress_block(
-            s,
+            s_raw,
             &raw const static_ltree as *const crate::src::deflate::ct_data,
             &raw const static_dtree as *const crate::src::deflate::ct_data,
         );
@@ -5014,22 +5024,26 @@ pub unsafe extern "C" fn _tr_flush_block(
             (*s).bi_valid += len_0;
         }
         send_all_trees(
-            s,
+            s_raw,
             (*s).l_desc.max_code + 1 as ::core::ffi::c_int,
             (*s).d_desc.max_code + 1 as ::core::ffi::c_int,
             max_blindex + 1 as ::core::ffi::c_int,
         );
         compress_block(
-            s,
+            s_raw,
             &raw mut (*s).dyn_ltree as *mut crate::src::deflate::ct_data_s
                 as *const crate::src::deflate::ct_data,
             &raw mut (*s).dyn_dtree as *mut crate::src::deflate::ct_data_s
                 as *const crate::src::deflate::ct_data,
         );
     }
-    init_block(s);
+    init_block(s_raw);
     if last != 0 {
-        bi_windup(s);
+        let pending_buf = ::core::slice::from_raw_parts_mut(
+            (*s).pending_buf,
+            (*s).pending_buf_size as usize,
+        );
+        bi_windup(s, pending_buf);
     }
 }
 #[export_name = "_tr_flush_block"]
