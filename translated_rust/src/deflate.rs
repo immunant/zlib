@@ -148,6 +148,28 @@ pub struct internal_state {
     pub slid: ::core::ffi::c_int,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) struct PendingStorageLayout {
+    pub total_len: usize,
+    pub symbol_offset: usize,
+    pub symbol_len: usize,
+    pub symbol_flush_threshold: crate::stdlib::uInt,
+}
+
+pub(crate) fn pending_storage_layout(
+    lit_bufsize: crate::stdlib::uInt,
+) -> PendingStorageLayout {
+    let symbol_offset = lit_bufsize as usize;
+    let total_len = symbol_offset.wrapping_mul(4);
+
+    PendingStorageLayout {
+        total_len,
+        symbol_offset,
+        symbol_len: total_len.wrapping_sub(symbol_offset),
+        symbol_flush_threshold: lit_bufsize.wrapping_sub(1).wrapping_mul(3),
+    }
+}
+
 pub const MIN_LOOKAHEAD: ::core::ffi::c_int =
     crate::zutil_h::MAX_MATCH + crate::zutil_h::MIN_MATCH + 1 as ::core::ffi::c_int;
 
@@ -1228,14 +1250,14 @@ pub unsafe extern "C" fn deflateInit2_(
     (*s).high_water = 0 as crate::zutil_h::ulg;
     (*s).lit_bufsize =
         ((1 as ::core::ffi::c_int) << memLevel + 6 as ::core::ffi::c_int) as crate::stdlib::uInt;
+    let pending_layout = pending_storage_layout((*s).lit_bufsize);
     (*s).pending_buf = Some((*strm).zalloc.expect("non-null function pointer"))
         .expect("non-null function pointer")(
         (*strm).opaque,
         (*s).lit_bufsize,
         4 as crate::stdlib::uInt,
     ) as *mut crate::zutil_h::uchf as *mut crate::stdlib::Bytef;
-    (*s).pending_buf_size =
-        ((*s).lit_bufsize as crate::zutil_h::ulg).wrapping_mul(4 as crate::zutil_h::ulg);
+    (*s).pending_buf_size = pending_layout.total_len as crate::zutil_h::ulg;
     if (*s).window.is_null()
         || (*s).prev.is_null()
         || (*s).head.is_null()
@@ -1247,12 +1269,10 @@ pub unsafe extern "C" fn deflateInit2_(
         deflateEnd(strm);
         return crate::zlib_h::Z_MEM_ERROR;
     }
-    (*s).sym_buf =
-        (*s).pending_buf.wrapping_add((*s).lit_bufsize as usize) as *mut crate::zutil_h::uchf;
-    (*s).sym_end = (*s)
-        .lit_bufsize
-        .wrapping_sub(1 as crate::stdlib::uInt)
-        .wrapping_mul(3 as crate::stdlib::uInt);
+    (*s).sym_buf = (*s)
+        .pending_buf
+        .wrapping_add(pending_layout.symbol_offset) as *mut crate::zutil_h::uchf;
+    (*s).sym_end = pending_layout.symbol_flush_threshold;
     (*s).level = level;
     (*s).strategy = strategy;
     (*s).method = method as crate::stdlib::Byte;
@@ -4466,7 +4486,8 @@ mod tests {
         lm_head_reset_plan, lm_init_plan, lm_initial_state, lm_match_parameters, lm_reset_plan,
         longest_match_candidate_update, longest_match_clamp_length, longest_match_limit,
         longest_match_next_chain_length, longest_match_search_parameters, normalize_deflate_params,
-        pending_buffer_needs_flush, pending_output_len, pending_short_cursors, put_short_msb_core,
+        pending_buffer_needs_flush, pending_output_len, pending_short_cursors,
+        pending_storage_layout, put_short_msb_core,
         read_buf_checksum, read_buf_core, read_buf_input_progress_after_copy, read_buf_len,
         read_buf_total_in_after_copy, short_msb_bytes, slide_hash_core, slide_hash_entry,
         stored_block_available_output, stored_block_buffered_len, stored_block_can_emit,
@@ -5397,6 +5418,28 @@ mod tests {
         assert_eq!(
             flush_pending_accounting(3, 8, crate::stdlib::uLong::MAX),
             Some((3, 0, 5, 2, true))
+        );
+    }
+
+    #[test]
+    fn pending_storage_layout_preserves_shared_allocation_geometry() {
+        assert_eq!(
+            pending_storage_layout(16),
+            super::PendingStorageLayout {
+                total_len: 64,
+                symbol_offset: 16,
+                symbol_len: 48,
+                symbol_flush_threshold: 45,
+            }
+        );
+        assert_eq!(
+            pending_storage_layout(1),
+            super::PendingStorageLayout {
+                total_len: 4,
+                symbol_offset: 1,
+                symbol_len: 3,
+                symbol_flush_threshold: 0,
+            }
         );
     }
 

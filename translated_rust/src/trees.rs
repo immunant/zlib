@@ -5402,12 +5402,8 @@ pub unsafe extern "C" fn _tr_tally_ffi(
     mut lc: ::core::ffi::c_uint,
 ) -> ::core::ffi::c_int {
     let state = &mut *s;
-    let symbols = core::slice::from_raw_parts_mut(
-        state.sym_buf,
-        state
-            .pending_buf_size
-            .wrapping_sub(state.lit_bufsize as crate::zutil_h::ulg) as usize,
-    );
+    let pending_layout = crate::src::deflate::pending_storage_layout(state.lit_bufsize);
+    let symbols = core::slice::from_raw_parts_mut(state.sym_buf, pending_layout.symbol_len);
     tr_tally_core(
         symbols,
         &mut state.sym_next,
