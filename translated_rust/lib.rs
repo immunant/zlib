@@ -184,6 +184,14 @@ pub mod zlib_h {
     #[derive(Copy, Clone, Default)]
     pub struct InputBuffer(pub Option<::core::num::NonZeroUsize>);
 
+    impl InputBuffer {
+        pub fn advance(self, bytes: usize) -> Self {
+            Self(self.0.and_then(|address| {
+                ::core::num::NonZeroUsize::new(address.get().wrapping_add(bytes))
+            }))
+        }
+    }
+
     /// A nullable cursor into the caller-owned output range.  zlib's stream
     /// API does not own this memory, so an address cursor preserves that API
     /// while keeping the stream itself free of raw pointer fields.
