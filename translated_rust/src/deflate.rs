@@ -2389,7 +2389,7 @@ fn longest_match(
     unsafe {
         let s = &mut *s;
         let mut chain_length: ::core::ffi::c_uint = s.max_chain_length as ::core::ffi::c_uint;
-        let mut scan: *mut crate::stdlib::Bytef = s.window.offset(s.strstart as isize);
+        let mut scan: *mut crate::stdlib::Bytef = s.window.wrapping_offset(s.strstart as isize);
         let mut match_0: *mut crate::stdlib::Bytef =
             ::core::ptr::null_mut::<crate::stdlib::Bytef>();
         let mut len: ::core::ffi::c_int = 0;
@@ -2410,12 +2410,13 @@ fn longest_match(
         let mut wmask: crate::stdlib::uInt = s.w_mask;
         let mut strend: *mut crate::stdlib::Bytef = s
             .window
-            .offset(s.strstart as isize)
-            .offset(crate::zutil_h::MAX_MATCH as isize);
-        let mut scan_end1: crate::stdlib::Byte =
-            *scan.offset((best_len - 1 as ::core::ffi::c_int) as isize) as crate::stdlib::Byte;
+            .wrapping_offset(s.strstart as isize)
+            .wrapping_offset(crate::zutil_h::MAX_MATCH as isize);
+        let mut scan_end1: crate::stdlib::Byte = *scan
+            .wrapping_offset((best_len - 1 as ::core::ffi::c_int) as isize)
+            as crate::stdlib::Byte;
         let mut scan_end: crate::stdlib::Byte =
-            *scan.offset(best_len as isize) as crate::stdlib::Byte;
+            *scan.wrapping_offset(best_len as isize) as crate::stdlib::Byte;
         if s.prev_length >= s.good_match {
             chain_length >>= 2 as ::core::ffi::c_int;
         }
@@ -2423,58 +2424,59 @@ fn longest_match(
             nice_match = s.lookahead as ::core::ffi::c_int;
         }
         loop {
-            match_0 = s.window.offset(cur_match as isize);
-            if !(*match_0.offset(best_len as isize) as ::core::ffi::c_int
+            match_0 = s.window.wrapping_offset(cur_match as isize);
+            if !(*match_0.wrapping_offset(best_len as isize) as ::core::ffi::c_int
                 != scan_end as ::core::ffi::c_int
-                || *match_0.offset((best_len - 1 as ::core::ffi::c_int) as isize)
+                || *match_0.wrapping_offset((best_len - 1 as ::core::ffi::c_int) as isize)
                     as ::core::ffi::c_int
                     != scan_end1 as ::core::ffi::c_int
                 || *match_0 as ::core::ffi::c_int != *scan as ::core::ffi::c_int
                 || {
-                    match_0 = match_0.offset(1);
+                    match_0 = match_0.wrapping_offset(1);
                     *match_0 as ::core::ffi::c_int
-                        != *scan.offset(1 as ::core::ffi::c_int as isize) as ::core::ffi::c_int
+                        != *scan.wrapping_offset(1 as ::core::ffi::c_int as isize)
+                            as ::core::ffi::c_int
                 })
             {
-                scan = scan.offset(2 as ::core::ffi::c_int as isize);
-                match_0 = match_0.offset(1);
+                scan = scan.wrapping_offset(2 as ::core::ffi::c_int as isize);
+                match_0 = match_0.wrapping_offset(1);
                 loop {
-                    scan = scan.offset(1);
-                    match_0 = match_0.offset(1);
+                    scan = scan.wrapping_offset(1);
+                    match_0 = match_0.wrapping_offset(1);
                     if !(*scan as ::core::ffi::c_int == *match_0 as ::core::ffi::c_int
                         && {
-                            scan = scan.offset(1);
-                            match_0 = match_0.offset(1);
+                            scan = scan.wrapping_offset(1);
+                            match_0 = match_0.wrapping_offset(1);
                             *scan as ::core::ffi::c_int == *match_0 as ::core::ffi::c_int
                         }
                         && {
-                            scan = scan.offset(1);
-                            match_0 = match_0.offset(1);
+                            scan = scan.wrapping_offset(1);
+                            match_0 = match_0.wrapping_offset(1);
                             *scan as ::core::ffi::c_int == *match_0 as ::core::ffi::c_int
                         }
                         && {
-                            scan = scan.offset(1);
-                            match_0 = match_0.offset(1);
+                            scan = scan.wrapping_offset(1);
+                            match_0 = match_0.wrapping_offset(1);
                             *scan as ::core::ffi::c_int == *match_0 as ::core::ffi::c_int
                         }
                         && {
-                            scan = scan.offset(1);
-                            match_0 = match_0.offset(1);
+                            scan = scan.wrapping_offset(1);
+                            match_0 = match_0.wrapping_offset(1);
                             *scan as ::core::ffi::c_int == *match_0 as ::core::ffi::c_int
                         }
                         && {
-                            scan = scan.offset(1);
-                            match_0 = match_0.offset(1);
+                            scan = scan.wrapping_offset(1);
+                            match_0 = match_0.wrapping_offset(1);
                             *scan as ::core::ffi::c_int == *match_0 as ::core::ffi::c_int
                         }
                         && {
-                            scan = scan.offset(1);
-                            match_0 = match_0.offset(1);
+                            scan = scan.wrapping_offset(1);
+                            match_0 = match_0.wrapping_offset(1);
                             *scan as ::core::ffi::c_int == *match_0 as ::core::ffi::c_int
                         }
                         && {
-                            scan = scan.offset(1);
-                            match_0 = match_0.offset(1);
+                            scan = scan.wrapping_offset(1);
+                            match_0 = match_0.wrapping_offset(1);
                             *scan as ::core::ffi::c_int == *match_0 as ::core::ffi::c_int
                         }
                         && scan < strend)
@@ -2484,19 +2486,19 @@ fn longest_match(
                 }
                 len = crate::zutil_h::MAX_MATCH
                     - strend.offset_from(scan) as ::core::ffi::c_long as ::core::ffi::c_int;
-                scan = strend.offset(-(crate::zutil_h::MAX_MATCH as isize));
+                scan = strend.wrapping_offset(-(crate::zutil_h::MAX_MATCH as isize));
                 if len > best_len {
                     s.match_start = cur_match as crate::stdlib::uInt;
                     best_len = len;
                     if len >= nice_match {
                         break;
                     }
-                    scan_end1 = *scan.offset((best_len - 1 as ::core::ffi::c_int) as isize)
+                    scan_end1 = *scan.wrapping_offset((best_len - 1 as ::core::ffi::c_int) as isize)
                         as crate::stdlib::Byte;
-                    scan_end = *scan.offset(best_len as isize) as crate::stdlib::Byte;
+                    scan_end = *scan.wrapping_offset(best_len as isize) as crate::stdlib::Byte;
                 }
             }
-            cur_match = *prev.offset((cur_match as crate::stdlib::uInt & wmask) as isize)
+            cur_match = *prev.wrapping_offset((cur_match as crate::stdlib::uInt & wmask) as isize)
                 as crate::src::deflate::IPos;
             if !(cur_match > limit && {
                 chain_length = chain_length.wrapping_sub(1);
