@@ -769,6 +769,19 @@ fn deflate_prepare_stream(stream: &mut crate::zlib_h::z_stream) -> bool {
     crate::src::zutil::prepare_stream_allocator(stream)
 }
 
+// `deflate_prepare_stream()` always leaves a stream with an allocation
+// callback.  Route both default and caller-provided allocation through that
+// published callback so every allocation observes the same stream fields and
+// callback order.  In particular, do not special-case `zcalloc` here: a
+// caller can intentionally install that function with a non-default opaque
+// value, and zlib still calls the stream's callback.
+macro_rules! deflate_allocate {
+    ($stream:expr, $items:expr, $size:expr $(,)?) => {{
+        let zalloc = $stream.zalloc.expect("prepared stream has an allocator");
+        zalloc($stream.opaque, $items, $size)
+    }};
+}
+
 // This internal parameter-defaulting dispatcher only accepts references
 // already bound by its callers. The exported `deflateInit2_` adapter binds
 // the raw ABI arguments before reaching the implementation below.
@@ -897,26 +910,19 @@ pub fn deflateInit2_(
     let Some(stream) = strm else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
-    let uses_default_allocator = deflate_prepare_stream(stream);
+    deflate_prepare_stream(stream);
     let options = match deflate_init_options(level, method, windowBits, memLevel, strategy) {
         Ok(options) => options,
         Err(error) => return error,
     };
-    // A missing allocator was replaced above with zlib's known-safe default.
-    // Only a caller-provided callback retains the foreign callback boundary.
-    s = if uses_default_allocator {
-        crate::src::zutil::zcalloc(
-            stream.opaque,
-            1 as crate::stdlib::uInt,
-            ::core::mem::size_of::<crate::src::deflate::deflate_state>() as crate::stdlib::uInt,
-        ) as *mut crate::src::deflate::deflate_state
-    } else {
-        Some(stream.zalloc.expect("non-null function pointer")).expect("non-null function pointer")(
-            stream.opaque,
-            1 as crate::stdlib::uInt,
-            ::core::mem::size_of::<crate::src::deflate::deflate_state>() as crate::stdlib::uInt,
-        ) as *mut crate::src::deflate::deflate_state
-    };
+    // Preparation above chose either zlib's default allocator or the
+    // caller's callback. Keep all requests below on that published stream
+    // callback path.
+    s = deflate_allocate!(
+        stream,
+        1 as crate::stdlib::uInt,
+        ::core::mem::size_of::<crate::src::deflate::deflate_state>() as crate::stdlib::uInt,
+    ) as *mut crate::src::deflate::deflate_state;
     if s.is_null() {
         return crate::zlib_h::Z_MEM_ERROR;
     }
@@ -947,57 +953,30 @@ pub fn deflateInit2_(
         .wrapping_add(crate::zutil_h::MIN_MATCH as crate::stdlib::uInt)
         .wrapping_sub(1 as crate::stdlib::uInt)
         .wrapping_div(crate::zutil_h::MIN_MATCH as crate::stdlib::uInt);
-    if uses_default_allocator {
-        state.window = crate::src::zutil::zcalloc(
-            stream.opaque,
-            state.w_size,
-            (2 as usize).wrapping_mul(::core::mem::size_of::<crate::stdlib::Byte>())
-                as crate::stdlib::uInt,
-        ) as *mut crate::stdlib::Bytef;
-        state.prev = crate::src::zutil::zcalloc(
-            stream.opaque,
-            state.w_size,
-            ::core::mem::size_of::<crate::src::deflate::Pos>() as crate::stdlib::uInt,
-        ) as *mut crate::src::deflate::Posf;
-        state.head = crate::src::zutil::zcalloc(
-            stream.opaque,
-            state.hash_size,
-            ::core::mem::size_of::<crate::src::deflate::Pos>() as crate::stdlib::uInt,
-        ) as *mut crate::src::deflate::Posf;
-    } else {
-        state.window = Some(stream.zalloc.expect("non-null function pointer"))
-            .expect("non-null function pointer")(
-            stream.opaque,
-            state.w_size,
-            (2 as usize).wrapping_mul(::core::mem::size_of::<crate::stdlib::Byte>())
-                as crate::stdlib::uInt,
-        ) as *mut crate::stdlib::Bytef;
-        state.prev = Some(stream.zalloc.expect("non-null function pointer"))
-            .expect("non-null function pointer")(
-            stream.opaque,
-            state.w_size,
-            ::core::mem::size_of::<crate::src::deflate::Pos>() as crate::stdlib::uInt,
-        ) as *mut crate::src::deflate::Posf;
-        state.head = Some(stream.zalloc.expect("non-null function pointer"))
-            .expect("non-null function pointer")(
-            stream.opaque,
-            state.hash_size,
-            ::core::mem::size_of::<crate::src::deflate::Pos>() as crate::stdlib::uInt,
-        ) as *mut crate::src::deflate::Posf;
-    }
+    state.window = deflate_allocate!(
+        stream,
+        state.w_size,
+        (2 as usize).wrapping_mul(::core::mem::size_of::<crate::stdlib::Byte>())
+            as crate::stdlib::uInt,
+    ) as *mut crate::stdlib::Bytef;
+    state.prev = deflate_allocate!(
+        stream,
+        state.w_size,
+        ::core::mem::size_of::<crate::src::deflate::Pos>() as crate::stdlib::uInt,
+    ) as *mut crate::src::deflate::Posf;
+    state.head = deflate_allocate!(
+        stream,
+        state.hash_size,
+        ::core::mem::size_of::<crate::src::deflate::Pos>() as crate::stdlib::uInt,
+    ) as *mut crate::src::deflate::Posf;
     state.high_water = 0 as crate::zutil_h::ulg;
     state.lit_bufsize = ((1 as ::core::ffi::c_int) << options.mem_level + 6 as ::core::ffi::c_int)
         as crate::stdlib::uInt;
-    state.pending_buf = if uses_default_allocator {
-        crate::src::zutil::zcalloc(stream.opaque, state.lit_bufsize, 4 as crate::stdlib::uInt)
-            as *mut crate::zutil_h::uchf as *mut crate::stdlib::Bytef
-    } else {
-        Some(stream.zalloc.expect("non-null function pointer")).expect("non-null function pointer")(
-            stream.opaque,
-            state.lit_bufsize,
-            4 as crate::stdlib::uInt,
-        ) as *mut crate::zutil_h::uchf as *mut crate::stdlib::Bytef
-    };
+    state.pending_buf = deflate_allocate!(
+        stream,
+        state.lit_bufsize,
+        4 as crate::stdlib::uInt,
+    ) as *mut crate::zutil_h::uchf as *mut crate::stdlib::Bytef;
     state.pending_buf_size =
         (state.lit_bufsize as crate::zutil_h::ulg).wrapping_mul(4 as crate::zutil_h::ulg);
     if state.window.is_null()
