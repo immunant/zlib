@@ -1295,11 +1295,10 @@ fn request_deflate_storage(
     }
 }
 
-// This is the sole callback-allocation boundary for the resumable deflater.
-// It deliberately remains an implementation-only unsafe transaction: it owns
-// callback invocation, immediate result validation/publication, and the
-// matching release order.  The rest of deflate receives only the scoped slice
-// views produced by `with_complete_views()` and ordinary scalar state.
+// This is the pointer-free callback-allocation owner for the resumable
+// deflater.  The established ABI/state boundaries invoke callbacks and form
+// raw views; this owner supplies their one immutable request schedule and
+// lifecycle geometry, so no consumer can recreate either from mutable state.
 mod callback_owner {
     use super::*;
 
@@ -1312,186 +1311,12 @@ mod callback_owner {
     }
 
     impl Transaction {
-        // Reload callback state for each request.  A custom callback can
-        // re-enter the library and alter the stream between requests.
-        unsafe fn allocate(
-            stream: &mut crate::zlib_h::z_stream_s,
-            allocation: DeflateAllocation,
-        ) -> Option<::core::ptr::NonNull<::core::ffi::c_void>> {
-            let callback = stream.zalloc?;
-            let opaque = stream.opaque;
-            ::core::ptr::NonNull::new(callback(opaque, allocation.items, allocation.size))
+        pub(super) fn new(storage: DeflateStorageLayout) -> Self {
+            Self { storage }
         }
 
-        pub(super) unsafe fn allocate_state(
-            stream: &mut crate::zlib_h::z_stream_s,
-            allocation: DeflateAllocation,
-            storage: DeflateStorageLayout,
-        ) -> Option<(
-            Self,
-            ::core::ptr::NonNull<crate::src::deflate::deflate_state>,
-        )> {
-            let callback = stream.zalloc?;
-            let opaque = stream.opaque;
-            let state =
-                ::core::ptr::NonNull::new(callback(opaque, allocation.items, allocation.size))?
-                    .cast::<crate::src::deflate::deflate_state>();
-            Some((Self { storage }, state))
-        }
-
-        pub(super) unsafe fn publish_state(
-            &self,
-            stream: &mut crate::zlib_h::z_stream_s,
-            state_handle: ::core::ptr::NonNull<crate::src::deflate::deflate_state>,
-            state: crate::src::deflate::internal_state,
-        ) {
-            state_handle.write(state);
-            stream.state = Some(state_handle.cast());
-        }
-
-        // Every callback result is converted to `Option<NonNull<_>>` and
-        // published to the lifecycle ledger before the next callback is
-        // loaded.  Continue after a failed allocation: zlib's common cleanup
-        // path observes the full window/prev/head/pending request sequence.
-        pub(super) unsafe fn allocate_storage(
-            &self,
-            stream: &mut crate::zlib_h::z_stream_s,
-            state_handle: ::core::ptr::NonNull<crate::src::deflate::deflate_state>,
-        ) -> bool {
-            let mut complete = true;
-            for request in self.storage.callback_requests() {
-                let allocation = Self::allocate(stream, request.allocation);
-                complete &= allocation.is_some();
-                let state = &mut *state_handle.as_ptr();
-                match request.slot {
-                    DeflateStorageSlot::Window => {
-                        state.window = allocation.map(|allocation| allocation.cast());
-                    }
-                    DeflateStorageSlot::Prev => {
-                        state.prev = allocation.map(|allocation| allocation.cast());
-                    }
-                    DeflateStorageSlot::Head => {
-                        state.head = allocation.map(|allocation| allocation.cast());
-                    }
-                    DeflateStorageSlot::Pending => {
-                        state.pending_buf = allocation.map(|allocation| allocation.cast());
-                    }
-                }
-                state
-                    .callback_storage
-                    .record_storage(request.slot, allocation.is_some());
-            }
-            complete
-        }
-
-        pub(super) unsafe fn with_state<R>(
-            &self,
-            state_handle: ::core::ptr::NonNull<crate::src::deflate::deflate_state>,
-            use_state: impl FnOnce(&mut crate::src::deflate::deflate_state) -> R,
-        ) -> R {
-            use_state(&mut *state_handle.as_ptr())
-        }
-
-        // Construct each complete backing view once for an operation.  The
-        // callback handles never leave this owner; its closure sees only
-        // bounded slices and the scalar state record.
-        pub(super) unsafe fn with_complete_views<R>(
-            &mut self,
-            state_handle: ::core::ptr::NonNull<crate::src::deflate::deflate_state>,
-            use_views: impl FnOnce(
-                &mut crate::src::deflate::deflate_state,
-                DeflateDispatchStorage<'_>,
-            ) -> R,
-        ) -> Option<R> {
-            let state = &mut *state_handle.as_ptr();
-            if !state.callback_storage.is_complete() {
-                return None;
-            }
-            let layout = state.callback_storage.storage();
-            let window = ::core::slice::from_raw_parts_mut(
-                state.window?.as_ptr(),
-                layout.window.byte_len()?,
-            );
-            let prev = ::core::slice::from_raw_parts_mut(
-                state.prev?.as_ptr(),
-                layout.prev.element_len::<crate::src::deflate::Posf>()?,
-            );
-            let head = ::core::slice::from_raw_parts_mut(
-                state.head?.as_ptr(),
-                layout.head.element_len::<crate::src::deflate::Posf>()?,
-            );
-            let pending_buf = ::core::slice::from_raw_parts_mut(
-                state.pending_buf?.as_ptr(),
-                layout.pending.byte_len()?,
-            );
-            Some(use_views(
-                state,
-                DeflateDispatchStorage {
-                    pending_buf,
-                    window,
-                    prev,
-                    head,
-                },
-            ))
-        }
-
-        pub(super) unsafe fn from_published(
-            stream: &mut crate::zlib_h::z_stream_s,
-        ) -> Option<(
-            Self,
-            ::core::ptr::NonNull<crate::src::deflate::deflate_state>,
-        )> {
-            let state = stream.state?.cast::<crate::src::deflate::deflate_state>();
-            if stream.zalloc.is_none() || stream.zfree.is_none() {
-                return None;
-            }
-            let storage = (*state.as_ptr()).callback_storage.storage();
-            Some((Self { storage }, state))
-        }
-
-        // Snapshot all original handles before the first free callback, then
-        // reload `zfree` and `opaque` for every release.  This keeps re-entry
-        // from borrowing the state across a callback and preserves zlib's
-        // pending/head/prev/window/state release order.
-        pub(super) unsafe fn release(
-            self,
-            stream: &mut crate::zlib_h::z_stream_s,
-            state_handle: ::core::ptr::NonNull<crate::src::deflate::deflate_state>,
-        ) -> ::core::ffi::c_int {
-            let (release_plan, allocations) = {
-                let state = &mut *state_handle.as_ptr();
-                let release_plan = state.callback_storage.take_release_plan(state.status);
-                drop(state.gzhead.take());
-                (
-                    release_plan,
-                    release_plan.ordered_slots().map(|slot| {
-                        slot.and_then(|slot| match slot {
-                            DeflateReleaseSlot::Pending => {
-                                state.pending_buf.map(|allocation| allocation.cast())
-                            }
-                            DeflateReleaseSlot::Head => {
-                                state.head.map(|allocation| allocation.cast())
-                            }
-                            DeflateReleaseSlot::Prev => {
-                                state.prev.map(|allocation| allocation.cast())
-                            }
-                            DeflateReleaseSlot::Window => {
-                                state.window.map(|allocation| allocation.cast())
-                            }
-                            DeflateReleaseSlot::State => Some(state_handle.cast()),
-                        })
-                    }),
-                )
-            };
-            for allocation in allocations.into_iter().flatten() {
-                let callback = stream
-                    .zfree
-                    .expect("published callback transaction has zfree");
-                let opaque = stream.opaque;
-                callback(opaque, allocation.as_ptr());
-            }
-            stream.state = None;
-            release_plan.result()
+        pub(super) fn storage(&self) -> DeflateStorageLayout {
+            self.storage
         }
     }
 }
@@ -1833,118 +1658,131 @@ pub unsafe fn deflateInit2_(
     };
     let storage = initialization.allocation.storage;
     let stream_data_type = stream.data_type;
-    let Some((mut callback_owner, state_handle)) = callback_owner::Transaction::allocate_state(
-        stream,
-        initialization.allocation.state,
-        storage,
-    ) else {
+    let Some(callback) = stream.zalloc else {
         return crate::zlib_h::Z_MEM_ERROR;
     };
+    let opaque = stream.opaque;
+    let Some(state_handle) = ::core::ptr::NonNull::new(callback(
+        opaque,
+        initialization.allocation.state.items,
+        initialization.allocation.state.size,
+    ))
+    .map(|state| state.cast::<crate::src::deflate::deflate_state>()) else {
+        return crate::zlib_h::Z_MEM_ERROR;
+    };
+    let callback_owner = callback_owner::Transaction::new(storage);
     // Publish a valid Rust state before invoking the remaining callbacks.
     // This keeps the original allocation order and makes callback re-entry
     // observe the same installed stream state without first writing invalid
     // all-zero bytes into Rust enum fields.
-    callback_owner.publish_state(
-        stream,
-        state_handle,
-        crate::src::deflate::internal_state {
-            data_type: stream_data_type,
-            status: initialization.initial_state.status,
-            pending_buf: None,
-            pending_buf_size: initialization.initial_state.pending_buf_size,
-            pending_out: initialization.initial_state.pending_out,
-            pending: initialization.initial_state.pending,
-            // This persistent, pointer-free ledger is the single authority for
-            // callback completion and eventual release.  Each callback below
-            // updates it only after publishing its returned handle, so a
-            // re-entrant allocator always observes matching handle/liveness
-            // state without a second temporary ledger.
-            callback_storage: DeflateCallbackStorageOwner::new_state(storage),
-            wrap: initialization.initial_state.wrap,
-            gzhead: None,
-            gzindex: initialization.initial_state.gzindex,
-            method: initialization.initial_state.method,
-            last_flush: initialization.initial_state.last_flush,
-            w_size: initialization.initial_state.w_size,
-            w_bits: initialization.initial_state.w_bits,
-            w_mask: initialization.initial_state.w_mask,
-            window: None,
-            window_size: initialization.initial_state.window_size,
-            prev: None,
-            head: None,
-            ins_h: initialization.initial_state.ins_h,
-            hash_size: initialization.initial_state.hash_size,
-            hash_bits: initialization.initial_state.hash_bits,
-            hash_mask: initialization.initial_state.hash_mask,
-            hash_shift: initialization.initial_state.hash_shift,
-            block_start: 0,
-            match_length: 0,
-            prev_match: 0,
-            match_available: 0,
-            strstart: 0,
-            match_start: 0,
-            lookahead: 0,
-            prev_length: 0,
-            max_chain_length: 0,
-            max_lazy_match: 0,
-            level: 0,
-            strategy: 0,
-            good_match: 0,
-            nice_match: 0,
-            dyn_ltree: [const { crate::src::deflate::ct_data_s { fc: 0, dl: 0 } }; 573],
-            dyn_dtree: [const { crate::src::deflate::ct_data_s { fc: 0, dl: 0 } }; 61],
-            bl_tree: [const { crate::src::deflate::ct_data_s { fc: 0, dl: 0 } }; 39],
-            l_desc: crate::src::deflate::tree_desc_s {
-                kind: crate::src::deflate::TreeKind::LitLen,
-                max_code: 0,
-            },
-            d_desc: crate::src::deflate::tree_desc_s {
-                kind: crate::src::deflate::TreeKind::Dist,
-                max_code: 0,
-            },
-            bl_desc: crate::src::deflate::tree_desc_s {
-                kind: crate::src::deflate::TreeKind::BitLen,
-                max_code: 0,
-            },
-            bl_count: [0; 16],
-            heap: [0; 573],
-            heap_len: 0,
-            heap_max: 0,
-            depth: [0; 573],
-            sym_buf_start: 0,
-            lit_bufsize: 0,
-            sym_next: 0,
-            sym_end: 0,
-            opt_len: 0,
-            static_len: 0,
-            matches: 0,
-            insert: 0,
-            bi_buf: 0,
-            bi_valid: 0,
-            bi_used: 0,
-            high_water: 0,
-            slid: 0,
+    state_handle.write(crate::src::deflate::internal_state {
+        data_type: stream_data_type,
+        status: initialization.initial_state.status,
+        pending_buf: None,
+        pending_buf_size: initialization.initial_state.pending_buf_size,
+        pending_out: initialization.initial_state.pending_out,
+        pending: initialization.initial_state.pending,
+        // This persistent, pointer-free ledger is the single authority for
+        // callback completion and eventual release.  Each callback below
+        // updates it only after publishing its returned handle, so a
+        // re-entrant allocator always observes matching handle/liveness
+        // state without a second temporary ledger.
+        callback_storage: DeflateCallbackStorageOwner::new_state(storage),
+        wrap: initialization.initial_state.wrap,
+        gzhead: None,
+        gzindex: initialization.initial_state.gzindex,
+        method: initialization.initial_state.method,
+        last_flush: initialization.initial_state.last_flush,
+        w_size: initialization.initial_state.w_size,
+        w_bits: initialization.initial_state.w_bits,
+        w_mask: initialization.initial_state.w_mask,
+        window: None,
+        window_size: initialization.initial_state.window_size,
+        prev: None,
+        head: None,
+        ins_h: initialization.initial_state.ins_h,
+        hash_size: initialization.initial_state.hash_size,
+        hash_bits: initialization.initial_state.hash_bits,
+        hash_mask: initialization.initial_state.hash_mask,
+        hash_shift: initialization.initial_state.hash_shift,
+        block_start: 0,
+        match_length: 0,
+        prev_match: 0,
+        match_available: 0,
+        strstart: 0,
+        match_start: 0,
+        lookahead: 0,
+        prev_length: 0,
+        max_chain_length: 0,
+        max_lazy_match: 0,
+        level: 0,
+        strategy: 0,
+        good_match: 0,
+        nice_match: 0,
+        dyn_ltree: [const { crate::src::deflate::ct_data_s { fc: 0, dl: 0 } }; 573],
+        dyn_dtree: [const { crate::src::deflate::ct_data_s { fc: 0, dl: 0 } }; 61],
+        bl_tree: [const { crate::src::deflate::ct_data_s { fc: 0, dl: 0 } }; 39],
+        l_desc: crate::src::deflate::tree_desc_s {
+            kind: crate::src::deflate::TreeKind::LitLen,
+            max_code: 0,
         },
-    );
+        d_desc: crate::src::deflate::tree_desc_s {
+            kind: crate::src::deflate::TreeKind::Dist,
+            max_code: 0,
+        },
+        bl_desc: crate::src::deflate::tree_desc_s {
+            kind: crate::src::deflate::TreeKind::BitLen,
+            max_code: 0,
+        },
+        bl_count: [0; 16],
+        heap: [0; 573],
+        heap_len: 0,
+        heap_max: 0,
+        depth: [0; 573],
+        sym_buf_start: 0,
+        lit_bufsize: 0,
+        sym_next: 0,
+        sym_end: 0,
+        opt_len: 0,
+        static_len: 0,
+        matches: 0,
+        insert: 0,
+        bi_buf: 0,
+        bi_valid: 0,
+        bi_used: 0,
+        high_water: 0,
+        slid: 0,
+    });
+    stream.state = Some(state_handle.cast());
     // Do not retain a Rust state borrow across an allocator callback.  The
     // owner validates and publishes each result before issuing the next
     // request, retaining the original four-request failure sequence.
-    callback_owner.allocate_storage(stream, state_handle);
-    let complete = callback_owner.with_state(state_handle, |state| {
-        state.data_type = crate::zlib_h::Z_UNKNOWN;
-        state.high_water = 0 as crate::zutil_h::ulg;
-        state.lit_bufsize = initialization.layout.lit_bufsize;
-        state.pending_buf_size = storage
-            .pending
-            .byte_len()
-            .expect("validated pending allocation geometry")
-            as crate::zutil_h::ulg;
-        state.callback_storage.is_complete()
+    let mut allocations_complete = true;
+    request_deflate_storage(&callback_owner.storage(), |request| {
+        let allocation = match stream.zalloc {
+            Some(callback) => {
+                let opaque = stream.opaque;
+                ::core::ptr::NonNull::new(callback(
+                    opaque,
+                    request.allocation.items,
+                    request.allocation.size,
+                ))
+            }
+            None => None,
+        };
+        allocations_complete &= allocation.is_some();
+        let state = &mut *state_handle.as_ptr();
+        match request.slot {
+            DeflateStorageSlot::Window => state.window = allocation.map(|value| value.cast()),
+            DeflateStorageSlot::Prev => state.prev = allocation.map(|value| value.cast()),
+            DeflateStorageSlot::Head => state.head = allocation.map(|value| value.cast()),
+            DeflateStorageSlot::Pending => state.pending_buf = allocation.map(|value| value.cast()),
+        }
+        state
+            .callback_storage
+            .record_storage(request.slot, allocation.is_some());
     });
-    if !complete {
-        callback_owner.with_state(state_handle, |state| {
-            state.status = crate::src::deflate::FINISH_STATE;
-        });
+    if !allocations_complete {
         stream.msg = crate::src::zutil::z_errmsg[(if (-4 as ::core::ffi::c_int)
             < -6 as ::core::ffi::c_int
             || -4 as ::core::ffi::c_int > 2 as ::core::ffi::c_int
@@ -1954,10 +1792,22 @@ pub unsafe fn deflateInit2_(
             2 as ::core::ffi::c_int - -4 as ::core::ffi::c_int
         }) as usize]
             .load(::core::sync::atomic::Ordering::Relaxed);
-        callback_owner.release(stream, state_handle);
+        let _ = deflateEnd(::core::ptr::NonNull::from(stream));
         return crate::zlib_h::Z_MEM_ERROR;
     }
-    callback_owner.with_state(state_handle, |state| {
+    let Some((stream, state, storage_request)) =
+        deflate_stream_and_state(stream, DeflateStorageProjection::Complete)
+    else {
+        unreachable!("complete callback storage must project")
+    };
+    let storage = storage_request
+        .into_dispatch_storage()
+        .expect("complete callback storage has complete bounded views");
+    {
+        state.data_type = crate::zlib_h::Z_UNKNOWN;
+        state.high_water = 0 as crate::zutil_h::ulg;
+        state.lit_bufsize = initialization.layout.lit_bufsize;
+        state.pending_buf_size = storage.pending_buf.len() as crate::zutil_h::ulg;
         state.sym_buf_start = state.lit_bufsize as usize;
         state.sym_end = state
             .lit_bufsize
@@ -1966,58 +1816,56 @@ pub unsafe fn deflateInit2_(
         state.level = initialization.layout.level;
         state.strategy = initialization.strategy;
         state.method = initialization.method as crate::stdlib::Byte;
-    });
+    }
     // The state is installed and all callback results are now validated. The
     // owner builds each of the four bounded views once and lends the reset
     // core only the head view it needs.
-    let adler = callback_owner
-        .with_complete_views(state_handle, |state, storage| {
-            let head = storage.head;
-            let _window = storage.window;
-            let _prev = storage.prev;
-            let _pending = storage.pending_buf;
-            let adler = reset_keep_core(
-                &mut state.pending,
-                &mut state.pending_out,
-                &mut state.wrap,
-                &mut state.status,
-                &mut state.last_flush,
-                &mut state.dyn_ltree,
-                &mut state.dyn_dtree,
-                &mut state.bl_tree,
-                &mut state.l_desc,
-                &mut state.d_desc,
-                &mut state.bl_desc,
-                &mut state.static_len,
-                &mut state.opt_len,
-                &mut state.matches,
-                &mut state.sym_next,
-                &mut state.bi_buf,
-                &mut state.bi_valid,
-                &mut state.bi_used,
-            );
-            let w_size = state.w_size;
-            let config = &configuration_table[state.level as usize];
-            DeflateResetCore {
-                window_size: &mut state.window_size,
-                slid: &mut state.slid,
-                max_lazy_match: &mut state.max_lazy_match,
-                good_match: &mut state.good_match,
-                nice_match: &mut state.nice_match,
-                max_chain_length: &mut state.max_chain_length,
-                strstart: &mut state.strstart,
-                block_start: &mut state.block_start,
-                lookahead: &mut state.lookahead,
-                insert: &mut state.insert,
-                prev_length: &mut state.prev_length,
-                match_length: &mut state.match_length,
-                match_available: &mut state.match_available,
-                ins_h: &mut state.ins_h,
-            }
-            .reset_after_keep(head, w_size, config);
-            adler
-        })
-        .expect("complete callback storage has complete bounded views");
+    let adler = {
+        let head = storage.head;
+        let _window = storage.window;
+        let _prev = storage.prev;
+        let _pending = storage.pending_buf;
+        let adler = reset_keep_core(
+            &mut state.pending,
+            &mut state.pending_out,
+            &mut state.wrap,
+            &mut state.status,
+            &mut state.last_flush,
+            &mut state.dyn_ltree,
+            &mut state.dyn_dtree,
+            &mut state.bl_tree,
+            &mut state.l_desc,
+            &mut state.d_desc,
+            &mut state.bl_desc,
+            &mut state.static_len,
+            &mut state.opt_len,
+            &mut state.matches,
+            &mut state.sym_next,
+            &mut state.bi_buf,
+            &mut state.bi_valid,
+            &mut state.bi_used,
+        );
+        let w_size = state.w_size;
+        let config = &configuration_table[state.level as usize];
+        DeflateResetCore {
+            window_size: &mut state.window_size,
+            slid: &mut state.slid,
+            max_lazy_match: &mut state.max_lazy_match,
+            good_match: &mut state.good_match,
+            nice_match: &mut state.nice_match,
+            max_chain_length: &mut state.max_chain_length,
+            strstart: &mut state.strstart,
+            block_start: &mut state.block_start,
+            lookahead: &mut state.lookahead,
+            insert: &mut state.insert,
+            prev_length: &mut state.prev_length,
+            match_length: &mut state.match_length,
+            match_available: &mut state.match_available,
+            ins_h: &mut state.ins_h,
+        }
+        .reset_after_keep(head, w_size, config);
+        adler
+    };
     stream.total_out = 0;
     stream.total_in = 0;
     stream.msg = ::core::ptr::null_mut::<::core::ffi::c_char>();
@@ -6221,16 +6069,34 @@ pub unsafe fn deflateEnd(
     // Convert the opaque state before dispatching to the callback owner.  The
     // owner retains both the state allocation and all backing handles through
     // the complete matching-release transaction.
-    let Some((callback_owner, state_handle)) = callback_owner::Transaction::from_published(strm)
+    let Some((strm, state, _)) = deflate_stream_and_state(strm, DeflateStorageProjection::None)
     else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
-    if !callback_owner.with_state(state_handle, |state| {
-        deflate_state_status_is_valid(state.status)
-    }) {
-        return crate::zlib_h::Z_STREAM_ERROR;
+    let state_handle = strm
+        .state
+        .expect("validated state projection has an opaque state")
+        .cast::<crate::src::deflate::deflate_state>();
+    let release_plan = state.callback_storage.take_release_plan(state.status);
+    drop(state.gzhead.take());
+    let allocations = release_plan.ordered_slots().map(|slot| {
+        slot.and_then(|slot| match slot {
+            DeflateReleaseSlot::Pending => state.pending_buf.map(|value| value.cast()),
+            DeflateReleaseSlot::Head => state.head.map(|value| value.cast()),
+            DeflateReleaseSlot::Prev => state.prev.map(|value| value.cast()),
+            DeflateReleaseSlot::Window => state.window.map(|value| value.cast()),
+            DeflateReleaseSlot::State => Some(state_handle.cast()),
+        })
+    });
+    for allocation in allocations.into_iter().flatten() {
+        let callback = strm
+            .zfree
+            .expect("published callback transaction has zfree");
+        let opaque = strm.opaque;
+        callback(opaque, allocation.as_ptr());
     }
-    callback_owner.release(strm, state_handle)
+    strm.state = None;
+    release_plan.result()
 }
 #[export_name = "deflateEnd"]
 
@@ -6382,19 +6248,19 @@ unsafe fn deflate_copy_from_abi_boundary(
         adler: source.adler,
         reserved: source.reserved,
     };
-    let Some((destination_transaction, destination_state_handle)) =
-        callback_owner::Transaction::allocate_state(
-            dest,
-            DeflateAllocation {
-                items: 1,
-                size: ::core::mem::size_of::<crate::src::deflate::deflate_state>()
-                    as crate::stdlib::uInt,
-            },
-            storage,
-        )
-    else {
+    let Some(callback) = dest.zalloc else {
         return crate::zlib_h::Z_MEM_ERROR;
     };
+    let opaque = dest.opaque;
+    let Some(destination_state_handle) = ::core::ptr::NonNull::new(callback(
+        opaque,
+        1,
+        ::core::mem::size_of::<crate::src::deflate::deflate_state>() as crate::stdlib::uInt,
+    ))
+    .map(|state| state.cast::<crate::src::deflate::deflate_state>()) else {
+        return crate::zlib_h::Z_MEM_ERROR;
+    };
+    let destination_transaction = callback_owner::Transaction::new(storage);
     // Publish an explicit initialized snapshot rather than byte-copying a
     // Rust value out of callback-owned storage.  The allocation handles are
     // retained until their replacements are installed below, preserving the
@@ -6405,91 +6271,107 @@ unsafe fn deflate_copy_from_abi_boundary(
     // completion and copy admission after the callback sequence without
     // extending a Rust borrow of callback-visible state across it.
     let destination_owner = DeflateCallbackStorageOwner::new_state(storage);
-    destination_transaction.publish_state(
-        dest,
-        destination_state_handle,
-        crate::src::deflate::internal_state {
-            data_type: payload.data_type,
-            status: payload.status,
-            pending_buf: ss.pending_buf,
-            pending_buf_size: payload.pending_buf_size,
-            pending_out: payload.pending_out,
-            pending: payload.pending,
-            callback_storage: destination_owner,
-            wrap: payload.wrap,
-            gzhead: payload.gzhead,
-            gzindex: payload.gzindex,
-            method: payload.method,
-            last_flush: payload.last_flush,
-            w_size: payload.w_size,
-            w_bits: payload.w_bits,
-            w_mask: payload.w_mask,
-            window: ss.window,
-            window_size: payload.window_size,
-            prev: ss.prev,
-            head: ss.head,
-            ins_h: payload.ins_h,
-            hash_size: payload.hash_size,
-            hash_bits: payload.hash_bits,
-            hash_mask: payload.hash_mask,
-            hash_shift: payload.hash_shift,
-            block_start: payload.block_start,
-            match_length: payload.match_length,
-            prev_match: payload.prev_match,
-            match_available: payload.match_available,
-            strstart: payload.strstart,
-            match_start: payload.match_start,
-            lookahead: payload.lookahead,
-            prev_length: payload.prev_length,
-            max_chain_length: payload.max_chain_length,
-            max_lazy_match: payload.max_lazy_match,
-            level: payload.level,
-            strategy: payload.strategy,
-            good_match: payload.good_match,
-            nice_match: payload.nice_match,
-            dyn_ltree: payload.tree.dyn_ltree,
-            dyn_dtree: payload.tree.dyn_dtree,
-            bl_tree: payload.tree.bl_tree,
-            l_desc: payload.tree.l_desc,
-            d_desc: payload.tree.d_desc,
-            bl_desc: payload.tree.bl_desc,
-            bl_count: payload.tree.bl_count,
-            heap: payload.tree.heap,
-            heap_len: payload.tree.heap_len,
-            heap_max: payload.tree.heap_max,
-            depth: payload.tree.depth,
-            sym_buf_start: payload.sym_buf_start,
-            lit_bufsize: payload.lit_bufsize,
-            sym_next: payload.sym_next,
-            sym_end: payload.sym_end,
-            opt_len: payload.opt_len,
-            static_len: payload.static_len,
-            matches: payload.matches,
-            insert: payload.insert,
-            bi_buf: payload.bi_buf,
-            bi_valid: payload.bi_valid,
-            bi_used: payload.bi_used,
-            high_water: payload.high_water,
-            slid: payload.slid,
-        },
-    );
-    destination_transaction.allocate_storage(dest, destination_state_handle);
-    let destination_owner = destination_transaction
-        .with_state(destination_state_handle, |state| state.callback_storage);
-    if !destination_owner.is_complete() {
-        destination_transaction.release(dest, destination_state_handle);
+    destination_state_handle.write(crate::src::deflate::internal_state {
+        data_type: payload.data_type,
+        status: payload.status,
+        pending_buf: ss.pending_buf,
+        pending_buf_size: payload.pending_buf_size,
+        pending_out: payload.pending_out,
+        pending: payload.pending,
+        callback_storage: destination_owner,
+        wrap: payload.wrap,
+        gzhead: payload.gzhead,
+        gzindex: payload.gzindex,
+        method: payload.method,
+        last_flush: payload.last_flush,
+        w_size: payload.w_size,
+        w_bits: payload.w_bits,
+        w_mask: payload.w_mask,
+        window: ss.window,
+        window_size: payload.window_size,
+        prev: ss.prev,
+        head: ss.head,
+        ins_h: payload.ins_h,
+        hash_size: payload.hash_size,
+        hash_bits: payload.hash_bits,
+        hash_mask: payload.hash_mask,
+        hash_shift: payload.hash_shift,
+        block_start: payload.block_start,
+        match_length: payload.match_length,
+        prev_match: payload.prev_match,
+        match_available: payload.match_available,
+        strstart: payload.strstart,
+        match_start: payload.match_start,
+        lookahead: payload.lookahead,
+        prev_length: payload.prev_length,
+        max_chain_length: payload.max_chain_length,
+        max_lazy_match: payload.max_lazy_match,
+        level: payload.level,
+        strategy: payload.strategy,
+        good_match: payload.good_match,
+        nice_match: payload.nice_match,
+        dyn_ltree: payload.tree.dyn_ltree,
+        dyn_dtree: payload.tree.dyn_dtree,
+        bl_tree: payload.tree.bl_tree,
+        l_desc: payload.tree.l_desc,
+        d_desc: payload.tree.d_desc,
+        bl_desc: payload.tree.bl_desc,
+        bl_count: payload.tree.bl_count,
+        heap: payload.tree.heap,
+        heap_len: payload.tree.heap_len,
+        heap_max: payload.tree.heap_max,
+        depth: payload.tree.depth,
+        sym_buf_start: payload.sym_buf_start,
+        lit_bufsize: payload.lit_bufsize,
+        sym_next: payload.sym_next,
+        sym_end: payload.sym_end,
+        opt_len: payload.opt_len,
+        static_len: payload.static_len,
+        matches: payload.matches,
+        insert: payload.insert,
+        bi_buf: payload.bi_buf,
+        bi_valid: payload.bi_valid,
+        bi_used: payload.bi_used,
+        high_water: payload.high_water,
+        slid: payload.slid,
+    });
+    dest.state = Some(destination_state_handle.cast());
+    let mut destination_complete = true;
+    request_deflate_storage(&destination_transaction.storage(), |request| {
+        let allocation = match dest.zalloc {
+            Some(callback) => {
+                let opaque = dest.opaque;
+                ::core::ptr::NonNull::new(callback(
+                    opaque,
+                    request.allocation.items,
+                    request.allocation.size,
+                ))
+            }
+            None => None,
+        };
+        destination_complete &= allocation.is_some();
+        let state = &mut *destination_state_handle.as_ptr();
+        match request.slot {
+            DeflateStorageSlot::Window => state.window = allocation.map(|value| value.cast()),
+            DeflateStorageSlot::Prev => state.prev = allocation.map(|value| value.cast()),
+            DeflateStorageSlot::Head => state.head = allocation.map(|value| value.cast()),
+            DeflateStorageSlot::Pending => state.pending_buf = allocation.map(|value| value.cast()),
+        }
+        state
+            .callback_storage
+            .record_storage(request.slot, allocation.is_some());
+    });
+    if !destination_complete {
+        deflateEnd(::core::ptr::NonNull::from(dest));
         return crate::zlib_h::Z_MEM_ERROR;
     }
     // The two callback lifecycles now own all allocations. Validate their
     // immutable descriptors once before the shared projection lends complete
     // bounded storage views to the pointer-free copy core.
-    assert!(ss
-        .callback_storage
-        .copy_geometry(&destination_owner, &copy_layout));
     let source_storage = source_storage
         .into_dispatch_storage()
         .expect("complete source copy storage projection");
-    let Some((_dest, _ds, destination_storage)) =
+    let Some((_dest, destination_state, destination_storage)) =
         deflate_stream_and_state(dest, DeflateStorageProjection::Complete)
     else {
         deflateEnd(::core::ptr::NonNull::from(dest));
@@ -6498,6 +6380,9 @@ unsafe fn deflate_copy_from_abi_boundary(
     let destination_storage = destination_storage
         .into_dispatch_storage()
         .expect("complete destination copy storage projection");
+    assert!(ss
+        .callback_storage
+        .copy_geometry(&destination_state.callback_storage, &copy_layout));
     // The immutable callback geometry was checked above, so this is an
     // internal consistency assertion rather than a second failure path.  A
     // new cleanup branch here would add another callback-release transition
