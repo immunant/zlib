@@ -842,7 +842,6 @@ unsafe fn gz_open(
     return state as *mut crate::gzguts_h::gz_state as crate::zlib_h::gzFile;
 }
 #[export_name = "gzopen"]
-
 pub unsafe extern "C" fn gzopen_ffi(
     mut path: *const ::core::ffi::c_char,
     mut mode: *const ::core::ffi::c_char,
@@ -854,7 +853,6 @@ pub unsafe extern "C" fn gzopen_ffi(
     )
 }
 #[export_name = "gzopen64"]
-
 pub unsafe extern "C" fn gzopen64_ffi(
     mut path: *const ::core::ffi::c_char,
     mut mode: *const ::core::ffi::c_char,
@@ -879,7 +877,6 @@ fn gzdopen_path_buffer_len() -> crate::__stddef_size_t_h::size_t {
 }
 
 #[export_name = "gzdopen"]
-
 pub unsafe extern "C" fn gzdopen_ffi(
     mut fd: ::core::ffi::c_int,
     mut mode: *const ::core::ffi::c_char,

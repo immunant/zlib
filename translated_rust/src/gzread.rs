@@ -163,6 +163,17 @@ fn gz_load_read_result(
     }
 }
 
+fn gz_load_errno(
+    ret: ::core::ffi::c_int,
+    os_error: Option<::core::ffi::c_int>,
+) -> ::core::ffi::c_int {
+    if ret < 0 {
+        os_error.unwrap_or(0)
+    } else {
+        0
+    }
+}
+
 fn gz_load_read_len(
     len: ::core::ffi::c_uint,
     have: ::core::ffi::c_uint,
@@ -742,7 +753,6 @@ unsafe fn gz_load(
 ) -> GzLoadResult {
     let max = gz_load_max_read_len();
     let mut have = 0 as ::core::ffi::c_uint;
-    *crate::stdlib::__errno_location() = 0 as ::core::ffi::c_int;
     loop {
         let get = gz_load_read_len(len, have, max);
         let ret = crate::stdlib::read(
@@ -750,11 +760,7 @@ unsafe fn gz_load(
             buf.wrapping_add(have as usize) as *mut ::core::ffi::c_void,
             get as crate::__stddef_size_t_h::size_t,
         ) as ::core::ffi::c_int;
-        let errno = if ret < 0 {
-            *crate::stdlib::__errno_location()
-        } else {
-            0
-        };
+        let errno = gz_load_errno(ret, std::io::Error::last_os_error().raw_os_error());
         let load = gz_load_with_reader(len, have, state.eof, state.again, || {
             gz_load_read_result(ret, errno)
         });
@@ -1815,6 +1821,16 @@ mod tests {
     fn gz_load_checked_have_preserves_load_failure_status() {
         assert_eq!(gz_load_checked_have(3, true), Err(()));
         assert_eq!(gz_load_checked_have(0, false), Ok(0));
+    }
+
+    #[test]
+    fn gz_load_errno_uses_os_error_only_for_failed_reads() {
+        assert_eq!(gz_load_errno(0, Some(crate::stdlib::EAGAIN)), 0);
+        assert_eq!(
+            gz_load_errno(-1, Some(crate::stdlib::EAGAIN)),
+            crate::stdlib::EAGAIN
+        );
+        assert_eq!(gz_load_errno(-1, None), 0);
     }
 
     #[test]

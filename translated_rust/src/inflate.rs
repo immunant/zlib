@@ -1166,6 +1166,12 @@ struct UpdateWindowSlicePlan {
     produced_len: Option<usize>,
 }
 
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+struct UpdateWindowPlan {
+    allocation: WindowAllocationPlan,
+    slices: UpdateWindowSlicePlan,
+}
+
 fn update_window_slice_plan(
     wsize: ::core::ffi::c_uint,
     wbits: ::core::ffi::c_uint,
@@ -1177,6 +1183,18 @@ fn update_window_slice_plan(
     UpdateWindowSlicePlan {
         window_len: update_window_buffer_len(updated_wsize),
         produced_len: update_window_produced_len(copy),
+    }
+}
+
+fn update_window_plan(
+    has_window: bool,
+    wsize: ::core::ffi::c_uint,
+    wbits: ::core::ffi::c_uint,
+    copy: ::core::ffi::c_uint,
+) -> UpdateWindowPlan {
+    UpdateWindowPlan {
+        allocation: window_allocation_plan(has_window, wbits),
+        slices: update_window_slice_plan(wsize, wbits, copy),
     }
 }
 
@@ -1192,25 +1210,24 @@ unsafe fn updatewindow(
     mut copy: ::core::ffi::c_uint,
 ) -> ::core::ffi::c_int {
     let state = &mut *((*strm).state as *mut crate::src::inflate::inflate_state);
-    let allocation_plan = window_allocation_plan(!state.window.is_null(), state.wbits);
-    if let Some((items, size)) = window_allocation_request_for_plan(allocation_plan) {
+    let plan = update_window_plan(!state.window.is_null(), state.wsize, state.wbits, copy);
+    if let Some((items, size)) = window_allocation_request_for_plan(plan.allocation) {
         state.window = Some((*strm).zalloc.expect("non-null function pointer"))
             .expect("non-null function pointer")((*strm).opaque, items, size)
             as *mut crate::stdlib::Byte;
     }
     let allocation_status =
-        update_window_allocation_status(allocation_plan, !state.window.is_null());
+        update_window_allocation_status(plan.allocation, !state.window.is_null());
     if allocation_status != 0 {
         return allocation_status;
     }
-    let slice_plan = update_window_slice_plan(state.wsize, state.wbits, copy);
     update_window_core(
         state.wbits,
         &mut state.wsize,
         &mut state.wnext,
         &mut state.whave,
-        core::slice::from_raw_parts_mut(state.window, slice_plan.window_len),
-        update_window_produced_slice(match slice_plan.produced_len {
+        core::slice::from_raw_parts_mut(state.window, plan.slices.window_len),
+        update_window_produced_slice(match plan.slices.produced_len {
             Some(produced_len) => Some(core::slice::from_raw_parts(
                 end.wrapping_sub(produced_len),
                 produced_len,
@@ -4843,6 +4860,30 @@ mod tests {
             super::UpdateWindowSlicePlan {
                 window_len: 8,
                 produced_len: Some(::core::ffi::c_uint::MAX as usize),
+            }
+        );
+    }
+
+    #[test]
+    fn update_window_plan_combines_allocation_and_slice_decisions() {
+        assert_eq!(
+            super::update_window_plan(false, 0, 3, 5),
+            super::UpdateWindowPlan {
+                allocation: WindowAllocationPlan::Allocate { items: 8, size: 1 },
+                slices: super::UpdateWindowSlicePlan {
+                    window_len: 8,
+                    produced_len: Some(5),
+                },
+            }
+        );
+        assert_eq!(
+            super::update_window_plan(true, 8, 3, 0),
+            super::UpdateWindowPlan {
+                allocation: WindowAllocationPlan::Existing,
+                slices: super::UpdateWindowSlicePlan {
+                    window_len: 8,
+                    produced_len: None,
+                },
             }
         );
     }
