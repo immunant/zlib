@@ -807,8 +807,8 @@ pub unsafe extern "C" fn gzgetc__ffi(mut file: crate::zlib_h::gzFile) -> ::core:
 }
 
 /// Describe where an ungot byte belongs in the existing read buffer without
-/// touching its ABI cursor.  The caller keeps the pointer adjustment and byte
-/// store at the raw boundary.
+/// touching its ABI cursor.  The boundary converts that cursor to an index
+/// before this safe core runs.
 #[derive(Clone, Copy)]
 enum GzUngetcBufferPlan {
     InvalidCharacter,
@@ -888,84 +888,50 @@ fn gzungetc_shift_to_end(buffer: &mut [u8], have: crate::stdlib::uInt) -> Option
     Some(start)
 }
 
-pub unsafe extern "C" fn gzungetc(
-    mut c: ::core::ffi::c_int,
-    mut file: crate::zlib_h::gzFile,
-) -> ::core::ffi::c_int {
-    let mut state: crate::gzguts_h::gz_statep =
-        ::core::ptr::null_mut::<crate::gzguts_h::gz_state>();
-    if file.is_null() {
-        return -1 as ::core::ffi::c_int;
-    }
-    state = file as crate::gzguts_h::gz_statep;
-    if (*state).mode != crate::gzguts_h::GZ_READ {
-        return -1 as ::core::ffi::c_int;
-    }
-    if (*state).how == crate::gzguts_h::LOOK && (*state).x.have == 0 as ::core::ffi::c_uint {
-        gz_look(state);
-    }
-    if !gzread_state_is_valid((*state).mode, (*state).err, (*state).again) {
-        return -1 as ::core::ffi::c_int;
-    }
-    crate::src::gzlib::gz_error(
-        state as *mut crate::gzguts_h::gz_state,
-        crate::zlib_h::Z_OK,
-        ::core::ptr::null::<::core::ffi::c_char>(),
-    );
-    if (*state).skip != 0 && gz_skip(state) == -1 as ::core::ffi::c_int {
-        return -1 as ::core::ffi::c_int;
-    }
-    let Some(output) = (*state)
-        .buffers
-        .as_mut()
-        .and_then(|buffers| buffers.output.as_mut())
-    else {
-        return -1;
-    };
-    let output_start = output.as_mut_ptr();
-    let plan = gzungetc_buffer_plan(
-        c,
-        (*state).x.have,
-        (*state).size,
-        (*state).x.next == output_start,
-    );
+/// Insert an ungot byte into the owned output buffer.  The public prefix
+/// cursor is represented by `next_index` for this operation, so this core
+/// never needs to inspect or construct a raw pointer or opaque state.
+fn gzungetc_buffer_insert(
+    output: &mut [u8],
+    c: ::core::ffi::c_int,
+    next_index: usize,
+    have: crate::stdlib::uInt,
+    size: crate::stdlib::uInt,
+) -> Result<(usize, GzUngetcBufferPlan), GzUngetcBufferPlan> {
+    let plan = gzungetc_buffer_plan(c, have, size, next_index == 0);
     match plan {
-        GzUngetcBufferPlan::InvalidCharacter => return -1 as ::core::ffi::c_int,
-        GzUngetcBufferPlan::Full => {
-            crate::src::gzlib::gz_error(
-                state as *mut crate::gzguts_h::gz_state,
-                crate::zlib_h::Z_DATA_ERROR,
-                b"out of room to push characters\0".as_ptr() as *const ::core::ffi::c_char,
-            );
-            return -1 as ::core::ffi::c_int;
-        }
+        GzUngetcBufferPlan::InvalidCharacter | GzUngetcBufferPlan::Full => return Err(plan),
         GzUngetcBufferPlan::Empty { .. } | GzUngetcBufferPlan::Buffered { .. } => {}
     };
     if let GzUngetcBufferPlan::Empty { capacity } = plan {
-        (*state).x.next = output_start
-            .offset(capacity as isize)
-            .offset(-(1 as ::core::ffi::c_int as isize));
-        *(*state).x.next.offset(0 as ::core::ffi::c_int as isize) = c as ::core::ffi::c_uchar;
-        if !gzungetc_buffer_commit_state(&mut *state, plan) {
-            return -1 as ::core::ffi::c_int;
-        }
-        return c;
+        let Some(index) = (capacity as usize).checked_sub(1) else {
+            return Err(plan);
+        };
+        let Some(slot) = output.get_mut(index..=index) else {
+            return Err(plan);
+        };
+        slot.copy_from_slice(&[c as ::core::ffi::c_uchar]);
+        return Ok((index, plan));
     }
     let GzUngetcBufferPlan::Buffered { shift_to_end, .. } = plan else {
-        return -1 as ::core::ffi::c_int;
+        return Err(plan);
     };
-    if shift_to_end {
-        let Some(start) = gzungetc_shift_to_end(output, (*state).x.have) else {
-            return -1 as ::core::ffi::c_int;
+    let cursor = if shift_to_end {
+        let Some(start) = gzungetc_shift_to_end(output, have) else {
+            return Err(plan);
         };
-        (*state).x.next = output_start.add(start);
-    }
-    (*state).x.next = (*state).x.next.offset(-1);
-    *(*state).x.next.offset(0 as ::core::ffi::c_int as isize) = c as ::core::ffi::c_uchar;
-    if !gzungetc_buffer_commit_state(&mut *state, plan) {
-        return -1 as ::core::ffi::c_int;
-    }
-    return c;
+        start
+    } else {
+        next_index
+    };
+    let Some(index) = cursor.checked_sub(1) else {
+        return Err(plan);
+    };
+    let Some(slot) = output.get_mut(index..=index) else {
+        return Err(plan);
+    };
+    slot.copy_from_slice(&[c as ::core::ffi::c_uchar]);
+    Ok((index, plan))
 }
 #[export_name = "gzungetc"]
 
@@ -973,7 +939,79 @@ pub unsafe extern "C" fn gzungetc_ffi(
     mut c: ::core::ffi::c_int,
     mut file: crate::zlib_h::gzFile,
 ) -> ::core::ffi::c_int {
-    gzungetc(c, file)
+    if file.is_null() {
+        return -1;
+    }
+    let state = &mut *(file as crate::gzguts_h::gz_statep);
+    if state.mode != crate::gzguts_h::GZ_READ {
+        return -1;
+    }
+    if state.how == crate::gzguts_h::LOOK && state.x.have == 0 {
+        gz_look(state);
+    }
+    if !gzread_state_is_valid(state.mode, state.err, state.again) {
+        return -1;
+    }
+    crate::src::gzlib::gz_error_clear(state);
+    if state.skip != 0 && gz_skip(state) == -1 {
+        return -1;
+    }
+
+    // `gzgetc` is allowed to advance the public prefix cursor directly, so
+    // reconcile that ABI cursor with the owned output allocation here.
+    let next_index = {
+        let Some(output) = state
+            .buffers
+            .as_ref()
+            .and_then(|buffers| buffers.output.as_ref())
+        else {
+            return -1;
+        };
+        let start = output.as_ptr() as usize;
+        let Some(index) = (state.x.next as usize).checked_sub(start) else {
+            return -1;
+        };
+        if index > output.len() {
+            return -1;
+        }
+        index
+    };
+    let have = state.x.have;
+    let size = state.size;
+    let inserted = {
+        let Some(output) = state
+            .buffers
+            .as_mut()
+            .and_then(|buffers| buffers.output.as_mut())
+        else {
+            return -1;
+        };
+        gzungetc_buffer_insert(output, c, next_index, have, size)
+    };
+    let (next_index, plan) = match inserted {
+        Ok(inserted) => inserted,
+        Err(GzUngetcBufferPlan::Full) => {
+            crate::src::gzlib::gz_error_static(
+                state,
+                crate::zlib_h::Z_DATA_ERROR,
+                b"out of room to push characters\0",
+            );
+            return -1;
+        }
+        Err(_) => return -1,
+    };
+    if !gzungetc_buffer_commit_state(state, plan) {
+        return -1;
+    };
+    let Some(output) = state
+        .buffers
+        .as_mut()
+        .and_then(|buffers| buffers.output.as_mut())
+    else {
+        return -1;
+    };
+    state.x.next = output.as_mut_ptr().wrapping_add(next_index);
+    c
 }
 pub unsafe extern "C" fn gzgets(
     mut file: crate::zlib_h::gzFile,
