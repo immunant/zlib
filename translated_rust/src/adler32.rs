@@ -85,12 +85,19 @@ fn classify_ffi_input(buf_is_null: bool, len: usize) -> FfiInputKind {
     }
 }
 
-fn adler32_combine_(adler1: uLong, adler2: uLong, len2: off64_t) -> uLong {
+fn combine_length_remainder(len2: off64_t) -> Option<u64> {
     if len2 < 0 {
-        return 0xffff_ffff;
+        return None;
     }
 
-    let rem = (len2 % BASE as off64_t) as u64;
+    u64::try_from(len2 % off64_t::from(BASE)).ok()
+}
+
+fn adler32_combine_(adler1: uLong, adler2: uLong, len2: off64_t) -> uLong {
+    let Some(rem) = combine_length_remainder(len2) else {
+        return 0xffff_ffff;
+    };
+
     let mut sum1 = adler1 as u64 & 0xffff;
     let mut sum2 = rem * sum1 % BASE_U64;
 
@@ -269,5 +276,16 @@ mod tests {
     #[test]
     fn rejects_negative_combine_lengths() {
         assert_eq!(adler32_combine64(1, 1, -1), 0xffff_ffff);
+    }
+
+    #[test]
+    fn combine_length_remainder_checks_sign_and_modulus_boundaries() {
+        let base = off64_t::from(BASE);
+
+        assert_eq!(combine_length_remainder(-1), None);
+        assert_eq!(combine_length_remainder(0), Some(0));
+        assert_eq!(combine_length_remainder(base - 1), Some(BASE_U64 - 1));
+        assert_eq!(combine_length_remainder(base), Some(0));
+        assert_eq!(combine_length_remainder(base + 1), Some(1));
     }
 }

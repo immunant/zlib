@@ -2951,6 +2951,10 @@ fn table_usage_fits(type_0: CodeType, used: u32, table_cursor: TableCursor) -> b
     within_type_capacity && table_cursor.end(used as usize).is_some()
 }
 
+fn subtable_is_needed(length: u32, root: u32, huff: u32, mask: u32, low: u32) -> bool {
+    length > root && (huff & mask) != low
+}
+
 fn next_huffman_code(mut huff: u32, length: u32) -> u32 {
     if !(1..=MAXBITS as u32).contains(&length) {
         return huff;
@@ -3186,7 +3190,7 @@ pub fn inflate_table_safe(
             length = next_length as u32;
         }
 
-        if length > root && huff & mask != low {
+        if subtable_is_needed(length, root, huff, mask, low) {
             if drop_bits == 0 {
                 drop_bits = root;
             }
@@ -3305,6 +3309,13 @@ mod tests {
         assert_eq!(entry.op, op);
         assert_eq!(entry.bits, bits);
         assert_eq!(entry.val, val);
+    }
+
+    #[test]
+    fn subtable_gate_respects_length_and_mask_boundaries() {
+        assert!(!subtable_is_needed(5, 5, 0b1101, 0b0111, 0b0101));
+        assert!(!subtable_is_needed(6, 5, 0b1101, 0b0111, 0b0101));
+        assert!(subtable_is_needed(6, 5, 0b1101, 0b0111, 0b0100));
     }
 
     #[test]

@@ -17,6 +17,7 @@ pub use crate::stdlib::fcntl;
 
 pub use crate::stdlib::open;
 
+pub use crate::stdlib::__O_CLOEXEC;
 pub use crate::stdlib::F_GETFD;
 pub use crate::stdlib::F_GETFL;
 pub use crate::stdlib::F_SETFD;
@@ -33,7 +34,6 @@ pub use crate::stdlib::O_WRONLY;
 pub use crate::stdlib::SEEK_CUR;
 pub use crate::stdlib::SEEK_END;
 pub use crate::stdlib::SEEK_SET;
-pub use crate::stdlib::__O_CLOEXEC;
 
 pub use crate::stdlib::__off64_t;
 pub use crate::stdlib::__off_t;
@@ -65,7 +65,11 @@ pub use crate::zlib_h::Z_OK;
 pub use crate::zlib_h::Z_RLE;
 
 fn gz_is_read_or_write_mode(mode: ::core::ffi::c_int) -> bool {
-    mode == crate::gzguts_h::GZ_READ || mode == crate::gzguts_h::GZ_WRITE
+    gz_is_read_mode(mode) || mode == crate::gzguts_h::GZ_WRITE
+}
+
+fn gz_is_read_mode(mode: ::core::ffi::c_int) -> bool {
+    mode == crate::gzguts_h::GZ_READ
 }
 
 pub(crate) fn gz_request_len(
@@ -103,7 +107,7 @@ fn gzclearerr_core(
     if !gz_is_read_or_write_mode(mode) {
         return false;
     }
-    if mode == crate::gzguts_h::GZ_READ {
+    if gz_is_read_mode(mode) {
         gz_clear_read_flags(eof, past);
     }
     true
@@ -164,7 +168,7 @@ struct GzResetFields {
 
 fn gz_reset_core(fields: &mut GzResetFields) {
     fields.have = 0;
-    if fields.mode == crate::gzguts_h::GZ_READ {
+    if gz_is_read_mode(fields.mode) {
         gz_clear_read_flags(&mut fields.eof, &mut fields.past);
         fields.how = crate::gzguts_h::LOOK;
         fields.junk = -1;
@@ -299,7 +303,7 @@ fn gzseek_request_is_valid(
 }
 
 fn gzrewind_request_is_valid(mode: ::core::ffi::c_int, err: ::core::ffi::c_int) -> bool {
-    mode == crate::gzguts_h::GZ_READ && gzseek_error_allows_positioning(err)
+    gz_is_read_mode(mode) && gzseek_error_allows_positioning(err)
 }
 
 fn gz_lseek_succeeded(result: crate::stdlib::__off64_t) -> bool {
@@ -354,7 +358,7 @@ fn gzseek_plan_request(
 }
 
 fn gzseek_uses_read_buffer(mode: ::core::ffi::c_int) -> bool {
-    mode == crate::gzguts_h::GZ_READ
+    gz_is_read_mode(mode)
 }
 
 fn gzseek_effective_skip(
@@ -381,7 +385,7 @@ fn gzseek_can_fast_forward(
     position: crate::stdlib::off64_t,
     offset: crate::stdlib::off64_t,
 ) -> bool {
-    mode == crate::gzguts_h::GZ_READ
+    gz_is_read_mode(mode)
         && how == crate::gzguts_h::COPY
         && position + offset >= 0 as crate::stdlib::off64_t
 }
@@ -410,7 +414,7 @@ fn gzseek_plan_remaining_offset(
             rewind: false,
         });
     }
-    if mode != crate::gzguts_h::GZ_READ {
+    if !gz_is_read_mode(mode) {
         return None;
     }
 
@@ -486,7 +490,7 @@ fn gz_prepare_open(options: GzOpenOptions) -> Option<GzOpenPlan> {
         return None;
     }
 
-    let direct = if options.mode == crate::gzguts_h::GZ_READ {
+    let direct = if gz_is_read_mode(options.mode) {
         if options.direct == 1 {
             return None;
         }
@@ -503,7 +507,7 @@ fn gz_prepare_open(options: GzOpenOptions) -> Option<GzOpenPlan> {
     };
     let oflag = options.oflag
         | crate::stdlib::O_LARGEFILE
-        | if options.mode == crate::gzguts_h::GZ_READ {
+        | if gz_is_read_mode(options.mode) {
             crate::stdlib::O_RDONLY
         } else {
             crate::stdlib::O_WRONLY
@@ -542,7 +546,7 @@ fn gz_post_open_metadata(
 ) -> (::core::ffi::c_int, Option<crate::stdlib::off64_t>) {
     if mode == crate::gzguts_h::GZ_APPEND {
         (crate::gzguts_h::GZ_WRITE, None)
-    } else if mode == crate::gzguts_h::GZ_READ {
+    } else if gz_is_read_mode(mode) {
         (
             mode,
             Some(if current_offset == -1 {
@@ -579,7 +583,7 @@ fn gz_open_offset_plan(mode: ::core::ffi::c_int) -> Option<GzOpenOffsetPlan> {
             whence: crate::stdlib::SEEK_END,
             record_offset: false,
         })
-    } else if mode == crate::gzguts_h::GZ_READ {
+    } else if gz_is_read_mode(mode) {
         Some(GzOpenOffsetPlan {
             whence: crate::stdlib::SEEK_CUR,
             record_offset: true,
@@ -997,7 +1001,7 @@ fn gzoffset64_adjust_for_buffered_read(
     mode: ::core::ffi::c_int,
     avail_in: crate::stdlib::uInt,
 ) -> crate::stdlib::off64_t {
-    if mode == crate::gzguts_h::GZ_READ {
+    if gz_is_read_mode(mode) {
         offset.wrapping_sub(avail_in as crate::stdlib::off64_t)
     } else {
         offset
@@ -1056,7 +1060,7 @@ pub unsafe extern "C" fn gzoffset_ffi(file: crate::zlib_h::gzFile) -> crate::std
     gz_legacy_offset_result(gzoffset64_state_result(state, offset))
 }
 fn gzeof_result(mode: ::core::ffi::c_int, past: ::core::ffi::c_int) -> ::core::ffi::c_int {
-    if mode == crate::gzguts_h::GZ_READ {
+    if gz_is_read_mode(mode) {
         past
     } else {
         0 as ::core::ffi::c_int
@@ -1206,9 +1210,9 @@ pub unsafe extern "C" fn gz_intmax_ffi() -> ::core::ffi::c_uint {
 mod tests {
     use super::{
         gz_clear_read_flags, gz_error_clears_buffer, gz_error_message_allocation_len,
-        gz_error_needs_message_allocation, gz_error_plan, gz_is_read_or_write_mode,
-        gz_legacy_offset_result, gz_lseek_succeeded, gz_open_fd_plan, gz_open_offset_plan,
-        gz_open_path_buffer_len, gz_open_recorded_offset, gz_parse_open_mode,
+        gz_error_needs_message_allocation, gz_error_plan, gz_is_read_mode,
+        gz_is_read_or_write_mode, gz_legacy_offset_result, gz_lseek_succeeded, gz_open_fd_plan,
+        gz_open_offset_plan, gz_open_path_buffer_len, gz_open_recorded_offset, gz_parse_open_mode,
         gz_position_after_skip, gz_post_open_metadata, gz_prepare_open, gz_request_len,
         gz_reset_core, gzbuffer_can_set_want, gzbuffer_normalized_want, gzclearerr_core,
         gzdopen_has_valid_descriptor, gzdopen_path_buffer_len, gzeof_result, gzerror_core,
@@ -1398,6 +1402,14 @@ mod tests {
         assert!(gz_is_read_or_write_mode(crate::gzguts_h::GZ_WRITE));
         assert!(!gz_is_read_or_write_mode(crate::gzguts_h::GZ_NONE));
         assert!(!gz_is_read_or_write_mode(crate::gzguts_h::GZ_APPEND));
+    }
+
+    #[test]
+    fn read_mode_validation_accepts_only_read_mode() {
+        assert!(gz_is_read_mode(crate::gzguts_h::GZ_READ));
+        assert!(!gz_is_read_mode(crate::gzguts_h::GZ_WRITE));
+        assert!(!gz_is_read_mode(crate::gzguts_h::GZ_APPEND));
+        assert!(!gz_is_read_mode(crate::gzguts_h::GZ_NONE));
     }
 
     #[test]
