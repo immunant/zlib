@@ -4082,6 +4082,42 @@ fn rle_tally_match_state(
     Some(flush_now)
 }
 
+/// The RLE mode's parser decision is independent of callback-owned symbol
+/// storage.  Keep the window inspection and the subsequent symbol write as
+/// two separate lends in the legacy adapter.
+enum RleSymbol {
+    Match,
+    Literal(crate::stdlib::uInt),
+}
+
+fn rle_symbol_plan_state(
+    s: &mut crate::src::deflate::deflate_state,
+    window: &[crate::stdlib::Byte],
+) -> Option<RleSymbol> {
+    s.match_length = 0;
+    if s.lookahead >= crate::zutil_h::MIN_MATCH as crate::stdlib::uInt && s.strstart != 0 {
+        s.match_length = rle_match_length_state(window, s.strstart, s.lookahead);
+    }
+    if s.match_length >= crate::zutil_h::MIN_MATCH as crate::stdlib::uInt {
+        Some(RleSymbol::Match)
+    } else {
+        Some(RleSymbol::Literal(
+            (*window.get(usize::try_from(s.strstart).ok()?)?).into(),
+        ))
+    }
+}
+
+fn rle_tally_symbol_state(
+    s: &mut crate::src::deflate::deflate_state,
+    symbols: &mut [crate::zutil_h::uch],
+    symbol: RleSymbol,
+) -> Option<bool> {
+    match symbol {
+        RleSymbol::Match => rle_tally_match_state(s, symbols),
+        RleSymbol::Literal(literal) => tally_symbol_state(s, symbols, 0, literal),
+    }
+}
+
 fn hash_match_is_usable(
     strstart: crate::src::deflate::IPos,
     hash_head: crate::src::deflate::IPos,
@@ -4136,24 +4172,25 @@ unsafe extern "C" fn deflate_rle(
                 break;
             }
         }
-        (*s).match_length = 0 as crate::stdlib::uInt;
-        if (*s).lookahead >= crate::zutil_h::MIN_MATCH as crate::stdlib::uInt
-            && (*s).strstart > 0 as crate::stdlib::uInt
-        {
-            let Ok(window_len) = usize::try_from((*s).window_size) else {
+        let symbol = {
+            let state = &mut *s;
+            let Ok(window_len) = usize::try_from(state.window_size) else {
                 return need_more;
             };
-            if window_len != 0 && (*s).window.is_null() {
+            if window_len != 0 && state.window.is_null() {
                 return need_more;
             }
             let window = if window_len == 0 {
                 &[]
             } else {
-                ::core::slice::from_raw_parts((*s).window, window_len)
+                ::core::slice::from_raw_parts(state.window, window_len)
             };
-            (*s).match_length = rle_match_length_state(window, (*s).strstart, (*s).lookahead);
-        }
-        if (*s).match_length >= crate::zutil_h::MIN_MATCH as crate::stdlib::uInt {
+            let Some(symbol) = rle_symbol_plan_state(state, window) else {
+                return need_more;
+            };
+            symbol
+        };
+        {
             let state = &mut *s;
             let Ok(symbol_len) = usize::try_from(state.sym_end) else {
                 return need_more;
@@ -4166,34 +4203,7 @@ unsafe extern "C" fn deflate_rle(
             } else {
                 ::core::slice::from_raw_parts_mut(state.sym_buf, symbol_len)
             };
-            let Some(flush_now) = rle_tally_match_state(state, symbols) else {
-                return need_more;
-            };
-            bflush = flush_now as ::core::ffi::c_int;
-        } else {
-            let state = &mut *s;
-            let Ok(window_len) = usize::try_from(state.window_size) else {
-                return need_more;
-            };
-            let Ok(symbol_len) = usize::try_from(state.sym_end) else {
-                return need_more;
-            };
-            if (window_len != 0 && state.window.is_null())
-                || (symbol_len != 0 && state.sym_buf.is_null())
-            {
-                return need_more;
-            }
-            let window = if window_len == 0 {
-                &[]
-            } else {
-                ::core::slice::from_raw_parts(state.window, window_len)
-            };
-            let symbols = if symbol_len == 0 {
-                &mut []
-            } else {
-                ::core::slice::from_raw_parts_mut(state.sym_buf, symbol_len)
-            };
-            let Some(flush_now) = tally_current_literal_state(state, window, symbols) else {
+            let Some(flush_now) = rle_tally_symbol_state(state, symbols, symbol) else {
                 return need_more;
             };
             bflush = flush_now as ::core::ffi::c_int;
