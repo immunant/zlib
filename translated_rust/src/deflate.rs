@@ -2557,6 +2557,28 @@ fn zlib_header_words(
     (header, dictionary_adler)
 }
 
+/// Decide whether a gzip header CRC must be emitted and whether its two-byte
+/// trailer first needs to drain the pending buffer.  This is scalar-only so
+/// the legacy gzip-header boundary need not re-adopt the opaque state just to
+/// repeat its capacity arithmetic.
+#[derive(Copy, Clone)]
+struct GzipHcrcPlan {
+    emit: bool,
+    flush_before_emit: bool,
+}
+
+fn gzip_hcrc_plan(
+    hcrc_enabled: bool,
+    pending: crate::zutil_h::ulg,
+    pending_buf_size: crate::zutil_h::ulg,
+) -> GzipHcrcPlan {
+    GzipHcrcPlan {
+        emit: hcrc_enabled,
+        flush_before_emit: hcrc_enabled
+            && pending.wrapping_add(2 as crate::zutil_h::ulg) > pending_buf_size,
+    }
+}
+
 /// Return whether a flush request cannot make progress without new input.
 ///
 /// zlib ranks the finish-style flush values specially before comparing them
@@ -3015,16 +3037,27 @@ pub fn deflate(
             state.status == crate::src::deflate::HCRC_STATE
         };
         if gzip_hcrc_pending {
-            let hcrc_enabled = {
-                let state = &mut *s;
-                (&*state.gzhead).hcrc != 0
+            // Snapshot the only header-derived flag and the pending capacity
+            // together.  The scalar planner then owns the two-byte admission
+            // check, avoiding a second raw state adoption before a possible
+            // flush.
+            let hcrc_plan = {
+                let state = &*s;
+                if state.gzhead.is_null() {
+                    GzipHcrcPlan {
+                        emit: false,
+                        flush_before_emit: false,
+                    }
+                } else {
+                    gzip_hcrc_plan(
+                        (&*state.gzhead).hcrc != 0,
+                        state.pending,
+                        state.pending_buf_size,
+                    )
+                }
             };
-            if hcrc_enabled {
-                let needs_flush = {
-                    let state = &mut *s;
-                    state.pending.wrapping_add(2 as crate::zutil_h::ulg) > state.pending_buf_size
-                };
-                if needs_flush {
+            if hcrc_plan.emit {
+                if hcrc_plan.flush_before_emit {
                     flush_pending(strm);
                     let state = &mut *s;
                     if state.pending != 0 as crate::zutil_h::ulg {
