@@ -105,23 +105,6 @@ fn gz_init_mode(direct: ::core::ffi::c_int) -> GzInitMode {
     }
 }
 
-#[derive(Debug, Eq, PartialEq)]
-struct GzInitAllocationPlan {
-    input_len: crate::stdlib::z_size_t,
-    output_len: Option<crate::stdlib::z_size_t>,
-}
-
-fn gz_init_allocation_plan(
-    want: ::core::ffi::c_uint,
-    direct: ::core::ffi::c_int,
-) -> Option<GzInitAllocationPlan> {
-    Some(GzInitAllocationPlan {
-        input_len: want.checked_mul(2)? as crate::stdlib::z_size_t,
-        output_len: (gz_init_mode(direct) == GzInitMode::Compressed)
-            .then_some(want as crate::stdlib::z_size_t),
-    })
-}
-
 fn gz_zero_chunk_len(
     size: ::core::ffi::c_uint,
     skip: crate::stdlib::off64_t,
@@ -1089,11 +1072,20 @@ fn gz_write_buffered_copy_plan(
 }
 
 fn gz_init(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
-    let Some(allocation) = gz_init_allocation_plan(state.want, state.direct) else {
+    let Some(allocation) = crate::src::gzlib::gz_write_buffer_layout(state.want, state.direct)
+    else {
         return -1 as ::core::ffi::c_int;
     };
+    let (input_len, output_len) = match allocation {
+        crate::src::gzlib::GzBufferLayout::WriteDirect { input_len } => (input_len, None),
+        crate::src::gzlib::GzBufferLayout::WriteCompressed {
+            input_len,
+            output_len,
+        } => (input_len, Some(output_len)),
+        crate::src::gzlib::GzBufferLayout::Read { .. } => unreachable!(),
+    };
     state.in_0 = unsafe {
-        crate::stdlib::malloc(allocation.input_len as crate::__stddef_size_t_h::size_t)
+        crate::stdlib::malloc(input_len as crate::__stddef_size_t_h::size_t)
             as *mut ::core::ffi::c_uchar
     };
     if state.in_0.is_null() {
@@ -1106,7 +1098,7 @@ fn gz_init(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
         }
         return -1 as ::core::ffi::c_int;
     }
-    if let Some(output_len) = allocation.output_len {
+    if let Some(output_len) = output_len {
         state.out = unsafe {
             crate::stdlib::malloc(output_len as crate::__stddef_size_t_h::size_t)
                 as *mut ::core::ffi::c_uchar
@@ -1897,12 +1889,12 @@ mod tests {
         gz_comp_reset_value, gz_comp_skips_empty_flush, gz_comp_write_again,
         gz_comp_write_chunk_len, gz_comp_write_failed, gz_comp_write_failure,
         gz_comp_write_progress, gz_comp_write_result, gz_has_pending_input, gz_has_pending_skip,
-        gz_init_allocation_plan, gz_init_deflate_failed, gz_init_failed, gz_init_mode,
-        gz_init_stream_defaults, gz_write_advanced_pos, gz_write_apply_buffered_copy_plan,
-        gz_write_apply_buffered_progress, gz_write_apply_chunk_progress,
-        gz_write_apply_direct_progress, gz_write_buffered_comp_result, gz_write_buffered_copy_len,
-        gz_write_buffered_copy_plan, gz_write_buffered_input_action, gz_write_buffered_progress,
-        gz_write_chunk_len, gz_write_comp_failed, gz_write_consumed, gz_write_direct_action,
+        gz_init_deflate_failed, gz_init_failed, gz_init_mode, gz_init_stream_defaults,
+        gz_write_advanced_pos, gz_write_apply_buffered_copy_plan, gz_write_apply_buffered_progress,
+        gz_write_apply_chunk_progress, gz_write_apply_direct_progress,
+        gz_write_buffered_comp_result, gz_write_buffered_copy_len, gz_write_buffered_copy_plan,
+        gz_write_buffered_input_action, gz_write_buffered_progress, gz_write_chunk_len,
+        gz_write_comp_failed, gz_write_consumed, gz_write_direct_action,
         gz_write_errno_is_retryable, gz_write_error_result, gz_write_is_empty,
         gz_write_preparation, gz_write_progress, gz_write_remaining_after_consumption,
         gz_write_state_is_usable, gz_write_uses_buffered_path, gz_zero_action,
@@ -1919,11 +1911,10 @@ mod tests {
         GzCompDirectWriteResult, GzCompOutputBufferAction, GzCompOutputBufferProgress,
         GzCompOutputFlushStep, GzCompOutputWriteProgress, GzCompOutputWriteResult,
         GzCompResetAction, GzCompWriteFailure, GzCompWriteResult, GzFlushAction, GzFwriteRequest,
-        GzInitAllocationPlan, GzInitMode, GzPutcWriteAction, GzSetParamsAction,
-        GzSetParamsBufferAction, GzSetParamsZeroAction, GzWriteBufferedCopyPlan,
-        GzWriteBufferedInputAction, GzWriteDirectAction, GzWriteInputStorage, GzWritePreparation,
-        GzZeroAction, GzZeroChunkLimits, GzZeroCore, GzZeroInitialAction, GzZeroPreparedChunk,
-        GzZeroStep,
+        GzInitMode, GzPutcWriteAction, GzSetParamsAction, GzSetParamsBufferAction,
+        GzSetParamsZeroAction, GzWriteBufferedCopyPlan, GzWriteBufferedInputAction,
+        GzWriteDirectAction, GzWriteInputStorage, GzWritePreparation, GzZeroAction,
+        GzZeroChunkLimits, GzZeroCore, GzZeroInitialAction, GzZeroPreparedChunk, GzZeroStep,
     };
 
     #[test]
@@ -2274,31 +2265,33 @@ mod tests {
     }
 
     #[test]
-    fn gz_init_allocation_plan_allocates_only_input_for_direct_writes() {
+    fn gz_write_buffer_layout_allocates_only_input_for_direct_writes() {
         assert_eq!(
-            gz_init_allocation_plan(4096, -1),
-            Some(GzInitAllocationPlan {
+            crate::src::gzlib::gz_write_buffer_layout(4096, -1),
+            Some(crate::src::gzlib::GzBufferLayout::WriteDirect { input_len: 8192 })
+        );
+    }
+
+    #[test]
+    fn gz_write_buffer_layout_allocates_input_and_output_for_compressed_writes() {
+        assert_eq!(
+            crate::src::gzlib::gz_write_buffer_layout(4096, 0),
+            Some(crate::src::gzlib::GzBufferLayout::WriteCompressed {
                 input_len: 8192,
-                output_len: None,
+                output_len: 4096,
             })
         );
     }
 
     #[test]
-    fn gz_init_allocation_plan_allocates_input_and_output_for_compressed_writes() {
+    fn gz_write_buffer_layout_rejects_input_size_overflow() {
         assert_eq!(
-            gz_init_allocation_plan(4096, 0),
-            Some(GzInitAllocationPlan {
-                input_len: 8192,
-                output_len: Some(4096),
-            })
+            crate::src::gzlib::gz_write_buffer_layout(::core::ffi::c_uint::MAX, 0),
+            None
         );
-    }
-
-    #[test]
-    fn gz_init_allocation_plan_rejects_input_size_overflow() {
-        assert_eq!(gz_init_allocation_plan(::core::ffi::c_uint::MAX, 0), None);
-        assert!(gz_init_allocation_plan(::core::ffi::c_uint::MAX / 2, 0).is_some());
+        assert!(
+            crate::src::gzlib::gz_write_buffer_layout(::core::ffi::c_uint::MAX / 2, 0).is_some()
+        );
     }
 
     #[test]

@@ -1013,21 +1013,13 @@ fn gz_look_needs_more_input(avail_in: crate::stdlib::uInt, again: ::core::ffi::c
     avail_in == 0 || again != 0 && avail_in < 4
 }
 
-#[derive(Debug, PartialEq, Eq)]
-struct GzLookAllocationPlan {
-    input_len: crate::stdlib::z_size_t,
-    output_len: crate::stdlib::z_size_t,
-}
-
-fn gz_look_allocation_plan(want: ::core::ffi::c_uint) -> GzLookAllocationPlan {
-    GzLookAllocationPlan {
-        input_len: want as crate::stdlib::z_size_t,
-        output_len: want.wrapping_shl(1) as crate::stdlib::z_size_t,
-    }
-}
-
 fn gz_output_buffer_len(size: ::core::ffi::c_uint) -> ::core::ffi::c_uint {
-    gz_look_allocation_plan(size).output_len as ::core::ffi::c_uint
+    match crate::src::gzlib::gz_read_buffer_layout(size) {
+        crate::src::gzlib::GzBufferLayout::Read { output_len, .. } => {
+            output_len as ::core::ffi::c_uint
+        }
+        _ => unreachable!(),
+    }
 }
 
 fn gz_look_window_bits() -> ::core::ffi::c_int {
@@ -1113,10 +1105,16 @@ fn gz_look_action(
 unsafe fn gz_look(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
     let mut strm: crate::zlib_h::z_streamp = &raw mut state.strm;
     if state.size == 0 as ::core::ffi::c_uint {
-        let allocation = gz_look_allocation_plan(state.want);
-        state.in_0 = crate::stdlib::malloc(allocation.input_len as crate::__stddef_size_t_h::size_t)
+        let crate::src::gzlib::GzBufferLayout::Read {
+            input_len,
+            output_len,
+        } = crate::src::gzlib::gz_read_buffer_layout(state.want)
+        else {
+            unreachable!();
+        };
+        state.in_0 = crate::stdlib::malloc(input_len as crate::__stddef_size_t_h::size_t)
             as *mut ::core::ffi::c_uchar;
-        state.out = crate::stdlib::malloc(allocation.output_len as crate::__stddef_size_t_h::size_t)
+        state.out = crate::stdlib::malloc(output_len as crate::__stddef_size_t_h::size_t)
             as *mut ::core::ffi::c_uchar;
         if gz_look_allocations_failed(!state.in_0.is_null(), !state.out.is_null()) {
             crate::stdlib::free(state.out as *mut ::core::ffi::c_void);
@@ -2395,17 +2393,17 @@ mod tests {
     }
 
     #[test]
-    fn gz_look_allocation_plan_preserves_input_and_wrapping_output_lengths() {
+    fn gz_read_buffer_layout_preserves_input_and_wrapping_output_lengths() {
         assert_eq!(
-            gz_look_allocation_plan(4096),
-            GzLookAllocationPlan {
+            crate::src::gzlib::gz_read_buffer_layout(4096),
+            crate::src::gzlib::GzBufferLayout::Read {
                 input_len: 4096,
                 output_len: 8192,
             }
         );
         assert_eq!(
-            gz_look_allocation_plan(::core::ffi::c_uint::MAX),
-            GzLookAllocationPlan {
+            crate::src::gzlib::gz_read_buffer_layout(::core::ffi::c_uint::MAX),
+            crate::src::gzlib::GzBufferLayout::Read {
                 input_len: ::core::ffi::c_uint::MAX as crate::stdlib::z_size_t,
                 output_len: ::core::ffi::c_uint::MAX.wrapping_shl(1) as crate::stdlib::z_size_t,
             }

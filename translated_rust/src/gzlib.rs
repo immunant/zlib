@@ -83,6 +83,43 @@ pub(crate) fn gz_request_len(
     size.checked_mul(nitems)
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum GzBufferLayout {
+    Read {
+        input_len: crate::stdlib::z_size_t,
+        output_len: crate::stdlib::z_size_t,
+    },
+    WriteDirect {
+        input_len: crate::stdlib::z_size_t,
+    },
+    WriteCompressed {
+        input_len: crate::stdlib::z_size_t,
+        output_len: crate::stdlib::z_size_t,
+    },
+}
+
+pub(crate) fn gz_read_buffer_layout(want: ::core::ffi::c_uint) -> GzBufferLayout {
+    GzBufferLayout::Read {
+        input_len: want as crate::stdlib::z_size_t,
+        output_len: want.wrapping_shl(1) as crate::stdlib::z_size_t,
+    }
+}
+
+pub(crate) fn gz_write_buffer_layout(
+    want: ::core::ffi::c_uint,
+    direct: ::core::ffi::c_int,
+) -> Option<GzBufferLayout> {
+    let input_len = want.checked_mul(2)? as crate::stdlib::z_size_t;
+    if direct != 0 {
+        Some(GzBufferLayout::WriteDirect { input_len })
+    } else {
+        Some(GzBufferLayout::WriteCompressed {
+            input_len,
+            output_len: want as crate::stdlib::z_size_t,
+        })
+    }
+}
+
 pub(crate) fn gz_errno_is_retryable(errno: ::core::ffi::c_int) -> bool {
     errno == crate::stdlib::EAGAIN || errno == crate::stdlib::EWOULDBLOCK
 }
