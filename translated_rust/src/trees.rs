@@ -3210,22 +3210,23 @@ unsafe extern "C" fn compress_block(
     let mut sx: ::core::ffi::c_uint = 0 as ::core::ffi::c_uint;
     let mut code: ::core::ffi::c_uint = 0;
     let mut extra: ::core::ffi::c_int = 0;
+    let sym_buf = (*s).pending_buf.offset((*s).sym_buf as isize);
     if (*s).sym_next != 0 as crate::stdlib::uInt {
         loop {
             let c2rust_fresh10 = sx;
             sx = sx.wrapping_add(1);
-            dist = (*(*s).sym_buf.offset(c2rust_fresh10 as isize) as ::core::ffi::c_int
+            dist = (*sym_buf.offset(c2rust_fresh10 as isize) as ::core::ffi::c_int
                 & 0xff as ::core::ffi::c_int) as ::core::ffi::c_uint;
             let c2rust_fresh11 = sx;
             sx = sx.wrapping_add(1);
             dist = dist.wrapping_add(
-                ((*(*s).sym_buf.offset(c2rust_fresh11 as isize) as ::core::ffi::c_int
+                ((*sym_buf.offset(c2rust_fresh11 as isize) as ::core::ffi::c_int
                     & 0xff as ::core::ffi::c_int) as ::core::ffi::c_uint)
                     << 8 as ::core::ffi::c_int,
             );
             let c2rust_fresh12 = sx;
             sx = sx.wrapping_add(1);
-            lc = *(*s).sym_buf.offset(c2rust_fresh12 as isize) as ::core::ffi::c_int;
+            lc = *sym_buf.offset(c2rust_fresh12 as isize) as ::core::ffi::c_int;
             if dist == 0 as ::core::ffi::c_uint {
                 let mut len: ::core::ffi::c_int =
                     (*ltree.offset(lc as isize)).dl.len as ::core::ffi::c_int;
@@ -3603,17 +3604,18 @@ pub unsafe extern "C" fn _tr_tally(
     mut dist: ::core::ffi::c_uint,
     mut lc: ::core::ffi::c_uint,
 ) -> ::core::ffi::c_int {
+    let sym_buf = (*s).pending_buf.offset((*s).sym_buf as isize);
     let c2rust_fresh0 = (*s).sym_next;
     (*s).sym_next = (*s).sym_next.wrapping_add(1);
-    *(*s).sym_buf.offset(c2rust_fresh0 as isize) =
+    *sym_buf.offset(c2rust_fresh0 as isize) =
         dist as crate::zutil_h::uch as crate::zutil_h::uchf;
     let c2rust_fresh1 = (*s).sym_next;
     (*s).sym_next = (*s).sym_next.wrapping_add(1);
-    *(*s).sym_buf.offset(c2rust_fresh1 as isize) =
+    *sym_buf.offset(c2rust_fresh1 as isize) =
         (dist >> 8 as ::core::ffi::c_int) as crate::zutil_h::uch as crate::zutil_h::uchf;
     let c2rust_fresh2 = (*s).sym_next;
     (*s).sym_next = (*s).sym_next.wrapping_add(1);
-    *(*s).sym_buf.offset(c2rust_fresh2 as isize) =
+    *sym_buf.offset(c2rust_fresh2 as isize) =
         lc as crate::zutil_h::uch as crate::zutil_h::uchf;
     if dist == 0 as ::core::ffi::c_uint {
         (*s).dyn_ltree[lc as usize].fc.freq = (*s).dyn_ltree[lc as usize].fc.freq.wrapping_add(1);
