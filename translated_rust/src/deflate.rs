@@ -44,14 +44,11 @@ pub struct ct_data_s {
 }
 #[derive(Copy, Clone)]
 #[repr(C)]
-
-pub union C2Rust_Unnamed_1 {
+pub struct C2Rust_Unnamed_1 {
     pub freq: crate::zutil_h::ush,
-    pub code: crate::zutil_h::ush,
 }
 #[derive(Copy, Clone)]
 #[repr(C)]
-
 pub union C2Rust_Unnamed_0 {
     pub dad: crate::zutil_h::ush,
     pub len: crate::zutil_h::ush,
