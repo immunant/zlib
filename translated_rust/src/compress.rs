@@ -102,7 +102,11 @@ pub unsafe extern "C" fn compress2_z(
             break;
         }
     }
-    *destLen = stream.next_out.offset_from(dest) as crate::stdlib::z_size_t;
+    // `next_out` advances only through the caller's byte output range. Using
+    // addresses expresses that byte count without requiring unsafe pointer
+    // provenance arithmetic (and also handles the permitted zero-capacity
+    // null buffer case).
+    *destLen = (stream.next_out as usize).wrapping_sub(dest as usize) as crate::stdlib::z_size_t;
     crate::src::deflate::deflateEnd(&raw mut stream as *mut _ as *mut crate::zlib_h::z_stream_s);
     return if err == crate::zlib_h::Z_STREAM_END {
         crate::zlib_h::Z_OK
