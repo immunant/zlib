@@ -581,11 +581,12 @@ pub fn gzsetparams(
     mut level: ::core::ffi::c_int,
     mut strategy: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
-    if !crate::src::gzlib::gz_write_state_is_usable(state) || state.direct != 0 {
+    let plan = crate::src::gzlib::gz_set_params_plan(state, level, strategy);
+    if matches!(plan, crate::src::gzlib::GzSetParamsPlan::Invalid) {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
     crate::src::gzlib::gzclearerr(state);
-    if level == state.level && strategy == state.strategy {
+    if matches!(plan, crate::src::gzlib::GzSetParamsPlan::Unchanged) {
         return crate::zlib_h::Z_OK;
     }
     if state.skip != 0 && gz_zero(state) == -1 as ::core::ffi::c_int {

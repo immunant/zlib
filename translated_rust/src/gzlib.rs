@@ -670,6 +670,29 @@ pub(crate) fn gz_write_needs_init(state: &crate::gzguts_h::gz_state) -> bool {
     state.size == 0
 }
 
+// Parameter changes only enter the deflater after the bound gzip state is
+// writable and non-transparent. Keep that state-only selection separate from
+// the deflater call itself.
+pub(crate) enum GzSetParamsPlan {
+    Invalid,
+    Unchanged,
+    Update,
+}
+
+pub(crate) fn gz_set_params_plan(
+    state: &crate::gzguts_h::gz_state,
+    level: ::core::ffi::c_int,
+    strategy: ::core::ffi::c_int,
+) -> GzSetParamsPlan {
+    if !gz_write_state_is_usable(state) || state.direct != 0 {
+        GzSetParamsPlan::Invalid
+    } else if level == state.level && strategy == state.strategy {
+        GzSetParamsPlan::Unchanged
+    } else {
+        GzSetParamsPlan::Update
+    }
+}
+
 // Initialization either writes directly with only an input buffer, or needs
 // the output buffer and deflater configured from the current write settings.
 // Keep this state-only choice separate from the allocation boundary in
