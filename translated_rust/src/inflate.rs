@@ -1859,11 +1859,8 @@ pub fn inflate(
     strm_ref: &mut crate::zlib_h::z_stream,
     mut flush: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
-    // Retain a raw alias only inside this transitional codec boundary. Rust
-    // callers pass the validated stream reference directly; ABI pointer
-    // adoption is confined to `inflate_ffi()`.
-    let mut state: *mut crate::src::inflate::inflate_state =
-        ::core::ptr::null_mut::<crate::src::inflate::inflate_state>();
+    // Rust callers pass the validated stream reference directly; the one
+    // state-pointer adoption remains confined to this codec boundary.
     // The decoder advances these checked offsets while the compatibility
     // cursors themselves stay fixed.  Slice views own all interior movement.
     let mut next: usize = 0;
@@ -1937,7 +1934,6 @@ pub fn inflate(
         ) else {
             return crate::zlib_h::Z_STREAM_ERROR;
         };
-        state = state_ref as *mut crate::src::inflate::inflate_state;
         state_ref.mode = entry_mode;
         put_cursor = strm_ref.next_out as *mut ::core::ffi::c_uchar;
         put = 0;
@@ -1999,7 +1995,7 @@ pub fn inflate(
                                                                                                 // transitions continue to adopt the state
                                                                                                 // only for their own commits.
                                                                                                 let mode = {
-                                                                                                let state_ref = &*state;
+                                                                                                let state_ref = &*state_ref;
                                                                                                 state_ref.mode
                                                                                             };
                                                                                                 match mode as ::core::ffi::c_uint {
@@ -2008,7 +2004,7 @@ pub fn inflate(
                                                                                                     // compatibility records.  Keep the header
                                                                                                     // transition on one short-lived borrow instead
                                                                                                     // of repeatedly traversing their raw pointers.
-                                                                                                    let state_ref = &mut *state;
+                                                                                                    let state_ref = &mut *state_ref;
                                                                                                     if state_ref.wrap == 0 as ::core::ffi::c_int {
                                                                                                         state_ref.mode = crate::src::inflate::TYPEDO;
                                                                                                         continue '_inf_leave;
@@ -2092,7 +2088,7 @@ pub fn inflate(
                                                                                                     // FLAGS follows HEAD without any cursor lend or
                                                                                                     // callback.  Keep its state/message commits on
                                                                                                     // the same kind of short-lived boundary borrow.
-                                                                                                    let state_ref = &mut *state;
+                                                                                                    let state_ref = &mut *state_ref;
                                                                                                     while bits < 16 as ::core::ffi::c_int as ::core::ffi::c_uint
                                                                                                     {
                                                                                                         if have == 0 as ::core::ffi::c_uint {
@@ -2179,7 +2175,7 @@ pub fn inflate(
                                                                                                     // already-consumed dictionary id. Keep the
                                                                                                     // stream/state adoption local instead of
                                                                                                     // repeatedly traversing both ABI records.
-                                                                                                    let state_ref = &mut *state;
+                                                                                                    let state_ref = &mut *state_ref;
                                                                                                     state_ref.check = inflate_dictionary_id(hold);
                                                                                                     strm_ref.adler = state_ref.check as crate::stdlib::uLong;
                                                                                                     hold = 0 as ::core::ffi::c_ulong;
@@ -2212,7 +2208,7 @@ pub fn inflate(
                                                                                                         );
                                                                                                         bits = bits.wrapping_add(8 as ::core::ffi::c_uint);
                                                                                                     }
-                                                                                                    let state_ref = &mut *state;
+                                                                                                    let state_ref = &mut *state_ref;
                                                                                                     let Some(length) = inflate_stored_block_len(hold) else {
                                                                                                         strm_ref.msg = INFLATE_ERROR_MESSAGES[4].as_ptr()
                                                                                                             as *const ::core::ffi::c_char as *mut ::core::ffi::c_char;
@@ -2253,7 +2249,7 @@ pub fn inflate(
                                                                                                     // callbacks or buffer lends. Adopt the two
                                                                                                     // compatibility records once for all of its
                                                                                                     // scalar commits and diagnostics.
-                                                                                                    let state_ref = &mut *state;
+                                                                                                    let state_ref = &mut *state_ref;
                                                                                                     let Some(plan) = inflate_table_header_plan(hold, bits) else {
                                                                                                        strm_ref.msg = INFLATE_ERROR_MESSAGES[5]
                                                                                                            .as_ptr() as *const ::core::ffi::c_char
@@ -2303,7 +2299,7 @@ pub fn inflate(
                                                                                                     // its state read/commit on one transition-local
                                                                                                     // borrow instead of traversing the compatibility
                                                                                                     // pointer for each field.
-                                                                                                    let state_ref = &mut *state;
+                                                                                                    let state_ref = &mut *state_ref;
                                                                                                     let Some(output_index) = out
                                                                                                         .checked_sub(left)
                                                                                                         .and_then(|offset| usize::try_from(offset).ok())
@@ -2329,7 +2325,7 @@ pub fn inflate(
                                                                                                     // accounting and the checksum commit in
                                                                                                     // this transition-local borrow rather than
                                                                                                     // repeatedly traversing the raw pointers.
-                                                                                                    let state_ref = &mut *state;
+                                                                                                    let state_ref = &mut *state_ref;
                                                                                                     if state_ref.wrap != 0 {
                                                                                                         while bits < 32 as ::core::ffi::c_int as ::core::ffi::c_uint
                                                                                                         {
@@ -2403,7 +2399,7 @@ pub fn inflate(
                                                                                                 // after consuming its local cursor. Adopt
                                                                                                 // the compatibility records once rather
                                                                                                 // than repeatedly traversing raw state.
-                                                                                                let state_ref = &mut *state;
+                                                                                                let state_ref = &mut *state_ref;
                                                                                                 if state_ref.wrap != 0 && state_ref.flags != 0 {
                                                                                                 while bits < 32 as ::core::ffi::c_int as ::core::ffi::c_uint
                                                                                                 {
@@ -2506,7 +2502,7 @@ pub fn inflate(
                                                                                         // Adopt both compatibility records once rather
                                                                                         // than repeatedly traversing their raw pointers.
                                                                                         let state_ref =
-                                                                                        &mut *state;
+                                                                                        &mut *state_ref;
                                                                                         if state_ref.havedict == 0 as ::core::ffi::c_int {
                                                                                         strm_ref.next_out = output[put..].as_mut_ptr();
                                                                                         strm_ref.avail_out = left as crate::stdlib::uInt;
@@ -2540,7 +2536,7 @@ pub fn inflate(
                                                                                     // retained header update and checksum commit on
                                                                                     // one short-lived state borrow.
                                                                                     let state_ref =
-                                                                                        &mut *state;
+                                                                                        &mut *state_ref;
                                                                                     let time_plan = inflate_gzip_time_plan(
                                                                                         state_ref.flags,
                                                                                         state_ref.wrap,
@@ -2717,7 +2713,7 @@ pub fn inflate(
                                                                             // rather than re-traversing their raw cursors for
                                                                             // each error and mode commit.
                                                                             let state_ref =
-                                                                                &mut *state;
+                                                                                &mut *state_ref;
                                                                             if state_ref.mode as ::core::ffi::c_uint
                                                                             == crate::src::inflate::BAD as ::core::ffi::c_int as ::core::ffi::c_uint
                                                                         {
@@ -2760,7 +2756,7 @@ pub fn inflate(
                                                                         // ABI views.  Keep its scalar state commits on one
                                                                         // short-lived adopted state record instead of
                                                                         // repeatedly traversing the compatibility pointer.
-                                                                        let state_ref = &mut *state;
+                                                                        let state_ref = &mut *state_ref;
                                                                         copy = state_ref.length;
                                                                         if copy != 0 {
                                                                             copy =
@@ -2858,7 +2854,7 @@ pub fn inflate(
                                                                     // OS follows TIME without any callback or cursor lend.
                                                                     // Reuse one adopted state record for the retained header,
                                                                     // optional header CRC, and mode transition.
-                                                                    let state_ref = &mut *state;
+                                                                    let state_ref = &mut *state_ref;
                                                                     let os_plan =
                                                                         inflate_gzip_os_plan(
                                                                             state_ref.flags,
@@ -2897,7 +2893,7 @@ pub fn inflate(
                                                         // compatibility records. Keep the block-header
                                                         // state transition on those short-lived borrows
                                                         // instead of repeatedly traversing raw pointers.
-                                                        let state_ref = &mut *state;
+                                                        let state_ref = &mut *state_ref;
                                                         if state_ref.last != 0 {
                                                             hold >>=
                                                                 bits & 7 as ::core::ffi::c_uint;
@@ -2983,7 +2979,7 @@ pub fn inflate(
                                                     // Keep those commits on one short-lived state borrow
                                                     // instead of repeatedly traversing the compatibility
                                                     // state pointer.
-                                                    let state_ref = &mut *state;
+                                                    let state_ref = &mut *state_ref;
                                                     if state_ref.flags & 0x400 as ::core::ffi::c_int
                                                         != 0
                                                     {
@@ -3045,10 +3041,10 @@ pub fn inflate(
                                                 // The EXLEN branch above owns a scoped state borrow.
                                                 // Re-adopt the already-validated compatibility record
                                                 // only for this fall-through mode commit.
-                                                let state_ref = &mut *state;
+                                                let state_ref = &mut *state_ref;
                                                 state_ref.mode = crate::src::inflate::LEN;
                                             }
-                                            let state_ref = &mut *state;
+                                            let state_ref = &mut *state_ref;
                                             let lcode = inflate_table_view(
                                                 &state_ref.codes,
                                                 state_ref.lencode,
@@ -3301,7 +3297,7 @@ pub fn inflate(
                                         // state.  Adopt the decoder state once for this transition
                                         // instead of repeatedly traversing its raw compatibility
                                         // pointer.
-                                        let state_ref = &mut *state;
+                                        let state_ref = &mut *state_ref;
                                         if state_ref.flags & 0x400 as ::core::ffi::c_int != 0 {
                                             copy = state_ref.length;
                                             if copy > have {
@@ -3368,7 +3364,7 @@ pub fn inflate(
                                     // update scalar match state. Keep the compatibility-state
                                     // access in one short-lived transition borrow, matching
                                     // the distance-extra transition below.
-                                    let state_ref = &mut *state;
+                                    let state_ref = &mut *state_ref;
                                     if state_ref.extra != 0 {
                                         let extra = state_ref.extra;
                                         while bits < extra {
@@ -3404,7 +3400,7 @@ pub fn inflate(
                                 // NAME consumes only the current input cursor and retained header
                                 // destination.  Keep its scalar state updates on one adopted
                                 // decoder-state borrow.
-                                let state_ref = &mut *state;
+                                let state_ref = &mut *state_ref;
                                 if state_ref.flags & 0x800 as ::core::ffi::c_int != 0 {
                                     if have == 0 as ::core::ffi::c_uint {
                                         break '_inf_leave;
@@ -3464,7 +3460,7 @@ pub fn inflate(
                             // the decoder entry's validated records. The table cursor
                             // is resolved once to a bounded view, so both root and
                             // subtable reads stay checked slice accesses.
-                            let state_ref = &mut *state;
+                            let state_ref = &mut *state_ref;
                             let Some(dcode) =
                                 inflate_table_view(&state_ref.codes, state_ref.distcode)
                             else {
@@ -3566,7 +3562,7 @@ pub fn inflate(
                         // COMMENT consumes only the current input cursor and retained
                         // header destination. Keep its scalar state updates on one
                         // adopted decoder-state borrow, matching the NAME transition.
-                        let state_ref = &mut *state;
+                        let state_ref = &mut *state_ref;
                         if state_ref.flags & 0x1000 as ::core::ffi::c_int != 0 {
                             if have == 0 as ::core::ffi::c_uint {
                                 break '_inf_leave;
@@ -3619,7 +3615,7 @@ pub fn inflate(
                     // update scalar match state. Keep the compatibility-state
                     // access in one short-lived transition borrow; raw input
                     // cursor handling remains in this legacy boundary.
-                    let state_ref = &mut *state;
+                    let state_ref = &mut *state_ref;
                     if state_ref.extra != 0 {
                         let extra = state_ref.extra;
                         while bits < extra {
@@ -3654,7 +3650,7 @@ pub fn inflate(
                 // cursor and updates stream/header scalars.  Keep those commits
                 // on one short-lived boundary borrow instead of repeatedly
                 // traversing the compatibility records.
-                let state_ref = &mut *state;
+                let state_ref = &mut *state_ref;
                 if state_ref.flags & 0x200 as ::core::ffi::c_int != 0 {
                     while bits < 16 as ::core::ffi::c_int as ::core::ffi::c_uint {
                         if have == 0 as ::core::ffi::c_uint {
@@ -3698,7 +3694,7 @@ pub fn inflate(
             // so keep its scalar state bookkeeping on one short-lived adopted
             // state record. The cursor copy below remains in the transitional
             // decoder boundary.
-            let state_ref = &mut *state;
+            let state_ref = &mut *state_ref;
             let Some(plan) = inflate_match_copy_plan(
                 out,
                 left,
@@ -3768,7 +3764,7 @@ pub fn inflate(
         // Reusing this plan keeps the history decision and final ABI accounting
         // tied to the same scalar snapshot.
         {
-            let state_ref = &mut *state;
+            let state_ref = &mut *state_ref;
             strm_ref.next_out = put_cursor as *mut crate::stdlib::Bytef;
             strm_ref.avail_out = left as crate::stdlib::uInt;
             strm_ref.next_in = next_cursor as *mut crate::stdlib::Bytef;
