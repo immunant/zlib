@@ -1780,21 +1780,33 @@ pub unsafe extern "C" fn deflateUsed_ffi(
     }
     crate::zlib_h::Z_OK
 }
-pub unsafe extern "C" fn deflatePrime(
-    mut strm: crate::zlib_h::z_streamp,
+pub unsafe fn deflatePrime(
+    strm: &mut crate::zlib_h::z_stream_s,
+    mut bits: ::core::ffi::c_int,
+    mut value: ::core::ffi::c_int,
+) -> ::core::ffi::c_int {
+    deflate_prime_impl(strm, bits, value)
+}
+
+/// Apply pending bits after validating the stream and borrowing its installed
+/// deflate state exactly once.
+fn deflate_prime_impl(
+    strm: &mut crate::zlib_h::z_stream_s,
     mut bits: ::core::ffi::c_int,
     mut value: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
     let mut put: ::core::ffi::c_int = 0;
-    if deflateStateCheck(strm) != 0 {
+    if !deflate_params_stream_is_valid(strm) {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    let s = &mut *((*strm).state as *mut crate::src::deflate::deflate_state);
-    let pending_state = &*s;
+    let s = unsafe { &mut *strm.state };
+    if !deflate_params_state_is_valid(s) {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    }
     if bits < 0 as ::core::ffi::c_int
         || bits > 16 as ::core::ffi::c_int
-        || pending_state.sym_buf
-            < pending_state.pending_out.wrapping_add(
+        || s.sym_buf
+            < s.pending_out.wrapping_add(
                 (crate::src::deflate::Buf_size + 7 as ::core::ffi::c_int >> 3 as ::core::ffi::c_int)
                     as usize,
             )
@@ -1827,6 +1839,9 @@ pub unsafe extern "C" fn deflatePrime_ffi(
     mut bits: ::core::ffi::c_int,
     mut value: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
+    let Some(strm) = strm.as_mut() else {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    };
     deflatePrime(strm, bits, value)
 }
 pub unsafe fn deflateParams(
