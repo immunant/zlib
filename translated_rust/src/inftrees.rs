@@ -3100,10 +3100,7 @@ pub fn inflate_table(
     loop {
         here.bits = len.wrapping_sub(drop_0) as ::core::ffi::c_uchar;
         let symbol = work[sym as usize] as ::core::ffi::c_uint;
-        if symbol
-            .wrapping_add(1 as ::core::ffi::c_uint)
-            < match_0
-        {
+        if symbol.wrapping_add(1 as ::core::ffi::c_uint) < match_0 {
             here.op = 0 as ::core::ffi::c_int as ::core::ffi::c_uchar;
             here.val = symbol as ::core::ffi::c_ushort;
         } else if symbol >= match_0 {

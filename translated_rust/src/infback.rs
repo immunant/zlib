@@ -415,13 +415,13 @@ pub unsafe extern "C" fn inflateBack(
                     let table_result = {
                         let state = &mut *state;
                         crate::src::inftrees::inflate_table(
-                        crate::src::inftrees::CODES,
-                        &state.lens,
-                        19,
-                        &mut state.codes[next_index..],
-                        &mut state.lenbits,
-                        &mut state.work,
-                    )
+                            crate::src::inftrees::CODES,
+                            &state.lens,
+                            19,
+                            &mut state.codes[next_index..],
+                            &mut state.lenbits,
+                            &mut state.work,
+                        )
                     };
                     ret = match table_result {
                         Ok(used) => {
@@ -650,13 +650,13 @@ pub unsafe extern "C" fn inflateBack(
                             let table_result = {
                                 let state = &mut *state;
                                 crate::src::inftrees::inflate_table(
-                                crate::src::inftrees::LENS,
-                                &state.lens,
-                                state.nlen,
-                                &mut state.codes[next_index..],
-                                &mut state.lenbits,
-                                &mut state.work,
-                            )
+                                    crate::src::inftrees::LENS,
+                                    &state.lens,
+                                    state.nlen,
+                                    &mut state.codes[next_index..],
+                                    &mut state.lenbits,
+                                    &mut state.work,
+                                )
                             };
                             ret = match table_result {
                                 Ok(used) => {
@@ -673,20 +673,21 @@ pub unsafe extern "C" fn inflateBack(
                                 (*state).mode = crate::src::inflate::BAD;
                                 continue;
                             } else {
-                                (*state).distcode = crate::src::inflate::CodeTable::Dynamic((*state).next);
+                                (*state).distcode =
+                                    crate::src::inflate::CodeTable::Dynamic((*state).next);
                                 (*state).distbits = 6 as ::core::ffi::c_uint;
                                 let next_index = (*state).next;
                                 let table_result = {
                                     let state = &mut *state;
                                     let nlen = state.nlen as usize;
                                     crate::src::inftrees::inflate_table(
-                                    crate::src::inftrees::DISTS,
-                                    &state.lens[nlen..],
-                                    state.ndist,
-                                    &mut state.codes[next_index..],
-                                    &mut state.distbits,
-                                    &mut state.work,
-                                )
+                                        crate::src::inftrees::DISTS,
+                                        &state.lens[nlen..],
+                                        state.ndist,
+                                        &mut state.codes[next_index..],
+                                        &mut state.distbits,
+                                        &mut state.work,
+                                    )
                                 };
                                 ret = match table_result {
                                     Ok(used) => {
