@@ -2046,6 +2046,27 @@ fn zlib_header_words(
     (header, dictionary_adler)
 }
 
+/// Return whether a flush request cannot make progress without new input.
+///
+/// zlib ranks the finish-style flush values specially before comparing them
+/// with the previous request.  Keep that C-style wrapping arithmetic in this
+/// value-only helper so the stream adapter need not reproduce it inline.
+fn flush_rank(flush: ::core::ffi::c_int) -> ::core::ffi::c_int {
+    flush
+        .wrapping_mul(2)
+        .wrapping_sub(if flush > 4 { 9 } else { 0 })
+}
+
+fn repeated_flush_is_buffer_error(
+    avail_in: crate::stdlib::uInt,
+    flush: ::core::ffi::c_int,
+    previous_flush: ::core::ffi::c_int,
+) -> bool {
+    avail_in == 0
+        && flush_rank(flush) <= flush_rank(previous_flush)
+        && flush != crate::zlib_h::Z_FINISH
+}
+
 pub unsafe extern "C" fn deflate(
     mut strm: crate::zlib_h::z_streamp,
     mut flush: ::core::ffi::c_int,
@@ -2093,21 +2114,7 @@ pub unsafe extern "C" fn deflate(
             (*s).last_flush = -1 as ::core::ffi::c_int;
             return crate::zlib_h::Z_OK;
         }
-    } else if (*strm).avail_in == 0 as crate::stdlib::uInt
-        && flush * 2 as ::core::ffi::c_int
-            - (if flush > 4 as ::core::ffi::c_int {
-                9 as ::core::ffi::c_int
-            } else {
-                0 as ::core::ffi::c_int
-            })
-            <= old_flush * 2 as ::core::ffi::c_int
-                - (if old_flush > 4 as ::core::ffi::c_int {
-                    9 as ::core::ffi::c_int
-                } else {
-                    0 as ::core::ffi::c_int
-                })
-        && flush != crate::zlib_h::Z_FINISH
-    {
+    } else if repeated_flush_is_buffer_error((*strm).avail_in, flush, old_flush) {
         (*strm).msg =
             crate::src::zutil::z_errmsg[(if (-5 as ::core::ffi::c_int) < -6 as ::core::ffi::c_int
                 || -5 as ::core::ffi::c_int > 2 as ::core::ffi::c_int
