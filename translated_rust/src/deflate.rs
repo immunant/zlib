@@ -1437,10 +1437,12 @@ fn deflate_reset_keep(
 pub unsafe extern "C" fn deflateResetKeep_ffi(
     mut strm: crate::zlib_h::z_streamp,
 ) -> ::core::ffi::c_int {
-    if strm.is_null() {
+    // Bind the optional caller stream at the ABI boundary.  The reset
+    // transition itself stays in the reference-bound implementation.
+    let Some(strm) = (unsafe { strm.as_mut() }) else {
         return crate::zlib_h::Z_STREAM_ERROR;
-    }
-    deflateResetKeep(&mut *strm, false)
+    };
+    deflateResetKeep(strm, false)
 }
 fn lm_init_state(
     state: &mut crate::src::deflate::deflate_state,
@@ -1473,10 +1475,12 @@ pub fn deflateReset(strm: &mut crate::zlib_h::z_stream) -> ::core::ffi::c_int {
 pub unsafe extern "C" fn deflateReset_ffi(
     mut strm: crate::zlib_h::z_streamp,
 ) -> ::core::ffi::c_int {
-    if strm.is_null() {
+    // Bind the optional caller stream at the ABI boundary.  The safe reset
+    // implementation retains the state validation and matcher setup.
+    let Some(strm) = (unsafe { strm.as_mut() }) else {
         return crate::zlib_h::Z_STREAM_ERROR;
-    }
-    deflateReset(&mut *strm)
+    };
+    deflateReset(strm)
 }
 // The named implementation owns the header snapshot. The ABI adapter only
 // binds the caller's fields for this synchronous conversion.
