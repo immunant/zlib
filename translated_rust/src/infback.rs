@@ -182,6 +182,12 @@ pub unsafe extern "C" fn inflateBackInit_(
     {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
+    let window_len = 1usize << windowBits;
+    let mut window_storage = Vec::new();
+    if window_storage.try_reserve_exact(window_len).is_err() {
+        return crate::zlib_h::Z_MEM_ERROR;
+    }
+    window_storage.resize(window_len, 0);
     (*strm).msg = ::core::ptr::null_mut::<::core::ffi::c_char>();
     if (*strm).zalloc.is_none() {
         (*strm).zalloc = Some(
@@ -209,11 +215,12 @@ pub unsafe extern "C" fn inflateBackInit_(
     if state.is_null() {
         return crate::zlib_h::Z_MEM_ERROR;
     }
+    state.write(crate::src::inflate::new_inflate_state());
     (*strm).state = state as *mut crate::src::deflate::internal_state;
     (*state).dmax = 32768 as ::core::ffi::c_uint;
     (*state).wbits = windowBits as crate::stdlib::uInt as ::core::ffi::c_uint;
     (*state).wsize = (1 as ::core::ffi::c_uint) << windowBits;
-    (*state).window = ::core::ptr::NonNull::new(window);
+    (*state).window = Some(window_storage);
     (*state).wnext = 0 as ::core::ffi::c_uint;
     (*state).whave = 0 as ::core::ffi::c_uint;
     (*state).sane = 1 as ::core::ffi::c_int;
@@ -938,10 +945,13 @@ pub unsafe extern "C" fn inflateBack_ffi(
             strm.avail_in as usize,
         ))
     };
-    let window = ::core::slice::from_raw_parts_mut(
-        state.window.unwrap().as_ptr(),
-        state.wsize as usize,
-    );
+    let Some(mut window) = state.window.take() else {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    };
+    if window.len() != state.wsize as usize {
+        state.window = Some(window);
+        return crate::zlib_h::Z_STREAM_ERROR;
+    }
     let mut input = BackInput::new(
         move || {
             let Some(callback) = in_0 else {
@@ -967,7 +977,8 @@ pub unsafe extern "C" fn inflateBack_ffi(
             bytes.len() as u32,
         ) != 0
     });
-    let result = inflate_back_impl(strm, state, window, &mut input, &mut output);
+    let result = inflate_back_impl(strm, state, &mut window, &mut input, &mut output);
+    state.window = Some(window);
     match input.remaining() {
         Some(remaining) => {
             strm.next_in = remaining.as_ptr() as *mut crate::stdlib::Bytef;
@@ -984,6 +995,7 @@ pub unsafe extern "C" fn inflateBackEnd(mut strm: crate::zlib_h::z_streamp) -> :
     if strm.is_null() || (*strm).state.is_null() || (*strm).zfree.is_none() {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
+    ::core::ptr::drop_in_place((*strm).state as *mut crate::src::inflate::inflate_state);
     Some((*strm).zfree.expect("non-null function pointer")).expect("non-null function pointer")(
         (*strm).opaque,
         (*strm).state as crate::stdlib::voidpf,
