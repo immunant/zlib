@@ -54,6 +54,32 @@ pub use crate::zlib_h::Z_OK;
 pub use crate::zlib_h::Z_STREAM_END;
 pub use crate::zlib_h::Z_STREAM_ERROR;
 
+enum GzLoadReadResult {
+    Ok,
+    RetryAfterPartial,
+    Error { retryable: bool },
+    Eof,
+}
+
+fn gz_load_read_result(
+    ret: ::core::ffi::c_int,
+    have: ::core::ffi::c_uint,
+    errno: ::core::ffi::c_int,
+) -> GzLoadReadResult {
+    if ret < 0 as ::core::ffi::c_int {
+        let retryable = gz_errno_is_retryable(errno);
+        if retryable && have != 0 as ::core::ffi::c_uint {
+            GzLoadReadResult::RetryAfterPartial
+        } else {
+            GzLoadReadResult::Error { retryable }
+        }
+    } else if ret == 0 as ::core::ffi::c_int {
+        GzLoadReadResult::Eof
+    } else {
+        GzLoadReadResult::Ok
+    }
+}
+
 unsafe fn gz_load(
     state: &mut crate::gzguts_h::gz_state,
     mut buf: *mut ::core::ffi::c_uchar,
@@ -80,23 +106,31 @@ unsafe fn gz_load(
             break;
         }
     }
-    if ret < 0 as ::core::ffi::c_int {
-        let errno = *crate::stdlib::__errno_location();
-        if gz_errno_is_retryable(errno) {
+    let errno = if ret < 0 as ::core::ffi::c_int {
+        *crate::stdlib::__errno_location()
+    } else {
+        0 as ::core::ffi::c_int
+    };
+    match gz_load_read_result(ret, *have, errno) {
+        GzLoadReadResult::Ok => {}
+        GzLoadReadResult::RetryAfterPartial => {
             state.again = 1 as ::core::ffi::c_int;
-            if *have != 0 as ::core::ffi::c_uint {
-                return 0 as ::core::ffi::c_int;
-            }
+            return 0 as ::core::ffi::c_int;
         }
-        crate::src::gzlib::gz_error(
-            state as *mut crate::gzguts_h::gz_state,
-            crate::zlib_h::Z_ERRNO,
-            crate::stdlib::strerror(errno),
-        );
-        return -1 as ::core::ffi::c_int;
-    }
-    if ret == 0 as ::core::ffi::c_int {
-        state.eof = 1 as ::core::ffi::c_int;
+        GzLoadReadResult::Error { retryable } => {
+            if retryable {
+                state.again = 1 as ::core::ffi::c_int;
+            }
+            crate::src::gzlib::gz_error(
+                state as *mut crate::gzguts_h::gz_state,
+                crate::zlib_h::Z_ERRNO,
+                crate::stdlib::strerror(errno),
+            );
+            return -1 as ::core::ffi::c_int;
+        }
+        GzLoadReadResult::Eof => {
+            state.eof = 1 as ::core::ffi::c_int;
+        }
     }
     return 0 as ::core::ffi::c_int;
 }
