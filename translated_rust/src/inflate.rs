@@ -1555,7 +1555,14 @@ pub unsafe fn inflate(
                                                                                                     continue '_inf_leave;
                                                                                                 }
                                                                                                 16206 => {
-                                                                                                    if (*state).wrap != 0 {
+                                                                                                    // The decoder entry already adopted both
+                                                                                                    // compatibility records. Keep trailer
+                                                                                                    // accounting and the checksum commit in
+                                                                                                    // this transition-local borrow rather than
+                                                                                                    // repeatedly traversing the raw pointers.
+                                                                                                    let strm_ref = &mut *strm;
+                                                                                                    let state_ref = &mut *state;
+                                                                                                    if state_ref.wrap != 0 {
                                                                                                         while bits < 32 as ::core::ffi::c_int as ::core::ffi::c_uint
                                                                                                         {
                                                                                                             if have == 0 as ::core::ffi::c_uint {
@@ -1571,28 +1578,28 @@ pub unsafe fn inflate(
                                                                                                             bits = bits.wrapping_add(8 as ::core::ffi::c_uint);
                                                                                                         }
                                                                                                         out = out.wrapping_sub(left);
-                                                                                                        (*strm).total_out = (*strm)
+                                                                                                        strm_ref.total_out = strm_ref
                                                                                                             .total_out
                                                                                                             .wrapping_add(out as crate::stdlib::uLong);
-                                                                                                        (*state).total = (*state)
+                                                                                                        state_ref.total = state_ref
                                                                                                             .total
                                                                                                             .wrapping_add(out as ::core::ffi::c_ulong);
-                                                                                                        if (*state).wrap & 4 as ::core::ffi::c_int != 0 && out != 0
+                                                                                                        if state_ref.wrap & 4 as ::core::ffi::c_int != 0 && out != 0
                                                                                                         {
                                                                                                             let output = core::slice::from_raw_parts(
                                                                                                                 put.wrapping_sub(out as usize),
                                                                                                                 out as usize,
                                                                                                             );
-                                                                                                            (*state).check = inflate_output_checksum(
-                                                                                                                (*state).check as crate::stdlib::uLong,
-                                                                                                                (*state).flags,
+                                                                                                            state_ref.check = inflate_output_checksum(
+                                                                                                                state_ref.check as crate::stdlib::uLong,
+                                                                                                                state_ref.flags,
                                                                                                                 output,
                                                                                                             );
-                                                                                                            (*strm).adler = (*state).check as crate::stdlib::uLong;
+                                                                                                            strm_ref.adler = state_ref.check as crate::stdlib::uLong;
                                                                                                         }
                                                                                                         out = left;
-                                                                                                        if (*state).wrap & 4 as ::core::ffi::c_int != 0
-                                                                                                            && (if (*state).flags != 0 {
+                                                                                                        if state_ref.wrap & 4 as ::core::ffi::c_int != 0
+                                                                                                            && (if state_ref.flags != 0 {
                                                                                                                 hold
                                                                                                             } else {
                                                                                                                 (hold >> 24 as ::core::ffi::c_int
@@ -1609,18 +1616,18 @@ pub unsafe fn inflate(
                                                                                                                         (hold & 0xff as ::core::ffi::c_ulong)
                                                                                                                             << 24 as ::core::ffi::c_int,
                                                                                                                     )
-                                                                                                            }) != (*state).check
+                                                                                                            }) != state_ref.check
                                                                                                         {
-                                                                                                            (*strm).msg = INFLATE_ERROR_MESSAGES[6].as_ptr()
+                                                                                                            strm_ref.msg = INFLATE_ERROR_MESSAGES[6].as_ptr()
                                                                                                                 as *const ::core::ffi::c_char as *mut ::core::ffi::c_char;
-                                                                                                            (*state).mode = crate::src::inflate::BAD;
+                                                                                                            state_ref.mode = crate::src::inflate::BAD;
                                                                                                             continue '_inf_leave;
                                                                                                         } else {
                                                                                                             hold = 0 as ::core::ffi::c_ulong;
                                                                                                             bits = 0 as ::core::ffi::c_uint;
                                                                                                         }
                                                                                                     }
-                                                                                                    (*state).mode = crate::src::inflate::LENGTH;
+                                                                                                    state_ref.mode = crate::src::inflate::LENGTH;
                                                                                                 }
                                                                                                 16207 => {}
                                                                                                 16208 => {
