@@ -1924,6 +1924,39 @@ fn append_gzip_fixed_header_state(
     true
 }
 
+/// Copy as much of a gzip extra field as fits in the pending buffer.
+///
+/// The caller owns the boundary borrow of `extra` and retains responsibility
+/// for flushing when this fills the pending buffer.  Keeping one bounded copy
+/// here makes the state updates and optional header-CRC coverage atomic.
+fn append_gzip_extra_chunk_state(
+    pending_buf: &mut [crate::stdlib::Byte],
+    pending: &mut crate::zutil_h::ulg,
+    gzindex: &mut crate::zutil_h::ulg,
+    extra: &[crate::stdlib::Byte],
+    hcrc: bool,
+    adler: &mut crate::stdlib::uLong,
+) -> Option<bool> {
+    let start = usize::try_from(*pending).ok()?;
+    let source_start = usize::try_from(*gzindex).ok()?;
+    if start > pending_buf.len() || source_start > extra.len() {
+        return None;
+    }
+
+    let copy = (pending_buf.len() - start).min(extra.len() - source_start);
+    if copy == 0 {
+        return Some(source_start == extra.len());
+    }
+    let end = start.checked_add(copy)?;
+    pending_buf[start..end].copy_from_slice(&extra[source_start..source_start + copy]);
+    if hcrc {
+        *adler = crate::src::crc32::crc32_slice(*adler, &pending_buf[start..end]);
+    }
+    *pending = end as crate::zutil_h::ulg;
+    *gzindex = source_start.checked_add(copy)? as crate::zutil_h::ulg;
+    Some(*gzindex as usize == extra.len())
+}
+
 fn flush_pending_state(
     pending_buf_size: crate::zutil_h::ulg,
     pending: &mut crate::zutil_h::ulg,
@@ -2228,52 +2261,45 @@ pub unsafe extern "C" fn deflate(
     }
     if (*s).status == crate::src::deflate::EXTRA_STATE {
         if !(*(*s).gzhead).extra.is_null() {
-            let mut beg: crate::zutil_h::ulg = (*s).pending;
-            let mut left: crate::zutil_h::ulg =
-                (((*(*s).gzhead).extra_len & 0xffff as crate::stdlib::uInt) as crate::zutil_h::ulg)
-                    .wrapping_sub((*s).gzindex);
-            while (*s).pending.wrapping_add(left) > (*s).pending_buf_size {
-                let mut copy: crate::zutil_h::ulg =
-                    (*s).pending_buf_size.wrapping_sub((*s).pending);
-                crate::stdlib::memcpy(
-                    (*s).pending_buf.offset((*s).pending as isize) as *mut ::core::ffi::c_void,
-                    (*(*s).gzhead).extra.offset((*s).gzindex as isize)
-                        as *const ::core::ffi::c_void,
-                    copy as crate::__stddef_size_t_h::size_t,
-                );
-                (*s).pending = (*s).pending_buf_size;
-                if (*(*s).gzhead).hcrc != 0 && (*s).pending > beg {
-                    (*strm).adler = crate::src::crc32::crc32_z(
-                        (*strm).adler,
-                        (*s).pending_buf.offset(beg as isize),
-                        ((*s).pending as crate::stdlib::z_size_t)
-                            .wrapping_sub(beg as crate::stdlib::z_size_t),
-                    );
+            let header = &*(*s).gzhead;
+            let extra_len = (header.extra_len & 0xffff as crate::stdlib::uInt) as usize;
+            let extra = ::core::slice::from_raw_parts(header.extra, extra_len);
+            loop {
+                let state = &mut *s;
+                let Ok(pending_len) = usize::try_from(state.pending_buf_size) else {
+                    return crate::zlib_h::Z_STREAM_ERROR;
+                };
+                if pending_len != 0 && state.pending_buf.is_null() {
+                    return crate::zlib_h::Z_STREAM_ERROR;
                 }
-                (*s).gzindex = (*s).gzindex.wrapping_add(copy);
+                let pending_buf = if pending_len == 0 {
+                    &mut []
+                } else {
+                    ::core::slice::from_raw_parts_mut(state.pending_buf, pending_len)
+                };
+                let Some(done) = append_gzip_extra_chunk_state(
+                    pending_buf,
+                    &mut state.pending,
+                    &mut state.gzindex,
+                    extra,
+                    header.hcrc != 0,
+                    &mut (*strm).adler,
+                ) else {
+                    return crate::zlib_h::Z_STREAM_ERROR;
+                };
+                if done {
+                    state.gzindex = 0 as crate::zutil_h::ulg;
+                    break;
+                }
+                if state.pending != state.pending_buf_size {
+                    return crate::zlib_h::Z_STREAM_ERROR;
+                }
                 flush_pending(strm);
                 if (*s).pending != 0 as crate::zutil_h::ulg {
                     (*s).last_flush = -1 as ::core::ffi::c_int;
                     return crate::zlib_h::Z_OK;
                 }
-                beg = 0 as crate::zutil_h::ulg;
-                left = left.wrapping_sub(copy);
             }
-            crate::stdlib::memcpy(
-                (*s).pending_buf.offset((*s).pending as isize) as *mut ::core::ffi::c_void,
-                (*(*s).gzhead).extra.offset((*s).gzindex as isize) as *const ::core::ffi::c_void,
-                left as crate::__stddef_size_t_h::size_t,
-            );
-            (*s).pending = (*s).pending.wrapping_add(left);
-            if (*(*s).gzhead).hcrc != 0 && (*s).pending > beg {
-                (*strm).adler = crate::src::crc32::crc32_z(
-                    (*strm).adler,
-                    (*s).pending_buf.offset(beg as isize),
-                    ((*s).pending as crate::stdlib::z_size_t)
-                        .wrapping_sub(beg as crate::stdlib::z_size_t),
-                );
-            }
-            (*s).gzindex = 0 as crate::zutil_h::ulg;
         }
         (*s).status = crate::src::deflate::NAME_STATE;
     }
