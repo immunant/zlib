@@ -643,6 +643,20 @@ fn gzgets_post_fetch_decision(
     }
 }
 
+fn gzgets_apply_post_fetch_decision(
+    past: &mut ::core::ffi::c_int,
+    decision: GzgetsPostFetchDecision,
+) -> bool {
+    match decision {
+        GzgetsPostFetchDecision::Stop => false,
+        GzgetsPostFetchDecision::MarkPastAndStop => {
+            *past = 1;
+            false
+        }
+        GzgetsPostFetchDecision::Copy => true,
+    }
+}
+
 enum GzUngetcBufferState {
     Empty,
     Full,
@@ -3016,6 +3030,29 @@ mod tests {
     }
 
     #[test]
+    fn gzgets_apply_post_fetch_decision_only_marks_past_at_eof() {
+        let mut past = 0;
+
+        assert!(!gzgets_apply_post_fetch_decision(
+            &mut past,
+            GzgetsPostFetchDecision::Stop,
+        ));
+        assert_eq!(past, 0);
+
+        assert!(gzgets_apply_post_fetch_decision(
+            &mut past,
+            GzgetsPostFetchDecision::Copy,
+        ));
+        assert_eq!(past, 0);
+
+        assert!(!gzgets_apply_post_fetch_decision(
+            &mut past,
+            GzgetsPostFetchDecision::MarkPastAndStop,
+        ));
+        assert_eq!(past, 1);
+    }
+
+    #[test]
     fn gzgets_copy_progress_updates_state_and_loop_decision() {
         assert_eq!(
             gzgets_copy_progress(10, 8, 42, 3, false),
@@ -3577,13 +3614,11 @@ pub unsafe extern "C" fn gzgets(
             } else {
                 0
             };
-            match gzgets_post_fetch_decision(state_ref.x.have, fetch) {
-                GzgetsPostFetchDecision::Stop => break,
-                GzgetsPostFetchDecision::MarkPastAndStop => {
-                    state_ref.past = 1 as ::core::ffi::c_int;
-                    break;
-                }
-                GzgetsPostFetchDecision::Copy => {}
+            if !gzgets_apply_post_fetch_decision(
+                &mut state_ref.past,
+                gzgets_post_fetch_decision(state_ref.x.have, fetch),
+            ) {
+                break;
             }
             n = gzgets_copy_len(state_ref.x.have, left, None);
             eol = crate::stdlib::memchr(

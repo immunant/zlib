@@ -4541,6 +4541,28 @@ fn tree_run_step(
     }
 }
 
+fn tree_run_step_after_increment(
+    count: ::core::ffi::c_int,
+    max_count: ::core::ffi::c_int,
+    min_count: ::core::ffi::c_int,
+    current_len: ::core::ffi::c_int,
+    next_len: ::core::ffi::c_int,
+    previous_len: ::core::ffi::c_int,
+) -> (::core::ffi::c_int, TreeRunStep) {
+    let count = count + 1;
+    (
+        count,
+        tree_run_step(
+            count,
+            max_count,
+            min_count,
+            current_len,
+            next_len,
+            previous_len,
+        ),
+    )
+}
+
 fn tally_scan_tree_action(
     bl_tree: &mut [crate::src::deflate::ct_data],
     current_len: ::core::ffi::c_int,
@@ -4634,8 +4656,9 @@ unsafe fn scan_tree(
     while n <= max_code {
         curlen = nextlen;
         nextlen = (*tree.wrapping_add(tree_next_cursor(n))).dl.len as ::core::ffi::c_int;
-        count += 1;
-        let step = tree_run_step(count, max_count, min_count, curlen, nextlen, prevlen);
+        let (incremented_count, step) =
+            tree_run_step_after_increment(count, max_count, min_count, curlen, nextlen, prevlen);
+        count = incremented_count;
         if let Some(action) = step.action {
             tally_scan_tree_action(&mut (*s).bl_tree, curlen, action);
         }
@@ -4662,8 +4685,9 @@ unsafe fn send_tree(
     while n <= max_code {
         curlen = nextlen;
         nextlen = (*tree.wrapping_add(tree_next_cursor(n))).dl.len as ::core::ffi::c_int;
-        count += 1;
-        let step = tree_run_step(count, max_count, min_count, curlen, nextlen, prevlen);
+        let (incremented_count, step) =
+            tree_run_step_after_increment(count, max_count, min_count, curlen, nextlen, prevlen);
+        count = incremented_count;
         if let Some(action) = step.action {
             match action {
                 ScanTreeAction::LiteralCount(_) => loop {
@@ -5697,10 +5721,10 @@ mod tests {
         tally_match_tree_indices, tally_scan_tree_action, tally_symbol_bytes, tally_tree_update,
         tree_bit_length_cost, tree_bit_length_totals_after_node, tree_heap_has_pair,
         tree_initial_leaf_plan, tree_next_cursor, tree_parent_depth, tree_run_continues,
-        tree_run_extra_bits, tree_run_limits, tree_run_step, BlockEncoding, CompressedBlockSymbol,
-        GenBitlenOverflowNode, GenBitlenOverflowReassignment, HeapChild, ScanTreeAction,
-        TallyTreeUpdate, TreeInitialLeafPlan, TreeRunStep, BL_CODE_ORDER_LEN, END_BLOCK, MAX_BITS,
-        REPZ_11_138, REPZ_3_10, REP_3_6,
+        tree_run_extra_bits, tree_run_limits, tree_run_step, tree_run_step_after_increment,
+        BlockEncoding, CompressedBlockSymbol, GenBitlenOverflowNode, GenBitlenOverflowReassignment,
+        HeapChild, ScanTreeAction, TallyTreeUpdate, TreeInitialLeafPlan, TreeRunStep,
+        BL_CODE_ORDER_LEN, END_BLOCK, MAX_BITS, REPZ_11_138, REPZ_3_10, REP_3_6,
     };
 
     fn ltree_with_frequency(
@@ -5930,6 +5954,38 @@ mod tests {
                 max_count: 7,
                 min_count: 4,
             }
+        );
+    }
+
+    #[test]
+    fn tree_run_step_after_increment_preserves_count_and_transition() {
+        assert_eq!(
+            tree_run_step_after_increment(1, 3, 4, 7, 7, 6),
+            (
+                2,
+                TreeRunStep {
+                    action: None,
+                    count: 2,
+                    previous_len: 6,
+                    max_count: 3,
+                    min_count: 4,
+                }
+            )
+        );
+        assert_eq!(
+            tree_run_step_after_increment(2, 3, 3, 7, 8, 6),
+            (
+                3,
+                TreeRunStep {
+                    action: Some(ScanTreeAction::RepeatLength {
+                        emit_length_once: true,
+                    }),
+                    count: 0,
+                    previous_len: 7,
+                    max_count: 7,
+                    min_count: 4,
+                }
+            )
         );
     }
 

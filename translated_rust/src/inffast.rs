@@ -384,6 +384,12 @@ fn match_copy_layout(
     (match_length / 3, match_length % 3)
 }
 
+fn trailing_match_copy_byte_count(
+    trailing_bytes: ::core::ffi::c_uint,
+) -> ::core::ffi::c_uint {
+    trailing_bytes.min(2)
+}
+
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 struct FastMatchCopyLayout {
     final_copy_triplets: ::core::ffi::c_uint,
@@ -604,7 +610,9 @@ pub unsafe extern "C" fn inflate_fast(
                                 output_cursor_after_write(output_produced, output_remaining);
                             *c2rust_fresh31 = *c2rust_fresh30;
                         }
-                        if copy_layout.final_trailing_bytes != 0 {
+                        let trailing_copy_byte_count =
+                            trailing_match_copy_byte_count(copy_layout.final_trailing_bytes);
+                        if trailing_copy_byte_count != 0 {
                             let c2rust_fresh32 = from;
                             from = from.wrapping_add(1);
                             let c2rust_fresh33 = out;
@@ -612,7 +620,7 @@ pub unsafe extern "C" fn inflate_fast(
                             (output_produced, output_remaining) =
                                 output_cursor_after_write(output_produced, output_remaining);
                             *c2rust_fresh33 = *c2rust_fresh32;
-                            if copy_layout.final_trailing_bytes > 1 as ::core::ffi::c_uint {
+                            if trailing_copy_byte_count > 1 as ::core::ffi::c_uint {
                                 let c2rust_fresh34 = from;
                                 from = from.wrapping_add(1);
                                 let c2rust_fresh35 = out;
@@ -709,7 +717,9 @@ pub unsafe extern "C" fn inflate_fast(
                                 output_cursor_after_write(output_produced, output_remaining);
                             *c2rust_fresh21 = *c2rust_fresh20;
                         }
-                        if copy_layout.final_trailing_bytes != 0 {
+                        let trailing_copy_byte_count =
+                            trailing_match_copy_byte_count(copy_layout.final_trailing_bytes);
+                        if trailing_copy_byte_count != 0 {
                             let c2rust_fresh22 = from;
                             from = from.wrapping_add(1);
                             let c2rust_fresh23 = out;
@@ -717,7 +727,7 @@ pub unsafe extern "C" fn inflate_fast(
                             (output_produced, output_remaining) =
                                 output_cursor_after_write(output_produced, output_remaining);
                             *c2rust_fresh23 = *c2rust_fresh22;
-                            if copy_layout.final_trailing_bytes > 1 as ::core::ffi::c_uint {
+                            if trailing_copy_byte_count > 1 as ::core::ffi::c_uint {
                                 let c2rust_fresh24 = from;
                                 from = from.wrapping_add(1);
                                 let c2rust_fresh25 = out;
@@ -773,7 +783,8 @@ mod tests {
         fast_litlen_action, fast_match_copy_layout, fast_match_uses_window, fast_window_copy_plan,
         fast_window_distance_is_invalid, finish_fast_distance, input_bytes_needed,
         input_remaining_after_read, low_bits, output_cursor_after_write, subtable_index,
-        table_index, unread_input_state, validate_fast_window_distance, FastCodeEntry,
+        table_index, trailing_match_copy_byte_count, unread_input_state,
+        validate_fast_window_distance, FastCodeEntry,
         FastDecodeError, FastDistAction, FastDistance, FastDistanceSource, FastLitLenAction,
         FastMatchCopyLayout, FastWindowContinuationSource, FastWindowCopyPlan, FastWindowDistance,
     };
@@ -1089,6 +1100,14 @@ mod tests {
             output_cursor_after_write(::core::ffi::c_uint::MAX, 0),
             (0, ::core::ffi::c_uint::MAX),
         );
+    }
+
+    #[test]
+    fn trailing_match_copy_byte_count_preserves_two_byte_copy_limit() {
+        assert_eq!(trailing_match_copy_byte_count(0), 0);
+        assert_eq!(trailing_match_copy_byte_count(1), 1);
+        assert_eq!(trailing_match_copy_byte_count(2), 2);
+        assert_eq!(trailing_match_copy_byte_count(::core::ffi::c_uint::MAX), 2);
     }
 
     #[test]

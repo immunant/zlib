@@ -3200,6 +3200,13 @@ fn stored_block_min_size(
     }) as ::core::ffi::c_uint
 }
 
+fn stored_block_buffered_len(
+    strstart: crate::stdlib::uInt,
+    block_start: ::core::ffi::c_long,
+) -> ::core::ffi::c_uint {
+    (strstart as ::core::ffi::c_long - block_start) as ::core::ffi::c_uint
+}
+
 fn stored_block_available_output(
     bi_valid: ::core::ffi::c_int,
     avail_out: crate::stdlib::uInt,
@@ -3296,7 +3303,7 @@ unsafe extern "C" fn deflate_stored(
             break;
         };
         have = available_output;
-        left = ((*s).strstart as ::core::ffi::c_long - (*s).block_start) as ::core::ffi::c_uint;
+        left = stored_block_buffered_len((*s).strstart, (*s).block_start);
         len = stored_block_payload_len(left, (*(*s).strm).avail_in, have);
         if stored_block_should_wait(len, min_block, left, (*(*s).strm).avail_in, flush) {
             break;
@@ -3458,7 +3465,7 @@ unsafe extern "C" fn deflate_stored(
     } else {
         have
     };
-    left = ((*s).strstart as ::core::ffi::c_long - (*s).block_start) as ::core::ffi::c_uint;
+    left = stored_block_buffered_len((*s).strstart, (*s).block_start);
     if stored_block_can_emit(left, min_block, flush, (*(*s).strm).avail_in, have) {
         len = if left > have { have } else { left };
         last = if flush == crate::zlib_h::Z_FINISH
@@ -4359,12 +4366,13 @@ mod tests {
         longest_match_next_chain_length, longest_match_search_parameters, normalize_deflate_params,
         pending_buffer_needs_flush, pending_output_len, pending_short_cursors, read_buf_checksum,
         read_buf_input_progress_after_copy, read_buf_len, read_buf_total_in_after_copy,
-        short_msb_bytes, slide_hash_entry, stored_block_available_output, stored_block_can_emit,
-        stored_block_header_bytes, stored_block_is_last, stored_block_min_size,
-        stored_block_payload_len, stored_block_should_wait, stored_insert_after_input,
-        symbol_buffer_is_full, symbol_triplet_cursors, zlib_header, DeflateFastMatchProgress,
-        DeflateFinalFlushAction, DeflateMatchRefillAction, DeflatePreflight,
-        DeflateRleRefillAction, DeflateRleTallyPlan, ReadBufChecksum,
+        short_msb_bytes, slide_hash_entry, stored_block_available_output,
+        stored_block_buffered_len, stored_block_can_emit, stored_block_header_bytes,
+        stored_block_is_last, stored_block_min_size, stored_block_payload_len,
+        stored_block_should_wait, stored_insert_after_input, symbol_buffer_is_full,
+        symbol_triplet_cursors, zlib_header, DeflateFastMatchProgress, DeflateFinalFlushAction,
+        DeflateMatchRefillAction, DeflatePreflight, DeflateRleRefillAction, DeflateRleTallyPlan,
+        ReadBufChecksum,
     };
 
     #[test]
@@ -4398,6 +4406,13 @@ mod tests {
             deflate_rle_clamp_match_length(crate::stdlib::uInt::MAX, crate::stdlib::uInt::MAX),
             crate::stdlib::uInt::MAX
         );
+    }
+
+    #[test]
+    fn stored_block_buffered_len_preserves_signed_difference_conversion() {
+        assert_eq!(stored_block_buffered_len(17, 5), 12);
+        assert_eq!(stored_block_buffered_len(5, 5), 0);
+        assert_eq!(stored_block_buffered_len(0, 1), ::core::ffi::c_uint::MAX);
     }
 
     #[test]
