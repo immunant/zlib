@@ -127,7 +127,10 @@ unsafe extern "C" fn gz_avail(mut state: crate::gzguts_h::gz_statep) -> ::core::
         }
         if gz_load(
             state,
-            (*state).in_buf.as_mut_ptr().offset((*strm).avail_in as isize),
+            (*state)
+                .in_buf
+                .as_mut_ptr()
+                .offset((*strm).avail_in as isize),
             (*state)
                 .size
                 .wrapping_sub((*strm).avail_in as ::core::ffi::c_uint),
@@ -677,7 +680,10 @@ pub unsafe extern "C" fn gzungetc(
         return -1 as ::core::ffi::c_int;
     }
     if (*state).x.next == (*state).out_buf.as_mut_ptr() {
-        let mut src: *mut ::core::ffi::c_uchar = (*state).out_buf.as_mut_ptr().offset((*state).x.have as isize);
+        let mut src: *mut ::core::ffi::c_uchar = (*state)
+            .out_buf
+            .as_mut_ptr()
+            .offset((*state).x.have as isize);
         let mut dest: *mut ::core::ffi::c_uchar = (*state)
             .out_buf
             .as_mut_ptr()
