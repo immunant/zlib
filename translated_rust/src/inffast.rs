@@ -277,17 +277,35 @@ pub(crate) fn decode_table_entry_or_invalid(
     })
 }
 
-pub fn inflate_fast(
-    strm: &mut crate::zlib_h::z_stream,
+enum FastError {
+    DistanceTooFar,
+    DistanceCode,
+    LiteralLengthCode,
+}
+
+struct FastProgress {
+    input_index: usize,
+    output_index: usize,
+    fast_end: usize,
+    error: Option<FastError>,
+}
+
+/// Decode the fast inflate loop using already-bounded input and output views.
+///
+/// The stream-storage bridge owns conversion of ABI cursors to these slices
+/// and commits the resulting cursors afterwards. In particular, inflateBack
+/// continues to pass one alias-safe output/history window to this core.
+fn inflate_fast_slices(
     state: &mut crate::src::inflate::inflate_state,
-    mut start: ::core::ffi::c_uint,
     history: Option<&[crate::stdlib::Bytef]>,
     history_may_alias_output: bool,
-) {
+    input: &[crate::stdlib::Bytef],
+    output_bytes: &mut [crate::stdlib::Bytef],
+    mut out_index: usize,
+    mut end_index: usize,
+) -> Option<FastProgress> {
     let mut in_index: usize = 0;
     let mut last: usize = 0;
-    let mut out_index: usize = 0;
-    let mut end_index: usize = 0;
     let mut wsize: ::core::ffi::c_uint = 0;
     let mut whave: ::core::ffi::c_uint = 0;
     let mut wnext: ::core::ffi::c_uint = 0;
@@ -298,28 +316,9 @@ pub fn inflate_fast(
     let mut op: ::core::ffi::c_uint = 0;
     let mut len: ::core::ffi::c_uint = 0;
     let mut dist: ::core::ffi::c_uint = 0;
-    // Callers establish the stream/state association before entering the fast
-    // path. Keeping that typed state borrow in the caller prevents this core
-    // from following the ABI state handle itself.
-    // The fast-loop entry condition leaves at least five input bytes.  Keep
-    // that existing boundary here and use an indexed view for bit-buffer
-    // reads, rather than repeatedly dereferencing the raw input cursor.
-    let input = unsafe { ::core::slice::from_raw_parts(strm.next_in, strm.avail_in as usize) };
     last = input.len().wrapping_sub(5);
-    out_index = (start as usize).wrapping_sub(strm.avail_out as usize);
-    // This is the same caller output extent represented by the old `beg`
-    // cursor and `start` below. Keep its cursors as indexes while the fast
-    // engine relies on its existing five-byte/257-byte entry bounds.
-    let output_start = strm.next_out.wrapping_sub(out_index);
-    end_index = out_index.wrapping_add(
-        strm.avail_out
-            .wrapping_sub(257 as crate::stdlib::uInt) as usize,
-    );
-    let mut output = FastOutput::new(
-        unsafe { ::core::slice::from_raw_parts_mut(output_start, start as usize) },
-        out_index,
-        end_index,
-    );
+    let mut output = FastOutput::new(output_bytes, out_index, end_index);
+    let mut error = None;
     wsize = state.wsize;
     whave = state.whave;
     wnext = state.wnext;
@@ -327,11 +326,11 @@ pub fn inflate_fast(
     bits = state.bits;
     let Some(lcode) = decode_table(state, DecodeTable::LiteralLength) else {
         state.mode = crate::src::inflate::BAD;
-        return;
+        return None;
     };
     let Some(dcode) = decode_table(state, DecodeTable::Distance) else {
         state.mode = crate::src::inflate::BAD;
-        return;
+        return None;
     };
     lmask = ((1 as ::core::ffi::c_uint) << state.lenbits).wrapping_sub(1 as ::core::ffi::c_uint);
     dmask = ((1 as ::core::ffi::c_uint) << state.distbits).wrapping_sub(1 as ::core::ffi::c_uint);
@@ -436,9 +435,7 @@ pub fn inflate_fast(
                             op = dist.wrapping_sub(op);
                             if op > whave {
                                 if state.sane != 0 {
-                                    strm.msg = b"invalid distance too far back\0".as_ptr()
-                                        as *const ::core::ffi::c_char
-                                        as *mut ::core::ffi::c_char;
+                                    error = Some(FastError::DistanceTooFar);
                                     state.mode = crate::src::inflate::BAD;
                                     break 's_627;
                                 }
@@ -540,8 +537,7 @@ pub fn inflate_fast(
                         };
                         here_code = next_code;
                     } else {
-                        strm.msg = b"invalid distance code\0".as_ptr() as *const ::core::ffi::c_char
-                            as *mut ::core::ffi::c_char;
+                        error = Some(FastError::DistanceCode);
                         state.mode = crate::src::inflate::BAD;
                         break 's_627;
                     }
@@ -561,8 +557,7 @@ pub fn inflate_fast(
                 state.mode = crate::src::inflate::TYPE;
                 break 's_627;
             } else {
-                strm.msg = b"invalid literal/length code\0".as_ptr() as *const ::core::ffi::c_char
-                    as *mut ::core::ffi::c_char;
+                error = Some(FastError::LiteralLengthCode);
                 state.mode = crate::src::inflate::BAD;
                 break 's_627;
             }
@@ -578,26 +573,80 @@ pub fn inflate_fast(
     bits = bits.wrapping_sub(len << 3 as ::core::ffi::c_int);
     hold &= ((1 as ::core::ffi::c_uint) << bits).wrapping_sub(1 as ::core::ffi::c_uint)
         as ::core::ffi::c_ulong;
-    let Some(next_input) = input.get(in_index..) else {
+    if input.get(in_index..).is_none() {
+        state.mode = crate::src::inflate::BAD;
+        return None;
+    }
+    out_index = output.index();
+    end_index = output.fast_end();
+    if output.bytes.get_mut(out_index..).is_none() {
+        state.mode = crate::src::inflate::BAD;
+        return None;
+    }
+    state.hold = hold;
+    state.bits = bits;
+    Some(FastProgress {
+        input_index: in_index,
+        output_index: out_index,
+        fast_end: end_index,
+        error,
+    })
+}
+
+/// Bridge the ABI stream cursors to the bounded fast-loop core.
+///
+/// The caller has already established the fast path's five-input-byte and
+/// 257-output-byte bounds. Keep raw slice construction here, so the decoder
+/// itself operates solely on ordinary Rust slices and indexes.
+pub fn inflate_fast(
+    strm: &mut crate::zlib_h::z_stream,
+    state: &mut crate::src::inflate::inflate_state,
+    start: ::core::ffi::c_uint,
+    history: Option<&[crate::stdlib::Bytef]>,
+    history_may_alias_output: bool,
+) {
+    let input = unsafe { ::core::slice::from_raw_parts(strm.next_in, strm.avail_in as usize) };
+    let out_index = (start as usize).wrapping_sub(strm.avail_out as usize);
+    let output_start = strm.next_out.wrapping_sub(out_index);
+    let end_index = out_index.wrapping_add(
+        strm.avail_out
+            .wrapping_sub(257 as crate::stdlib::uInt) as usize,
+    );
+    let output = unsafe { ::core::slice::from_raw_parts_mut(output_start, start as usize) };
+    let Some(progress) = inflate_fast_slices(
+        state,
+        history,
+        history_may_alias_output,
+        input,
+        output,
+        out_index,
+        end_index,
+    ) else {
+        return;
+    };
+    if let Some(error) = progress.error {
+        strm.msg = match error {
+            FastError::DistanceTooFar => b"invalid distance too far back\0".as_ptr(),
+            FastError::DistanceCode => b"invalid distance code\0".as_ptr(),
+            FastError::LiteralLengthCode => b"invalid literal/length code\0".as_ptr(),
+        } as *mut crate::stdlib::charf;
+    }
+    let Some(next_input) = input.get(progress.input_index..) else {
+        state.mode = crate::src::inflate::BAD;
+        return;
+    };
+    let Some(next_output) = output.get_mut(progress.output_index..) else {
         state.mode = crate::src::inflate::BAD;
         return;
     };
     strm.next_in = next_input.as_ptr() as *mut crate::stdlib::Bytef;
-    out_index = output.index();
-    end_index = output.fast_end();
-    let Some(next_output) = output.bytes.get_mut(out_index..) else {
-        state.mode = crate::src::inflate::BAD;
-        return;
-    };
     strm.next_out = next_output.as_mut_ptr();
-    strm.avail_in = input.len().wrapping_sub(in_index) as crate::stdlib::uInt;
-    strm.avail_out = (if out_index < end_index {
-        (257usize).wrapping_add(end_index.wrapping_sub(out_index))
+    strm.avail_in = input.len().wrapping_sub(progress.input_index) as crate::stdlib::uInt;
+    strm.avail_out = (if progress.output_index < progress.fast_end {
+        (257usize).wrapping_add(progress.fast_end.wrapping_sub(progress.output_index))
     } else {
-        (257usize).wrapping_sub(out_index.wrapping_sub(end_index))
+        (257usize).wrapping_sub(progress.output_index.wrapping_sub(progress.fast_end))
     }) as ::core::ffi::c_uint as crate::stdlib::uInt;
-    state.hold = hold;
-    state.bits = bits;
 }
 #[export_name = "inflate_fast"]
 
