@@ -3572,16 +3572,16 @@ pub(crate) fn tr_flush_block(
     }
 }
 
-pub(crate) unsafe fn tr_flush_block_impl(
+pub(crate) fn tr_flush_block_impl(
     s: &mut crate::src::deflate::deflate_state,
-    strm: Option<&mut crate::zlib_h::z_stream_s>,
+    data_type: Option<&mut ::core::ffi::c_int>,
     buf: Option<&[u8]>,
     stored_len: crate::zutil_h::ulg,
     last: ::core::ffi::c_int,
 ) {
     tr_flush_block(
         s,
-        strm.map(|strm| &mut strm.data_type),
+        data_type,
         buf,
         stored_len,
         last,
@@ -3627,7 +3627,7 @@ pub unsafe fn tr_flush_block_from_raw(
     // This legacy state-only ABI helper has no stream argument.  Ordinary
     // compression passes the stream explicitly; here only block generation
     // is observable through the supplied state.
-    unsafe { tr_flush_block_impl(s, None, buf.as_deref(), stored_len, last) };
+    tr_flush_block_impl(s, None, buf.as_deref(), stored_len, last);
 }
 
 #[export_name = "_tr_flush_block"]
