@@ -480,11 +480,10 @@ impl InflateOwnedDecoder {
         // bounded request.
         self.stream.message = None;
         let result = InflateStreamOwner {
-            normal: &mut self.normal,
+            decoder: self,
             input,
             output,
             header: None,
-            stream: &mut self.stream,
             flush: crate::zlib_h::Z_NO_FLUSH,
         }
         .run();
@@ -1653,23 +1652,22 @@ fn inflate_normal_request<'request>(
     }
 }
 
-// One normal-inflate dispatch owns every value the decoder is allowed to
-// observe: the resumable Rust state, bounded caller cursors, the scoped
-// header-output facade, and scalar stream accounting.  It deliberately does
-// not retain the ABI stream, the opaque state handle, or the registered
-// header pointer.  The stream adapter constructs this request only after all
-// three foreign projections have been checked, and consumes its completion
-// before publishing any ABI cursor or header changes.
-struct InflateStreamOwner<'normal, 'input, 'output, 'header, 'stream> {
-    normal: &'normal mut InflateNormalState,
+// One normal-inflate dispatch owns every pointer-free part of the persistent
+// decoder: resumable codec state and stream scalar completion, together with
+// bounded caller cursors and the scoped header-output facade.  It deliberately
+// does not retain the ABI stream, opaque state handle, or registered header
+// pointer.  The stream adapter constructs this request only after all three
+// foreign projections have been checked, and consumes its completion before
+// publishing any ABI cursor or header changes.
+struct InflateStreamOwner<'decoder, 'input, 'output, 'header> {
+    decoder: &'decoder mut InflateOwnedDecoder,
     input: &'input [u8],
     output: &'output mut [u8],
     header: Option<InflateHeaderOutput<'header>>,
-    stream: &'stream mut InflateDecoderStream,
     flush: ::core::ffi::c_int,
 }
 
-impl InflateStreamOwner<'_, '_, '_, '_, '_> {
+impl InflateStreamOwner<'_, '_, '_, '_> {
     fn run(self) -> InflateDecoderResult {
         inflate(self)
     }
@@ -1697,15 +1695,15 @@ fn inflate_pull_byte(
 // returns scalar cursor/header publication before the ABI adapter republishes
 // either.  The ABI-shaped adapter deliberately has a distinct name, so this
 // remains the implementation entry point for bounded decoder requests.
-fn inflate(request: InflateStreamOwner<'_, '_, '_, '_, '_>) -> InflateDecoderResult {
+fn inflate(request: InflateStreamOwner<'_, '_, '_, '_>) -> InflateDecoderResult {
     let InflateStreamOwner {
-        normal,
+        decoder,
         input,
         output,
         mut header,
-        stream,
         mut flush,
     } = request;
+    let InflateOwnedDecoder { normal, stream } = decoder;
     let mut have: ::core::ffi::c_uint = 0;
     let mut left: ::core::ffi::c_uint = 0;
     let mut hold: ::core::ffi::c_ulong = 0;
@@ -3603,11 +3601,10 @@ pub(crate) unsafe fn inflate_from_stream(
         InflateStreamScalars::from_abi(strm.total_in, strm.total_out, strm.adler, strm.data_type)
             .into_decoder();
     let result = InflateStreamOwner {
-        normal: &mut state.decoder.normal,
+        decoder: &mut state.decoder,
         input,
         output,
         header,
-        stream: &mut state.decoder.stream,
         flush,
     }
     .run();
