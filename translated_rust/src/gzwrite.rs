@@ -227,15 +227,24 @@ fn gz_write_remaining_after_consumption(
     remaining.wrapping_sub(consumed as crate::stdlib::z_size_t)
 }
 
-fn gz_write_apply_direct_progress(
-    pos: &mut crate::stdlib::off64_t,
-    remaining: &mut crate::stdlib::z_size_t,
+#[derive(Debug, Eq, PartialEq)]
+struct GzWriteDirectProgress {
+    pos: crate::stdlib::off64_t,
+    remaining: crate::stdlib::z_size_t,
+}
+
+fn gz_write_direct_progress(
+    pos: crate::stdlib::off64_t,
+    remaining: crate::stdlib::z_size_t,
     chunk_len: ::core::ffi::c_uint,
     remaining_avail_in: crate::stdlib::uInt,
-) -> bool {
-    let consumed = gz_write_apply_chunk_progress(pos, chunk_len, remaining_avail_in);
-    *remaining = gz_write_remaining_after_consumption(*remaining, consumed);
-    *remaining != 0
+) -> GzWriteDirectProgress {
+    let consumed = chunk_len.wrapping_sub(remaining_avail_in as ::core::ffi::c_uint);
+
+    GzWriteDirectProgress {
+        pos: gz_write_advanced_pos(pos, consumed),
+        remaining: gz_write_remaining_after_consumption(remaining, consumed),
+    }
 }
 
 fn gz_zero_apply_progress(
@@ -712,26 +721,24 @@ unsafe fn gz_write(
             }
         }
     } else {
-        if gz_has_pending_input((*state).strm.avail_in)
+        let state = &mut *state;
+        if gz_has_pending_input(state.strm.avail_in)
             && gz_comp(state, crate::zlib_h::Z_NO_FLUSH) == -1 as ::core::ffi::c_int
         {
             return 0 as crate::stdlib::z_size_t;
         }
-        (*state).strm.next_in = buf as *mut crate::stdlib::Bytef;
+        state.strm.next_in = buf as *mut crate::stdlib::Bytef;
         loop {
             let n = gz_write_chunk_len(len);
-            (*state).strm.avail_in = n as crate::stdlib::uInt;
+            state.strm.avail_in = n as crate::stdlib::uInt;
             ret = gz_comp(state, crate::zlib_h::Z_NO_FLUSH);
-            let has_remaining = gz_write_apply_direct_progress(
-                &mut (*state).x.pos,
-                &mut len,
-                n,
-                (*state).strm.avail_in,
-            );
+            let progress = gz_write_direct_progress(state.x.pos, len, n, state.strm.avail_in);
+            state.x.pos = progress.pos;
+            len = progress.remaining;
             if ret == -1 as ::core::ffi::c_int {
-                return gz_write_error_result((*state).again, put, len);
+                return gz_write_error_result(state.again, put, len);
             }
-            if !has_remaining {
+            if gz_write_is_empty(len) {
                 break;
             }
         }
@@ -1047,15 +1054,15 @@ mod tests {
         gz_comp_reset_after_flush, gz_comp_skips_empty_flush, gz_comp_write_again,
         gz_comp_write_chunk_len, gz_comp_write_failed, gz_comp_write_failure, gz_has_pending_input,
         gz_has_pending_skip, gz_write_advanced_pos, gz_write_apply_chunk_progress,
-        gz_write_apply_direct_progress, gz_write_buffered_copy_len,
-        gz_write_buffered_have_after_copy, gz_write_buffered_step, gz_write_chunk_len,
-        gz_write_errno_is_retryable, gz_write_error_result, gz_write_is_empty,
-        gz_write_remaining_after_consumption, gz_write_state_is_usable,
-        gz_write_uses_buffered_path, gz_zero_action, gz_zero_apply_progress, gz_zero_chunk_len,
-        gz_zero_needs_initialization, gzclose_mode_is_writable, gzclose_w_result,
-        gzflush_mode_is_valid, gzfwrite_result, gzputc_result, gzputs_len_fits_int, gzputs_result,
-        gzsetparams_settings_match, gzsetparams_state_is_usable, gzwrite_len_fits_int,
-        GzCompResetAction, GzCompWriteFailure, GzZeroAction,
+        gz_write_buffered_copy_len, gz_write_buffered_have_after_copy, gz_write_buffered_step,
+        gz_write_chunk_len, gz_write_direct_progress, gz_write_errno_is_retryable,
+        gz_write_error_result, gz_write_is_empty, gz_write_remaining_after_consumption,
+        gz_write_state_is_usable, gz_write_uses_buffered_path, gz_zero_action,
+        gz_zero_apply_progress, gz_zero_chunk_len, gz_zero_needs_initialization,
+        gzclose_mode_is_writable, gzclose_w_result, gzflush_mode_is_valid, gzfwrite_result,
+        gzputc_result, gzputs_len_fits_int, gzputs_result, gzsetparams_settings_match,
+        gzsetparams_state_is_usable, gzwrite_len_fits_int, GzCompResetAction, GzCompWriteFailure,
+        GzZeroAction,
     };
 
     #[test]
@@ -1679,48 +1686,31 @@ mod tests {
     }
 
     #[test]
-    fn gz_write_apply_direct_progress_accounts_for_partial_consumption() {
-        let mut pos = 10;
-        let mut remaining = 100;
+    fn gz_write_direct_progress_accounts_for_partial_consumption() {
+        let progress = gz_write_direct_progress(10, 100, 80, 20);
 
-        assert!(gz_write_apply_direct_progress(
-            &mut pos,
-            &mut remaining,
-            80,
-            20
-        ));
-        assert_eq!(pos, 70);
-        assert_eq!(remaining, 40);
+        assert_eq!(progress.pos, 70);
+        assert_eq!(progress.remaining, 40);
     }
 
     #[test]
-    fn gz_write_apply_direct_progress_reports_input_exhaustion() {
-        let mut pos = 10;
-        let mut remaining = 80;
+    fn gz_write_direct_progress_reports_input_exhaustion() {
+        let progress = gz_write_direct_progress(10, 80, 80, 0);
 
-        assert!(!gz_write_apply_direct_progress(
-            &mut pos,
-            &mut remaining,
-            80,
-            0
-        ));
-        assert_eq!(pos, 90);
-        assert_eq!(remaining, 0);
+        assert_eq!(progress.pos, 90);
+        assert_eq!(progress.remaining, 0);
     }
 
     #[test]
-    fn gz_write_apply_direct_progress_preserves_wrapping_accounting() {
-        let mut pos = 0;
-        let mut remaining = ::core::ffi::c_uint::MAX as crate::stdlib::z_size_t;
+    fn gz_write_direct_progress_preserves_wrapping_accounting() {
+        let progress =
+            gz_write_direct_progress(0, ::core::ffi::c_uint::MAX as crate::stdlib::z_size_t, 0, 1);
 
-        assert!(!gz_write_apply_direct_progress(
-            &mut pos,
-            &mut remaining,
-            0,
-            1
-        ));
-        assert_eq!(pos, ::core::ffi::c_uint::MAX as crate::stdlib::off64_t);
-        assert_eq!(remaining, 0);
+        assert_eq!(
+            progress.pos,
+            ::core::ffi::c_uint::MAX as crate::stdlib::off64_t
+        );
+        assert_eq!(progress.remaining, 0);
     }
 
     #[test]

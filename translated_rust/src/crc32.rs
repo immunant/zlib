@@ -4742,15 +4742,12 @@ fn multmodp(mut a: crate::stdlib::uLong, mut b: crate::stdlib::uLong) -> crate::
     return p;
 }
 
-fn x2nmodp(mut n: crate::stdlib::off64_t, mut k: ::core::ffi::c_uint) -> crate::stdlib::uLong {
+fn x2nmodp(mut n: u64, mut k: u32) -> crate::stdlib::uLong {
     let mut p: crate::stdlib::uLong = 0;
     p = (1 as ::core::ffi::c_int as crate::stdlib::uLong) << 31 as ::core::ffi::c_int;
     while n != 0 {
-        if n & 1 as crate::stdlib::off64_t != 0 {
-            p = multmodp(
-                x2n_table[(k & 31 as ::core::ffi::c_uint) as usize] as crate::stdlib::uLong,
-                p,
-            );
+        if n & 1 != 0 {
+            p = multmodp(x2n_table[(k & 31) as usize] as crate::stdlib::uLong, p);
         }
         n >>= 1 as ::core::ffi::c_int;
         k = k.wrapping_add(1);
@@ -4826,7 +4823,7 @@ pub fn crc32_combine_gen64(len2: crate::stdlib::off64_t) -> crate::stdlib::uLong
     if len2 < 0 {
         return 0;
     }
-    x2nmodp(len2, 3)
+    x2nmodp(len2 as u64, 3)
 }
 #[export_name = "crc32_combine_gen64"]
 
@@ -4901,7 +4898,8 @@ pub unsafe extern "C" fn crc32_combine_ffi(
 mod tests {
     use super::{
         crc32, crc32_combine, crc32_combine_gen64, crc32_combine_op, crc32_update_byte,
-        crc32_update_bytes, crc32_z, crc_table_ref, next_poly_term, CRC32_MASK, POLY,
+        crc32_update_bytes, crc32_z, crc_table_ref, multmodp, next_poly_term, x2n_table, x2nmodp,
+        CRC32_MASK, POLY,
     };
 
     const HELLO_SPACE_CRC: crate::stdlib::uLong = 0xed81_f9f6;
@@ -4930,6 +4928,17 @@ mod tests {
         assert_eq!(crc32_z(0, b""), 0);
         assert_eq!(crc32_z(0, b"123456789"), 0xcbf4_3926);
         assert_eq!(crc32(0, b"123456789"), 0xcbf4_3926);
+    }
+
+    #[test]
+    fn x2nmodp_handles_the_top_unsigned_exponent_bit() {
+        let initial = (1 as crate::stdlib::uLong) << 31;
+
+        assert_eq!(x2nmodp(0, 3), initial);
+        assert_eq!(
+            x2nmodp(1_u64 << 63, 3),
+            multmodp(x2n_table[2] as crate::stdlib::uLong, initial),
+        );
     }
 
     #[test]
