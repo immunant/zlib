@@ -439,7 +439,7 @@ unsafe extern "C" fn read_buf(
             ::core::slice::from_raw_parts(buf, len as usize),
         );
     } else if (*(*strm).state).wrap == 2 as ::core::ffi::c_int {
-        (*strm).adler = crate::src::crc32::crc32_raw((*strm).adler, buf, len as crate::stdlib::uInt);
+        (*strm).adler = crate::src::crc32::crc32_z_raw((*strm).adler, buf, len as crate::stdlib::z_size_t);
     }
     (*strm).next_in = (*strm).next_in.offset(len as isize);
     (*strm).total_in = (*strm).total_in.wrapping_add(len as crate::stdlib::uLong);
@@ -966,10 +966,10 @@ pub unsafe extern "C" fn deflateResetKeep(
         crate::src::deflate::INIT_STATE
     };
     (*strm).adler = if (*s).wrap == 2 as ::core::ffi::c_int {
-        crate::src::crc32::crc32_raw(
+        crate::src::crc32::crc32_z_raw(
             0 as crate::stdlib::uLong,
             ::core::ptr::null::<crate::stdlib::Bytef>(),
-            0 as crate::stdlib::uInt,
+            0 as crate::stdlib::z_size_t,
         )
     } else {
         crate::src::adler32::adler32_z(0 as crate::stdlib::uLong, None)
@@ -1581,10 +1581,10 @@ pub unsafe extern "C" fn deflate(
         }
     }
     if (*s).status == crate::src::deflate::GZIP_STATE {
-        (*strm).adler = crate::src::crc32::crc32_raw(
+        (*strm).adler = crate::src::crc32::crc32_z_raw(
             0 as crate::stdlib::uLong,
             ::core::ptr::null::<crate::stdlib::Bytef>(),
-            0 as crate::stdlib::uInt,
+            0 as crate::stdlib::z_size_t,
         );
         let c2rust_fresh0 = (*s).pending;
         (*s).pending = (*s).pending.wrapping_add(1);
@@ -1879,10 +1879,10 @@ pub unsafe extern "C" fn deflate(
             *(*s).pending_buf.offset(c2rust_fresh24 as isize) =
                 ((*strm).adler >> 8 as ::core::ffi::c_int & 0xff as crate::stdlib::uLong)
                     as crate::stdlib::Byte;
-            (*strm).adler = crate::src::crc32::crc32_raw(
+            (*strm).adler = crate::src::crc32::crc32_z_raw(
                 0 as crate::stdlib::uLong,
                 ::core::ptr::null::<crate::stdlib::Bytef>(),
-                0 as crate::stdlib::uInt,
+                0 as crate::stdlib::z_size_t,
             );
         }
         (*s).status = crate::src::deflate::BUSY_STATE;
