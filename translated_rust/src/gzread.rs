@@ -202,6 +202,60 @@ struct GzInflateResult {
     data_error_message: Option<&'static [u8]>,
 }
 
+// LOOK mode has a complete pointer-free transition once the boundary has
+// refilled and validated its owned input cursor.  Keep header detection and
+// the raw-copy fallback here so the eventual gzip owner need only project an
+// ABI stream for the reset/codec calls themselves.
+struct GzLookState<'a> {
+    direct: &'a mut ::core::ffi::c_int,
+    junk: &'a mut ::core::ffi::c_int,
+    how: &'a mut ::core::ffi::c_int,
+    again: ::core::ffi::c_int,
+    input: &'a [u8],
+    output: Option<&'a mut [u8]>,
+}
+
+enum GzLookAction {
+    ResetGzip,
+    NeedInput,
+    Copy { have: usize },
+}
+
+fn gz_look_step(state: GzLookState<'_>) -> Result<GzLookAction, ()> {
+    let GzLookState {
+        direct,
+        junk,
+        how,
+        again,
+        input,
+        output,
+    } = state;
+    if *direct == -1 || *junk == 0 {
+        *how = crate::gzguts_h::GZIP;
+        *junk = (*junk != -1) as ::core::ffi::c_int;
+        *direct = 0;
+        return Ok(GzLookAction::ResetGzip);
+    }
+    if input.is_empty() || again != 0 && input.len() < 4 {
+        return Ok(GzLookAction::NeedInput);
+    }
+    if is_gzip_header(input) {
+        *how = crate::gzguts_h::GZIP;
+        *junk = 1;
+        *direct = 0;
+        return Ok(GzLookAction::ResetGzip);
+    }
+    let Some(output) = output else {
+        return Err(());
+    };
+    let Some(destination) = output.get_mut(..input.len()) else {
+        return Err(());
+    };
+    copy_buffered_input(input, destination);
+    *how = crate::gzguts_h::COPY;
+    Ok(GzLookAction::Copy { have: input.len() })
+}
+
 // Skipping buffered gzip output needs only a checked buffer offset and scalar
 // progress.  Keep that transition independent of the ABI cursor so the
 // eventual gzip owner can reuse it after the cursor becomes an offset rather
@@ -583,12 +637,23 @@ unsafe fn gz_look(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
             return -1 as ::core::ffi::c_int;
         }
     }
-    if state.direct == -1 as ::core::ffi::c_int || state.junk == 0 as ::core::ffi::c_int {
+    // This reset is intentionally before refill: opening a normal gzip read
+    // starts with `junk == 0`, and the original ordering resets the embedded
+    // codec before it attempts any file I/O.
+    if state.direct == -1 || state.junk == 0 {
+        let action = gz_look_step(GzLookState {
+            direct: &mut state.direct,
+            junk: &mut state.junk,
+            how: &mut state.how,
+            again: state.again,
+            input: &[],
+            output: None,
+        });
+        if !matches!(action, Ok(GzLookAction::ResetGzip)) {
+            return -1;
+        }
         crate::src::inflate::inflateReset(&raw mut state.strm as *mut crate::zlib_h::z_stream_s);
-        state.how = crate::gzguts_h::GZIP;
-        state.junk = (state.junk != -1 as ::core::ffi::c_int) as ::core::ffi::c_int;
-        state.direct = 0 as ::core::ffi::c_int;
-        return 0 as ::core::ffi::c_int;
+        return 0;
     }
     let Some(mut input_cursor) = state.in_0.as_deref().and_then(|buffer| {
         GzCodecInput::from_owned_buffer(buffer, state.strm.next_in.addr(), state.strm.avail_in)
@@ -613,12 +678,6 @@ unsafe fn gz_look(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
     }
     state.strm.next_in = state.in_0.as_deref_mut().unwrap().as_mut_ptr();
     state.strm.avail_in = input_cursor.available();
-    if input_cursor.available() == 0 as crate::stdlib::uInt
-        || state.again != 0 && input_cursor.available() < 4 as crate::stdlib::uInt
-    {
-        return 0 as ::core::ffi::c_int;
-    }
-    let avail_in = input_cursor.available() as usize;
     // The successful refill above leaves a checked owner cursor.  Retain that
     // index through copy detection instead of rebuilding a view from the ABI
     // stream pointer that is published only for the subsequent codec call.
@@ -629,26 +688,33 @@ unsafe fn gz_look(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
     else {
         return -1 as ::core::ffi::c_int;
     };
-    if is_gzip_header(input) {
-        crate::src::inflate::inflateReset(&raw mut state.strm as *mut crate::zlib_h::z_stream_s);
-        state.how = crate::gzguts_h::GZIP;
-        state.junk = 1 as ::core::ffi::c_int;
-        state.direct = 0 as ::core::ffi::c_int;
-        return 0 as ::core::ffi::c_int;
+    let action = gz_look_step(GzLookState {
+        direct: &mut state.direct,
+        junk: &mut state.junk,
+        how: &mut state.how,
+        again: state.again,
+        input,
+        output: state.out.as_deref_mut(),
+    });
+    match action {
+        Ok(GzLookAction::ResetGzip) => {
+            crate::src::inflate::inflateReset(
+                &raw mut state.strm as *mut crate::zlib_h::z_stream_s,
+            );
+            0
+        }
+        Ok(GzLookAction::NeedInput) => 0,
+        Ok(GzLookAction::Copy { have }) => {
+            let Some(output) = state.out.as_deref_mut() else {
+                return -1;
+            };
+            state.x.next = output.as_mut_ptr();
+            state.x.have = have as ::core::ffi::c_uint;
+            state.strm.avail_in = 0;
+            0
+        }
+        Err(()) => -1,
     }
-    let Some(mut output) = state
-        .out
-        .as_deref_mut()
-        .and_then(|buffer| crate::src::gzlib::GzCodecOutputView::prefix(buffer, avail_in))
-    else {
-        return -1 as ::core::ffi::c_int;
-    };
-    copy_buffered_input(input, output.bytes_mut());
-    state.x.next = output.bytes_mut().as_mut_ptr();
-    state.x.have = avail_in as ::core::ffi::c_uint;
-    state.strm.avail_in = 0 as crate::stdlib::uInt;
-    state.how = crate::gzguts_h::COPY;
-    return 0 as ::core::ffi::c_int;
 }
 
 unsafe fn gz_decomp(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
