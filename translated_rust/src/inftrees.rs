@@ -2906,23 +2906,23 @@ pub static inflate_copyright: [::core::ffi::c_char; 49] = [
     b' ' as ::core::ffi::c_char,
     0,
 ];
-struct InflateTableBuild {
-    entries: Vec<crate::src::inftrees::code>,
-    work: Vec<::core::ffi::c_ushort>,
-    root: ::core::ffi::c_uint,
-}
-
 /// Construct a Huffman decode table using only validated Rust slices and
-/// indices. The FFI adapter below is deliberately limited to copying the
-/// legacy inputs and committing this completed table to the caller's storage.
-fn inflate_table_build(
+/// indices. The callers keep their output transactional by supplying local
+/// fixed-size scratch storage and copying it out only after this succeeds.
+fn inflate_table_build_into(
     type_0: crate::src::inftrees::codetype,
     lens: &[::core::ffi::c_ushort],
+    entries: &mut [crate::src::inftrees::code],
+    work: &mut [::core::ffi::c_ushort],
     mut root: ::core::ffi::c_uint,
-) -> Result<InflateTableBuild, ::core::ffi::c_int> {
-    if lens.len() > MAX_CODE_LENGTHS {
+) -> Result<(usize, ::core::ffi::c_uint), ::core::ffi::c_int> {
+    if lens.len() > MAX_CODE_LENGTHS || entries.len() < crate::src::inftrees::ENOUGH as usize {
         return Err(-1);
     }
+    let Some(work) = work.get_mut(..lens.len()) else {
+        return Err(1);
+    };
+    work.fill(0);
     let mut len: ::core::ffi::c_uint = 0;
     let mut sym: ::core::ffi::c_uint = 0;
     let mut min: ::core::ffi::c_uint = 0;
@@ -3104,11 +3104,11 @@ fn inflate_table_build(
         here.op = 64 as ::core::ffi::c_int as ::core::ffi::c_uchar;
         here.bits = 1 as ::core::ffi::c_int as ::core::ffi::c_uchar;
         here.val = 0 as ::core::ffi::c_int as ::core::ffi::c_ushort;
-        return Ok(InflateTableBuild {
-            entries: vec![here; 2],
-            work: vec![0; lens.len()],
-            root: 1,
-        });
+        let Some(entries) = entries.get_mut(..2) else {
+            return Err(1);
+        };
+        entries.fill(here);
+        return Ok((2, 1));
     }
     min = 1 as ::core::ffi::c_uint;
     while min < max {
@@ -3145,7 +3145,6 @@ fn inflate_table_build(
                 as ::core::ffi::c_ushort;
         len = len.wrapping_add(1);
     }
-    let mut work = vec![0; lens.len()];
     for (symbol, &length) in lens.iter().enumerate() {
         if length != 0 {
             let offset = offs[length as usize] as usize;
@@ -3189,14 +3188,6 @@ fn inflate_table_build(
     {
         return Err(1);
     }
-    let mut entries = vec![
-        crate::src::inftrees::code {
-            op: 0,
-            bits: 0,
-            val: 0,
-        };
-        crate::src::inftrees::ENOUGH as usize
-    ];
     loop {
         here.bits = len.wrapping_sub(drop_0) as ::core::ffi::c_uchar;
         let Some(&symbol) = work.get(sym as usize) else {
@@ -3287,12 +3278,7 @@ fn inflate_table_build(
         };
         *slot = here;
     }
-    entries.truncate(used as usize);
-    Ok(InflateTableBuild {
-        entries,
-        work,
-        root,
-    })
+    Ok((used as usize, root))
 }
 
 /// Commit a completed canonical table into caller-owned Rust storage.  The
@@ -3305,13 +3291,19 @@ pub(crate) fn inflate_table_into(
     work: &mut [::core::ffi::c_ushort],
     root: ::core::ffi::c_uint,
 ) -> Result<(usize, ::core::ffi::c_uint), ::core::ffi::c_int> {
-    let build = inflate_table_build(type_0, lens, root)?;
-    if build.entries.len() > table.len() || build.work.len() > work.len() {
+    let mut entries = [crate::src::inftrees::code {
+        op: 0,
+        bits: 0,
+        val: 0,
+    }; crate::src::inftrees::ENOUGH as usize];
+    let mut ordered = [0; MAX_CODE_LENGTHS];
+    let (used, root) = inflate_table_build_into(type_0, lens, &mut entries, &mut ordered, root)?;
+    if used > table.len() || lens.len() > work.len() {
         return Err(1);
     }
-    table[..build.entries.len()].copy_from_slice(&build.entries);
-    work[..build.work.len()].copy_from_slice(&build.work);
-    Ok((build.entries.len(), build.root))
+    table[..used].copy_from_slice(&entries[..used]);
+    work[..lens.len()].copy_from_slice(&ordered[..lens.len()]);
+    Ok((used, root))
 }
 
 #[export_name = "inflate_table"]
@@ -3344,7 +3336,19 @@ pub unsafe extern "C" fn inflate_table_ffi(
     let mut lens_copy = [0; MAX_CODE_LENGTHS];
     lens_copy[..codes].copy_from_slice(lens);
     let root = *bits;
-    let build = match inflate_table_build(type_0, &lens_copy[..codes], root) {
+    let mut entries = [crate::src::inftrees::code {
+        op: 0,
+        bits: 0,
+        val: 0,
+    }; crate::src::inftrees::ENOUGH as usize];
+    let mut ordered = [0; MAX_CODE_LENGTHS];
+    let (used, root) = match inflate_table_build_into(
+        type_0,
+        &lens_copy[..codes],
+        &mut entries,
+        &mut ordered,
+        root,
+    ) {
         Ok(build) => build,
         Err(status) => return status,
     };
@@ -3355,12 +3359,12 @@ pub unsafe extern "C" fn inflate_table_ffi(
     // The C ABI supplies capacity for exactly these build products.  Keep
     // the boundary's temporary views exact-sized, rather than constructing
     // an oversized slice from an interior table cursor.
-    let work = ::core::slice::from_raw_parts_mut(work, build.work.len());
-    work.copy_from_slice(&build.work);
-    let output = ::core::slice::from_raw_parts_mut(table_start, build.entries.len());
-    output.copy_from_slice(&build.entries);
+    let work = ::core::slice::from_raw_parts_mut(work, codes);
+    work.copy_from_slice(&ordered[..codes]);
+    let output = ::core::slice::from_raw_parts_mut(table_start, used);
+    output.copy_from_slice(&entries[..used]);
     *table_cursor = output.as_mut_ptr().wrapping_add(output.len());
-    *bits = build.root;
+    *bits = root;
     0
 }
 pub(crate) fn inflate_fixed_state(state: &mut crate::src::inflate::inflate_state) {
