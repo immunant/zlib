@@ -1016,7 +1016,12 @@ pub unsafe extern "C" fn inflateResetKeep_ffi(
     let Some(strm) = strm.as_mut() else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
-    inflate_from_stream(strm, InflateStreamRequest::Reset(InflateResetKind::Keep)).status()
+    inflate_from_stream(
+        strm,
+        InflateStreamRequest::Reset(InflateResetKind::Keep),
+        None,
+    )
+    .status()
 }
 #[export_name = "inflateReset"]
 
@@ -1026,7 +1031,12 @@ pub unsafe extern "C" fn inflateReset_ffi(
     let Some(strm) = strm.as_mut() else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
-    inflate_from_stream(strm, InflateStreamRequest::Reset(InflateResetKind::Full)).status()
+    inflate_from_stream(
+        strm,
+        InflateStreamRequest::Reset(InflateResetKind::Full),
+        None,
+    )
+    .status()
 }
 #[export_name = "inflateReset2"]
 
@@ -1040,6 +1050,7 @@ pub unsafe extern "C" fn inflateReset2_ffi(
     inflate_from_stream(
         strm,
         InflateStreamRequest::Reset(InflateResetKind::WindowBits(windowBits)),
+        None,
     )
     .status()
 }
@@ -1164,6 +1175,7 @@ pub unsafe extern "C" fn inflatePrime_ffi(
     inflate_from_stream(
         strm,
         InflateStreamRequest::Scalar(InflateNormalScalarAction::Prime { bits, value }),
+        None,
     )
     .scalar()
     .status()
@@ -1507,6 +1519,7 @@ pub(crate) enum InflateStreamRequest<'request> {
         dict_length: Option<&'request mut crate::stdlib::uInt>,
     },
     SetDictionary(&'request [crate::stdlib::Bytef]),
+    Header,
 }
 
 // The ABI adapter can service both streaming and scalar normal-inflate
@@ -3245,6 +3258,7 @@ fn inflate(request: InflateStreamOwner<'_, '_, '_, '_, '_>) -> InflateDecoderRes
 pub(crate) unsafe fn inflate_from_stream(
     strm: &mut crate::zlib_h::z_stream_s,
     request: InflateStreamRequest<'_>,
+    mut header_registration: Option<&mut crate::zlib_h::gz_header_s>,
 ) -> InflateStreamResult {
     let Some((strm, state)) = inflate_stream_and_state(strm) else {
         return match request {
@@ -3256,7 +3270,8 @@ pub(crate) unsafe fn inflate_from_stream(
             | InflateStreamRequest::Sync
             | InflateStreamRequest::Reset(_)
             | InflateStreamRequest::Dictionary { .. }
-            | InflateStreamRequest::SetDictionary(_) => {
+            | InflateStreamRequest::SetDictionary(_)
+            | InflateStreamRequest::Header => {
                 InflateStreamResult::Status(crate::zlib_h::Z_STREAM_ERROR)
             }
         };
@@ -3279,6 +3294,18 @@ pub(crate) unsafe fn inflate_from_stream(
     if let InflateStreamRequest::SetDictionary(dictionary) = request {
         let mut owner = InflateNormalStateOwner::new(&mut state.decoder.normal);
         return InflateStreamResult::Status(inflateSetDictionary(&mut owner, dictionary));
+    }
+    if let InflateStreamRequest::Header = request {
+        if state.decoder.normal.wrap & 2 == 0 {
+            return InflateStreamResult::Status(crate::zlib_h::Z_STREAM_ERROR);
+        }
+        state.head = header_registration
+            .as_deref_mut()
+            .map(::core::ptr::NonNull::from);
+        if let Some(header) = header_registration {
+            header.done = 0;
+        }
+        return InflateStreamResult::Status(crate::zlib_h::Z_OK);
     }
     if let InflateStreamRequest::Reset(kind) = request {
         // Reset shares this established stream/state projection with normal
@@ -3526,7 +3553,7 @@ pub unsafe extern "C" fn inflate_ffi(
     let Some(strm) = strm.as_mut() else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
-    inflate_from_stream(strm, InflateStreamRequest::Decode(flush)).status()
+    inflate_from_stream(strm, InflateStreamRequest::Decode(flush), None).status()
 }
 // Ending a normal inflate stream has a pointer-free half: consume the Rust
 // history owner before the ABI adapter releases the callback-owned state
@@ -3601,6 +3628,7 @@ pub unsafe extern "C" fn inflateGetDictionary_ffi(
             dictionary,
             dict_length: dictLength.as_mut(),
         },
+        None,
     )
     .status()
 }
@@ -3665,27 +3693,7 @@ pub unsafe extern "C" fn inflateSetDictionary_ffi(
     } else {
         ::core::slice::from_raw_parts(dictionary, dictLength as usize)
     };
-    inflate_from_stream(strm, InflateStreamRequest::SetDictionary(dictionary)).status()
-}
-// A registered gzip header must retain the original pointer's provenance for
-// later decoder calls.  The export boundary forms that handle after checking
-// the stream; this adapter owns the stream-bound opaque-state projection and
-// the one immediate `done` publication.
-pub unsafe fn inflateGetHeader(
-    strm: &mut crate::zlib_h::z_stream_s,
-    mut head: Option<&mut crate::zlib_h::gz_header_s>,
-) -> ::core::ffi::c_int {
-    let Some((_strm, state)) = inflate_stream_and_state(strm) else {
-        return crate::zlib_h::Z_STREAM_ERROR;
-    };
-    if state.decoder.normal.wrap & 2 as ::core::ffi::c_int == 0 as ::core::ffi::c_int {
-        return crate::zlib_h::Z_STREAM_ERROR;
-    }
-    state.head = head.as_deref_mut().map(::core::ptr::NonNull::from);
-    if let Some(head) = head {
-        head.done = 0 as ::core::ffi::c_int;
-    }
-    return crate::zlib_h::Z_OK;
+    inflate_from_stream(strm, InflateStreamRequest::SetDictionary(dictionary), None).status()
 }
 #[export_name = "inflateGetHeader"]
 
@@ -3696,7 +3704,7 @@ pub unsafe extern "C" fn inflateGetHeader_ffi(
     let Some(strm) = strm.as_mut() else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
-    inflateGetHeader(strm, head.as_mut())
+    inflate_from_stream(strm, InflateStreamRequest::Header, head.as_mut()).status()
 }
 fn syncsearch(have: &mut ::core::ffi::c_uint, buf: &[::core::ffi::c_uchar]) -> ::core::ffi::c_uint {
     let mut got: ::core::ffi::c_uint = 0;
@@ -3775,7 +3783,7 @@ pub unsafe extern "C" fn inflateSync_ffi(mut strm: crate::zlib_h::z_streamp) -> 
     let Some(strm) = strm.as_mut() else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
-    inflate_from_stream(strm, InflateStreamRequest::Sync).status()
+    inflate_from_stream(strm, InflateStreamRequest::Sync, None).status()
 }
 
 fn inflate_sync_point(
@@ -3891,6 +3899,7 @@ pub unsafe extern "C" fn inflateSyncPoint_ffi(
     inflate_from_stream(
         strm,
         InflateStreamRequest::Scalar(InflateNormalScalarAction::SyncPoint),
+        None,
     )
     .scalar()
     .status()
@@ -3982,6 +3991,7 @@ pub unsafe extern "C" fn inflateUndermine_ffi(
     inflate_from_stream(
         strm,
         InflateStreamRequest::Scalar(InflateNormalScalarAction::Undermine),
+        None,
     )
     .scalar()
     .status()
@@ -4018,6 +4028,7 @@ pub unsafe extern "C" fn inflateValidate_ffi(
     inflate_from_stream(
         strm,
         InflateStreamRequest::Scalar(InflateNormalScalarAction::Validate(check)),
+        None,
     )
     .scalar()
     .status()
@@ -4051,6 +4062,7 @@ pub unsafe extern "C" fn inflateMark_ffi(
     inflate_from_stream(
         strm,
         InflateStreamRequest::Scalar(InflateNormalScalarAction::Mark),
+        None,
     )
     .scalar()
     .mark()
@@ -4071,6 +4083,7 @@ pub unsafe extern "C" fn inflateCodesUsed_ffi(
     inflate_from_stream(
         strm,
         InflateStreamRequest::Scalar(InflateNormalScalarAction::CodesUsed),
+        None,
     )
     .scalar()
     .codes_used()
