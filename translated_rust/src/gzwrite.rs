@@ -139,7 +139,7 @@ unsafe extern "C" fn gz_comp(
                     return -1 as ::core::ffi::c_int;
                 }
                 crate::src::gzlib::gz_direct_write_progress(state, writ as ::core::ffi::c_uint);
-                state.strm.next_in = state.strm.next_in.offset(writ as isize);
+                state.strm.next_in = state.strm.next_in.wrapping_add(writ as usize);
             }
             return 0 as ::core::ffi::c_int;
         }
@@ -175,7 +175,7 @@ unsafe extern "C" fn gz_comp(
                     );
                     return -1 as ::core::ffi::c_int;
                 }
-                state.x.next = state.x.next.offset(writ as isize);
+                state.x.next = state.x.next.wrapping_add(writ as usize);
             }
             if state.strm.avail_out == 0 as crate::stdlib::uInt {
                 crate::src::gzlib::gz_reset_output_buffer(state);
@@ -268,17 +268,19 @@ unsafe extern "C" fn gz_write(
             have = state
                 .strm
                 .next_in
-                .offset(state.strm.avail_in as isize)
-                .offset_from(state.in_0) as ::core::ffi::c_uint;
+                .wrapping_add(state.strm.avail_in as usize)
+                .addr()
+                .wrapping_sub(state.in_0.addr()) as ::core::ffi::c_uint;
             copy = crate::src::gzlib::gz_buffer_space(state.size, have, len);
             crate::stdlib::memcpy(
-                state.in_0.offset(have as isize) as *mut ::core::ffi::c_void,
+                state.in_0.wrapping_add(have as usize) as *mut ::core::ffi::c_void,
                 buf as *const ::core::ffi::c_void,
                 copy as crate::__stddef_size_t_h::size_t,
             );
             crate::src::gzlib::gz_buffered_copy_progress(state, &mut len, copy);
-            buf =
-                (buf as *const ::core::ffi::c_char).offset(copy as isize) as crate::stdlib::voidpc;
+            buf = (buf as *const ::core::ffi::c_char)
+                .wrapping_add(copy as usize)
+                as crate::stdlib::voidpc;
             if len == 0 as crate::stdlib::z_size_t {
                 break;
             }
@@ -429,10 +431,11 @@ pub unsafe extern "C" fn gzputc(
         }
         have = (*strm)
             .next_in
-            .offset((*strm).avail_in as isize)
-            .offset_from((*state).in_0) as ::core::ffi::c_uint;
+            .wrapping_add((*strm).avail_in as usize)
+            .addr()
+            .wrapping_sub((*state).in_0.addr()) as ::core::ffi::c_uint;
         if have < (*state).size {
-            *(*state).in_0.offset(have as isize) = c as ::core::ffi::c_uchar;
+            *(*state).in_0.wrapping_add(have as usize) = c as ::core::ffi::c_uchar;
             (*strm).avail_in = (*strm).avail_in.wrapping_add(1);
             crate::src::gzlib::gz_advance_pos(&mut *state, 1);
             return c & 0xff as ::core::ffi::c_int;
