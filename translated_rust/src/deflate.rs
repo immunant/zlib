@@ -694,8 +694,19 @@ impl<'input, 'output> DeflateOneShotOwner<'input, 'output> {
 
 // This adapter owns the complete temporary ABI lifecycle for compress2_z().
 // Its interface is pointer-free, so all chunking and result accounting remain
-// in `DeflateOneShotOwner`; only the established codec boundary is unsafe.
+// in `DeflateOneShotOwner`.
 pub(crate) fn deflate_one_shot(
+    owner: &mut DeflateOneShotOwner<'_, '_>,
+    level: ::core::ffi::c_int,
+) -> DeflateOneShotProgress {
+    deflate_one_shot_abi(owner, level)
+}
+
+// Keep the temporary ABI stream's complete lifecycle at one codec boundary.
+// The caller owns only pointer-free input/output cursors and receives scalar
+// completion, so none of the temporary stream's raw fields escape this
+// adapter.
+fn deflate_one_shot_abi(
     owner: &mut DeflateOneShotOwner<'_, '_>,
     level: ::core::ffi::c_int,
 ) -> DeflateOneShotProgress {
