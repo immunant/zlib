@@ -2846,7 +2846,7 @@ pub unsafe extern "C" fn inflate_table(
     let mut match_0: ::core::ffi::c_uint = 0 as ::core::ffi::c_uint;
     let mut count: [::core::ffi::c_ushort; 16] = [0; 16];
     let mut offs: [::core::ffi::c_ushort; 16] = [0; 16];
-    static mut lbase: [::core::ffi::c_ushort; 31] = [
+    static lbase: [::core::ffi::c_ushort; 31] = [
         3 as ::core::ffi::c_int as ::core::ffi::c_ushort,
         4 as ::core::ffi::c_int as ::core::ffi::c_ushort,
         5 as ::core::ffi::c_int as ::core::ffi::c_ushort,
@@ -2879,7 +2879,7 @@ pub unsafe extern "C" fn inflate_table(
         0 as ::core::ffi::c_int as ::core::ffi::c_ushort,
         0 as ::core::ffi::c_int as ::core::ffi::c_ushort,
     ];
-    static mut lext: [::core::ffi::c_ushort; 31] = [
+    static lext: [::core::ffi::c_ushort; 31] = [
         16 as ::core::ffi::c_int as ::core::ffi::c_ushort,
         16 as ::core::ffi::c_int as ::core::ffi::c_ushort,
         16 as ::core::ffi::c_int as ::core::ffi::c_ushort,
@@ -2912,7 +2912,7 @@ pub unsafe extern "C" fn inflate_table(
         68 as ::core::ffi::c_int as ::core::ffi::c_ushort,
         193 as ::core::ffi::c_int as ::core::ffi::c_ushort,
     ];
-    static mut dbase: [::core::ffi::c_ushort; 32] = [
+    static dbase: [::core::ffi::c_ushort; 32] = [
         1 as ::core::ffi::c_int as ::core::ffi::c_ushort,
         2 as ::core::ffi::c_int as ::core::ffi::c_ushort,
         3 as ::core::ffi::c_int as ::core::ffi::c_ushort,
@@ -2946,7 +2946,7 @@ pub unsafe extern "C" fn inflate_table(
         0 as ::core::ffi::c_int as ::core::ffi::c_ushort,
         0 as ::core::ffi::c_int as ::core::ffi::c_ushort,
     ];
-    static mut dext: [::core::ffi::c_ushort; 32] = [
+    static dext: [::core::ffi::c_ushort; 32] = [
         16 as ::core::ffi::c_int as ::core::ffi::c_ushort,
         16 as ::core::ffi::c_int as ::core::ffi::c_ushort,
         16 as ::core::ffi::c_int as ::core::ffi::c_ushort,
