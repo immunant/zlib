@@ -2425,10 +2425,6 @@ fn gen_codes(
 
 fn tr_static_init() {}
 
-unsafe fn init_block(s: &mut crate::src::deflate::deflate_state) {
-    init_block_impl(s);
-}
-
 fn init_block_impl(s: &mut crate::src::deflate::deflate_state) {
     let mut n: ::core::ffi::c_int = 0;
     n = 0 as ::core::ffi::c_int;
