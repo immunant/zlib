@@ -655,13 +655,11 @@ pub(crate) fn with_inflate_callback_allocation(
         };
         (zalloc, allocator_stream.opaque)
     };
-    let allocation = unsafe {
-        zalloc(
-            opaque,
-            1,
-            ::core::mem::size_of::<crate::src::inflate::inflate_state>() as crate::stdlib::uInt,
-        )
-    };
+    let allocation = zalloc(
+        opaque,
+        1,
+        ::core::mem::size_of::<crate::src::inflate::inflate_state>() as crate::stdlib::uInt,
+    );
     if allocation.is_null() {
         debug_assert!(release_inflate_state_owner(state_address).is_none());
         return Err(crate::zlib_h::Z_MEM_ERROR);

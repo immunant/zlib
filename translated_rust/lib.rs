@@ -106,8 +106,13 @@ pub mod zlib_h {
         ::core::mem::transmute::<[u8; 15], [::core::ffi::c_char; 15]>(*b"1.3.2.1-motley\0")
     };
 
+    // zalloc is a synchronous callback contract: zlib calls a non-null
+    // callback with the stream's opaque value and the requested item count
+    // and size, and treats a null result as allocation failure.  The ABI
+    // boundary validates that it is paired with zfree before dispatching;
+    // callers retain responsibility for installing a valid C callback.
     pub type alloc_func = Option<
-        unsafe extern "C" fn(
+        extern "C" fn(
             crate::stdlib::voidpf,
             crate::stdlib::uInt,
             crate::stdlib::uInt,

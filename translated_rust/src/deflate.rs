@@ -3702,13 +3702,11 @@ unsafe fn deflate_install_state(
         }
         return crate::zlib_h::Z_MEM_ERROR;
     };
-    let allocation = unsafe {
-        zalloc(
-            dest.opaque,
-            1,
-            ::core::mem::size_of::<crate::src::deflate::deflate_state>() as crate::stdlib::uInt,
-        )
-    };
+    let allocation = zalloc(
+        dest.opaque,
+        1,
+        ::core::mem::size_of::<crate::src::deflate::deflate_state>() as crate::stdlib::uInt,
+    );
     if allocation.is_null() {
         let released_allocation = release_deflate_state_owner(state_address);
         debug_assert!(released_allocation.is_none());
