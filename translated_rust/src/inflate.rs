@@ -2467,23 +2467,16 @@ fn inflate_sync_point_value(
         as ::core::ffi::c_int
 }
 
-pub unsafe extern "C" fn inflateSyncPoint(
-    mut strm: crate::zlib_h::z_streamp,
-) -> ::core::ffi::c_int {
-    let mut state: *mut crate::src::inflate::inflate_state =
-        ::core::ptr::null_mut::<crate::src::inflate::inflate_state>();
-    if inflateStateCheck(strm) != 0 {
-        return crate::zlib_h::Z_STREAM_ERROR;
-    }
-    state = (*strm).state as *mut crate::src::inflate::inflate_state;
-    inflate_sync_point_value((*state).mode as ::core::ffi::c_uint, (*state).bits)
-}
-
 #[export_name = "inflateSyncPoint"]
 pub unsafe extern "C" fn inflateSyncPoint_ffi(
     mut strm: crate::zlib_h::z_streamp,
 ) -> ::core::ffi::c_int {
-    inflateSyncPoint(strm)
+    if inflateStateCheck(strm) != 0 {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    }
+
+    let state = (*strm).state as *mut crate::src::inflate::inflate_state;
+    inflate_sync_point_value((*state).mode as ::core::ffi::c_uint, (*state).bits)
 }
 pub unsafe extern "C" fn inflateCopy(
     mut dest: crate::zlib_h::z_streamp,
@@ -2694,7 +2687,8 @@ mod tests {
         inflate_mode_is_valid, inflate_needs_buffer_error, inflate_prime_update, inflate_undermine_core,
         inflate_reset2_params, inflate_state_metadata_is_valid, inflate_sync_point_value,
         inflate_sync_search_core, inflate_should_update_window, inflate_validate_wrap, initial_window_metadata,
-        stored_block_lengths_are_valid, syncsearch_safe, window_update_plan, InflatePrimeUpdate,
+        stored_block_lengths_are_valid, syncsearch_safe, window_update_plan, inflateSyncPoint_ffi,
+        InflatePrimeUpdate,
         InflateSyncSearch, BAD, CHECK, CODE_LENGTH_ORDER, COPY_, COPY_1, HEAD, LEN_, MATCH, STORED, SYNC,
         TYPE,
     };
@@ -2804,6 +2798,14 @@ mod tests {
         assert_eq!(inflate_sync_point_value(STORED as u32, 1), 0);
         assert_eq!(inflate_sync_point_value(HEAD as u32, 0), 0);
         assert_eq!(inflate_sync_point_value(u32::MAX, 0), 0);
+    }
+
+    #[test]
+    fn inflate_sync_point_ffi_rejects_a_null_stream() {
+        assert_eq!(
+            unsafe { inflateSyncPoint_ffi(::core::ptr::null_mut()) },
+            crate::zlib_h::Z_STREAM_ERROR
+        );
     }
 
     #[test]
