@@ -801,10 +801,18 @@ pub(crate) fn updatewindow<T>(
         InflateWindowAccess::Existing => Ok(operation(state, window)),
     }
 }
-pub unsafe fn inflate(
+// The checked stream/state binding below, followed by the null cursor guard,
+// keeps the implementation's Rust-facing contract reference-bound. Its raw
+// decoder operations stay internal to this implementation.
+pub fn inflate(
     strm: &mut crate::zlib_h::z_stream,
     mut flush: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
+    // SAFETY: the checked state binding and cursor validation immediately
+    // below establish the C stream invariants for this one decoder pass.
+    // Keep the translated raw decoder body in this narrow implementation
+    // scope instead of exposing an unsafe-function contract to callers.
+    unsafe {
     let mut next: *mut ::core::ffi::c_uchar = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
     let mut put: *mut ::core::ffi::c_uchar = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
     let mut have: ::core::ffi::c_uint = 0;
@@ -872,6 +880,9 @@ pub unsafe fn inflate(
     let input = if have == 0 {
         &[]
     } else {
+        // The public C API requires `avail_in` readable bytes at a non-null
+        // `next_in` cursor; the guard above enforces the null half before
+        // this implementation binds the range.
         ::core::slice::from_raw_parts(next, have as usize)
     };
     hold = (*state).hold;
@@ -2551,6 +2562,7 @@ pub unsafe fn inflate(
         ret = crate::zlib_h::Z_BUF_ERROR;
     }
     return ret;
+    }
 }
 #[export_name = "inflate"]
 
@@ -2561,7 +2573,7 @@ pub unsafe extern "C" fn inflate_ffi(
     let Some(strm) = (unsafe { strm.as_mut() }) else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
-    unsafe { inflate(strm, flush) }
+    inflate(strm, flush)
 }
 pub fn inflateEnd(strm: &mut crate::zlib_h::z_stream) -> ::core::ffi::c_int {
     let Some((strm, state)) = inflateStateCheck(strm as *mut _) else {

@@ -358,10 +358,9 @@ fn gz_decomp(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
             }
             break;
         } else {
-            // SAFETY: `gz_look` initialized this stream and its input/output
-            // ranges are owned by the validated gzip state for this call.
-            ret =
-                unsafe { crate::src::inflate::inflate(&mut state.strm, crate::zlib_h::Z_NO_FLUSH) };
+            // `gz_look` initialized this stream and its input/output ranges
+            // are owned by the validated gzip state for this call.
+            ret = crate::src::inflate::inflate(&mut state.strm, crate::zlib_h::Z_NO_FLUSH);
             match crate::src::gzlib::gz_decomp_after_inflate(state, had, ret) {
                 crate::src::gzlib::GzDecompStep::Continue => {}
                 crate::src::gzlib::GzDecompStep::Stop(result) => {
