@@ -247,6 +247,13 @@ fn gz_avail(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
     return 0 as ::core::ffi::c_int;
 }
 
+/// Derive the `junk` transition value used when lookahead restarts the
+/// inflater. Keeping the sentinel rule scalar-only makes it independently
+/// testable without moving opaque state traversal out of the codec boundary.
+fn gz_look_reset_junk(junk: ::core::ffi::c_int) -> ::core::ffi::c_int {
+    (junk != -1) as ::core::ffi::c_int
+}
+
 unsafe fn gz_look(state_ref: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
     if state_ref.size == 0 as ::core::ffi::c_uint {
         let output_len = match (state_ref.want as usize).checked_mul(2) {
@@ -285,29 +292,29 @@ unsafe fn gz_look(state_ref: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_i
         ) != crate::zlib_h::Z_OK
         {
             state_ref.buffers = None;
-            state_ref.size = 0 as ::core::ffi::c_uint;
+            state_ref.size = 0;
             crate::src::gzlib::gz_error_static(
                 state_ref,
                 crate::zlib_h::Z_MEM_ERROR,
                 b"out of memory\0",
             );
-            return -1 as ::core::ffi::c_int;
+            return -1;
         }
     }
     if state_ref.direct == -1 as ::core::ffi::c_int || state_ref.junk == 0 as ::core::ffi::c_int {
         crate::src::inflate::inflateReset(&raw mut state_ref.strm);
         state_ref.how = crate::gzguts_h::GZIP;
-        state_ref.junk = (state_ref.junk != -1 as ::core::ffi::c_int) as ::core::ffi::c_int;
-        state_ref.direct = 0 as ::core::ffi::c_int;
-        return 0 as ::core::ffi::c_int;
+        state_ref.junk = gz_look_reset_junk(state_ref.junk);
+        state_ref.direct = 0;
+        return 0;
     }
     if gz_avail(state_ref) == -1 as ::core::ffi::c_int {
-        return -1 as ::core::ffi::c_int;
+        return -1;
     }
     if state_ref.strm.avail_in == 0 as crate::stdlib::uInt
         || state_ref.again != 0 && state_ref.strm.avail_in < 4 as crate::stdlib::uInt
     {
-        return 0 as ::core::ffi::c_int;
+        return 0;
     }
     let input_is_gzip = {
         let Some(buffers) = state_ref.buffers.as_ref() else {
@@ -329,9 +336,9 @@ unsafe fn gz_look(state_ref: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_i
     if input_is_gzip {
         crate::src::inflate::inflateReset(&raw mut state_ref.strm);
         state_ref.how = crate::gzguts_h::GZIP;
-        state_ref.junk = 1 as ::core::ffi::c_int;
-        state_ref.direct = 0 as ::core::ffi::c_int;
-        return 0 as ::core::ffi::c_int;
+        state_ref.junk = 1;
+        state_ref.direct = 0;
+        return 0;
     }
     let Some(buffers) = state_ref.buffers.as_mut() else {
         return -1;
@@ -354,7 +361,7 @@ unsafe fn gz_look(state_ref: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_i
     state_ref.x.have = state_ref.strm.avail_in as ::core::ffi::c_uint;
     state_ref.strm.avail_in = 0 as crate::stdlib::uInt;
     state_ref.how = crate::gzguts_h::COPY;
-    return 0 as ::core::ffi::c_int;
+    0
 }
 
 /// The safe portion of one gzip inflate step after the boundary has invoked
