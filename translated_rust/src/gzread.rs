@@ -1522,7 +1522,10 @@ fn gz_decomp_apply_trailing_junk_plan(
     *how = plan.how;
 }
 
-unsafe fn gz_decomp(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
+// The control flow operates on an established state reference.  Keep the few
+// remaining gzip-buffer and inflate crossings explicit until their storage
+// owners move to the exported boundary.
+fn gz_decomp(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
     let mut ret: ::core::ffi::c_int = crate::zlib_h::Z_OK;
     let had = gz_decomp_stream_state(&state.strm).avail_out as ::core::ffi::c_uint;
     loop {
@@ -1541,17 +1544,21 @@ unsafe fn gz_decomp(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int
             }
             GzDecompInputAction::UnexpectedEof => {
                 if gz_decomp_reports_unexpected_eof(state.again) {
-                    crate::src::gzlib::gz_error(
-                        state as *mut crate::gzguts_h::gz_state,
-                        crate::zlib_h::Z_BUF_ERROR,
-                        b"unexpected end of file\0".as_ptr() as *const ::core::ffi::c_char,
-                    );
+                    unsafe {
+                        crate::src::gzlib::gz_error(
+                            state as *mut crate::gzguts_h::gz_state,
+                            crate::zlib_h::Z_BUF_ERROR,
+                            b"unexpected end of file\0".as_ptr() as *const ::core::ffi::c_char,
+                        );
+                    }
                 }
                 break;
             }
             GzDecompInputAction::Inflate => {}
         }
-        ret = crate::src::inflate::inflate(&raw mut state.strm, crate::zlib_h::Z_NO_FLUSH);
+        ret = unsafe {
+            crate::src::inflate::inflate(&raw mut state.strm, crate::zlib_h::Z_NO_FLUSH)
+        };
         let stream_state = gz_decomp_stream_state(&state.strm);
         let decision = gz_decomp_decision(
             ret,
@@ -1562,20 +1569,24 @@ unsafe fn gz_decomp(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int
         state.junk = gz_decomp_junk_after_output(state.junk, decision.clear_junk);
         match decision.action {
             GzDecompAction::InternalError => {
-                crate::src::gzlib::gz_error(
-                    state as *mut crate::gzguts_h::gz_state,
-                    crate::zlib_h::Z_STREAM_ERROR,
-                    b"internal error: inflate stream corrupt\0".as_ptr()
-                        as *const ::core::ffi::c_char,
-                );
+                unsafe {
+                    crate::src::gzlib::gz_error(
+                        state as *mut crate::gzguts_h::gz_state,
+                        crate::zlib_h::Z_STREAM_ERROR,
+                        b"internal error: inflate stream corrupt\0".as_ptr()
+                            as *const ::core::ffi::c_char,
+                    );
+                }
                 break;
             }
             GzDecompAction::MemoryError => {
-                crate::src::gzlib::gz_error(
-                    state as *mut crate::gzguts_h::gz_state,
-                    crate::zlib_h::Z_MEM_ERROR,
-                    b"out of memory\0".as_ptr() as *const ::core::ffi::c_char,
-                );
+                unsafe {
+                    crate::src::gzlib::gz_error(
+                        state as *mut crate::gzguts_h::gz_state,
+                        crate::zlib_h::Z_MEM_ERROR,
+                        b"out of memory\0".as_ptr() as *const ::core::ffi::c_char,
+                    );
+                }
                 break;
             }
             GzDecompAction::TrailingJunk => {
@@ -1599,11 +1610,13 @@ unsafe fn gz_decomp(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int
                             state.strm.msg as *const ::core::ffi::c_char
                         }
                     };
-                crate::src::gzlib::gz_error(
-                    state as *mut crate::gzguts_h::gz_state,
-                    crate::zlib_h::Z_DATA_ERROR,
-                    message,
-                );
+                unsafe {
+                    crate::src::gzlib::gz_error(
+                        state as *mut crate::gzguts_h::gz_state,
+                        crate::zlib_h::Z_DATA_ERROR,
+                        message,
+                    );
+                }
                 break;
             }
             GzDecompAction::Stop => break,
@@ -1636,9 +1649,9 @@ fn gz_fetch(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
             GzFetchAction::Gzip => {
                 state.strm.avail_out = gz_fetch_output_capacity(state.size) as crate::stdlib::uInt;
                 state.strm.next_out = state.out as *mut crate::stdlib::Bytef;
-                // `gz_decomp` still crosses the inflate and gzip-buffer
-                // boundaries; only that call needs an unsafe boundary here.
-                (unsafe { gz_decomp(state) }) == -1 as ::core::ffi::c_int
+                // `gz_decomp` keeps its remaining inflate and gzip-buffer
+                // crossings local to the control helper.
+                gz_decomp(state) == -1 as ::core::ffi::c_int
             }
             GzFetchAction::StateCorrupt => {
                 unsafe {
