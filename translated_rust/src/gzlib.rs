@@ -1195,6 +1195,7 @@ struct GzOpenMode {
 fn gz_open_init(state: &mut crate::gzguts_h::gz_state) {
     state.size = 0;
     state.want = crate::gzguts_h::GZBUFSIZE as ::core::ffi::c_uint;
+    state.path = ::core::ptr::null_mut();
     state.path_len = 0;
     state.err = crate::zlib_h::Z_OK;
     state.msg = ::core::ptr::null_mut::<::core::ffi::c_char>();
@@ -1364,37 +1365,10 @@ fn gz_open(
         crate::src::zutil::zcfree(::core::ptr::null_mut(), state as crate::stdlib::voidpf);
         return ::core::ptr::null_mut::<crate::zlib_h::gzFile_s>();
     }
-    state_ref.path = crate::stdlib::malloc(
-        (len as crate::__stddef_size_t_h::size_t)
-            .wrapping_add(1 as crate::__stddef_size_t_h::size_t),
-    ) as *mut ::core::ffi::c_char;
-    if state_ref.path.is_null() {
-        // This state uses zlib's default allocator, so its safe matching
-        // adapter can release the still-owned allocation.
-        crate::src::zutil::zcfree(::core::ptr::null_mut(), state as crate::stdlib::voidpf);
-        return ::core::ptr::null_mut::<crate::zlib_h::gzFile_s>();
-    }
     state_ref.path_len = len;
-    // SAFETY: the owned path allocation has room for the path and terminator,
-    // and both the format string and source path are valid C strings.
-    unsafe {
-        crate::stdlib::snprintf(
-            state_ref.path,
-            (len as crate::__stddef_size_t_h::size_t)
-                .wrapping_add(1 as crate::__stddef_size_t_h::size_t),
-            b"%s\0".as_ptr() as *const ::core::ffi::c_char,
-            path.as_ptr(),
-        );
-    }
-    // Keep a safe copy of the immutable path for error-message construction.
-    // The C-facing path allocation above remains the descriptor API's input,
-    // while this copy lets `gz_error()` avoid raw string formatting and manual
-    // message release.
+    // The registry owns the immutable C-compatible path and publishes its
+    // stable byte buffer through the opaque C state.
     if !gz_register_owned_strings(state_ref, path) {
-        crate::src::zutil::zcfree(
-            ::core::ptr::null_mut(),
-            state_ref.path as crate::stdlib::voidpf,
-        );
         crate::src::zutil::zcfree(::core::ptr::null_mut(), state as crate::stdlib::voidpf);
         return ::core::ptr::null_mut::<crate::zlib_h::gzFile_s>();
     }
@@ -1431,12 +1405,8 @@ fn gz_open(
         }
     }
     if state_ref.fd == -1 as ::core::ffi::c_int {
-        // Both allocations are still owned by this failed open and use
-        // zlib's default allocator. Preserve C's path-then-state order.
-        crate::src::zutil::zcfree(
-            ::core::ptr::null_mut(),
-            state_ref.path as crate::stdlib::voidpf,
-        );
+        // The registry entry must be dropped before releasing the state it
+        // is keyed by.
         gz_release_owned_strings(state_ref);
         crate::src::zutil::zcfree(::core::ptr::null_mut(), state as crate::stdlib::voidpf);
         return ::core::ptr::null_mut::<crate::zlib_h::gzFile_s>();
@@ -1966,7 +1936,7 @@ fn gz_owned_strings() -> &'static ::std::sync::Mutex<Vec<(usize, GzOwnedStrings)
 }
 
 fn gz_register_owned_strings(
-    state: &crate::gzguts_h::gz_state,
+    state: &mut crate::gzguts_h::gz_state,
     path: &::core::ffi::CStr,
 ) -> bool {
     let mut path_copy = Vec::new();
@@ -1984,6 +1954,7 @@ fn gz_register_owned_strings(
             path: path_copy,
             message: None,
         };
+        state.path = strings.path.as_mut_ptr() as *mut ::core::ffi::c_char;
         return true;
     }
     if strings.try_reserve(1).is_err() {
@@ -1996,6 +1967,12 @@ fn gz_register_owned_strings(
             message: None,
         },
     ));
+    state.path = strings
+        .last_mut()
+        .expect("new gzip string entry")
+        .1
+        .path
+        .as_mut_ptr() as *mut ::core::ffi::c_char;
     true
 }
 

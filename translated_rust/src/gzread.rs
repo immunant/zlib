@@ -1094,12 +1094,9 @@ pub fn gzclose_r(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
         crate::src::zutil::zcfree(::core::ptr::null_mut(), state.in_0 as crate::stdlib::voidpf);
     }
     err = gz_close_read_finish(state);
-    let path = state.path;
     let fd = state.fd;
     // The result of closing the descriptor intentionally overrides the
-    // earlier buffered-error result, matching zlib's cleanup order. `path`
-    // and `state` are default-allocator allocations owned by this close.
-    crate::src::zutil::zcfree(::core::ptr::null_mut(), path as crate::stdlib::voidpf);
+    // earlier buffered-error result, matching zlib's cleanup order.
     crate::src::gzlib::gz_release_owned_strings(state);
     ret = crate::stdlib::close(fd);
     crate::src::zutil::zcfree(
