@@ -4127,160 +4127,40 @@ fn deflate_fast(
         let mut hash_head: crate::src::deflate::IPos = 0;
         let mut bflush: ::core::ffi::c_int = 0;
         loop {
-        let needs_input = {
-            let state = &mut *s;
-            state.lookahead < crate::src::deflate::MIN_LOOKAHEAD as crate::stdlib::uInt
-        };
-        if needs_input {
-            fill_window(s);
-            let state = &mut *s;
-            if state.lookahead < crate::src::deflate::MIN_LOOKAHEAD as crate::stdlib::uInt
-                && flush == crate::zlib_h::Z_NO_FLUSH
-            {
-                return need_more;
-            }
-            if state.lookahead == 0 as crate::stdlib::uInt {
-                break;
-            }
-        }
-        hash_head = NIL as crate::src::deflate::IPos;
-        let has_min_match = {
-            let state = &mut *s;
-            state.lookahead >= crate::zutil_h::MIN_MATCH as crate::stdlib::uInt
-        };
-        if has_min_match {
-            let state = &mut *s;
-            let (Ok(window_len), Ok(head_len), Ok(prev_len)) = (
-                usize::try_from(state.window_size),
-                usize::try_from(state.hash_size),
-                usize::try_from(state.w_size),
-            ) else {
-                return need_more;
+            let needs_input = {
+                let state = &mut *s;
+                state.lookahead < crate::src::deflate::MIN_LOOKAHEAD as crate::stdlib::uInt
             };
-            if (window_len != 0 && state.window.is_null())
-                || (head_len != 0 && state.head.is_null())
-                || (prev_len != 0 && state.prev.is_null())
-            {
-                return need_more;
-            }
-            let window = if window_len == 0 {
-                &[]
-            } else {
-                ::core::slice::from_raw_parts(state.window, window_len)
-            };
-            let head = if head_len == 0 {
-                &mut []
-            } else {
-                ::core::slice::from_raw_parts_mut(state.head, head_len)
-            };
-            let prev = if prev_len == 0 {
-                &mut []
-            } else {
-                ::core::slice::from_raw_parts_mut(state.prev, prev_len)
-            };
-            let Some(previous) = insert_string_state(
-                window,
-                head,
-                prev,
-                state.strstart,
-                &mut state.ins_h,
-                state.hash_shift,
-                state.hash_mask,
-                state.w_mask,
-            ) else {
-                return need_more;
-            };
-            hash_head = previous;
-            if hash_match_is_usable(
-                state.strstart as crate::src::deflate::IPos,
-                hash_head,
-                state.w_size,
-            ) {
-                state.match_length =
-                    longest_match_state(state, window, prev, hash_head).unwrap_or(0);
-            }
-        }
-        let has_match = {
-            let state = &mut *s;
-            state.match_length >= crate::zutil_h::MIN_MATCH as crate::stdlib::uInt
-        };
-        if has_match {
-            let state = &mut *s;
-            let Ok(symbol_len) = usize::try_from(state.sym_end) else {
-                return need_more;
-            };
-            if symbol_len != 0 && state.sym_buf.is_null() {
-                return need_more;
-            }
-            let symbols = if symbol_len == 0 {
-                &mut []
-            } else {
-                ::core::slice::from_raw_parts_mut(state.sym_buf, symbol_len)
-            };
-            let Some((flush_now, length)) = fast_tally_match_state(state, symbols) else {
-                return need_more;
-            };
-            bflush = flush_now as ::core::ffi::c_int;
-            if length <= state.max_lazy_match
-                && state.lookahead >= crate::zutil_h::MIN_MATCH as crate::stdlib::uInt
-            {
-                state.match_length = length.wrapping_sub(1);
-                loop {
-                    state.strstart = state.strstart.wrapping_add(1);
-                    let (Ok(window_len), Ok(head_len), Ok(prev_len)) = (
-                        usize::try_from(state.window_size),
-                        usize::try_from(state.hash_size),
-                        usize::try_from(state.w_size),
-                    ) else {
-                        return need_more;
-                    };
-                    if (window_len != 0 && state.window.is_null())
-                        || (head_len != 0 && state.head.is_null())
-                        || (prev_len != 0 && state.prev.is_null())
-                    {
-                        return need_more;
-                    }
-                    let window = if window_len == 0 {
-                        &[]
-                    } else {
-                        ::core::slice::from_raw_parts(state.window, window_len)
-                    };
-                    let head = if head_len == 0 {
-                        &mut []
-                    } else {
-                        ::core::slice::from_raw_parts_mut(state.head, head_len)
-                    };
-                    let prev = if prev_len == 0 {
-                        &mut []
-                    } else {
-                        ::core::slice::from_raw_parts_mut(state.prev, prev_len)
-                    };
-                    let Some(previous) = insert_string_state(
-                        window,
-                        head,
-                        prev,
-                        state.strstart,
-                        &mut state.ins_h,
-                        state.hash_shift,
-                        state.hash_mask,
-                        state.w_mask,
-                    ) else {
-                        return need_more;
-                    };
-                    hash_head = previous;
-                    state.match_length = state.match_length.wrapping_sub(1);
-                    if state.match_length == 0 as crate::stdlib::uInt {
-                        break;
-                    }
+            if needs_input {
+                fill_window(s);
+                let state = &mut *s;
+                if state.lookahead < crate::src::deflate::MIN_LOOKAHEAD as crate::stdlib::uInt
+                    && flush == crate::zlib_h::Z_NO_FLUSH
+                {
+                    return need_more;
                 }
-                state.strstart = state.strstart.wrapping_add(1);
-            } else {
-                state.strstart = state.strstart.wrapping_add(state.match_length);
-                state.match_length = 0 as crate::stdlib::uInt;
-                let Ok(window_len) = usize::try_from(state.window_size) else {
+                if state.lookahead == 0 as crate::stdlib::uInt {
+                    break;
+                }
+            }
+            hash_head = NIL as crate::src::deflate::IPos;
+            let has_min_match = {
+                let state = &mut *s;
+                state.lookahead >= crate::zutil_h::MIN_MATCH as crate::stdlib::uInt
+            };
+            if has_min_match {
+                let state = &mut *s;
+                let (Ok(window_len), Ok(head_len), Ok(prev_len)) = (
+                    usize::try_from(state.window_size),
+                    usize::try_from(state.hash_size),
+                    usize::try_from(state.w_size),
+                ) else {
                     return need_more;
                 };
-                if window_len != 0 && state.window.is_null() {
+                if (window_len != 0 && state.window.is_null())
+                    || (head_len != 0 && state.head.is_null())
+                    || (prev_len != 0 && state.prev.is_null())
+                {
                     return need_more;
                 }
                 let window = if window_len == 0 {
@@ -4288,297 +4168,119 @@ fn deflate_fast(
                 } else {
                     ::core::slice::from_raw_parts(state.window, window_len)
                 };
-                let Some(ins_h) = initialize_hash_state(
+                let head = if head_len == 0 {
+                    &mut []
+                } else {
+                    ::core::slice::from_raw_parts_mut(state.head, head_len)
+                };
+                let prev = if prev_len == 0 {
+                    &mut []
+                } else {
+                    ::core::slice::from_raw_parts_mut(state.prev, prev_len)
+                };
+                let Some(previous) = insert_string_state(
                     window,
+                    head,
+                    prev,
                     state.strstart,
+                    &mut state.ins_h,
                     state.hash_shift,
                     state.hash_mask,
+                    state.w_mask,
                 ) else {
                     return need_more;
                 };
-                state.ins_h = ins_h;
+                hash_head = previous;
+                if hash_match_is_usable(
+                    state.strstart as crate::src::deflate::IPos,
+                    hash_head,
+                    state.w_size,
+                ) {
+                    state.match_length =
+                        longest_match_state(state, window, prev, hash_head).unwrap_or(0);
+                }
             }
-        } else {
-            let state = &mut *s;
-            let Ok(window_len) = usize::try_from(state.window_size) else {
-                return need_more;
-            };
-            let Ok(symbol_len) = usize::try_from(state.sym_end) else {
-                return need_more;
-            };
-            if (window_len != 0 && state.window.is_null())
-                || (symbol_len != 0 && state.sym_buf.is_null())
-            {
-                return need_more;
-            }
-            let window = if window_len == 0 {
-                &[]
-            } else {
-                ::core::slice::from_raw_parts(state.window, window_len)
-            };
-            let symbols = if symbol_len == 0 {
-                &mut []
-            } else {
-                ::core::slice::from_raw_parts_mut(state.sym_buf, symbol_len)
-            };
-            let Some(flush_now) = tally_current_literal_state(state, window, symbols) else {
-                return need_more;
-            };
-            bflush = flush_now as ::core::ffi::c_int;
-        }
-        if bflush != 0 {
-            let (block_start, strstart, window) = {
+            let has_match = {
                 let state = &mut *s;
-                (state.block_start, state.strstart, state.window)
+                state.match_length >= crate::zutil_h::MIN_MATCH as crate::stdlib::uInt
             };
-            crate::src::trees::_tr_flush_block(
-                s as *mut crate::src::deflate::internal_state,
-                if block_start >= 0 as ::core::ffi::c_long {
-                    window.wrapping_add(block_start as ::core::ffi::c_uint as usize)
-                        as *mut crate::stdlib::charf
-                } else {
-                    ::core::ptr::null_mut::<crate::stdlib::charf>()
-                },
-                block_flush_len_state(strstart, block_start),
-                0 as ::core::ffi::c_int,
-            );
-            let avail_out = {
+            if has_match {
                 let state = &mut *s;
-                state.block_start = strstart as ::core::ffi::c_long;
-                let strm = state.strm;
-                flush_pending(strm)
-            };
-            if let Some(result) = deflate_post_flush_result(avail_out, false) {
-                return result;
-            }
-        }
-    }
-    {
-        let state = &mut *s;
-        state.insert = if state.strstart
-            < (crate::zutil_h::MIN_MATCH - 1 as ::core::ffi::c_int) as crate::stdlib::uInt
-        {
-            state.strstart
-        } else {
-            (crate::zutil_h::MIN_MATCH - 1 as ::core::ffi::c_int) as crate::stdlib::uInt
-        };
-    }
-    if flush == crate::zlib_h::Z_FINISH {
-        let (block_start, window, strstart) = {
-            let state = &mut *s;
-            (state.block_start, state.window, state.strstart)
-        };
-        crate::src::trees::_tr_flush_block(
-            s as *mut crate::src::deflate::internal_state,
-            if block_start >= 0 as ::core::ffi::c_long {
-                window.wrapping_add(block_start as ::core::ffi::c_uint as usize)
-                    as *mut crate::stdlib::charf
-            } else {
-                ::core::ptr::null_mut::<crate::stdlib::charf>()
-            },
-            block_flush_len_state(strstart, block_start),
-            1 as ::core::ffi::c_int,
-        );
-        let avail_out = {
-            let state = &mut *s;
-            state.block_start = state.strstart as ::core::ffi::c_long;
-            let strm = state.strm;
-            flush_pending(strm)
-        };
-        if let Some(result) = deflate_post_flush_result(avail_out, true) {
-            return result;
-        }
-        return finish_done;
-    }
-    let has_symbols = {
-        let state = &mut *s;
-        state.sym_next != 0
-    };
-    if has_symbols {
-        let (block_start, window, strstart) = {
-            let state = &mut *s;
-            (state.block_start, state.window, state.strstart)
-        };
-        crate::src::trees::_tr_flush_block(
-            s as *mut crate::src::deflate::internal_state,
-            if block_start >= 0 as ::core::ffi::c_long {
-                window.wrapping_add(block_start as ::core::ffi::c_uint as usize)
-                    as *mut crate::stdlib::charf
-            } else {
-                ::core::ptr::null_mut::<crate::stdlib::charf>()
-            },
-            block_flush_len_state(strstart, block_start),
-            0 as ::core::ffi::c_int,
-        );
-        let avail_out = {
-            let state = &mut *s;
-            state.block_start = state.strstart as ::core::ffi::c_long;
-            let strm = state.strm;
-            flush_pending(strm)
-        };
-        if let Some(result) = deflate_post_flush_result(avail_out, false) {
-            return result;
-        }
-    }
-        return block_done;
-    }
-}
-
-unsafe fn deflate_slow(
-    mut s: *mut crate::src::deflate::deflate_state,
-    mut flush: ::core::ffi::c_int,
-) -> block_state {
-    let mut hash_head: crate::src::deflate::IPos = 0;
-    let mut bflush: ::core::ffi::c_int = 0;
-    loop {
-        let needs_input = {
-            let state = &mut *s;
-            state.lookahead < crate::src::deflate::MIN_LOOKAHEAD as crate::stdlib::uInt
-        };
-        if needs_input {
-            fill_window(s);
-            let state = &mut *s;
-            if state.lookahead < crate::src::deflate::MIN_LOOKAHEAD as crate::stdlib::uInt
-                && flush == crate::zlib_h::Z_NO_FLUSH
-            {
-                return need_more;
-            }
-            if state.lookahead == 0 as crate::stdlib::uInt {
-                break;
-            }
-        }
-        hash_head = NIL as crate::src::deflate::IPos;
-        let has_min_match = {
-            let state = &mut *s;
-            state.prev_length = state.match_length;
-            state.prev_match = state.match_start as crate::src::deflate::IPos;
-            state.match_length =
-                (crate::zutil_h::MIN_MATCH - 1 as ::core::ffi::c_int) as crate::stdlib::uInt;
-            state.lookahead >= crate::zutil_h::MIN_MATCH as crate::stdlib::uInt
-        };
-        if has_min_match {
-            let state = &mut *s;
-            let (Ok(window_len), Ok(head_len), Ok(prev_len)) = (
-                usize::try_from(state.window_size),
-                usize::try_from(state.hash_size),
-                usize::try_from(state.w_size),
-            ) else {
-                return need_more;
-            };
-            if (window_len != 0 && state.window.is_null())
-                || (head_len != 0 && state.head.is_null())
-                || (prev_len != 0 && state.prev.is_null())
-            {
-                return need_more;
-            }
-            let window = if window_len == 0 {
-                &[]
-            } else {
-                ::core::slice::from_raw_parts(state.window, window_len)
-            };
-            let head = if head_len == 0 {
-                &mut []
-            } else {
-                ::core::slice::from_raw_parts_mut(state.head, head_len)
-            };
-            let prev = if prev_len == 0 {
-                &mut []
-            } else {
-                ::core::slice::from_raw_parts_mut(state.prev, prev_len)
-            };
-            let Some(previous) = insert_string_state(
-                window,
-                head,
-                prev,
-                state.strstart,
-                &mut state.ins_h,
-                state.hash_shift,
-                state.hash_mask,
-                state.w_mask,
-            ) else {
-                return need_more;
-            };
-            hash_head = previous;
-            if lazy_hash_match_is_usable(
-                state.strstart as crate::src::deflate::IPos,
-                hash_head,
-                state.prev_length,
-                state.max_lazy_match,
-                state.w_size,
-            ) {
-                state.match_length =
-                    longest_match_state(state, window, prev, hash_head).unwrap_or(0);
-                state.match_length = filtered_match_length(
-                    state.match_length,
-                    state.strategy,
-                    state.strstart,
-                    state.match_start,
-                );
-            }
-        }
-        let use_previous_match = {
-            let state = &mut *s;
-            state.prev_length >= crate::zutil_h::MIN_MATCH as crate::stdlib::uInt
-                && state.match_length <= state.prev_length
-        };
-        if use_previous_match {
-            let (max_insert, len, dist) = {
-                let state = &mut *s;
-                let max_insert = state
-                    .strstart
-                    .wrapping_add(state.lookahead)
-                    .wrapping_sub(crate::zutil_h::MIN_MATCH as crate::stdlib::uInt);
-                let len =
-                    state.prev_length.wrapping_sub(3 as crate::stdlib::uInt) as crate::zutil_h::uch;
-                let dist = (state.strstart as crate::src::deflate::IPos)
-                    .wrapping_sub(1 as crate::src::deflate::IPos)
-                    .wrapping_sub(state.prev_match)
-                    as crate::zutil_h::ush;
-                (max_insert, len, dist)
-            };
-            let state = &mut *s;
-            let Ok(symbol_len) = usize::try_from(state.sym_end) else {
-                return need_more;
-            };
-            if symbol_len != 0 && state.sym_buf.is_null() {
-                return need_more;
-            }
-            let symbols = if symbol_len == 0 {
-                &mut []
-            } else {
-                ::core::slice::from_raw_parts_mut(state.sym_buf, symbol_len)
-            };
-            let Some(flush_now) = tally_symbol_state(state, symbols, dist.into(), len.into())
-            else {
-                return need_more;
-            };
-            bflush = flush_now as ::core::ffi::c_int;
-            {
-                let state = &mut *s;
-                state.lookahead = state
-                    .lookahead
-                    .wrapping_sub(state.prev_length.wrapping_sub(1 as crate::stdlib::uInt));
-                state.prev_length = state.prev_length.wrapping_sub(2 as crate::stdlib::uInt);
-            }
-            loop {
-                let insert_current = {
-                    let state = &mut *s;
-                    state.strstart = state.strstart.wrapping_add(1);
-                    state.strstart <= max_insert
+                let Ok(symbol_len) = usize::try_from(state.sym_end) else {
+                    return need_more;
                 };
-                if insert_current {
-                    let state = &mut *s;
-                    let (Ok(window_len), Ok(head_len), Ok(prev_len)) = (
-                        usize::try_from(state.window_size),
-                        usize::try_from(state.hash_size),
-                        usize::try_from(state.w_size),
-                    ) else {
+                if symbol_len != 0 && state.sym_buf.is_null() {
+                    return need_more;
+                }
+                let symbols = if symbol_len == 0 {
+                    &mut []
+                } else {
+                    ::core::slice::from_raw_parts_mut(state.sym_buf, symbol_len)
+                };
+                let Some((flush_now, length)) = fast_tally_match_state(state, symbols) else {
+                    return need_more;
+                };
+                bflush = flush_now as ::core::ffi::c_int;
+                if length <= state.max_lazy_match
+                    && state.lookahead >= crate::zutil_h::MIN_MATCH as crate::stdlib::uInt
+                {
+                    state.match_length = length.wrapping_sub(1);
+                    loop {
+                        state.strstart = state.strstart.wrapping_add(1);
+                        let (Ok(window_len), Ok(head_len), Ok(prev_len)) = (
+                            usize::try_from(state.window_size),
+                            usize::try_from(state.hash_size),
+                            usize::try_from(state.w_size),
+                        ) else {
+                            return need_more;
+                        };
+                        if (window_len != 0 && state.window.is_null())
+                            || (head_len != 0 && state.head.is_null())
+                            || (prev_len != 0 && state.prev.is_null())
+                        {
+                            return need_more;
+                        }
+                        let window = if window_len == 0 {
+                            &[]
+                        } else {
+                            ::core::slice::from_raw_parts(state.window, window_len)
+                        };
+                        let head = if head_len == 0 {
+                            &mut []
+                        } else {
+                            ::core::slice::from_raw_parts_mut(state.head, head_len)
+                        };
+                        let prev = if prev_len == 0 {
+                            &mut []
+                        } else {
+                            ::core::slice::from_raw_parts_mut(state.prev, prev_len)
+                        };
+                        let Some(previous) = insert_string_state(
+                            window,
+                            head,
+                            prev,
+                            state.strstart,
+                            &mut state.ins_h,
+                            state.hash_shift,
+                            state.hash_mask,
+                            state.w_mask,
+                        ) else {
+                            return need_more;
+                        };
+                        hash_head = previous;
+                        state.match_length = state.match_length.wrapping_sub(1);
+                        if state.match_length == 0 as crate::stdlib::uInt {
+                            break;
+                        }
+                    }
+                    state.strstart = state.strstart.wrapping_add(1);
+                } else {
+                    state.strstart = state.strstart.wrapping_add(state.match_length);
+                    state.match_length = 0 as crate::stdlib::uInt;
+                    let Ok(window_len) = usize::try_from(state.window_size) else {
                         return need_more;
                     };
-                    if (window_len != 0 && state.window.is_null())
-                        || (head_len != 0 && state.head.is_null())
-                        || (prev_len != 0 && state.prev.is_null())
-                    {
+                    if window_len != 0 && state.window.is_null() {
                         return need_more;
                     }
                     let window = if window_len == 0 {
@@ -4586,45 +4288,43 @@ unsafe fn deflate_slow(
                     } else {
                         ::core::slice::from_raw_parts(state.window, window_len)
                     };
-                    let head = if head_len == 0 {
-                        &mut []
-                    } else {
-                        ::core::slice::from_raw_parts_mut(state.head, head_len)
-                    };
-                    let prev = if prev_len == 0 {
-                        &mut []
-                    } else {
-                        ::core::slice::from_raw_parts_mut(state.prev, prev_len)
-                    };
-                    let Some(previous) = insert_string_state(
+                    let Some(ins_h) = initialize_hash_state(
                         window,
-                        head,
-                        prev,
                         state.strstart,
-                        &mut state.ins_h,
                         state.hash_shift,
                         state.hash_mask,
-                        state.w_mask,
                     ) else {
                         return need_more;
                     };
-                    hash_head = previous;
+                    state.ins_h = ins_h;
                 }
-                let previous_match_done = {
-                    let state = &mut *s;
-                    state.prev_length = state.prev_length.wrapping_sub(1);
-                    state.prev_length == 0 as crate::stdlib::uInt
-                };
-                if previous_match_done {
-                    break;
-                }
-            }
-            {
+            } else {
                 let state = &mut *s;
-                state.match_available = 0 as ::core::ffi::c_int;
-                state.match_length =
-                    (crate::zutil_h::MIN_MATCH - 1 as ::core::ffi::c_int) as crate::stdlib::uInt;
-                state.strstart = state.strstart.wrapping_add(1);
+                let Ok(window_len) = usize::try_from(state.window_size) else {
+                    return need_more;
+                };
+                let Ok(symbol_len) = usize::try_from(state.sym_end) else {
+                    return need_more;
+                };
+                if (window_len != 0 && state.window.is_null())
+                    || (symbol_len != 0 && state.sym_buf.is_null())
+                {
+                    return need_more;
+                }
+                let window = if window_len == 0 {
+                    &[]
+                } else {
+                    ::core::slice::from_raw_parts(state.window, window_len)
+                };
+                let symbols = if symbol_len == 0 {
+                    &mut []
+                } else {
+                    ::core::slice::from_raw_parts_mut(state.sym_buf, symbol_len)
+                };
+                let Some(flush_now) = tally_current_literal_state(state, window, symbols) else {
+                    return need_more;
+                };
+                bflush = flush_now as ::core::ffi::c_int;
             }
             if bflush != 0 {
                 let (block_start, strstart, window) = {
@@ -4652,10 +4352,387 @@ unsafe fn deflate_slow(
                     return result;
                 }
             }
-        } else if {
+        }
+        {
+            let state = &mut *s;
+            state.insert = if state.strstart
+                < (crate::zutil_h::MIN_MATCH - 1 as ::core::ffi::c_int) as crate::stdlib::uInt
+            {
+                state.strstart
+            } else {
+                (crate::zutil_h::MIN_MATCH - 1 as ::core::ffi::c_int) as crate::stdlib::uInt
+            };
+        }
+        if flush == crate::zlib_h::Z_FINISH {
+            let (block_start, window, strstart) = {
+                let state = &mut *s;
+                (state.block_start, state.window, state.strstart)
+            };
+            crate::src::trees::_tr_flush_block(
+                s as *mut crate::src::deflate::internal_state,
+                if block_start >= 0 as ::core::ffi::c_long {
+                    window.wrapping_add(block_start as ::core::ffi::c_uint as usize)
+                        as *mut crate::stdlib::charf
+                } else {
+                    ::core::ptr::null_mut::<crate::stdlib::charf>()
+                },
+                block_flush_len_state(strstart, block_start),
+                1 as ::core::ffi::c_int,
+            );
+            let avail_out = {
+                let state = &mut *s;
+                state.block_start = state.strstart as ::core::ffi::c_long;
+                let strm = state.strm;
+                flush_pending(strm)
+            };
+            if let Some(result) = deflate_post_flush_result(avail_out, true) {
+                return result;
+            }
+            return finish_done;
+        }
+        let has_symbols = {
+            let state = &mut *s;
+            state.sym_next != 0
+        };
+        if has_symbols {
+            let (block_start, window, strstart) = {
+                let state = &mut *s;
+                (state.block_start, state.window, state.strstart)
+            };
+            crate::src::trees::_tr_flush_block(
+                s as *mut crate::src::deflate::internal_state,
+                if block_start >= 0 as ::core::ffi::c_long {
+                    window.wrapping_add(block_start as ::core::ffi::c_uint as usize)
+                        as *mut crate::stdlib::charf
+                } else {
+                    ::core::ptr::null_mut::<crate::stdlib::charf>()
+                },
+                block_flush_len_state(strstart, block_start),
+                0 as ::core::ffi::c_int,
+            );
+            let avail_out = {
+                let state = &mut *s;
+                state.block_start = state.strstart as ::core::ffi::c_long;
+                let strm = state.strm;
+                flush_pending(strm)
+            };
+            if let Some(result) = deflate_post_flush_result(avail_out, false) {
+                return result;
+            }
+        }
+        return block_done;
+    }
+}
+
+fn deflate_slow(
+    mut s: *mut crate::src::deflate::deflate_state,
+    mut flush: ::core::ffi::c_int,
+) -> block_state {
+    // Slow parsing still needs the legacy state, hash-table, symbol-buffer,
+    // and pending-output lends. Keep that compatibility boundary local so
+    // ordinary dispatch does not inherit an unsafe-function requirement.
+    unsafe {
+        let mut hash_head: crate::src::deflate::IPos = 0;
+        let mut bflush: ::core::ffi::c_int = 0;
+        loop {
+            let needs_input = {
+                let state = &mut *s;
+                state.lookahead < crate::src::deflate::MIN_LOOKAHEAD as crate::stdlib::uInt
+            };
+            if needs_input {
+                fill_window(s);
+                let state = &mut *s;
+                if state.lookahead < crate::src::deflate::MIN_LOOKAHEAD as crate::stdlib::uInt
+                    && flush == crate::zlib_h::Z_NO_FLUSH
+                {
+                    return need_more;
+                }
+                if state.lookahead == 0 as crate::stdlib::uInt {
+                    break;
+                }
+            }
+            hash_head = NIL as crate::src::deflate::IPos;
+            let has_min_match = {
+                let state = &mut *s;
+                state.prev_length = state.match_length;
+                state.prev_match = state.match_start as crate::src::deflate::IPos;
+                state.match_length =
+                    (crate::zutil_h::MIN_MATCH - 1 as ::core::ffi::c_int) as crate::stdlib::uInt;
+                state.lookahead >= crate::zutil_h::MIN_MATCH as crate::stdlib::uInt
+            };
+            if has_min_match {
+                let state = &mut *s;
+                let (Ok(window_len), Ok(head_len), Ok(prev_len)) = (
+                    usize::try_from(state.window_size),
+                    usize::try_from(state.hash_size),
+                    usize::try_from(state.w_size),
+                ) else {
+                    return need_more;
+                };
+                if (window_len != 0 && state.window.is_null())
+                    || (head_len != 0 && state.head.is_null())
+                    || (prev_len != 0 && state.prev.is_null())
+                {
+                    return need_more;
+                }
+                let window = if window_len == 0 {
+                    &[]
+                } else {
+                    ::core::slice::from_raw_parts(state.window, window_len)
+                };
+                let head = if head_len == 0 {
+                    &mut []
+                } else {
+                    ::core::slice::from_raw_parts_mut(state.head, head_len)
+                };
+                let prev = if prev_len == 0 {
+                    &mut []
+                } else {
+                    ::core::slice::from_raw_parts_mut(state.prev, prev_len)
+                };
+                let Some(previous) = insert_string_state(
+                    window,
+                    head,
+                    prev,
+                    state.strstart,
+                    &mut state.ins_h,
+                    state.hash_shift,
+                    state.hash_mask,
+                    state.w_mask,
+                ) else {
+                    return need_more;
+                };
+                hash_head = previous;
+                if lazy_hash_match_is_usable(
+                    state.strstart as crate::src::deflate::IPos,
+                    hash_head,
+                    state.prev_length,
+                    state.max_lazy_match,
+                    state.w_size,
+                ) {
+                    state.match_length =
+                        longest_match_state(state, window, prev, hash_head).unwrap_or(0);
+                    state.match_length = filtered_match_length(
+                        state.match_length,
+                        state.strategy,
+                        state.strstart,
+                        state.match_start,
+                    );
+                }
+            }
+            let use_previous_match = {
+                let state = &mut *s;
+                state.prev_length >= crate::zutil_h::MIN_MATCH as crate::stdlib::uInt
+                    && state.match_length <= state.prev_length
+            };
+            if use_previous_match {
+                let (max_insert, len, dist) = {
+                    let state = &mut *s;
+                    let max_insert = state
+                        .strstart
+                        .wrapping_add(state.lookahead)
+                        .wrapping_sub(crate::zutil_h::MIN_MATCH as crate::stdlib::uInt);
+                    let len = state.prev_length.wrapping_sub(3 as crate::stdlib::uInt)
+                        as crate::zutil_h::uch;
+                    let dist = (state.strstart as crate::src::deflate::IPos)
+                        .wrapping_sub(1 as crate::src::deflate::IPos)
+                        .wrapping_sub(state.prev_match)
+                        as crate::zutil_h::ush;
+                    (max_insert, len, dist)
+                };
+                let state = &mut *s;
+                let Ok(symbol_len) = usize::try_from(state.sym_end) else {
+                    return need_more;
+                };
+                if symbol_len != 0 && state.sym_buf.is_null() {
+                    return need_more;
+                }
+                let symbols = if symbol_len == 0 {
+                    &mut []
+                } else {
+                    ::core::slice::from_raw_parts_mut(state.sym_buf, symbol_len)
+                };
+                let Some(flush_now) = tally_symbol_state(state, symbols, dist.into(), len.into())
+                else {
+                    return need_more;
+                };
+                bflush = flush_now as ::core::ffi::c_int;
+                {
+                    let state = &mut *s;
+                    state.lookahead = state
+                        .lookahead
+                        .wrapping_sub(state.prev_length.wrapping_sub(1 as crate::stdlib::uInt));
+                    state.prev_length = state.prev_length.wrapping_sub(2 as crate::stdlib::uInt);
+                }
+                loop {
+                    let insert_current = {
+                        let state = &mut *s;
+                        state.strstart = state.strstart.wrapping_add(1);
+                        state.strstart <= max_insert
+                    };
+                    if insert_current {
+                        let state = &mut *s;
+                        let (Ok(window_len), Ok(head_len), Ok(prev_len)) = (
+                            usize::try_from(state.window_size),
+                            usize::try_from(state.hash_size),
+                            usize::try_from(state.w_size),
+                        ) else {
+                            return need_more;
+                        };
+                        if (window_len != 0 && state.window.is_null())
+                            || (head_len != 0 && state.head.is_null())
+                            || (prev_len != 0 && state.prev.is_null())
+                        {
+                            return need_more;
+                        }
+                        let window = if window_len == 0 {
+                            &[]
+                        } else {
+                            ::core::slice::from_raw_parts(state.window, window_len)
+                        };
+                        let head = if head_len == 0 {
+                            &mut []
+                        } else {
+                            ::core::slice::from_raw_parts_mut(state.head, head_len)
+                        };
+                        let prev = if prev_len == 0 {
+                            &mut []
+                        } else {
+                            ::core::slice::from_raw_parts_mut(state.prev, prev_len)
+                        };
+                        let Some(previous) = insert_string_state(
+                            window,
+                            head,
+                            prev,
+                            state.strstart,
+                            &mut state.ins_h,
+                            state.hash_shift,
+                            state.hash_mask,
+                            state.w_mask,
+                        ) else {
+                            return need_more;
+                        };
+                        hash_head = previous;
+                    }
+                    let previous_match_done = {
+                        let state = &mut *s;
+                        state.prev_length = state.prev_length.wrapping_sub(1);
+                        state.prev_length == 0 as crate::stdlib::uInt
+                    };
+                    if previous_match_done {
+                        break;
+                    }
+                }
+                {
+                    let state = &mut *s;
+                    state.match_available = 0 as ::core::ffi::c_int;
+                    state.match_length = (crate::zutil_h::MIN_MATCH - 1 as ::core::ffi::c_int)
+                        as crate::stdlib::uInt;
+                    state.strstart = state.strstart.wrapping_add(1);
+                }
+                if bflush != 0 {
+                    let (block_start, strstart, window) = {
+                        let state = &mut *s;
+                        (state.block_start, state.strstart, state.window)
+                    };
+                    crate::src::trees::_tr_flush_block(
+                        s as *mut crate::src::deflate::internal_state,
+                        if block_start >= 0 as ::core::ffi::c_long {
+                            window.wrapping_add(block_start as ::core::ffi::c_uint as usize)
+                                as *mut crate::stdlib::charf
+                        } else {
+                            ::core::ptr::null_mut::<crate::stdlib::charf>()
+                        },
+                        block_flush_len_state(strstart, block_start),
+                        0 as ::core::ffi::c_int,
+                    );
+                    let avail_out = {
+                        let state = &mut *s;
+                        state.block_start = strstart as ::core::ffi::c_long;
+                        let strm = state.strm;
+                        flush_pending(strm)
+                    };
+                    if let Some(result) = deflate_post_flush_result(avail_out, false) {
+                        return result;
+                    }
+                }
+            } else if {
+                let state = &mut *s;
+                state.match_available != 0
+            } {
+                let state = &mut *s;
+                let Ok(window_len) = usize::try_from(state.window_size) else {
+                    return need_more;
+                };
+                let Ok(symbol_len) = usize::try_from(state.sym_end) else {
+                    return need_more;
+                };
+                if (window_len != 0 && state.window.is_null())
+                    || (symbol_len != 0 && state.sym_buf.is_null())
+                {
+                    return need_more;
+                }
+                let window = if window_len == 0 {
+                    &[]
+                } else {
+                    ::core::slice::from_raw_parts(state.window, window_len)
+                };
+                let symbols = if symbol_len == 0 {
+                    &mut []
+                } else {
+                    ::core::slice::from_raw_parts_mut(state.sym_buf, symbol_len)
+                };
+                let Some(flush_now) = tally_previous_literal_state(state, window, symbols) else {
+                    return need_more;
+                };
+                bflush = flush_now as ::core::ffi::c_int;
+                let avail_out = if bflush != 0 {
+                    let (block_start, strstart, window) = {
+                        let state = &mut *s;
+                        (state.block_start, state.strstart, state.window)
+                    };
+                    crate::src::trees::_tr_flush_block(
+                        s as *mut crate::src::deflate::internal_state,
+                        if block_start >= 0 as ::core::ffi::c_long {
+                            window.wrapping_add(block_start as ::core::ffi::c_uint as usize)
+                                as *mut crate::stdlib::charf
+                        } else {
+                            ::core::ptr::null_mut::<crate::stdlib::charf>()
+                        },
+                        block_flush_len_state(strstart, block_start),
+                        0 as ::core::ffi::c_int,
+                    );
+                    let state = &mut *s;
+                    state.block_start = strstart as ::core::ffi::c_long;
+                    let strm = state.strm;
+                    flush_pending(strm)
+                } else {
+                    // `deflate()` rejects a zero-capacity output stream on entry,
+                    // and every earlier flush in this loop returns immediately
+                    // when it exhausts that capacity. Without a flush here the
+                    // capacity is therefore still nonzero.
+                    1
+                };
+                {
+                    let state = &mut *s;
+                    state.strstart = state.strstart.wrapping_add(1);
+                    state.lookahead = state.lookahead.wrapping_sub(1);
+                }
+                if avail_out == 0 as crate::stdlib::uInt {
+                    return need_more;
+                }
+            } else {
+                let state = &mut *s;
+                state.match_available = 1 as ::core::ffi::c_int;
+                state.strstart = state.strstart.wrapping_add(1);
+                state.lookahead = state.lookahead.wrapping_sub(1);
+            }
+        }
+        let match_available = {
             let state = &mut *s;
             state.match_available != 0
-        } {
+        };
+        if match_available {
             let state = &mut *s;
             let Ok(window_len) = usize::try_from(state.window_size) else {
                 return need_more;
@@ -4682,149 +4759,77 @@ unsafe fn deflate_slow(
                 return need_more;
             };
             bflush = flush_now as ::core::ffi::c_int;
-            let avail_out = if bflush != 0 {
-                let (block_start, strstart, window) = {
-                    let state = &mut *s;
-                    (state.block_start, state.strstart, state.window)
-                };
-                crate::src::trees::_tr_flush_block(
-                    s as *mut crate::src::deflate::internal_state,
-                    if block_start >= 0 as ::core::ffi::c_long {
-                        window.wrapping_add(block_start as ::core::ffi::c_uint as usize)
-                            as *mut crate::stdlib::charf
-                    } else {
-                        ::core::ptr::null_mut::<crate::stdlib::charf>()
-                    },
-                    block_flush_len_state(strstart, block_start),
-                    0 as ::core::ffi::c_int,
-                );
+            state.match_available = 0 as ::core::ffi::c_int;
+        }
+        {
+            let state = &mut *s;
+            state.insert = if state.strstart
+                < (crate::zutil_h::MIN_MATCH - 1 as ::core::ffi::c_int) as crate::stdlib::uInt
+            {
+                state.strstart
+            } else {
+                (crate::zutil_h::MIN_MATCH - 1 as ::core::ffi::c_int) as crate::stdlib::uInt
+            };
+        }
+        if flush == crate::zlib_h::Z_FINISH {
+            let (block_start, window, strstart) = {
+                let state = &mut *s;
+                (state.block_start, state.window, state.strstart)
+            };
+            crate::src::trees::_tr_flush_block(
+                s as *mut crate::src::deflate::internal_state,
+                if block_start >= 0 as ::core::ffi::c_long {
+                    window.wrapping_add(block_start as ::core::ffi::c_uint as usize)
+                        as *mut crate::stdlib::charf
+                } else {
+                    ::core::ptr::null_mut::<crate::stdlib::charf>()
+                },
+                block_flush_len_state(strstart, block_start),
+                1 as ::core::ffi::c_int,
+            );
+            let avail_out = {
                 let state = &mut *s;
                 state.block_start = strstart as ::core::ffi::c_long;
                 let strm = state.strm;
                 flush_pending(strm)
-            } else {
-                // `deflate()` rejects a zero-capacity output stream on entry,
-                // and every earlier flush in this loop returns immediately
-                // when it exhausts that capacity. Without a flush here the
-                // capacity is therefore still nonzero.
-                1
             };
-            {
+            if let Some(result) = deflate_post_flush_result(avail_out, true) {
+                return result;
+            }
+            return finish_done;
+        }
+        let has_symbols = {
+            let state = &mut *s;
+            state.sym_next != 0
+        };
+        if has_symbols {
+            let (block_start, window, strstart) = {
                 let state = &mut *s;
-                state.strstart = state.strstart.wrapping_add(1);
-                state.lookahead = state.lookahead.wrapping_sub(1);
+                (state.block_start, state.window, state.strstart)
+            };
+            crate::src::trees::_tr_flush_block(
+                s as *mut crate::src::deflate::internal_state,
+                if block_start >= 0 as ::core::ffi::c_long {
+                    window.wrapping_add(block_start as ::core::ffi::c_uint as usize)
+                        as *mut crate::stdlib::charf
+                } else {
+                    ::core::ptr::null_mut::<crate::stdlib::charf>()
+                },
+                block_flush_len_state(strstart, block_start),
+                0 as ::core::ffi::c_int,
+            );
+            let avail_out = {
+                let state = &mut *s;
+                state.block_start = strstart as ::core::ffi::c_long;
+                let strm = state.strm;
+                flush_pending(strm)
+            };
+            if let Some(result) = deflate_post_flush_result(avail_out, false) {
+                return result;
             }
-            if avail_out == 0 as crate::stdlib::uInt {
-                return need_more;
-            }
-        } else {
-            let state = &mut *s;
-            state.match_available = 1 as ::core::ffi::c_int;
-            state.strstart = state.strstart.wrapping_add(1);
-            state.lookahead = state.lookahead.wrapping_sub(1);
         }
+        return block_done;
     }
-    let match_available = {
-        let state = &mut *s;
-        state.match_available != 0
-    };
-    if match_available {
-        let state = &mut *s;
-        let Ok(window_len) = usize::try_from(state.window_size) else {
-            return need_more;
-        };
-        let Ok(symbol_len) = usize::try_from(state.sym_end) else {
-            return need_more;
-        };
-        if (window_len != 0 && state.window.is_null())
-            || (symbol_len != 0 && state.sym_buf.is_null())
-        {
-            return need_more;
-        }
-        let window = if window_len == 0 {
-            &[]
-        } else {
-            ::core::slice::from_raw_parts(state.window, window_len)
-        };
-        let symbols = if symbol_len == 0 {
-            &mut []
-        } else {
-            ::core::slice::from_raw_parts_mut(state.sym_buf, symbol_len)
-        };
-        let Some(flush_now) = tally_previous_literal_state(state, window, symbols) else {
-            return need_more;
-        };
-        bflush = flush_now as ::core::ffi::c_int;
-        state.match_available = 0 as ::core::ffi::c_int;
-    }
-    {
-        let state = &mut *s;
-        state.insert = if state.strstart
-            < (crate::zutil_h::MIN_MATCH - 1 as ::core::ffi::c_int) as crate::stdlib::uInt
-        {
-            state.strstart
-        } else {
-            (crate::zutil_h::MIN_MATCH - 1 as ::core::ffi::c_int) as crate::stdlib::uInt
-        };
-    }
-    if flush == crate::zlib_h::Z_FINISH {
-        let (block_start, window, strstart) = {
-            let state = &mut *s;
-            (state.block_start, state.window, state.strstart)
-        };
-        crate::src::trees::_tr_flush_block(
-            s as *mut crate::src::deflate::internal_state,
-            if block_start >= 0 as ::core::ffi::c_long {
-                window.wrapping_add(block_start as ::core::ffi::c_uint as usize)
-                    as *mut crate::stdlib::charf
-            } else {
-                ::core::ptr::null_mut::<crate::stdlib::charf>()
-            },
-            block_flush_len_state(strstart, block_start),
-            1 as ::core::ffi::c_int,
-        );
-        let avail_out = {
-            let state = &mut *s;
-            state.block_start = strstart as ::core::ffi::c_long;
-            let strm = state.strm;
-            flush_pending(strm)
-        };
-        if let Some(result) = deflate_post_flush_result(avail_out, true) {
-            return result;
-        }
-        return finish_done;
-    }
-    let has_symbols = {
-        let state = &mut *s;
-        state.sym_next != 0
-    };
-    if has_symbols {
-        let (block_start, window, strstart) = {
-            let state = &mut *s;
-            (state.block_start, state.window, state.strstart)
-        };
-        crate::src::trees::_tr_flush_block(
-            s as *mut crate::src::deflate::internal_state,
-            if block_start >= 0 as ::core::ffi::c_long {
-                window.wrapping_add(block_start as ::core::ffi::c_uint as usize)
-                    as *mut crate::stdlib::charf
-            } else {
-                ::core::ptr::null_mut::<crate::stdlib::charf>()
-            },
-            block_flush_len_state(strstart, block_start),
-            0 as ::core::ffi::c_int,
-        );
-        let avail_out = {
-            let state = &mut *s;
-            state.block_start = strstart as ::core::ffi::c_long;
-            let strm = state.strm;
-            flush_pending(strm)
-        };
-        if let Some(result) = deflate_post_flush_result(avail_out, false) {
-            return result;
-        }
-    }
-    return block_done;
 }
 
 fn rle_match_length_state(
@@ -5104,65 +5109,126 @@ fn filtered_match_length(
     }
 }
 
-unsafe fn deflate_rle(
+fn deflate_rle(
     mut s: *mut crate::src::deflate::deflate_state,
     mut flush: ::core::ffi::c_int,
 ) -> block_state {
-    let mut bflush: ::core::ffi::c_int = 0;
-    loop {
-        let needs_input = {
-            let state = &mut *s;
-            state.lookahead <= crate::zutil_h::MAX_MATCH as crate::stdlib::uInt
-        };
-        if needs_input {
-            fill_window(s);
-            let state = &mut *s;
-            if state.lookahead <= crate::zutil_h::MAX_MATCH as crate::stdlib::uInt
-                && flush == crate::zlib_h::Z_NO_FLUSH
+    // RLE parsing retains the same transitional callback-owned lends as the
+    // other block modes; confine them to this codec boundary.
+    unsafe {
+        let mut bflush: ::core::ffi::c_int = 0;
+        loop {
+            let needs_input = {
+                let state = &mut *s;
+                state.lookahead <= crate::zutil_h::MAX_MATCH as crate::stdlib::uInt
+            };
+            if needs_input {
+                fill_window(s);
+                let state = &mut *s;
+                if state.lookahead <= crate::zutil_h::MAX_MATCH as crate::stdlib::uInt
+                    && flush == crate::zlib_h::Z_NO_FLUSH
+                {
+                    return need_more;
+                }
+                if state.lookahead == 0 as crate::stdlib::uInt {
+                    break;
+                }
+            }
+            let symbol = {
+                let state = &mut *s;
+                let Ok(window_len) = usize::try_from(state.window_size) else {
+                    return need_more;
+                };
+                if window_len != 0 && state.window.is_null() {
+                    return need_more;
+                }
+                let window = if window_len == 0 {
+                    &[]
+                } else {
+                    ::core::slice::from_raw_parts(state.window, window_len)
+                };
+                let Some(symbol) = rle_symbol_plan_state(state, window) else {
+                    return need_more;
+                };
+                symbol
+            };
             {
-                return need_more;
+                let state = &mut *s;
+                let Ok(symbol_len) = usize::try_from(state.sym_end) else {
+                    return need_more;
+                };
+                if symbol_len != 0 && state.sym_buf.is_null() {
+                    return need_more;
+                }
+                let symbols = if symbol_len == 0 {
+                    &mut []
+                } else {
+                    ::core::slice::from_raw_parts_mut(state.sym_buf, symbol_len)
+                };
+                let Some(flush_now) = rle_tally_symbol_state(state, symbols, symbol) else {
+                    return need_more;
+                };
+                bflush = flush_now as ::core::ffi::c_int;
             }
-            if state.lookahead == 0 as crate::stdlib::uInt {
-                break;
+            if bflush != 0 {
+                let (block_start, strstart, window) = {
+                    let state = &mut *s;
+                    (state.block_start, state.strstart, state.window)
+                };
+                crate::src::trees::_tr_flush_block(
+                    s as *mut crate::src::deflate::internal_state,
+                    if block_start >= 0 as ::core::ffi::c_long {
+                        window.wrapping_add(block_start as ::core::ffi::c_uint as usize)
+                            as *mut crate::stdlib::charf
+                    } else {
+                        ::core::ptr::null_mut::<crate::stdlib::charf>()
+                    },
+                    block_flush_len_state(strstart, block_start),
+                    0 as ::core::ffi::c_int,
+                );
+                let avail_out = {
+                    let state = &mut *s;
+                    state.block_start = strstart as ::core::ffi::c_long;
+                    let strm = state.strm;
+                    flush_pending(strm)
+                };
+                if let Some(result) = deflate_post_flush_result(avail_out, false) {
+                    return result;
+                }
             }
         }
-        let symbol = {
+        let tail_action = {
             let state = &mut *s;
-            let Ok(window_len) = usize::try_from(state.window_size) else {
-                return need_more;
-            };
-            if window_len != 0 && state.window.is_null() {
-                return need_more;
-            }
-            let window = if window_len == 0 {
-                &[]
-            } else {
-                ::core::slice::from_raw_parts(state.window, window_len)
-            };
-            let Some(symbol) = rle_symbol_plan_state(state, window) else {
-                return need_more;
-            };
-            symbol
+            deflate_tail_action_state(state, flush)
         };
-        {
-            let state = &mut *s;
-            let Ok(symbol_len) = usize::try_from(state.sym_end) else {
-                return need_more;
+        if matches!(tail_action, DeflateTailAction::Finish) {
+            let (block_start, strstart, window) = {
+                let state = &mut *s;
+                (state.block_start, state.strstart, state.window)
             };
-            if symbol_len != 0 && state.sym_buf.is_null() {
-                return need_more;
+            crate::src::trees::_tr_flush_block(
+                s as *mut crate::src::deflate::internal_state,
+                if block_start >= 0 as ::core::ffi::c_long {
+                    window.wrapping_add(block_start as ::core::ffi::c_uint as usize)
+                        as *mut crate::stdlib::charf
+                } else {
+                    ::core::ptr::null_mut::<crate::stdlib::charf>()
+                },
+                block_flush_len_state(strstart, block_start),
+                1 as ::core::ffi::c_int,
+            );
+            let avail_out = {
+                let state = &mut *s;
+                state.block_start = strstart as ::core::ffi::c_long;
+                let strm = state.strm;
+                flush_pending(strm)
+            };
+            if let Some(result) = deflate_post_flush_result(avail_out, true) {
+                return result;
             }
-            let symbols = if symbol_len == 0 {
-                &mut []
-            } else {
-                ::core::slice::from_raw_parts_mut(state.sym_buf, symbol_len)
-            };
-            let Some(flush_now) = rle_tally_symbol_state(state, symbols, symbol) else {
-                return need_more;
-            };
-            bflush = flush_now as ::core::ffi::c_int;
+            return finish_done;
         }
-        if bflush != 0 {
+        if matches!(tail_action, DeflateTailAction::FlushSymbols) {
             let (block_start, strstart, window) = {
                 let state = &mut *s;
                 (state.block_start, state.strstart, state.window)
@@ -5188,65 +5254,8 @@ unsafe fn deflate_rle(
                 return result;
             }
         }
+        return block_done;
     }
-    let tail_action = {
-        let state = &mut *s;
-        deflate_tail_action_state(state, flush)
-    };
-    if matches!(tail_action, DeflateTailAction::Finish) {
-        let (block_start, strstart, window) = {
-            let state = &mut *s;
-            (state.block_start, state.strstart, state.window)
-        };
-        crate::src::trees::_tr_flush_block(
-            s as *mut crate::src::deflate::internal_state,
-            if block_start >= 0 as ::core::ffi::c_long {
-                window.wrapping_add(block_start as ::core::ffi::c_uint as usize)
-                    as *mut crate::stdlib::charf
-            } else {
-                ::core::ptr::null_mut::<crate::stdlib::charf>()
-            },
-            block_flush_len_state(strstart, block_start),
-            1 as ::core::ffi::c_int,
-        );
-        let avail_out = {
-            let state = &mut *s;
-            state.block_start = strstart as ::core::ffi::c_long;
-            let strm = state.strm;
-            flush_pending(strm)
-        };
-        if let Some(result) = deflate_post_flush_result(avail_out, true) {
-            return result;
-        }
-        return finish_done;
-    }
-    if matches!(tail_action, DeflateTailAction::FlushSymbols) {
-        let (block_start, strstart, window) = {
-            let state = &mut *s;
-            (state.block_start, state.strstart, state.window)
-        };
-        crate::src::trees::_tr_flush_block(
-            s as *mut crate::src::deflate::internal_state,
-            if block_start >= 0 as ::core::ffi::c_long {
-                window.wrapping_add(block_start as ::core::ffi::c_uint as usize)
-                    as *mut crate::stdlib::charf
-            } else {
-                ::core::ptr::null_mut::<crate::stdlib::charf>()
-            },
-            block_flush_len_state(strstart, block_start),
-            0 as ::core::ffi::c_int,
-        );
-        let avail_out = {
-            let state = &mut *s;
-            state.block_start = strstart as ::core::ffi::c_long;
-            let strm = state.strm;
-            flush_pending(strm)
-        };
-        if let Some(result) = deflate_post_flush_result(avail_out, false) {
-            return result;
-        }
-    }
-    return block_done;
 }
 
 fn deflate_huff(
