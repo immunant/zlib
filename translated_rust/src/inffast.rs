@@ -384,9 +384,7 @@ fn match_copy_layout(
     (match_length / 3, match_length % 3)
 }
 
-fn trailing_match_copy_byte_count(
-    trailing_bytes: ::core::ffi::c_uint,
-) -> ::core::ffi::c_uint {
+fn trailing_match_copy_byte_count(trailing_bytes: ::core::ffi::c_uint) -> ::core::ffi::c_uint {
     trailing_bytes.min(2)
 }
 
@@ -784,9 +782,9 @@ mod tests {
         fast_window_distance_is_invalid, finish_fast_distance, input_bytes_needed,
         input_remaining_after_read, low_bits, output_cursor_after_write, subtable_index,
         table_index, trailing_match_copy_byte_count, unread_input_state,
-        validate_fast_window_distance, FastCodeEntry,
-        FastDecodeError, FastDistAction, FastDistance, FastDistanceSource, FastLitLenAction,
-        FastMatchCopyLayout, FastWindowContinuationSource, FastWindowCopyPlan, FastWindowDistance,
+        validate_fast_window_distance, FastCodeEntry, FastDecodeError, FastDistAction,
+        FastDistance, FastDistanceSource, FastLitLenAction, FastMatchCopyLayout,
+        FastWindowContinuationSource, FastWindowCopyPlan, FastWindowDistance,
     };
 
     #[test]

@@ -1470,14 +1470,6 @@ fn gz_skip_loop_decision(
     }
 }
 
-fn gz_skip_consume_buffered(state: &mut crate::gzguts_h::gz_state, n: ::core::ffi::c_uint) {
-    let progress = gz_skip_consume_progress(state.x.have, state.x.pos, state.skip, n);
-    state.x.have = progress.remaining_have;
-    state.x.pos = progress.pos;
-    state.skip = progress.remaining_skip;
-    state.x.next = state.x.next.wrapping_add(progress.consumed as usize);
-}
-
 fn gzgets_copy_len(
     have: ::core::ffi::c_uint,
     left: ::core::ffi::c_uint,
@@ -1555,8 +1547,16 @@ unsafe fn gz_skip(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
     loop {
         let action = gz_skip_action(state.x.have, state.eof, state.strm.avail_in);
         if matches!(action, GzSkipAction::ConsumeBuffered) {
-            let n = gz_skip_len(state.x.have, state.skip, crate::src::gzlib::gz_intmax());
-            gz_skip_consume_buffered(state, n);
+            let progress = gz_skip_progress(
+                state.x.have,
+                state.x.pos,
+                state.skip,
+                crate::src::gzlib::gz_intmax(),
+            );
+            state.x.have = progress.remaining_have;
+            state.x.pos = progress.pos;
+            state.skip = progress.remaining_skip;
+            state.x.next = state.x.next.wrapping_add(progress.consumed as usize);
         }
         let fetch_failed =
             matches!(action, GzSkipAction::Fetch) && gz_fetch(state) == -1 as ::core::ffi::c_int;

@@ -568,6 +568,21 @@ fn deflate_final_flush_action(
     }
 }
 
+fn deflate_flush_block_state_after_output(
+    avail_out: crate::stdlib::uInt,
+    final_block: bool,
+) -> Option<block_state> {
+    if avail_out == 0 {
+        Some(if final_block {
+            finish_started
+        } else {
+            need_more
+        })
+    } else {
+        None
+    }
+}
+
 fn deflate_rle_match_state_after_emit(
     lookahead: crate::stdlib::uInt,
     strstart: crate::stdlib::uInt,
@@ -3656,12 +3671,10 @@ unsafe extern "C" fn deflate_fast(
             );
             (*s).block_start = (*s).strstart as ::core::ffi::c_long;
             flush_pending((*s).strm);
-            if (*(*s).strm).avail_out == 0 as crate::stdlib::uInt {
-                return (if false {
-                    finish_started as ::core::ffi::c_int
-                } else {
-                    need_more as ::core::ffi::c_int
-                }) as block_state;
+            if let Some(state) =
+                deflate_flush_block_state_after_output((*(*s).strm).avail_out, false)
+            {
+                return state;
             }
         }
     }
@@ -3681,12 +3694,8 @@ unsafe extern "C" fn deflate_fast(
         );
         (*s).block_start = (*s).strstart as ::core::ffi::c_long;
         flush_pending((*s).strm);
-        if (*(*s).strm).avail_out == 0 as crate::stdlib::uInt {
-            return (if true {
-                finish_started as ::core::ffi::c_int
-            } else {
-                need_more as ::core::ffi::c_int
-            }) as block_state;
+        if let Some(state) = deflate_flush_block_state_after_output((*(*s).strm).avail_out, true) {
+            return state;
         }
         return finish_done;
     }
@@ -4346,12 +4355,12 @@ mod tests {
         can_search_hash_match, clamped_copy_len, deflate_block_state_actions,
         deflate_bound_lengths, deflate_copy_prev_len, deflate_copyright, deflate_dictionary_len,
         deflate_dictionary_state_after_load, deflate_fast_match_progress,
-        deflate_fast_should_insert_match, deflate_final_flush_action, deflate_flush_rank,
-        deflate_huff_literal_progress, deflate_insert_after_block,
-        deflate_literal_state_after_emit, deflate_literal_tally_plan, deflate_match_refill_action,
-        deflate_pending_value, deflate_preflight, deflate_prime_bits_valid,
-        deflate_request_is_invalid, deflate_reset_status_and_adler, deflate_rle_can_scan_match,
-        deflate_rle_clamp_match_length, deflate_rle_match_length,
+        deflate_fast_should_insert_match, deflate_final_flush_action,
+        deflate_flush_block_state_after_output, deflate_flush_rank, deflate_huff_literal_progress,
+        deflate_insert_after_block, deflate_literal_state_after_emit, deflate_literal_tally_plan,
+        deflate_match_refill_action, deflate_pending_value, deflate_preflight,
+        deflate_prime_bits_valid, deflate_request_is_invalid, deflate_reset_status_and_adler,
+        deflate_rle_can_scan_match, deflate_rle_clamp_match_length, deflate_rle_match_length,
         deflate_rle_match_state_after_emit, deflate_rle_match_tally_plan,
         deflate_rle_refill_action, deflate_rle_tally_plan, deflate_set_dictionary_allowed,
         deflate_should_return_buf_error, deflate_slow_can_search_match, deflate_state_check_impl,
@@ -4660,6 +4669,19 @@ mod tests {
         assert_eq!(
             deflate_final_flush_action(crate::zlib_h::Z_NO_FLUSH, 0),
             DeflateFinalFlushAction::Done
+        );
+    }
+
+    #[test]
+    fn deflate_flush_block_state_after_output_preserves_final_block_boundary() {
+        assert_eq!(deflate_flush_block_state_after_output(1, false), None);
+        assert_eq!(
+            deflate_flush_block_state_after_output(0, false),
+            Some(crate::src::deflate::need_more)
+        );
+        assert_eq!(
+            deflate_flush_block_state_after_output(0, true),
+            Some(crate::src::deflate::finish_started)
         );
     }
 

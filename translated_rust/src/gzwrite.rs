@@ -1082,14 +1082,16 @@ unsafe fn gz_comp(
     return 0 as ::core::ffi::c_int;
 }
 
+#[derive(Debug, Eq, PartialEq)]
 struct GzZeroPreparedChunk {
     len: ::core::ffi::c_uint,
     initialize_buffer: bool,
 }
 
-fn gz_zero_prepare_chunk(
-    state: &mut crate::gzguts_h::gz_state,
+fn gz_zero_chunk_plan(
     first: ::core::ffi::c_int,
+    size: ::core::ffi::c_uint,
+    skip: crate::stdlib::off64_t,
 ) -> GzZeroPreparedChunk {
     let limits = gz_zero_chunk_limits();
     let GzZeroStep::WriteChunk {
@@ -1097,21 +1099,30 @@ fn gz_zero_prepare_chunk(
         initialize_buffer,
     } = gz_zero_chunk_step(
         first,
-        state.size,
-        state.skip,
+        size,
+        skip,
         limits.int_and_off64_are_same_size,
         limits.int_max,
     )
     else {
         unreachable!();
     };
-    state.strm.avail_in = len as crate::stdlib::uInt;
-    state.strm.next_in = state.in_0;
 
     GzZeroPreparedChunk {
         len,
         initialize_buffer,
     }
+}
+
+fn gz_zero_prepare_chunk(
+    state: &mut crate::gzguts_h::gz_state,
+    first: ::core::ffi::c_int,
+) -> GzZeroPreparedChunk {
+    let chunk = gz_zero_chunk_plan(first, state.size, state.skip);
+    state.strm.avail_in = chunk.len as crate::stdlib::uInt;
+    state.strm.next_in = state.in_0;
+
+    chunk
 }
 
 unsafe fn gz_zero(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
@@ -1638,19 +1649,20 @@ mod tests {
         gz_write_is_empty, gz_write_preparation, gz_write_progress,
         gz_write_remaining_after_consumption, gz_write_state_is_usable,
         gz_write_uses_buffered_path, gz_zero_action, gz_zero_apply_comp_progress,
-        gz_zero_apply_progress, gz_zero_chunk_len, gz_zero_chunk_limits, gz_zero_chunk_step,
-        gz_zero_initial_step, gz_zero_initialize_buffer, gz_zero_needs_initialization,
-        gz_zero_pending_step, gz_zero_progress, gzclose_buffer_action, gzclose_mode_is_writable,
-        gzclose_operation_error, gzclose_w_result, gzflush_action, gzflush_mode_is_valid,
-        gzfwrite_result, gzputc_result, gzputc_write_action, gzputs_len_fits_int, gzputs_result,
-        gzsetparams_action, gzsetparams_buffer_action, gzsetparams_settings_match,
-        gzsetparams_state_is_usable, gzwrite_request, GzCloseBufferAction, GzCompDeflateAction,
-        GzCompDirectWriteProgress, GzCompDirectWriteResult, GzCompOutputBufferAction,
-        GzCompOutputBufferProgress, GzCompOutputWriteProgress, GzCompOutputWriteResult,
-        GzCompResetAction, GzCompWriteFailure, GzCompWriteResult, GzFlushAction,
-        GzInitAllocationPlan, GzInitMode, GzPutcWriteAction, GzSetParamsAction,
-        GzSetParamsBufferAction, GzWriteBufferedInputAction, GzWriteDirectAction,
-        GzWritePreparation, GzZeroAction, GzZeroChunkLimits, GzZeroStep,
+        gz_zero_apply_progress, gz_zero_chunk_len, gz_zero_chunk_limits, gz_zero_chunk_plan,
+        gz_zero_chunk_step, gz_zero_initial_step, gz_zero_initialize_buffer,
+        gz_zero_needs_initialization, gz_zero_pending_step, gz_zero_progress,
+        gzclose_buffer_action, gzclose_mode_is_writable, gzclose_operation_error, gzclose_w_result,
+        gzflush_action, gzflush_mode_is_valid, gzfwrite_result, gzputc_result, gzputc_write_action,
+        gzputs_len_fits_int, gzputs_result, gzsetparams_action, gzsetparams_buffer_action,
+        gzsetparams_settings_match, gzsetparams_state_is_usable, gzwrite_request,
+        GzCloseBufferAction, GzCompDeflateAction, GzCompDirectWriteProgress,
+        GzCompDirectWriteResult, GzCompOutputBufferAction, GzCompOutputBufferProgress,
+        GzCompOutputWriteProgress, GzCompOutputWriteResult, GzCompResetAction, GzCompWriteFailure,
+        GzCompWriteResult, GzFlushAction, GzInitAllocationPlan, GzInitMode, GzPutcWriteAction,
+        GzSetParamsAction, GzSetParamsBufferAction, GzWriteBufferedInputAction,
+        GzWriteDirectAction, GzWritePreparation, GzZeroAction, GzZeroChunkLimits,
+        GzZeroPreparedChunk, GzZeroStep,
     };
 
     #[test]
@@ -1822,6 +1834,24 @@ mod tests {
                 initialize_buffer: true,
             }
         ));
+    }
+
+    #[test]
+    fn gz_zero_chunk_plan_preserves_first_pass_and_remaining_skip() {
+        assert_eq!(
+            gz_zero_chunk_plan(1, 1024, 99),
+            GzZeroPreparedChunk {
+                len: 99,
+                initialize_buffer: true,
+            }
+        );
+        assert_eq!(
+            gz_zero_chunk_plan(0, 1024, 99),
+            GzZeroPreparedChunk {
+                len: 99,
+                initialize_buffer: false,
+            }
+        );
     }
 
     #[test]

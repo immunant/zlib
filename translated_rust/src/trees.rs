@@ -4140,12 +4140,16 @@ fn assign_canonical_codes(
     }
 }
 
+fn tree_code_count(max_code: ::core::ffi::c_int) -> usize {
+    max_code as usize + 1
+}
+
 unsafe fn gen_codes(
     tree: *mut crate::src::deflate::ct_data,
     max_code: ::core::ffi::c_int,
     bl_count: &[crate::zutil_h::ush; 16],
 ) {
-    let tree = &mut *::core::ptr::slice_from_raw_parts_mut(tree, max_code as usize + 1);
+    let tree = &mut *::core::ptr::slice_from_raw_parts_mut(tree, tree_code_count(max_code));
     let mut lengths = Vec::with_capacity(tree.len());
     for entry in tree.iter() {
         lengths.push(entry.dl.len);
@@ -5719,12 +5723,13 @@ mod tests {
         supplemental_tree_node, supplemental_tree_opt_len, supplemental_tree_static_len,
         symbol_buffer_has_entries, symbol_buffer_is_full, symbol_triplet_cursors,
         tally_match_tree_indices, tally_scan_tree_action, tally_symbol_bytes, tally_tree_update,
-        tree_bit_length_cost, tree_bit_length_totals_after_node, tree_heap_has_pair,
-        tree_initial_leaf_plan, tree_next_cursor, tree_parent_depth, tree_run_continues,
-        tree_run_extra_bits, tree_run_limits, tree_run_step, tree_run_step_after_increment,
-        BlockEncoding, CompressedBlockSymbol, GenBitlenOverflowNode, GenBitlenOverflowReassignment,
-        HeapChild, ScanTreeAction, TallyTreeUpdate, TreeInitialLeafPlan, TreeRunStep,
-        BL_CODE_ORDER_LEN, END_BLOCK, MAX_BITS, REPZ_11_138, REPZ_3_10, REP_3_6,
+        tree_bit_length_cost, tree_bit_length_totals_after_node, tree_code_count,
+        tree_heap_has_pair, tree_initial_leaf_plan, tree_next_cursor, tree_parent_depth,
+        tree_run_continues, tree_run_extra_bits, tree_run_limits, tree_run_step,
+        tree_run_step_after_increment, BlockEncoding, CompressedBlockSymbol, GenBitlenOverflowNode,
+        GenBitlenOverflowReassignment, HeapChild, ScanTreeAction, TallyTreeUpdate,
+        TreeInitialLeafPlan, TreeRunStep, BL_CODE_ORDER_LEN, END_BLOCK, MAX_BITS, REPZ_11_138,
+        REPZ_3_10, REP_3_6,
     };
 
     fn ltree_with_frequency(
@@ -6187,6 +6192,16 @@ mod tests {
         assign_canonical_codes(&mut tree, &[0, 1, 2, 2, 0], &counts);
 
         assert_eq!(tree.map(|entry| entry.fc.value), [99, 0, 1, 3, 99]);
+    }
+
+    #[test]
+    fn tree_code_count_includes_the_maximum_code() {
+        assert_eq!(tree_code_count(0), 1);
+        assert_eq!(tree_code_count(285), 286);
+        assert_eq!(
+            tree_code_count(::core::ffi::c_int::MAX),
+            ::core::ffi::c_int::MAX as usize + 1
+        );
     }
 
     #[test]
