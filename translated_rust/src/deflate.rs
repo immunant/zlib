@@ -4270,8 +4270,6 @@ fn deflate_stored(
             }
             flush_pending(s.strm);
             if left != 0 || len != 0 {
-                let stream = s.strm;
-                let strm = &mut *stream;
                 let Ok(output_len) = usize::try_from(strm.avail_out) else {
                     return need_more;
                 };
