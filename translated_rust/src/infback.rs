@@ -1477,14 +1477,18 @@ pub fn inflateBackEnd(strm: &mut crate::zlib_h::z_stream) -> ::core::ffi::c_int 
     if strm.state.is_null() || strm.zfree.is_none() {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
+    // A user deallocator may re-enter unrelated code, so capture all values
+    // it receives before crossing that callback boundary. In particular, do
+    // not read the stream-owned callback or allocation through `strm` while
+    // the callback is active.
+    let opaque = strm.opaque;
+    let state = strm.state as crate::stdlib::voidpf;
+    let zfree = strm.zfree.expect("non-null function pointer");
     // SAFETY: `inflateBackInit_` obtained `state` from this stream's `zalloc`,
     // and this validated callback is the matching deallocator configured on
     // the same stream. This is the final use of that allocation.
     unsafe {
-        Some(strm.zfree.expect("non-null function pointer")).expect("non-null function pointer")(
-            strm.opaque,
-            strm.state as crate::stdlib::voidpf,
-        );
+        Some(zfree).expect("non-null function pointer")(opaque, state);
     }
     strm.state = ::core::ptr::null_mut::<crate::src::deflate::internal_state>();
     crate::zlib_h::Z_OK
