@@ -2470,28 +2470,6 @@ fn deflate_pending_impl(
         (pending, bi_valid, crate::zlib_h::Z_OK)
     }
 }
-
-pub unsafe extern "C" fn deflatePending(
-    mut strm: crate::zlib_h::z_streamp,
-    mut pending: *mut ::core::ffi::c_uint,
-    mut bits: *mut ::core::ffi::c_int,
-) -> ::core::ffi::c_int {
-    let Some((_strm, state, _storage)) = strm
-        .as_mut()
-        .and_then(|strm| deflate_stream_and_state(strm, DeflateStorageProjection::None))
-    else {
-        return crate::zlib_h::Z_STREAM_ERROR;
-    };
-    let (pending_value, bits_value, status) = deflate_pending_impl(state.pending, state.bi_valid);
-    if !bits.is_null() {
-        *bits = bits_value;
-    }
-    if !pending.is_null() {
-        *pending = pending_value;
-        return status;
-    }
-    crate::zlib_h::Z_OK
-}
 #[export_name = "deflatePending"]
 
 pub unsafe extern "C" fn deflatePending_ffi(
@@ -2499,7 +2477,16 @@ pub unsafe extern "C" fn deflatePending_ffi(
     mut pending: *mut ::core::ffi::c_uint,
     mut bits: *mut ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
-    deflatePending(strm, pending, bits)
+    let Some(strm) = strm.as_mut() else {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    };
+    deflateTune(
+        strm,
+        DeflateScalarAction::Pending {
+            pending: pending.as_mut(),
+            bits: bits.as_mut(),
+        },
+    )
 }
 
 fn deflate_used_impl(
@@ -2861,6 +2848,10 @@ fn deflate_tune_values(
 // optional scalar output borrow, so it cannot retain the ABI stream or any
 // callback-backed storage.
 enum DeflateScalarAction<'a> {
+    Pending {
+        pending: Option<&'a mut ::core::ffi::c_uint>,
+        bits: Option<&'a mut ::core::ffi::c_int>,
+    },
     Used {
         bits: Option<&'a mut ::core::ffi::c_int>,
     },
@@ -2886,6 +2877,19 @@ unsafe fn deflateTune(
         return crate::zlib_h::Z_STREAM_ERROR;
     };
     match action {
+        DeflateScalarAction::Pending { pending, bits } => {
+            let (pending_value, bits_value, status) =
+                deflate_pending_impl(s.pending, s.bi_valid);
+            if let Some(bits) = bits {
+                *bits = bits_value;
+            }
+            if let Some(pending) = pending {
+                *pending = pending_value;
+                status
+            } else {
+                crate::zlib_h::Z_OK
+            }
+        }
         DeflateScalarAction::Used { bits } => deflate_used_impl(s.bi_used, bits),
         DeflateScalarAction::Tune {
             good_length,
