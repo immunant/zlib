@@ -1299,6 +1299,35 @@ fn deflate_bound_for_state(
     }
 }
 
+fn deflate_zlib_header(
+    w_bits: crate::stdlib::uInt,
+    strategy: ::core::ffi::c_int,
+    level: ::core::ffi::c_int,
+    has_dictionary: bool,
+) -> crate::stdlib::uInt {
+    let mut header: crate::stdlib::uInt =
+        (crate::zlib_h::Z_DEFLATED as crate::stdlib::uInt).wrapping_add(
+            w_bits.wrapping_sub(8 as crate::stdlib::uInt) << 4 as ::core::ffi::c_int,
+        ) << 8 as ::core::ffi::c_int;
+    let level_flags: crate::stdlib::uInt =
+        if strategy >= crate::zlib_h::Z_HUFFMAN_ONLY || level < 2 as ::core::ffi::c_int {
+            0 as crate::stdlib::uInt
+        } else if level < 6 as ::core::ffi::c_int {
+            1 as crate::stdlib::uInt
+        } else if level == 6 as ::core::ffi::c_int {
+            2 as crate::stdlib::uInt
+        } else {
+            3 as crate::stdlib::uInt
+        };
+    header |= level_flags << 6 as ::core::ffi::c_int;
+    if has_dictionary {
+        header |= crate::zutil_h::PRESET_DICT as crate::stdlib::uInt;
+    }
+    header.wrapping_add(
+        (31 as crate::stdlib::uInt).wrapping_sub(header.wrapping_rem(31 as crate::stdlib::uInt)),
+    )
+}
+
 #[export_name = "deflateBound_z"]
 pub unsafe extern "C" fn deflateBound_z_ffi(
     mut strm: crate::zlib_h::z_streamp,
@@ -1527,27 +1556,11 @@ pub unsafe extern "C" fn deflate_ffi(
         (*s).status = crate::src::deflate::BUSY_STATE;
     }
     if (*s).status == crate::src::deflate::INIT_STATE {
-        let mut header: crate::stdlib::uInt =
-            (crate::zlib_h::Z_DEFLATED as crate::stdlib::uInt).wrapping_add(
-                (*s).w_bits.wrapping_sub(8 as crate::stdlib::uInt) << 4 as ::core::ffi::c_int,
-            ) << 8 as ::core::ffi::c_int;
-        let mut level_flags: crate::stdlib::uInt = 0;
-        if (*s).strategy >= crate::zlib_h::Z_HUFFMAN_ONLY || (*s).level < 2 as ::core::ffi::c_int {
-            level_flags = 0 as crate::stdlib::uInt;
-        } else if (*s).level < 6 as ::core::ffi::c_int {
-            level_flags = 1 as crate::stdlib::uInt;
-        } else if (*s).level == 6 as ::core::ffi::c_int {
-            level_flags = 2 as crate::stdlib::uInt;
-        } else {
-            level_flags = 3 as crate::stdlib::uInt;
-        }
-        header |= level_flags << 6 as ::core::ffi::c_int;
-        if (*s).strstart != 0 as crate::stdlib::uInt {
-            header |= crate::zutil_h::PRESET_DICT as crate::stdlib::uInt;
-        }
-        header = header.wrapping_add(
-            (31 as crate::stdlib::uInt)
-                .wrapping_sub(header.wrapping_rem(31 as crate::stdlib::uInt)),
+        let header = deflate_zlib_header(
+            (*s).w_bits,
+            (*s).strategy,
+            (*s).level,
+            (*s).strstart != 0 as crate::stdlib::uInt,
         );
         {
             let pending_buf =

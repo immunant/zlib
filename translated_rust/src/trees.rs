@@ -2588,29 +2588,6 @@ fn bi_windup_state(bi_buf: crate::zutil_h::ush, bi_valid: ::core::ffi::c_int) ->
     }
 }
 
-unsafe extern "C" fn bi_flush(mut s: *mut crate::src::deflate::deflate_state) {
-    let result = bi_flush_state((*s).bi_buf, (*s).bi_valid);
-    for byte in result.bytes[..result.len].iter().copied() {
-        let pending = (*s).pending;
-        (*s).pending = (*s).pending.wrapping_add(1);
-        *(*s).pending_buf.offset(pending as isize) = byte;
-    }
-    (*s).bi_buf = result.bi_buf;
-    (*s).bi_valid = result.bi_valid;
-}
-
-unsafe extern "C" fn bi_windup(mut s: *mut crate::src::deflate::deflate_state) {
-    let result = bi_windup_state((*s).bi_buf, (*s).bi_valid);
-    for byte in result.bytes[..result.len].iter().copied() {
-        let pending = (*s).pending;
-        (*s).pending = (*s).pending.wrapping_add(1);
-        *(*s).pending_buf.offset(pending as isize) = byte;
-    }
-    (*s).bi_used = result.bi_used;
-    (*s).bi_buf = 0 as crate::zutil_h::ush;
-    (*s).bi_valid = 0 as ::core::ffi::c_int;
-}
-
 fn gen_codes(
     tree: &mut [crate::src::deflate::ct_data],
     max_code: ::core::ffi::c_int,
@@ -3503,7 +3480,15 @@ pub unsafe extern "C" fn _tr_stored_block_ffi(
     }
     (*s).bi_buf = bits.bi_buf;
     (*s).bi_valid = bits.bi_valid;
-    bi_windup(s);
+    let windup = bi_windup_state((*s).bi_buf, (*s).bi_valid);
+    for byte in windup.bytes[..windup.len].iter().copied() {
+        let pending = (*s).pending;
+        (*s).pending = (*s).pending.wrapping_add(1);
+        *(*s).pending_buf.offset(pending as isize) = byte;
+    }
+    (*s).bi_used = windup.bi_used;
+    (*s).bi_buf = 0 as crate::zutil_h::ush;
+    (*s).bi_valid = 0 as ::core::ffi::c_int;
     let len_bytes = stored_block_len_bytes(stored_len);
     let c2rust_fresh51 = (*s).pending;
     (*s).pending = (*s).pending.wrapping_add(1);
@@ -3529,7 +3514,14 @@ pub unsafe extern "C" fn _tr_stored_block_ffi(
 #[export_name = "_tr_flush_bits"]
 
 pub unsafe extern "C" fn _tr_flush_bits_ffi(mut s: *mut crate::src::deflate::deflate_state) {
-    bi_flush(s);
+    let flush = bi_flush_state((*s).bi_buf, (*s).bi_valid);
+    for byte in flush.bytes[..flush.len].iter().copied() {
+        let pending = (*s).pending;
+        (*s).pending = (*s).pending.wrapping_add(1);
+        *(*s).pending_buf.offset(pending as isize) = byte;
+    }
+    (*s).bi_buf = flush.bi_buf;
+    (*s).bi_valid = flush.bi_valid;
 }
 #[export_name = "_tr_align"]
 
@@ -3905,7 +3897,15 @@ pub unsafe extern "C" fn _tr_flush_block_ffi(
     }
     init_block(&mut *s);
     if last != 0 {
-        bi_windup(s);
+        let windup = bi_windup_state((*s).bi_buf, (*s).bi_valid);
+        for byte in windup.bytes[..windup.len].iter().copied() {
+            let pending = (*s).pending;
+            (*s).pending = (*s).pending.wrapping_add(1);
+            *(*s).pending_buf.offset(pending as isize) = byte;
+        }
+        (*s).bi_used = windup.bi_used;
+        (*s).bi_buf = 0 as crate::zutil_h::ush;
+        (*s).bi_valid = 0 as ::core::ffi::c_int;
     }
 }
 #[export_name = "_tr_tally"]

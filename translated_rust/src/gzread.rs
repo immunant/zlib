@@ -71,7 +71,7 @@ unsafe fn gz_load(
         }
         ret = crate::stdlib::read(
             (*state).fd,
-            buf.offset(*have as isize) as *mut ::core::ffi::c_void,
+            buf.wrapping_add(*have as usize) as *mut ::core::ffi::c_void,
             get as crate::__stddef_size_t_h::size_t,
         ) as ::core::ffi::c_int;
         if ret <= 0 as ::core::ffi::c_int {
@@ -128,7 +128,7 @@ unsafe extern "C" fn gz_avail(mut state: crate::gzguts_h::gz_statep) -> ::core::
         }
         if gz_load(
             state,
-            (*state).in_0.offset((*strm).avail_in as isize),
+            (*state).in_0.wrapping_add((*strm).avail_in as usize),
             (*state)
                 .size
                 .wrapping_sub((*strm).avail_in as ::core::ffi::c_uint),

@@ -278,7 +278,7 @@ unsafe extern "C" fn gz_write(
                 copy = len as ::core::ffi::c_uint;
             }
             crate::stdlib::memcpy(
-                (*state).in_0.offset(have as isize) as *mut ::core::ffi::c_void,
+                (*state).in_0.wrapping_add(have as usize) as *mut ::core::ffi::c_void,
                 buf as *const ::core::ffi::c_void,
                 copy as crate::__stddef_size_t_h::size_t,
             );
