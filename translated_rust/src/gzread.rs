@@ -810,69 +810,71 @@ pub unsafe extern "C" fn gzgetc__ffi(mut file: crate::zlib_h::gzFile) -> ::core:
     }
     gzgetc_(&mut *(file as crate::gzguts_h::gz_statep))
 }
-pub fn gzungetc(
-    mut c: ::core::ffi::c_int,
+// Classify the push-back request before the ABI adapter binds the output
+// allocation. In particular, a failed initial `gz_look()` must not make the
+// adapter construct a slice from an unallocated `out` pointer.
+fn gzungetc_dispatch(
+    c: ::core::ffi::c_int,
     state: &mut crate::gzguts_h::gz_state,
-) -> ::core::ffi::c_int {
+) -> Option<crate::src::gzlib::GzUngetcPlan> {
     if !crate::src::gzlib::gz_has_mode(state, crate::gzguts_h::GZ_READ) {
-        return -1 as ::core::ffi::c_int;
+        return None;
     }
     if crate::src::gzlib::gz_ungetc_needs_look(state) {
         gz_look(state);
     }
     if !gz_prepare_read_operation(state) {
-        return -1 as ::core::ffi::c_int;
+        return None;
     }
     if c < 0 as ::core::ffi::c_int {
-        return -1 as ::core::ffi::c_int;
+        return None;
     }
     match crate::src::gzlib::gz_ungetc_plan(state) {
-        crate::src::gzlib::GzUngetcPlan::First { buffer_end } => {
-            // SAFETY: the ungetc plan reserves the final byte of the
-            // initialized output buffer for this first pushed-back byte.
-            state.x.next = state
-                .out
-                .wrapping_add(buffer_end as usize)
-                .wrapping_sub(1);
-            unsafe {
-                *state.x.next = c as ::core::ffi::c_uchar;
-            }
-            crate::src::gzlib::gz_ungetc_progress(state, true);
-        }
         crate::src::gzlib::GzUngetcPlan::Full => {
             crate::src::gzlib::gz_error(
                 state,
                 crate::zlib_h::Z_DATA_ERROR,
                 Some(b"out of room to push characters\0"),
             );
-            return -1 as ::core::ffi::c_int;
+            None
+        }
+        plan => Some(plan),
+    }
+}
+
+// Once `gzungetc_dispatch()` has accepted the request, the ABI adapter has
+// bound the initialized output allocation. The cursor movement and overlap
+// handling below are therefore entirely safe slice operations.
+fn gzungetc(
+    c: ::core::ffi::c_int,
+    state: &mut crate::gzguts_h::gz_state,
+    output: &mut [::core::ffi::c_uchar],
+    plan: crate::src::gzlib::GzUngetcPlan,
+) -> ::core::ffi::c_int {
+    match plan {
+        crate::src::gzlib::GzUngetcPlan::First { buffer_end } => {
+            let byte = buffer_end as usize - 1;
+            output[byte] = c as ::core::ffi::c_uchar;
+            state.x.next = state.out.wrapping_add(byte);
+            crate::src::gzlib::gz_ungetc_progress(state, true);
         }
         crate::src::gzlib::GzUngetcPlan::Prepend { move_to_end } => {
-            // SAFETY: this plan is derived from the initialized output
-            // buffer's available capacity. The backwards copy stays within
-            // that buffer and preserves the translated overlapping move.
             if let Some(move_to_end) = move_to_end {
-                let mut src: *mut ::core::ffi::c_uchar = state
-                    .out
-                    .wrapping_add(move_to_end.source_len as usize);
-                let mut dest: *mut ::core::ffi::c_uchar = state
-                    .out
-                    .wrapping_add(move_to_end.destination_offset as usize);
-                unsafe {
-                    while src > state.out {
-                        src = src.wrapping_sub(1);
-                        dest = dest.wrapping_sub(1);
-                        *dest = *src;
-                    }
-                }
-                state.x.next = dest;
+                let source_len = move_to_end.source_len as usize;
+                let destination_end = move_to_end.destination_offset as usize;
+                let destination_start = destination_end - source_len;
+                output.copy_within(0..source_len, destination_start);
+                state.x.next = state.out.wrapping_add(destination_start);
             }
-            state.x.next = state.x.next.wrapping_sub(1);
-            unsafe {
-                *state.x.next = c as ::core::ffi::c_uchar;
-            }
+            let next = (state.x.next as usize).wrapping_sub(state.out as usize);
+            let byte = next - 1;
+            output[byte] = c as ::core::ffi::c_uchar;
+            state.x.next = state.out.wrapping_add(byte);
             crate::src::gzlib::gz_ungetc_progress(state, false);
         }
+        // `gzungetc_dispatch()` rejects this before the ABI binder constructs
+        // an output slice.
+        crate::src::gzlib::GzUngetcPlan::Full => unreachable!(),
     }
     c
 }
@@ -885,7 +887,18 @@ pub unsafe extern "C" fn gzungetc_ffi(
     if file.is_null() {
         return -1 as ::core::ffi::c_int;
     }
-    gzungetc(c, &mut *(file as crate::gzguts_h::gz_statep))
+    let state = &mut *(file as crate::gzguts_h::gz_statep);
+    let Some(plan) = gzungetc_dispatch(c, state) else {
+        return -1;
+    };
+    // The dispatcher above reached `gz_look()` and accepted a plan derived
+    // from its initialized output allocation. This ABI binder performs the
+    // only raw conversion; the implementation receives the bounded slice.
+    let output = ::core::slice::from_raw_parts_mut(
+        state.out,
+        state.size.wrapping_shl(1) as usize,
+    );
+    gzungetc(c, state, output, plan)
 }
 // Copying a fetched chunk into the caller's already-bound destination is
 // ordinary slice work.  Return the exact amount consumed so the read loop can

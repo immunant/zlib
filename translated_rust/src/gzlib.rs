@@ -1128,7 +1128,11 @@ pub(crate) fn gz_ungetc_plan(state: &crate::gzguts_h::gz_state) -> GzUngetcPlan 
         GzUngetcPlan::Prepend {
             move_to_end: (state.x.next == state.out).then_some(GzUngetcMove {
                 source_len: state.x.have,
-                destination_offset: buffer_end.wrapping_sub(state.x.have),
+                // This is the end-exclusive destination used by the C
+                // backwards copy. The read adapter derives the start by
+                // subtracting `source_len`, so the moved bytes remain at
+                // the end of the output allocation.
+                destination_offset: buffer_end,
             }),
         }
     }
