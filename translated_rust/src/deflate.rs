@@ -3204,72 +3204,42 @@ fn deflate_copy_state(
     }
 }
 
-unsafe fn deflate_copy_impl(
-    dest: &mut crate::zlib_h::z_stream_s,
-    source: &crate::zlib_h::z_stream_s,
-) -> ::core::ffi::c_int {
-    // Validate the stream before following its state link.  The state borrow
-    // is then retained for the complete snapshot preparation below.
-    if !deflate_params_stream_is_valid(source) {
-        return crate::zlib_h::Z_STREAM_ERROR;
-    }
-    let Some(source_state) = source.state.as_ref() else {
-        return crate::zlib_h::Z_STREAM_ERROR;
-    };
-    if !deflate_copy_state_is_valid(source, source_state) {
-        return crate::zlib_h::Z_STREAM_ERROR;
-    }
-
+/// Clone all codec-owned state before touching the destination stream.  The
+/// allocator-specific storage handoff remains at the raw ABI boundary, while
+/// this implementation deals exclusively in ordinary Rust owners.
+fn deflate_copy_impl(
+    source_state: &crate::src::deflate::deflate_state,
+) -> Result<crate::src::deflate::deflate_state, ::core::ffi::c_int> {
     let Some(head) = source_state.head.as_deref() else {
-        return crate::zlib_h::Z_STREAM_ERROR;
+        return Err(crate::zlib_h::Z_STREAM_ERROR);
     };
     let Some(head_copy) = clone_head_table(head) else {
-        return crate::zlib_h::Z_MEM_ERROR;
+        return Err(crate::zlib_h::Z_MEM_ERROR);
     };
     let Some(prev) = source_state.prev.as_deref() else {
-        return crate::zlib_h::Z_STREAM_ERROR;
+        return Err(crate::zlib_h::Z_STREAM_ERROR);
     };
     let Some(prev_copy) = clone_prev_table(prev) else {
-        return crate::zlib_h::Z_MEM_ERROR;
+        return Err(crate::zlib_h::Z_MEM_ERROR);
     };
     let Some(source_pending) = source_state.pending_buf.as_deref() else {
-        return crate::zlib_h::Z_STREAM_ERROR;
+        return Err(crate::zlib_h::Z_STREAM_ERROR);
     };
     let Some(mut pending_copy) = allocate_pending_buffer(source_pending.len()) else {
-        return crate::zlib_h::Z_MEM_ERROR;
+        return Err(crate::zlib_h::Z_MEM_ERROR);
     };
     pending_copy.copy_from_slice(source_pending);
     let gzhead = gzip_header_clone(source_state.gzhead);
 
-    // `z_stream_s` is an ABI carrier and intentionally Copy.  Its state
-    // field is replaced below only after the duplicate allocation succeeds.
-    *dest = *source;
-    let zalloc = dest.zalloc.expect("validated source allocator");
-    let zfree = dest.zfree.expect("validated source deallocator");
-    let state_memory = zalloc(
-        dest.opaque,
-        1,
-        ::core::mem::size_of::<crate::src::deflate::deflate_state>() as crate::stdlib::uInt,
-    )
-    .cast::<crate::src::deflate::deflate_state>();
-    if state_memory.is_null() {
-        return crate::zlib_h::Z_MEM_ERROR;
-    }
     let Some(source_window) = source_state.window.as_deref() else {
-        zfree(dest.opaque, state_memory.cast());
-        dest.state = ::core::ptr::null_mut();
-        return crate::zlib_h::Z_STREAM_ERROR;
+        return Err(crate::zlib_h::Z_STREAM_ERROR);
     };
     let Some(window) = allocate_window(source_window.len()) else {
-        zfree(dest.opaque, state_memory.cast());
-        dest.state = ::core::ptr::null_mut();
-        return crate::zlib_h::Z_MEM_ERROR;
+        return Err(crate::zlib_h::Z_MEM_ERROR);
     };
     let high_water = source_state.high_water as usize;
     if high_water > source_window.len() {
-        zfree(dest.opaque, state_memory.cast());
-        dest.state = ::core::ptr::null_mut();
-        return crate::zlib_h::Z_STREAM_ERROR;
+        return Err(crate::zlib_h::Z_STREAM_ERROR);
     }
     let mut window = window;
     window[..high_water].copy_from_slice(&source_window[..high_water]);
@@ -3283,9 +3253,7 @@ unsafe fn deflate_copy_impl(
     );
     let mut copied_state = copied_state;
     copied_state.window = Some(window);
-    core::ptr::write(state_memory, copied_state);
-    dest.state = state_memory;
-    crate::zlib_h::Z_OK
+    Ok(copied_state)
 }
 
 /// Convert ABI stream pointers once before the copy implementation borrows
@@ -3299,7 +3267,38 @@ unsafe fn deflateCopy(
     if dest.is_null() || source.is_null() || dest == source {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    deflate_copy_impl(&mut *dest, &*source)
+    let source = &*source;
+    if !deflate_params_stream_is_valid(source) {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    }
+    let Some(source_state) = source.state.as_ref() else {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    };
+    if !deflate_copy_state_is_valid(source, source_state) {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    }
+    let copied_state = match deflate_copy_impl(source_state) {
+        Ok(snapshot) => snapshot,
+        Err(error) => return error,
+    };
+
+    // Keep the custom allocator paired with the source stream exactly as in
+    // the C ABI.  Every fallible Rust-owned clone above has already succeeded,
+    // so there is no post-allocation cleanup path here.
+    let dest = &mut *dest;
+    *dest = *source;
+    let state_memory = dest.zalloc.expect("validated source allocator")(
+        dest.opaque,
+        1,
+        ::core::mem::size_of::<crate::src::deflate::deflate_state>() as crate::stdlib::uInt,
+    )
+    .cast::<crate::src::deflate::deflate_state>();
+    if state_memory.is_null() {
+        return crate::zlib_h::Z_MEM_ERROR;
+    }
+    core::ptr::write(state_memory, copied_state);
+    dest.state = state_memory;
+    crate::zlib_h::Z_OK
 }
 #[export_name = "deflateCopy"]
 
