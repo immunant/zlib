@@ -178,6 +178,8 @@ struct GzInflateResult {
     result: ::core::ffi::c_int,
     input: GzCodecInput,
     output_available: crate::stdlib::uInt,
+    total_in: crate::stdlib::uLong,
+    total_out: crate::stdlib::uLong,
     data_error_message: Option<&'static [u8]>,
 }
 
@@ -659,7 +661,7 @@ fn gz_decomp_loop(
         };
         result = call.result;
         decomp.record_input(call.input);
-        match decomp.record_inflate(result, call.output_available) {
+        match decomp.record_inflate(result, call.output_available, call.total_in, call.total_out) {
             crate::src::gzlib::GzDecompAction::Continue => {}
             crate::src::gzlib::GzDecompAction::Stop => break,
             crate::src::gzlib::GzDecompAction::Junk => {
@@ -821,9 +823,19 @@ unsafe fn gz_decomp(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int
     let Some(input) = state.buffers.input_cursor.as_ref() else {
         return -1 as ::core::ffi::c_int;
     };
-    let Some(mut decomp) =
-        crate::src::gzlib::GzDecompState::new(output_len, input, state.junk, state.eof, state.how)
-    else {
+    let Some(mut decomp) = crate::src::gzlib::GzDecompState::new(
+        output_len,
+        input,
+        crate::src::gzlib::GzCodecCounters::from_stream_fields(
+            state.strm.avail_in,
+            state.strm.avail_out,
+            state.strm.total_in,
+            state.strm.total_out,
+        ),
+        state.junk,
+        state.eof,
+        state.how,
+    ) else {
         return -1 as ::core::ffi::c_int;
     };
     state.strm.avail_out = decomp.output_available();
@@ -879,6 +891,8 @@ unsafe fn gz_decomp(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int
                     result,
                     input,
                     output_available: strm.avail_out,
+                    total_in: strm.total_in,
+                    total_out: strm.total_out,
                     data_error_message,
                 })
             },
@@ -902,7 +916,10 @@ unsafe fn gz_decomp(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int
     };
     let input_cursor = state.buffers.input_cursor.as_ref().unwrap();
     state.strm.next_in = buffer.as_mut_ptr().wrapping_add(input_cursor.cursor());
-    state.strm.avail_in = input_cursor.available();
+    state.strm.avail_in = finish.codec.available_input();
+    state.strm.avail_out = finish.codec.available_output();
+    state.strm.total_in = finish.codec.total_in();
+    state.strm.total_out = finish.codec.total_out();
     state.junk = finish.junk;
     state.eof = finish.eof;
     state.how = finish.how;

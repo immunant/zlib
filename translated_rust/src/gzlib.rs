@@ -681,6 +681,30 @@ impl GzCodecCounters {
     fn reset_input(&mut self) {
         self.available_input = 0;
     }
+
+    fn record_input(&mut self, input: &GzCodecInput) {
+        self.available_input = input.available();
+    }
+
+    fn record_output(&mut self, available: crate::stdlib::uInt) {
+        self.available_output = available;
+    }
+
+    pub(crate) fn available_output(&self) -> crate::stdlib::uInt {
+        self.available_output
+    }
+
+    pub(crate) fn available_input(&self) -> crate::stdlib::uInt {
+        self.available_input
+    }
+
+    pub(crate) fn total_in(&self) -> crate::stdlib::uLong {
+        self.total_in
+    }
+
+    pub(crate) fn total_out(&self) -> crate::stdlib::uLong {
+        self.total_out
+    }
 }
 
 // A codec operation reports output progress by decreasing `avail_out`. Keep
@@ -773,6 +797,7 @@ pub(crate) struct GzDecompFinish {
     pub(crate) result: ::core::ffi::c_int,
     pub(crate) input: GzCodecInput,
     pub(crate) output: GzCodecOutputCursor,
+    pub(crate) codec: GzCodecCounters,
     pub(crate) junk: ::core::ffi::c_int,
     pub(crate) eof: ::core::ffi::c_int,
     pub(crate) how: ::core::ffi::c_int,
@@ -785,6 +810,7 @@ pub(crate) struct GzDecompFinish {
 pub(crate) struct GzDecompState {
     output: GzCodecOutput,
     input: GzCodecInput,
+    codec: GzCodecCounters,
     junk: ::core::ffi::c_int,
     eof: ::core::ffi::c_int,
     how: ::core::ffi::c_int,
@@ -794,16 +820,21 @@ impl GzDecompState {
     pub(crate) fn new(
         output_capacity: usize,
         input: &GzCodecInput,
+        mut codec: GzCodecCounters,
         junk: ::core::ffi::c_int,
         eof: ::core::ffi::c_int,
         how: ::core::ffi::c_int,
     ) -> Option<Self> {
+        let output = GzCodecOutput::new(output_capacity)?;
+        codec.record_input(input);
+        codec.record_output(output.available());
         Some(Self {
-            output: GzCodecOutput::new(output_capacity)?,
+            output,
             input: GzCodecInput {
                 cursor: input.cursor,
                 available: input.available,
             },
+            codec,
             junk,
             eof,
             how,
@@ -820,6 +851,7 @@ impl GzDecompState {
 
     pub(crate) fn record_input(&mut self, input: GzCodecInput) {
         self.input = input;
+        self.codec.record_input(&self.input);
     }
 
     pub(crate) fn input(&self) -> &GzCodecInput {
@@ -831,15 +863,20 @@ impl GzDecompState {
     }
 
     pub(crate) fn output_available(&self) -> crate::stdlib::uInt {
-        self.output.available()
+        self.codec.available_output()
     }
 
     pub(crate) fn record_inflate(
         &mut self,
         result: ::core::ffi::c_int,
         available: crate::stdlib::uInt,
+        total_in: crate::stdlib::uLong,
+        total_out: crate::stdlib::uLong,
     ) -> GzDecompAction {
         self.output.record_available(available);
+        self.codec.record_output(available);
+        self.codec.total_in = total_in;
+        self.codec.total_out = total_out;
         let produced_output = self.output.has_output();
         if produced_output {
             self.junk = 0;
@@ -860,6 +897,7 @@ impl GzDecompState {
                 result: 0,
                 input: self.input,
                 output: self.output.completed_cursor(),
+                codec: self.codec,
                 junk: self.junk,
                 eof: self.eof,
                 how: self.how,
@@ -869,6 +907,7 @@ impl GzDecompState {
                 result: -1,
                 input: self.input,
                 output: self.output.completed_cursor(),
+                codec: self.codec,
                 junk: self.junk,
                 eof: self.eof,
                 how: self.how,
@@ -878,6 +917,7 @@ impl GzDecompState {
                 result: 0,
                 input: self.input,
                 output: self.output.completed_cursor(),
+                codec: self.codec,
                 junk: self.junk,
                 eof: self.eof,
                 how: self.how,
