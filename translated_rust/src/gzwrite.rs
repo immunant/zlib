@@ -114,12 +114,12 @@ struct GzInitAllocationPlan {
 fn gz_init_allocation_plan(
     want: ::core::ffi::c_uint,
     direct: ::core::ffi::c_int,
-) -> GzInitAllocationPlan {
-    GzInitAllocationPlan {
-        input_len: want.wrapping_shl(1) as crate::stdlib::z_size_t,
+) -> Option<GzInitAllocationPlan> {
+    Some(GzInitAllocationPlan {
+        input_len: want.checked_mul(2)? as crate::stdlib::z_size_t,
         output_len: (gz_init_mode(direct) == GzInitMode::Compressed)
             .then_some(want as crate::stdlib::z_size_t),
-    }
+    })
 }
 
 fn gz_zero_chunk_len(
@@ -1073,7 +1073,9 @@ fn gz_write_buffered_copy_plan(
 }
 
 fn gz_init(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
-    let allocation = gz_init_allocation_plan(state.want, state.direct);
+    let Some(allocation) = gz_init_allocation_plan(state.want, state.direct) else {
+        return -1 as ::core::ffi::c_int;
+    };
     state.in_0 = unsafe {
         crate::stdlib::malloc(allocation.input_len as crate::__stddef_size_t_h::size_t)
             as *mut ::core::ffi::c_uchar
@@ -2253,10 +2255,10 @@ mod tests {
     fn gz_init_allocation_plan_allocates_only_input_for_direct_writes() {
         assert_eq!(
             gz_init_allocation_plan(4096, -1),
-            GzInitAllocationPlan {
+            Some(GzInitAllocationPlan {
                 input_len: 8192,
                 output_len: None,
-            }
+            })
         );
     }
 
@@ -2264,22 +2266,17 @@ mod tests {
     fn gz_init_allocation_plan_allocates_input_and_output_for_compressed_writes() {
         assert_eq!(
             gz_init_allocation_plan(4096, 0),
-            GzInitAllocationPlan {
+            Some(GzInitAllocationPlan {
                 input_len: 8192,
                 output_len: Some(4096),
-            }
+            })
         );
     }
 
     #[test]
-    fn gz_init_allocation_plan_preserves_input_size_wrapping() {
-        assert_eq!(
-            gz_init_allocation_plan(::core::ffi::c_uint::MAX, 0),
-            GzInitAllocationPlan {
-                input_len: ::core::ffi::c_uint::MAX.wrapping_shl(1) as crate::stdlib::z_size_t,
-                output_len: Some(::core::ffi::c_uint::MAX as crate::stdlib::z_size_t),
-            }
-        );
+    fn gz_init_allocation_plan_rejects_input_size_overflow() {
+        assert_eq!(gz_init_allocation_plan(::core::ffi::c_uint::MAX, 0), None);
+        assert!(gz_init_allocation_plan(::core::ffi::c_uint::MAX / 2, 0).is_some());
     }
 
     #[test]
