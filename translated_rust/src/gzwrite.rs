@@ -255,6 +255,7 @@ unsafe fn gz_init(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
 unsafe fn gz_comp(
     state: &mut crate::gzguts_h::gz_state,
     mut flush: ::core::ffi::c_int,
+    external_input: Option<&[u8]>,
 ) -> ::core::ffi::c_int {
     let mut ret: ::core::ffi::c_int = 0;
     let mut writ: ::core::ffi::c_int = 0;
@@ -387,11 +388,79 @@ unsafe fn gz_comp(
                 state.x.next = state.strm.next_out;
             }
         }
-        have = state.strm.avail_out as ::core::ffi::c_uint;
-        ret = crate::src::deflate::deflate(
-            &raw mut state.strm as *mut crate::zlib_h::z_stream_s,
-            flush,
-        );
+        // Form one complete bounded embedded-deflate request before
+        // publishing its cursors to the ABI stream.  Buffered callers borrow
+        // the owned input allocation; large writes pass their caller slice
+        // explicitly, so this layer never reconstructs that range from an
+        // unchecked state cursor.
+        let input_available = state.strm.avail_in;
+        let input_cursor = state.strm.next_in.addr();
+        let output_available = state.strm.avail_out;
+        let output_cursor = state.strm.next_out.addr();
+        let input = match external_input {
+            Some(input) => input,
+            None => match state.buffers.input.as_deref() {
+                Some(input) => input,
+                None => return -1,
+            },
+        };
+        let input = if input_available == 0 {
+            // zlib permits a flush/finalization pass with no current input;
+            // `next_in` may then still be null, so no cursor validation is
+            // meaningful or required for the empty request.
+            &[]
+        } else {
+            let Some(buffered_input) = crate::src::gzlib::GzBufferedCursor::from_owned_buffer(
+                input,
+                input_cursor,
+                input_available,
+            ) else {
+                return -1;
+            };
+            let Some((input, _)) = buffered_input.consume(input_available as usize) else {
+                return -1;
+            };
+            input
+        };
+        let output_size = state.buffers.size;
+        let Some(output) = state.buffers.output.as_deref_mut() else {
+            return -1;
+        };
+        let Some(setup) =
+            crate::src::gzlib::GzEmbeddedDeflateSetup::from_output(output, output_size)
+        else {
+            return -1;
+        };
+        let Some(mut call) =
+            setup.call_at_output_cursor(input, input_available, output_cursor, output_available)
+        else {
+            return -1;
+        };
+        have = call.output_available();
+        let snapshot = {
+            let strm = &mut state.strm;
+            strm.next_in = call.input().as_ptr().cast_mut();
+            strm.avail_in = call.input_available();
+            strm.next_out = call.output_mut().as_mut_ptr();
+            strm.avail_out = call.output_available();
+            let result =
+                crate::src::deflate::deflate(strm as *mut crate::zlib_h::z_stream_s, flush);
+            crate::src::gzlib::GzEmbeddedDeflateResult {
+                result,
+                remaining_input: strm.avail_in,
+                output_available: strm.avail_out,
+                total_in: strm.total_in,
+                total_out: strm.total_out,
+            }
+        };
+        let Some(snapshot) = call.finish(snapshot) else {
+            return -1;
+        };
+        ret = snapshot.result;
+        state.strm.avail_in = snapshot.remaining_input;
+        state.strm.avail_out = snapshot.output_available;
+        state.strm.total_in = snapshot.total_in;
+        state.strm.total_out = snapshot.total_out;
         if ret == crate::zlib_h::Z_STREAM_ERROR {
             crate::src::gzlib::GzErrorState {
                 message: &mut state.msg,
@@ -406,7 +475,7 @@ unsafe fn gz_comp(
             );
             return -1 as ::core::ffi::c_int;
         }
-        have = have.wrapping_sub(state.strm.avail_out as ::core::ffi::c_uint);
+        have = have.wrapping_sub(snapshot.output_available);
         if have == 0 {
             break;
         }
@@ -421,7 +490,7 @@ unsafe fn gz_zero(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
     let mut first: ::core::ffi::c_int = 0;
     let mut ret: ::core::ffi::c_int = 0;
     if state.strm.avail_in != 0
-        && gz_comp(state, crate::zlib_h::Z_NO_FLUSH) == -1 as ::core::ffi::c_int
+        && gz_comp(state, crate::zlib_h::Z_NO_FLUSH, None) == -1 as ::core::ffi::c_int
     {
         return -1 as ::core::ffi::c_int;
     }
@@ -442,7 +511,7 @@ unsafe fn gz_zero(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
         }
         state.strm.avail_in = step.input_len;
         state.strm.next_in = state.buffers.input.as_deref_mut().unwrap().as_mut_ptr();
-        ret = gz_comp(state, crate::zlib_h::Z_NO_FLUSH);
+        ret = gz_comp(state, crate::zlib_h::Z_NO_FLUSH, None);
         let progress = step.finish(state.strm.avail_in, state.x.pos, state.skip);
         state.x.pos = progress.position;
         state.skip = progress.skip;
@@ -502,7 +571,7 @@ unsafe fn gz_write(
             if len == 0 as crate::stdlib::z_size_t {
                 break;
             }
-            if gz_comp(state, crate::zlib_h::Z_NO_FLUSH) == -1 as ::core::ffi::c_int {
+            if gz_comp(state, crate::zlib_h::Z_NO_FLUSH, None) == -1 as ::core::ffi::c_int {
                 return if state.again != 0 {
                     put.wrapping_sub(len)
                 } else {
@@ -512,7 +581,7 @@ unsafe fn gz_write(
         }
     } else {
         if state.strm.avail_in != 0
-            && gz_comp(state, crate::zlib_h::Z_NO_FLUSH) == -1 as ::core::ffi::c_int
+            && gz_comp(state, crate::zlib_h::Z_NO_FLUSH, None) == -1 as ::core::ffi::c_int
         {
             return 0 as crate::stdlib::z_size_t;
         }
@@ -558,7 +627,7 @@ unsafe fn gz_write(
                 n = len as ::core::ffi::c_uint;
             }
             state.strm.avail_in = n as crate::stdlib::uInt;
-            ret = gz_comp(state, crate::zlib_h::Z_NO_FLUSH);
+            ret = gz_comp(state, crate::zlib_h::Z_NO_FLUSH, Some(input));
             n = n.wrapping_sub(state.strm.avail_in as ::core::ffi::c_uint);
             state.x.pos += n as crate::stdlib::off64_t;
             input = &input[n as usize..];
@@ -849,7 +918,7 @@ unsafe fn gzflush(
     if state.skip != 0 && gz_zero(state) == -1 as ::core::ffi::c_int {
         return state.err;
     }
-    gz_comp(state, flush);
+    gz_comp(state, flush, None);
     return state.err;
 }
 #[export_name = "gzflush"]
@@ -893,7 +962,7 @@ unsafe fn gzsetparams(
     }
     if state.buffers.size != 0 {
         if state.strm.avail_in != 0
-            && gz_comp(state, crate::zlib_h::Z_BLOCK) == -1 as ::core::ffi::c_int
+            && gz_comp(state, crate::zlib_h::Z_BLOCK, None) == -1 as ::core::ffi::c_int
         {
             return state.err;
         }
@@ -927,7 +996,7 @@ pub unsafe fn gzclose_w(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c
     if state.skip != 0 && gz_zero(state) == -1 as ::core::ffi::c_int {
         ret = state.err;
     }
-    if gz_comp(state, crate::zlib_h::Z_FINISH) == -1 as ::core::ffi::c_int {
+    if gz_comp(state, crate::zlib_h::Z_FINISH, None) == -1 as ::core::ffi::c_int {
         ret = state.err;
     }
     if state.buffers.size != 0 {

@@ -593,8 +593,16 @@ impl<'a> GzEmbeddedDeflateSetup<'a> {
     // source of this output view.  Direct handles have no compressed-output
     // allocation and therefore cannot construct an embedded-deflate setup.
     pub(crate) fn from_write_buffers(buffers: &'a mut GzWriteOutputView<'a>) -> Option<Self> {
-        let available = usize::try_from(buffers.size()).ok()?;
-        let output = buffers.output_mut();
+        let size = buffers.size();
+        Self::from_output(buffers.output_mut(), size)
+    }
+
+    // `gz_comp()` borrows the paired input and output allocations separately
+    // for one complete codec request.  It therefore needs the same checked
+    // setup without first borrowing all of `GzBuffers` through
+    // `write_output_view()`.
+    pub(crate) fn from_output(output: &'a mut [u8], size: crate::stdlib::uInt) -> Option<Self> {
+        let available = usize::try_from(size).ok()?;
         Some(Self {
             output: GzCodecOutputView::prefix(output, available)?,
         })
