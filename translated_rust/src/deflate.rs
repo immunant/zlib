@@ -1642,13 +1642,15 @@ pub unsafe extern "C" fn deflateGetDictionary(
         return crate::zlib_h::Z_STREAM_ERROR;
     }
     s = (*strm).state as *mut crate::src::deflate::deflate_state;
-    len = deflate_dictionary_len((*s).strstart, (*s).lookahead, (*s).w_size);
+    let (strstart, lookahead, w_size, window) =
+        ((*s).strstart, (*s).lookahead, (*s).w_size, (*s).window);
+    len = deflate_dictionary_len(strstart, lookahead, w_size);
     if !dictionary.is_null() && len != 0 {
         crate::stdlib::memcpy(
             dictionary as *mut ::core::ffi::c_void,
-            (*s).window
-                .offset((*s).strstart as isize)
-                .offset((*s).lookahead as isize)
+            window
+                .offset(strstart as isize)
+                .offset(lookahead as isize)
                 .offset(-(len as isize)) as *const ::core::ffi::c_void,
             len as crate::__stddef_size_t_h::size_t,
         );
