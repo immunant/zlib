@@ -1642,18 +1642,24 @@ pub unsafe extern "C" fn deflateBound_ffi(
         sourceLen as crate::stdlib::z_size_t,
     ))
 }
-unsafe extern "C" fn putShortMSB(
-    mut s: *mut crate::src::deflate::deflate_state,
-    mut b: crate::stdlib::uInt,
-) {
-    let c2rust_fresh33 = (*s).pending;
-    (*s).pending = (*s).pending.wrapping_add(1);
-    *(*s).pending_buf.offset(c2rust_fresh33 as isize) =
-        (b >> 8 as ::core::ffi::c_int) as crate::stdlib::Byte;
-    let c2rust_fresh34 = (*s).pending;
-    (*s).pending = (*s).pending.wrapping_add(1);
-    *(*s).pending_buf.offset(c2rust_fresh34 as isize) =
-        (b & 0xff as crate::stdlib::uInt) as crate::stdlib::Byte;
+fn put_short_msb(
+    state: &mut crate::src::deflate::deflate_state,
+    pending_buf: &mut [crate::stdlib::Bytef],
+    value: crate::stdlib::uInt,
+) -> bool {
+    let Ok(start) = usize::try_from(state.pending) else {
+        return false;
+    };
+    let Some(end) = start.checked_add(2) else {
+        return false;
+    };
+    let Some(bytes) = pending_buf.get_mut(start..end) else {
+        return false;
+    };
+    bytes[0] = (value >> 8) as crate::stdlib::Byte;
+    bytes[1] = (value & 0xff) as crate::stdlib::Byte;
+    state.pending = state.pending.wrapping_add(2);
+    true
 }
 
 unsafe extern "C" fn flush_pending(mut strm: crate::zlib_h::z_streamp) {
@@ -1775,16 +1781,30 @@ pub unsafe extern "C" fn deflate(
             (31 as crate::stdlib::uInt)
                 .wrapping_sub(header.wrapping_rem(31 as crate::stdlib::uInt)),
         );
-        putShortMSB(s, header);
-        if (*s).strstart != 0 as crate::stdlib::uInt {
-            putShortMSB(
-                s,
+        let dictionary = (*s).strstart != 0 as crate::stdlib::uInt;
+        let state = &mut *s;
+        let pending_buf = ::core::slice::from_raw_parts_mut(
+            state.pending_buf,
+            state.pending_buf_size as usize,
+        );
+        if !put_short_msb(state, pending_buf, header) {
+            return crate::zlib_h::Z_STREAM_ERROR;
+        }
+        if dictionary {
+            if !put_short_msb(
+                state,
+                pending_buf,
                 ((*strm).adler >> 16 as ::core::ffi::c_int) as crate::stdlib::uInt,
-            );
-            putShortMSB(
-                s,
+            ) {
+                return crate::zlib_h::Z_STREAM_ERROR;
+            }
+            if !put_short_msb(
+                state,
+                pending_buf,
                 ((*strm).adler & 0xffff as crate::stdlib::uLong) as crate::stdlib::uInt,
-            );
+            ) {
+                return crate::zlib_h::Z_STREAM_ERROR;
+            }
         }
         (*strm).adler = crate::src::adler32::adler32(0 as crate::stdlib::uLong, None);
         (*s).status = crate::src::deflate::BUSY_STATE;
@@ -2242,14 +2262,25 @@ pub unsafe extern "C" fn deflate(
             ((*strm).total_in >> 24 as ::core::ffi::c_int & 0xff as crate::stdlib::uLong)
                 as crate::stdlib::Byte;
     } else {
-        putShortMSB(
-            s,
+        let state = &mut *s;
+        let pending_buf = ::core::slice::from_raw_parts_mut(
+            state.pending_buf,
+            state.pending_buf_size as usize,
+        );
+        if !put_short_msb(
+            state,
+            pending_buf,
             ((*strm).adler >> 16 as ::core::ffi::c_int) as crate::stdlib::uInt,
-        );
-        putShortMSB(
-            s,
+        ) {
+            return crate::zlib_h::Z_STREAM_ERROR;
+        }
+        if !put_short_msb(
+            state,
+            pending_buf,
             ((*strm).adler & 0xffff as crate::stdlib::uLong) as crate::stdlib::uInt,
-        );
+        ) {
+            return crate::zlib_h::Z_STREAM_ERROR;
+        }
     }
     flush_pending(strm);
     if (*s).wrap > 0 as ::core::ffi::c_int {
