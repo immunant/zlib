@@ -908,13 +908,17 @@ pub unsafe extern "C" fn inflateBack_ffi(
 pub unsafe extern "C" fn inflateBackEnd_ffi(
     mut strm: crate::zlib_h::z_streamp,
 ) -> ::core::ffi::c_int {
-    if strm.is_null() || (*strm).state.is_null() || (*strm).zfree.is_none() {
+    if strm.is_null() {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    Some((*strm).zfree.expect("non-null function pointer")).expect("non-null function pointer")(
-        (*strm).opaque,
-        (*strm).state as crate::stdlib::voidpf,
-    );
-    (*strm).state = ::core::ptr::null_mut::<crate::src::deflate::internal_state>();
+    let strm_ref = &mut *strm;
+    if strm_ref.state.is_null() || strm_ref.zfree.is_none() {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    }
+    let zfree = strm_ref.zfree.expect("non-null function pointer");
+    let opaque = strm_ref.opaque;
+    let state = strm_ref.state;
+    zfree(opaque, state as crate::stdlib::voidpf);
+    strm_ref.state = ::core::ptr::null_mut::<crate::src::deflate::internal_state>();
     return crate::zlib_h::Z_OK;
 }

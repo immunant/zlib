@@ -775,6 +775,18 @@ fn gzerror(state: &crate::gzguts_h::gz_state) -> (::core::ffi::c_int, GzErrorMes
     };
     (state.err, message)
 }
+
+fn gzerror_impl(
+    state: &crate::gzguts_h::gz_state,
+    errnum: Option<&mut ::core::ffi::c_int>,
+) -> GzErrorMessage {
+    let (err, message) = gzerror(state);
+    if let Some(errnum_ref) = errnum {
+        *errnum_ref = err;
+    }
+    message
+}
+
 #[export_name = "gzerror"]
 
 pub unsafe extern "C" fn gzerror_ffi(
@@ -788,10 +800,7 @@ pub unsafe extern "C" fn gzerror_ffi(
     if !gz_state_open(state) {
         return ::core::ptr::null::<::core::ffi::c_char>();
     }
-    let (err, message) = gzerror(state);
-    if let Some(errnum_ref) = errnum.as_mut() {
-        *errnum_ref = err;
-    }
+    let message = gzerror_impl(state, errnum.as_mut());
     match message {
         GzErrorMessage::OutOfMemory => b"out of memory\0".as_ptr() as *const ::core::ffi::c_char,
         GzErrorMessage::Empty => b"\0".as_ptr() as *const ::core::ffi::c_char,
