@@ -3796,8 +3796,29 @@ fn inflate_sync_core(
     strm.total_in = total_input;
     if let InflateSyncSearch::MarkerFound { .. } = result {
         state.wrap = inflate_sync_normalized_wrap(state.flags, state.wrap);
+        inflate_sync_finish_core(strm, state);
     }
     result
+}
+
+/// Complete a successful sync-marker search without resetting the stream's
+/// externally visible byte totals. This keeps reset, decode-table, and
+/// history-window state transitions out of the FFI wrapper.
+fn inflate_sync_finish_core(
+    strm: &mut crate::zlib_h::z_stream,
+    state: &mut crate::src::inflate::inflate_state,
+) {
+    let flags = state.flags;
+    let input_total = strm.total_in;
+    let output_total = strm.total_out;
+    inflate_reset_core(strm, state);
+    state.next = 0;
+    state.distcode = DecodeTableLocation::dynamic(0);
+    state.lencode = DecodeTableLocation::dynamic(0);
+    strm.total_in = input_total;
+    strm.total_out = output_total;
+    state.flags = flags;
+    state.mode = crate::src::inflate::TYPE;
 }
 
 #[export_name = "inflateSync"]
@@ -3829,14 +3850,6 @@ pub unsafe extern "C" fn inflateSync_ffi(mut strm: crate::zlib_h::z_streamp) -> 
         return crate::zlib_h::Z_DATA_ERROR;
     }
 
-    let flags = state.flags;
-    let input_total = strm.total_in;
-    let output_total = strm.total_out;
-    inflateReset(strm);
-    strm.total_in = input_total;
-    strm.total_out = output_total;
-    state.flags = flags;
-    state.mode = crate::src::inflate::TYPE;
     crate::zlib_h::Z_OK
 }
 fn inflate_sync_point_value(
@@ -4053,8 +4066,8 @@ mod tests {
         inflate_state_is_usable, inflate_state_metadata_check_result,
         inflate_state_references_are_valid,
         inflate_state_metadata_is_valid, inflate_stream_buffers_are_valid,
-        inflate_stream_has_allocator_callbacks, inflate_sync_core, inflate_sync_input_progress,
-        inflate_sync_normalized_wrap, inflate_sync_point, inflate_sync_point_value,
+        inflate_stream_has_allocator_callbacks, inflate_sync_core, inflate_sync_finish_core,
+        inflate_sync_input_progress, inflate_sync_normalized_wrap, inflate_sync_point, inflate_sync_point_value,
         inflate_sync_remaining_input, inflate_sync_search_core, inflate_trailer_checksum_from_hold,
         inflate_trailer_checksum_is_valid, inflate_undermine_core, inflate_validate_core,
         inflate_validate_wrap, inflate_zlib_header_error, inflate_zlib_header_transition,
@@ -5533,7 +5546,7 @@ mod tests {
     }
 
     #[test]
-    fn inflate_sync_core_updates_stream_progress_before_reset() {
+    fn inflate_sync_core_updates_progress_and_completes_marker_reset() {
         let mut stream = crate::zlib_h::z_stream {
             next_in: ::core::ptr::null_mut(),
             avail_in: 4,
@@ -5578,11 +5591,60 @@ mod tests {
         assert_eq!(stream.avail_in, 0);
         assert_eq!(stream.total_in, 15);
         assert_eq!(state.wrap, 1);
+        assert_eq!(state.mode, TYPE);
+        assert_eq!(state.next, 0);
 
         assert_eq!(
             unsafe { super::inflateEnd_ffi(&mut stream) },
             crate::zlib_h::Z_OK
         );
+    }
+
+    #[test]
+    fn inflate_sync_finish_resets_decoder_state_without_losing_stream_totals() {
+        let mut stream = crate::zlib_h::z_stream {
+            next_in: ::core::ptr::null_mut(),
+            avail_in: 3,
+            total_in: 29,
+            next_out: ::core::ptr::null_mut(),
+            avail_out: 7,
+            total_out: 31,
+            msg: b"old error\0".as_ptr() as *mut ::core::ffi::c_char,
+            state: ::core::ptr::null_mut(),
+            zalloc: None,
+            zfree: None,
+            opaque: ::core::ptr::null_mut(),
+            data_type: 99,
+            adler: 0,
+            reserved: 0,
+        };
+        let mut state = super::inflate_state::newly_allocated();
+        state.wrap = 1;
+        state.flags = 42;
+        state.wsize = 8;
+        state.whave = 5;
+        state.wnext = 5;
+        state.next = 13;
+        state.lencode = super::DecodeTableLocation::fixed_lens();
+        state.distcode = super::DecodeTableLocation::fixed_dists();
+
+        inflate_sync_finish_core(&mut stream, &mut state);
+
+        assert_eq!(stream.total_in, 29);
+        assert_eq!(stream.total_out, 31);
+        assert_eq!(stream.avail_in, 3);
+        assert_eq!(stream.avail_out, 7);
+        assert!(stream.msg.is_null());
+        assert_eq!(stream.data_type, 0);
+        assert_eq!(stream.adler, 1);
+        assert_eq!(state.flags, 42);
+        assert_eq!(state.mode, TYPE);
+        assert_eq!(state.wsize, 0);
+        assert_eq!(state.whave, 0);
+        assert_eq!(state.wnext, 0);
+        assert_eq!(state.next, 0);
+        assert_eq!(state.lencode, super::DecodeTableLocation::dynamic(0));
+        assert_eq!(state.distcode, super::DecodeTableLocation::dynamic(0));
     }
     #[test]
     fn inflate_mode_validation_accepts_only_known_range() {
