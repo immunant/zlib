@@ -2806,16 +2806,21 @@ fn deflate_stored(
                 break;
             }
         }
-        used = used.wrapping_sub((*s.strm).avail_in as ::core::ffi::c_uint);
+        let (post_loop_avail_in, post_loop_next_in) = {
+            let strm = &*s.strm;
+            (strm.avail_in, strm.next_in)
+        };
+        used = used.wrapping_sub(post_loop_avail_in as ::core::ffi::c_uint);
         if used != 0 {
             if used >= s.w_size {
                 s.matches = 2 as crate::stdlib::uInt;
                 let state = &mut *s;
-                let strm = &mut *state.strm;
                 let copy_len = state.w_size as usize;
                 let window = ::core::slice::from_raw_parts_mut(state.window, copy_len);
-                let input =
-                    ::core::slice::from_raw_parts(strm.next_in.wrapping_sub(copy_len), copy_len);
+                let input = ::core::slice::from_raw_parts(
+                    post_loop_next_in.wrapping_sub(copy_len),
+                    copy_len,
+                );
                 copy_deflate_bytes(window, input);
                 state.strstart = state.w_size;
                 state.insert = state.strstart;
@@ -2840,7 +2845,7 @@ fn deflate_stored(
                 let output_start = s.strstart as usize;
                 let output = &mut window[output_start..output_start + copy_len];
                 let input = ::core::slice::from_raw_parts(
-                    (*s.strm).next_in.wrapping_sub(copy_len),
+                    post_loop_next_in.wrapping_sub(copy_len),
                     copy_len,
                 );
                 copy_deflate_bytes(output, input);
@@ -2858,7 +2863,7 @@ fn deflate_stored(
         }
         if flush != crate::zlib_h::Z_NO_FLUSH
             && flush != crate::zlib_h::Z_FINISH
-            && (*s.strm).avail_in == 0 as crate::stdlib::uInt
+            && post_loop_avail_in == 0 as crate::stdlib::uInt
             && s.strstart as ::core::ffi::c_long == s.block_start
         {
             return block_done;
@@ -2866,7 +2871,7 @@ fn deflate_stored(
         have = s
             .window_size
             .wrapping_sub(s.strstart as crate::zutil_h::ulg) as ::core::ffi::c_uint;
-        let avail_in = (*s.strm).avail_in;
+        let avail_in = post_loop_avail_in;
         if avail_in > have && s.block_start >= s.w_size as ::core::ffi::c_long {
             s.block_start -= s.w_size as ::core::ffi::c_long;
             s.strstart = s.strstart.wrapping_sub(s.w_size);

@@ -208,30 +208,15 @@ fn gz_open(
     unsafe {
         let mut state: crate::gzguts_h::gz_statep =
             ::core::ptr::null_mut::<crate::gzguts_h::gz_state>();
-        let mut len: crate::stdlib::z_size_t = 0;
-        let mut oflag: ::core::ffi::c_int;
-        let exclusive: ::core::ffi::c_int;
         state =
             crate::stdlib::malloc(::core::mem::size_of::<crate::gzguts_h::gz_state>()
                 as crate::__stddef_size_t_h::size_t) as crate::gzguts_h::gz_statep;
         if state.is_null() {
             return ::core::ptr::null_mut::<crate::zlib_h::gzFile_s>();
         }
-        (*state).size = 0 as ::core::ffi::c_uint;
-        (*state).want = crate::gzguts_h::GZBUFSIZE as ::core::ffi::c_uint;
-        (*state).err = crate::zlib_h::Z_OK;
-        (*state).msg = ::core::ptr::null_mut::<::core::ffi::c_char>();
-        (*state).mode = crate::gzguts_h::GZ_NONE;
-        (*state).level = crate::zlib_h::Z_DEFAULT_COMPRESSION;
-        (*state).strategy = crate::zlib_h::Z_DEFAULT_STRATEGY;
-        (*state).direct = 0 as ::core::ffi::c_int;
-        (*state).mode = parsed_mode.mode;
-        (*state).level = parsed_mode.level;
-        (*state).strategy = parsed_mode.strategy;
-        (*state).direct = parsed_mode.direct;
-        oflag = parsed_mode.oflag;
-        exclusive = parsed_mode.exclusive;
-        len = path.to_bytes().len() as crate::stdlib::z_size_t;
+        let mut oflag = parsed_mode.oflag;
+        let exclusive = parsed_mode.exclusive;
+        let len = path.to_bytes().len() as crate::stdlib::z_size_t;
         let state_path = crate::stdlib::malloc(
             (len as crate::__stddef_size_t_h::size_t)
                 .wrapping_add(1 as crate::__stddef_size_t_h::size_t),
@@ -240,7 +225,16 @@ fn gz_open(
             crate::stdlib::free(state as *mut ::core::ffi::c_void);
             return ::core::ptr::null_mut::<crate::zlib_h::gzFile_s>();
         }
-        (*state).path = state_path;
+        let state_ref = &mut *state;
+        state_ref.size = 0 as ::core::ffi::c_uint;
+        state_ref.want = crate::gzguts_h::GZBUFSIZE as ::core::ffi::c_uint;
+        state_ref.err = crate::zlib_h::Z_OK;
+        state_ref.msg = ::core::ptr::null_mut::<::core::ffi::c_char>();
+        state_ref.mode = parsed_mode.mode;
+        state_ref.level = parsed_mode.level;
+        state_ref.strategy = parsed_mode.strategy;
+        state_ref.direct = parsed_mode.direct;
+        state_ref.path = state_path;
         crate::stdlib::snprintf(
             state_path,
             (len as crate::__stddef_size_t_h::size_t)
@@ -267,8 +261,7 @@ fn gz_open(
                 );
             }
         }
-        (*state).fd = fd;
-        let state_ref = &mut *state;
+        state_ref.fd = fd;
         state_ref.path_len = len as crate::__stddef_size_t_h::size_t;
         if state_ref.fd == -1 as ::core::ffi::c_int {
             crate::stdlib::free(state_ref.path as *mut ::core::ffi::c_void);
