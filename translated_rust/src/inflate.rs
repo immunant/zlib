@@ -763,17 +763,35 @@ pub(crate) fn inflate_fast_tables(
     lencode: usize,
     distcode: usize,
 ) -> Option<(&[crate::src::inftrees::code], &[crate::src::inftrees::code])> {
-    let lcode = if lencode == crate::src::inftrees::inffixed_h::lenfix.as_ptr() as usize {
-        Some(&crate::src::inftrees::inffixed_h::lenfix[..])
-    } else {
-        inflate_fast_dynamic_table(codes, lencode)
-    };
-    let dcode = if distcode == crate::src::inftrees::inffixed_h::distfix.as_ptr() as usize {
-        Some(&crate::src::inftrees::inffixed_h::distfix[..])
-    } else {
-        inflate_fast_dynamic_table(codes, distcode)
-    };
+    let lcode = inflate_fast_table(
+        codes,
+        lencode,
+        crate::src::inftrees::inffixed_h::lenfix.as_ptr() as usize,
+        &crate::src::inftrees::inffixed_h::lenfix,
+    );
+    let dcode = inflate_fast_table(
+        codes,
+        distcode,
+        crate::src::inftrees::inffixed_h::distfix.as_ptr() as usize,
+        &crate::src::inftrees::inffixed_h::distfix,
+    );
     Some((lcode?, dcode?))
+}
+
+/// Resolve one compatibility table cursor to a bounded table view.  The
+/// cursor remains an address token: all table access after this point is by
+/// checked slice indexing.
+fn inflate_fast_table<'a>(
+    codes: &'a [crate::src::inftrees::code],
+    cursor: usize,
+    fixed_cursor: usize,
+    fixed: &'a [crate::src::inftrees::code],
+) -> Option<&'a [crate::src::inftrees::code]> {
+    if cursor == fixed_cursor {
+        Some(fixed)
+    } else {
+        inflate_fast_dynamic_table(codes, cursor)
+    }
 }
 
 /// Run normal inflate's bounded fast decoder after its ABI boundary has
@@ -791,9 +809,8 @@ fn inflate_fast_normal(
     output: &mut [u8],
     output_start: usize,
     window: &[u8],
-    codes: &[crate::src::inftrees::code],
-    lencode: usize,
-    distcode: usize,
+    lcode: &[crate::src::inftrees::code],
+    dcode: &[crate::src::inftrees::code],
     wsize: usize,
     whave: usize,
     wnext: usize,
@@ -804,7 +821,6 @@ fn inflate_fast_normal(
     distbits: ::core::ffi::c_uint,
     start: ::core::ffi::c_uint,
 ) -> Option<crate::src::inffast::InflateFastProgress> {
-    let (lcode, dcode) = inflate_fast_tables(codes, lencode, distcode)?;
     Some(crate::src::inffast::inflate_fast_core(
         crate::src::inffast::InflateFastViews {
             input,
@@ -2153,6 +2169,13 @@ pub unsafe fn inflate(
                                         }
                                         let strm_ref = &mut *strm;
                                         let state_ref = &mut *state;
+                                        let lcode = inflate_fast_table(
+                                            &state_ref.codes,
+                                            state_ref.lencode as usize,
+                                            crate::src::inftrees::inffixed_h::lenfix.as_ptr()
+                                                as usize,
+                                            &crate::src::inftrees::inffixed_h::lenfix,
+                                        );
                                         let fast = if have >= 6 as ::core::ffi::c_uint
                                             && left >= 258 as ::core::ffi::c_uint
                                         {
@@ -2185,24 +2208,30 @@ pub unsafe fn inflate(
                                                         put.wrapping_sub(output_start),
                                                         out as usize,
                                                     );
-                                                    inflate_fast_normal(
-                                                        input,
-                                                        output,
-                                                        output_start,
-                                                        window,
+                                                    inflate_fast_tables(
                                                         &state_ref.codes,
                                                         state_ref.lencode as usize,
                                                         state_ref.distcode as usize,
-                                                        wsize,
-                                                        state_ref.whave as usize,
-                                                        state_ref.wnext as usize,
-                                                        state_ref.sane != 0,
-                                                        hold,
-                                                        bits,
-                                                        state_ref.lenbits,
-                                                        state_ref.distbits,
-                                                        out,
                                                     )
+                                                    .and_then(|(lcode, dcode)| {
+                                                        inflate_fast_normal(
+                                                            input,
+                                                            output,
+                                                            output_start,
+                                                            window,
+                                                            lcode,
+                                                            dcode,
+                                                            wsize,
+                                                            state_ref.whave as usize,
+                                                            state_ref.wnext as usize,
+                                                            state_ref.sane != 0,
+                                                            hold,
+                                                            bits,
+                                                            state_ref.lenbits,
+                                                            state_ref.distbits,
+                                                            out,
+                                                        )
+                                                    })
                                                 } else {
                                                     None
                                                 }
@@ -2252,15 +2281,31 @@ pub unsafe fn inflate(
                                             // fast dispatch.  Keep scalar state updates on that
                                             // borrow instead of re-traversing the raw state
                                             // pointer.
+                                            let Some(lcode) = lcode else {
+                                                strm_ref.msg = INFLATE_ERROR_MESSAGES[14].as_ptr()
+                                                    as *const ::core::ffi::c_char
+                                                    as *mut ::core::ffi::c_char;
+                                                state_ref.mode = crate::src::inflate::BAD;
+                                                ret = crate::zlib_h::Z_DATA_ERROR;
+                                                break '_inf_leave;
+                                            };
                                             state_ref.back = 0 as ::core::ffi::c_int;
                                             loop {
-                                                here = *state_ref.lencode.wrapping_add(
-                                                    (hold as ::core::ffi::c_uint
-                                                        & ((1 as ::core::ffi::c_uint)
-                                                            << state_ref.lenbits)
-                                                            .wrapping_sub(1 as ::core::ffi::c_uint))
-                                                        as usize,
-                                                );
+                                                let index = (hold as ::core::ffi::c_uint
+                                                    & ((1 as ::core::ffi::c_uint)
+                                                        << state_ref.lenbits)
+                                                        .wrapping_sub(1 as ::core::ffi::c_uint))
+                                                    as usize;
+                                                let Some(code) = lcode.get(index) else {
+                                                    strm_ref.msg = INFLATE_ERROR_MESSAGES[14]
+                                                        .as_ptr()
+                                                        as *const ::core::ffi::c_char
+                                                        as *mut ::core::ffi::c_char;
+                                                    state_ref.mode = crate::src::inflate::BAD;
+                                                    ret = crate::zlib_h::Z_DATA_ERROR;
+                                                    break '_inf_leave;
+                                                };
+                                                here = *code;
                                                 if here.bits as ::core::ffi::c_uint <= bits {
                                                     break;
                                                 }
@@ -2283,9 +2328,8 @@ pub unsafe fn inflate(
                                             {
                                                 last = here;
                                                 loop {
-                                                    here = *state_ref.lencode.wrapping_add(
-                                                        (last.val as ::core::ffi::c_uint)
-                                                            .wrapping_add(
+                                                    let index = (last.val as ::core::ffi::c_uint)
+                                                        .wrapping_add(
                                                             (hold as ::core::ffi::c_uint
                                                                 & ((1 as ::core::ffi::c_uint)
                                                                     << last.bits
@@ -2297,8 +2341,17 @@ pub unsafe fn inflate(
                                                                     ))
                                                                 >> last.bits as ::core::ffi::c_int,
                                                         )
-                                                            as usize,
-                                                    );
+                                                        as usize;
+                                                    let Some(code) = lcode.get(index) else {
+                                                        strm_ref.msg = INFLATE_ERROR_MESSAGES[14]
+                                                            .as_ptr()
+                                                            as *const ::core::ffi::c_char
+                                                            as *mut ::core::ffi::c_char;
+                                                        state_ref.mode = crate::src::inflate::BAD;
+                                                        ret = crate::zlib_h::Z_DATA_ERROR;
+                                                        break '_inf_leave;
+                                                    };
+                                                    here = *code;
                                                     if (last.bits as ::core::ffi::c_int
                                                         + here.bits as ::core::ffi::c_int)
                                                         as ::core::ffi::c_uint
