@@ -2382,38 +2382,6 @@ fn clear_inflate_state(strm: &mut crate::zlib_h::z_stream) {
 pub unsafe extern "C" fn inflateEnd_ffi(mut strm: crate::zlib_h::z_streamp) -> ::core::ffi::c_int {
     inflateEnd(strm)
 }
-pub unsafe extern "C" fn inflateGetDictionary(
-    mut strm: crate::zlib_h::z_streamp,
-    mut dictionary: *mut crate::stdlib::Bytef,
-    mut dictLength: *mut crate::stdlib::uInt,
-) -> ::core::ffi::c_int {
-    let Some((_strm, state)) = inflateStateCheck(strm) else {
-        return crate::zlib_h::Z_STREAM_ERROR;
-    };
-    let dictionary = if !dictionary.is_null() && state.whave != 0 {
-        Some(::core::slice::from_raw_parts_mut(
-            dictionary,
-            state.whave as usize,
-        ))
-    } else {
-        None
-    };
-    let window = if state.whave != 0 {
-        Some(::core::slice::from_raw_parts(
-            state.window,
-            state.wsize as usize,
-        ))
-    } else {
-        None
-    };
-    let dict_length = if dictLength.is_null() {
-        None
-    } else {
-        Some(&mut *dictLength)
-    };
-    inflate_get_dictionary(state, window, dictionary, dict_length)
-}
-
 fn inflate_get_dictionary(
     state: &crate::src::inflate::inflate_state,
     window: Option<&[crate::stdlib::Bytef]>,
@@ -2439,7 +2407,33 @@ pub unsafe extern "C" fn inflateGetDictionary_ffi(
     mut dictionary: *mut crate::stdlib::Bytef,
     mut dictLength: *mut crate::stdlib::uInt,
 ) -> ::core::ffi::c_int {
-    inflateGetDictionary(strm, dictionary, dictLength)
+    // The ABI boundary validates the stream and binds optional caller output
+    // storage. The named implementation only operates on those references.
+    let Some((_strm, state)) = inflateStateCheck(strm) else {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    };
+    let dictionary = if !dictionary.is_null() && state.whave != 0 {
+        Some(::core::slice::from_raw_parts_mut(
+            dictionary,
+            state.whave as usize,
+        ))
+    } else {
+        None
+    };
+    let window = if state.whave != 0 {
+        Some(::core::slice::from_raw_parts(
+            state.window,
+            state.wsize as usize,
+        ))
+    } else {
+        None
+    };
+    let dict_length = if dictLength.is_null() {
+        None
+    } else {
+        Some(&mut *dictLength)
+    };
+    inflate_get_dictionary(state, window, dictionary, dict_length)
 }
 pub unsafe extern "C" fn inflateSetDictionary(
     mut strm: crate::zlib_h::z_streamp,
