@@ -601,16 +601,6 @@ fn gzgetc(state: Option<&mut crate::gzguts_h::gz_state>) -> ::core::ffi::c_int {
         return -1 as ::core::ffi::c_int;
     }
     crate::src::gzlib::gz_error_state(state, crate::zlib_h::Z_OK, None);
-    if state.x.have != 0 {
-        state.x.have = state.x.have.wrapping_sub(1);
-        state.x.pos += 1;
-        let byte = unsafe {
-            let byte = *state.x.next;
-            state.x.next = state.x.next.add(1);
-            byte
-        };
-        return byte as ::core::ffi::c_int;
-    }
     return if unsafe { gz_read(state, &mut buf) } < 1 as crate::stdlib::z_size_t
     {
         -1 as ::core::ffi::c_int
