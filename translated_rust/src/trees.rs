@@ -3099,12 +3099,10 @@ pub(crate) fn tr_align(s: &mut crate::src::deflate::deflate_state) {
     flush_bits_impl(s);
 }
 
-pub unsafe extern "C" fn _tr_align(mut s: *mut crate::src::deflate::deflate_state) {
-    let Some(s) = s.as_mut() else {
-        return;
-    };
+pub fn _tr_align(s: &mut crate::src::deflate::deflate_state) {
     tr_align(s);
 }
+
 #[export_name = "_tr_align"]
 
 pub unsafe extern "C" fn _tr_align_ffi(mut s: *mut crate::src::deflate::deflate_state) {
