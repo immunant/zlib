@@ -1445,6 +1445,22 @@ fn put_short_msb_bytes(
     *pending = pending.wrapping_add(2);
 }
 
+fn append_pending_bytes(
+    pending_buf: &mut [crate::stdlib::Bytef],
+    pending: &mut crate::zutil_h::ulg,
+    bytes: &[crate::stdlib::Bytef],
+) {
+    let start = *pending as usize;
+    let Some(end) = start.checked_add(bytes.len()) else {
+        return;
+    };
+    let Some(output) = pending_buf.get_mut(start..end) else {
+        return;
+    };
+    output.copy_from_slice(bytes);
+    *pending = pending.wrapping_add(bytes.len() as crate::zutil_h::ulg);
+}
+
 unsafe extern "C" fn putShortMSB(
     mut s: *mut crate::src::deflate::deflate_state,
     mut b: crate::stdlib::uInt,
@@ -2026,44 +2042,33 @@ pub unsafe extern "C" fn deflate(
         return crate::zlib_h::Z_STREAM_END;
     }
     if (*s).wrap == 2 as ::core::ffi::c_int {
-        let c2rust_fresh25 = (*s).pending;
-        (*s).pending = (*s).pending.wrapping_add(1);
-        *(*s).pending_buf.offset(c2rust_fresh25 as isize) =
-            ((*strm).adler & 0xff as crate::stdlib::uLong) as crate::stdlib::Byte;
-        let c2rust_fresh26 = (*s).pending;
-        (*s).pending = (*s).pending.wrapping_add(1);
-        *(*s).pending_buf.offset(c2rust_fresh26 as isize) =
-            ((*strm).adler >> 8 as ::core::ffi::c_int & 0xff as crate::stdlib::uLong)
-                as crate::stdlib::Byte;
-        let c2rust_fresh27 = (*s).pending;
-        (*s).pending = (*s).pending.wrapping_add(1);
-        *(*s).pending_buf.offset(c2rust_fresh27 as isize) =
-            ((*strm).adler >> 16 as ::core::ffi::c_int & 0xff as crate::stdlib::uLong)
-                as crate::stdlib::Byte;
-        let c2rust_fresh28 = (*s).pending;
-        (*s).pending = (*s).pending.wrapping_add(1);
-        *(*s).pending_buf.offset(c2rust_fresh28 as isize) =
-            ((*strm).adler >> 24 as ::core::ffi::c_int & 0xff as crate::stdlib::uLong)
-                as crate::stdlib::Byte;
-        let c2rust_fresh29 = (*s).pending;
-        (*s).pending = (*s).pending.wrapping_add(1);
-        *(*s).pending_buf.offset(c2rust_fresh29 as isize) =
-            ((*strm).total_in & 0xff as crate::stdlib::uLong) as crate::stdlib::Byte;
-        let c2rust_fresh30 = (*s).pending;
-        (*s).pending = (*s).pending.wrapping_add(1);
-        *(*s).pending_buf.offset(c2rust_fresh30 as isize) =
-            ((*strm).total_in >> 8 as ::core::ffi::c_int & 0xff as crate::stdlib::uLong)
-                as crate::stdlib::Byte;
-        let c2rust_fresh31 = (*s).pending;
-        (*s).pending = (*s).pending.wrapping_add(1);
-        *(*s).pending_buf.offset(c2rust_fresh31 as isize) =
-            ((*strm).total_in >> 16 as ::core::ffi::c_int & 0xff as crate::stdlib::uLong)
-                as crate::stdlib::Byte;
-        let c2rust_fresh32 = (*s).pending;
-        (*s).pending = (*s).pending.wrapping_add(1);
-        *(*s).pending_buf.offset(c2rust_fresh32 as isize) =
-            ((*strm).total_in >> 24 as ::core::ffi::c_int & 0xff as crate::stdlib::uLong)
-                as crate::stdlib::Byte;
+        // The final gzip trailer has a fixed eight-byte representation.  The
+        // pending allocation has exactly `pending_buf_size` bytes, established
+        // by `deflateInit2_()` or `deflateCopy()`.
+        let pending_buf = ::core::slice::from_raw_parts_mut(
+            (*s).pending_buf,
+            (*s).pending_buf_size as usize,
+        );
+        append_pending_bytes(
+            pending_buf,
+            &mut (*s).pending,
+            &[
+                ((*strm).adler & 0xff as crate::stdlib::uLong) as crate::stdlib::Byte,
+                ((*strm).adler >> 8 as ::core::ffi::c_int & 0xff as crate::stdlib::uLong)
+                    as crate::stdlib::Byte,
+                ((*strm).adler >> 16 as ::core::ffi::c_int & 0xff as crate::stdlib::uLong)
+                    as crate::stdlib::Byte,
+                ((*strm).adler >> 24 as ::core::ffi::c_int & 0xff as crate::stdlib::uLong)
+                    as crate::stdlib::Byte,
+                ((*strm).total_in & 0xff as crate::stdlib::uLong) as crate::stdlib::Byte,
+                ((*strm).total_in >> 8 as ::core::ffi::c_int & 0xff as crate::stdlib::uLong)
+                    as crate::stdlib::Byte,
+                ((*strm).total_in >> 16 as ::core::ffi::c_int & 0xff as crate::stdlib::uLong)
+                    as crate::stdlib::Byte,
+                ((*strm).total_in >> 24 as ::core::ffi::c_int & 0xff as crate::stdlib::uLong)
+                    as crate::stdlib::Byte,
+            ],
+        );
     } else {
         putShortMSB(
             s,
