@@ -188,9 +188,7 @@ pub(crate) fn inflate_state_values_are_valid(
 // The large legacy decoder still calls this transitional adapter. Every
 // other stream validation site uses `inflate_state_check_at_boundary!`, which
 // keeps its raw adoptions in the FFI boundary that owns the stream.
-pub(crate) unsafe extern "C" fn inflateStateCheck(
-    mut strm: crate::zlib_h::z_streamp,
-) -> ::core::ffi::c_int {
+pub(crate) unsafe fn inflateStateCheck(mut strm: crate::zlib_h::z_streamp) -> ::core::ffi::c_int {
     if strm.is_null() {
         return 1;
     }
@@ -677,7 +675,7 @@ fn inflate_fast_tables(
     Some((lcode?, dcode?))
 }
 
-unsafe extern "C" fn updatewindow(
+unsafe fn updatewindow(
     mut strm: crate::zlib_h::z_streamp,
     mut end: *const crate::stdlib::Bytef,
     mut copy: ::core::ffi::c_uint,
@@ -735,7 +733,7 @@ unsafe extern "C" fn updatewindow(
     }
     return 0 as ::core::ffi::c_int;
 }
-pub unsafe extern "C" fn inflate(
+pub unsafe fn inflate(
     mut strm: crate::zlib_h::z_streamp,
     mut flush: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
