@@ -881,6 +881,22 @@ fn gzfread_request_len(
     }
 }
 
+// Item reads do not close the handle or invoke user callbacks. Resolve the
+// opaque handle through its owned-state registry so the exported ABI adapter
+// only needs to bind the caller's destination range.
+fn gzfread_handle(
+    file_key: usize,
+    size: crate::stdlib::z_size_t,
+    nitems: crate::stdlib::z_size_t,
+    buffer: Option<&mut [::core::ffi::c_uchar]>,
+) -> crate::stdlib::z_size_t {
+    crate::src::gzlib::gz_with_owned_state(file_key, |state| {
+        let request = gzfread_dispatch(state, size, nitems);
+        gzfread(state, size, request, buffer)
+    })
+    .unwrap_or(0)
+}
+
 #[export_name = "gzfread"]
 
 pub unsafe extern "C" fn gzfread_ffi(
@@ -890,27 +906,25 @@ pub unsafe extern "C" fn gzfread_ffi(
     mut file: crate::zlib_h::gzFile,
 ) -> crate::stdlib::z_size_t {
     if file.is_null() {
-        return 0 as crate::stdlib::z_size_t;
+        return 0;
     }
-    let state = &mut *(file as crate::gzguts_h::gz_statep);
-    let request = gzfread_dispatch(state, size, nitems);
-    // Empty, overflowing, and oversized requests never reach the raw range
-    // conversion below.
-    match request {
-        GzItemReadRequest::Rejected | GzItemReadRequest::Empty => {
-            gzfread(state, size, request, None)
+    // Classify only the caller-controlled byte count before binding its
+    // range. The stateful request preflight, including its error record,
+    // remains in `gzfread_handle()` after registry lookup succeeds.
+    let buffer = match crate::src::gzlib::gz_item_request(size, nitems) {
+        crate::src::gzlib::GzItemRequest::Bytes(len) if !buf.is_null() => {
+            let Some(slice_len) = crate::src::gzlib::gz_rust_slice_len(len) else {
+                return gzfread_handle(file.addr(), size, nitems, None);
+            };
+            // SAFETY: C's `gzfread` contract supplies a writable range for
+            // its non-null buffer and requested item count.
+            Some(unsafe {
+                ::core::slice::from_raw_parts_mut(buf as *mut ::core::ffi::c_uchar, slice_len)
+            })
         }
-        GzItemReadRequest::Bytes(_) if buf.is_null() => gzfread(state, size, request, None),
-        GzItemReadRequest::Bytes(slice_len) => gzfread(
-            state,
-            size,
-            request,
-            Some(::core::slice::from_raw_parts_mut(
-                buf as *mut ::core::ffi::c_uchar,
-                slice_len,
-            )),
-        ),
-    }
+        _ => None,
+    };
+    gzfread_handle(file.addr(), size, nitems, buffer)
 }
 // Reading one byte through `gz_read` preserves the buffered and unbuffered
 // paths' cursor and EOF bookkeeping while keeping the internal buffer access
