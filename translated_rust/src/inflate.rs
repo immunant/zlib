@@ -1645,9 +1645,13 @@ pub unsafe extern "C" fn inflate(
                                                                         // increasing implementation
                                                                         // unsafety.
                                                                         let mut copied = 0usize;
-                                                                        while copied < copy as usize {
-                                                                            *put.wrapping_add(copied) =
-                                                                                *next.wrapping_add(copied);
+                                                                        while copied < copy as usize
+                                                                        {
+                                                                            *put.wrapping_add(
+                                                                                copied,
+                                                                            ) = *next.wrapping_add(
+                                                                                copied,
+                                                                            );
                                                                             copied += 1;
                                                                         }
                                                                         have =
@@ -1788,7 +1792,8 @@ pub unsafe extern "C" fn inflate(
                                                             1 => {
                                                                 let state = &mut *state;
                                                                 crate::src::inftrees::inflate_fixed_state(state);
-                                                                state.mode = crate::src::inflate::LEN_;
+                                                                state.mode =
+                                                                    crate::src::inflate::LEN_;
                                                                 if flush == crate::zlib_h::Z_TREES {
                                                                     hold >>=
                                                                         2 as ::core::ffi::c_int;
@@ -1876,7 +1881,9 @@ pub unsafe extern "C" fn inflate(
                                             }
                                             (*state).mode = crate::src::inflate::LEN;
                                         }
-                                        if have >= 6 as ::core::ffi::c_uint
+                                        let strm_ref = &mut *strm;
+                                        let state_ref = &mut *state;
+                                        let fast = if have >= 6 as ::core::ffi::c_uint
                                             && left >= 258 as ::core::ffi::c_uint
                                         {
                                             // `out` is the output capacity at the beginning of
@@ -1884,9 +1891,9 @@ pub unsafe extern "C" fn inflate(
                                             // over any bytes decoded by the slow path. Lend the
                                             // complete original span so the fast decoder keeps
                                             // zlib's distance accounting relative to `out`.
-                                            let strm_ref = &mut *strm;
-                                            let state_ref = &mut *state;
-                                            let fast = if let Some(output_start) = out.checked_sub(left) {
+                                            let fast = if let Some(output_start) =
+                                                out.checked_sub(left)
+                                            {
                                                 let output_start = output_start as usize;
                                                 let wsize = state_ref.wsize as usize;
                                                 let window = if wsize == 0 {
@@ -1935,62 +1942,47 @@ pub unsafe extern "C" fn inflate(
                                             } else {
                                                 None
                                             };
-                                            if let Some(fast) = fast {
-                                                let Ok(input_used) = ::core::ffi::c_uint::try_from(fast.input_used) else {
-                                                    ret = crate::zlib_h::Z_DATA_ERROR;
-                                                    break '_inf_leave;
-                                                };
-                                                let Ok(output_used) = ::core::ffi::c_uint::try_from(fast.output_used) else {
-                                                    ret = crate::zlib_h::Z_DATA_ERROR;
-                                                    break '_inf_leave;
-                                                };
-                                                if input_used > have || output_used > left {
-                                                    ret = crate::zlib_h::Z_DATA_ERROR;
-                                                    break '_inf_leave;
-                                                }
-                                                next = next.wrapping_add(fast.input_used);
-                                                have = have.wrapping_sub(input_used);
-                                                put = put.wrapping_add(fast.output_used);
-                                                left = left.wrapping_sub(output_used);
-                                                hold = fast.hold;
-                                                bits = fast.bits;
-                                                if let Some(mode) = fast.mode {
-                                                    state_ref.mode = mode;
-                                                    strm_ref.msg = match fast.error {
-                                                        Some(14) => b"invalid literal/length code\0".as_ptr(),
-                                                        Some(15) => b"invalid distance code\0".as_ptr(),
-                                                        Some(17) => b"invalid distance too far back\0".as_ptr(),
-                                                        _ => ::core::ptr::null(),
-                                                    } as *mut ::core::ffi::c_char;
-                                                }
-                                                if state_ref.mode as ::core::ffi::c_uint
-                                                    == crate::src::inflate::TYPE as ::core::ffi::c_int
-                                                        as ::core::ffi::c_uint
-                                                {
-                                                    state_ref.back = -1 as ::core::ffi::c_int;
-                                                }
-                                                continue '_inf_leave;
+                                            fast
+                                        } else {
+                                            None
+                                        };
+                                        if let Some(fast) = fast {
+                                            let Ok(input_used) =
+                                                ::core::ffi::c_uint::try_from(fast.input_used)
+                                            else {
+                                                ret = crate::zlib_h::Z_DATA_ERROR;
+                                                break '_inf_leave;
+                                            };
+                                            let Ok(output_used) =
+                                                ::core::ffi::c_uint::try_from(fast.output_used)
+                                            else {
+                                                ret = crate::zlib_h::Z_DATA_ERROR;
+                                                break '_inf_leave;
+                                            };
+                                            if input_used > have || output_used > left {
+                                                ret = crate::zlib_h::Z_DATA_ERROR;
+                                                break '_inf_leave;
                                             }
-                                            // A transitional cursor layout that cannot be
-                                            // represented by the safe table/window lends retains
-                                            // the legacy decoder path until state ownership is
-                                            // migrated.
-                                            strm_ref.next_out = put as *mut crate::stdlib::Bytef;
-                                            strm_ref.avail_out = left as crate::stdlib::uInt;
-                                            strm_ref.next_in = next as *mut crate::stdlib::Bytef;
-                                            strm_ref.avail_in = have as crate::stdlib::uInt;
-                                            state_ref.hold = hold;
-                                            state_ref.bits = bits;
-                                            crate::src::inffast::inflate_fast(
-                                                strm as *mut crate::zlib_h::z_stream_s,
-                                                out,
-                                            );
-                                            put = strm_ref.next_out as *mut ::core::ffi::c_uchar;
-                                            left = strm_ref.avail_out as ::core::ffi::c_uint;
-                                            next = strm_ref.next_in as *mut ::core::ffi::c_uchar;
-                                            have = strm_ref.avail_in as ::core::ffi::c_uint;
-                                            hold = state_ref.hold;
-                                            bits = state_ref.bits;
+                                            next = next.wrapping_add(fast.input_used);
+                                            have = have.wrapping_sub(input_used);
+                                            put = put.wrapping_add(fast.output_used);
+                                            left = left.wrapping_sub(output_used);
+                                            hold = fast.hold;
+                                            bits = fast.bits;
+                                            if let Some(mode) = fast.mode {
+                                                state_ref.mode = mode;
+                                                strm_ref.msg = match fast.error {
+                                                    Some(14) => {
+                                                        b"invalid literal/length code\0".as_ptr()
+                                                    }
+                                                    Some(15) => b"invalid distance code\0".as_ptr(),
+                                                    Some(17) => {
+                                                        b"invalid distance too far back\0".as_ptr()
+                                                    }
+                                                    _ => ::core::ptr::null(),
+                                                }
+                                                    as *mut ::core::ffi::c_char;
+                                            }
                                             if state_ref.mode as ::core::ffi::c_uint
                                                 == crate::src::inflate::TYPE as ::core::ffi::c_int
                                                     as ::core::ffi::c_uint
@@ -2141,8 +2133,8 @@ pub unsafe extern "C" fn inflate(
                                             if (*state).flags & 0x200 as ::core::ffi::c_int != 0
                                                 && (*state).wrap & 4 as ::core::ffi::c_int != 0
                                             {
-                                                let mut checked = (*state).check
-                                                    as crate::stdlib::uLong;
+                                                let mut checked =
+                                                    (*state).check as crate::stdlib::uLong;
                                                 let mut checked_at = 0usize;
                                                 while checked_at < copy as usize {
                                                     let byte = *next.wrapping_add(checked_at);
@@ -2152,8 +2144,7 @@ pub unsafe extern "C" fn inflate(
                                                     );
                                                     checked_at += 1;
                                                 }
-                                                (*state).check = checked
-                                                    as ::core::ffi::c_ulong;
+                                                (*state).check = checked as ::core::ffi::c_ulong;
                                             }
                                             have = have.wrapping_sub(copy);
                                             next = next.wrapping_add(copy as usize);
@@ -2324,8 +2315,7 @@ pub unsafe extern "C" fn inflate(
                         loop {
                             let c2rust_fresh7 = copy;
                             copy = copy.wrapping_add(1);
-                            len = *next.wrapping_add(c2rust_fresh7 as usize)
-                                as ::core::ffi::c_uint;
+                            len = *next.wrapping_add(c2rust_fresh7 as usize) as ::core::ffi::c_uint;
                             if !(*state).head.is_null()
                                 && !(*(*state).head).comment.is_null()
                                 && (*state).length < (*(*state).head).comm_max
@@ -2956,13 +2946,12 @@ pub unsafe extern "C" fn inflateCopy_ffi(
                 .wrapping_add(crate::src::inftrees::ENOUGH as usize)
                 .wrapping_sub(1) as *const crate::src::inftrees::code
     {
-        (*copy).lencode = (&raw mut (*copy).codes as *mut crate::src::inftrees::code)
-            .wrapping_add(
-                (*state)
-                    .lencode
-                    .offset_from(&raw mut (*state).codes as *mut crate::src::inftrees::code)
-                    as usize,
-            );
+        (*copy).lencode = (&raw mut (*copy).codes as *mut crate::src::inftrees::code).wrapping_add(
+            (*state)
+                .lencode
+                .offset_from(&raw mut (*state).codes as *mut crate::src::inftrees::code)
+                as usize,
+        );
         (*copy).distcode = (&raw mut (*copy).codes as *mut crate::src::inftrees::code)
             .wrapping_add(
                 (*state)

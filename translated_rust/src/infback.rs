@@ -734,7 +734,7 @@ pub unsafe extern "C" fn inflateBack_ffi(
                 break;
             }
         }
-        if have >= 6 as ::core::ffi::c_uint && left >= 258 as ::core::ffi::c_uint {
+        let fast = if have >= 6 as ::core::ffi::c_uint && left >= 258 as ::core::ffi::c_uint {
             // inflateBack's caller-provided output window is also its
             // history.  Build that bounded view at this export boundary and
             // tell the safe core to read history from the output slice itself
@@ -812,51 +812,37 @@ pub unsafe extern "C" fn inflateBack_ffi(
                     None
                 }
             };
-            if let Some(fast) = fast {
-                let Ok(input_used) = ::core::ffi::c_uint::try_from(fast.input_used) else {
-                    ret = crate::zlib_h::Z_DATA_ERROR;
-                    break;
-                };
-                let Ok(output_used) = ::core::ffi::c_uint::try_from(fast.output_used) else {
-                    ret = crate::zlib_h::Z_DATA_ERROR;
-                    break;
-                };
-                if input_used > have || output_used > left {
-                    ret = crate::zlib_h::Z_DATA_ERROR;
-                    break;
-                }
-                next = next.wrapping_add(fast.input_used);
-                have = have.wrapping_sub(input_used);
-                put = put.wrapping_add(fast.output_used);
-                left = left.wrapping_sub(output_used);
-                hold = fast.hold;
-                bits = fast.bits;
-                if let Some(mode) = fast.mode {
-                    (*state).mode = mode;
-                    (*strm).msg = match fast.error {
-                        Some(14) => b"invalid literal/length code\0".as_ptr(),
-                        Some(15) => b"invalid distance code\0".as_ptr(),
-                        Some(17) => b"invalid distance too far back\0".as_ptr(),
-                        _ => ::core::ptr::null(),
-                    } as *mut ::core::ffi::c_char;
-                }
-            } else {
-                (*strm).next_out = put as *mut crate::stdlib::Bytef;
-                (*strm).avail_out = left as crate::stdlib::uInt;
-                (*strm).next_in = next as *mut crate::stdlib::Bytef;
-                (*strm).avail_in = have as crate::stdlib::uInt;
-                (*state).hold = hold;
-                (*state).bits = bits;
-                crate::src::inffast::inflate_fast(
-                    strm as *mut crate::zlib_h::z_stream_s,
-                    (*state).wsize,
-                );
-                put = (*strm).next_out as *mut ::core::ffi::c_uchar;
-                left = (*strm).avail_out as ::core::ffi::c_uint;
-                next = (*strm).next_in as *mut ::core::ffi::c_uchar;
-                have = (*strm).avail_in as ::core::ffi::c_uint;
-                hold = (*state).hold;
-                bits = (*state).bits;
+            fast
+        } else {
+            None
+        };
+        if let Some(fast) = fast {
+            let Ok(input_used) = ::core::ffi::c_uint::try_from(fast.input_used) else {
+                ret = crate::zlib_h::Z_DATA_ERROR;
+                break;
+            };
+            let Ok(output_used) = ::core::ffi::c_uint::try_from(fast.output_used) else {
+                ret = crate::zlib_h::Z_DATA_ERROR;
+                break;
+            };
+            if input_used > have || output_used > left {
+                ret = crate::zlib_h::Z_DATA_ERROR;
+                break;
+            }
+            next = next.wrapping_add(fast.input_used);
+            have = have.wrapping_sub(input_used);
+            put = put.wrapping_add(fast.output_used);
+            left = left.wrapping_sub(output_used);
+            hold = fast.hold;
+            bits = fast.bits;
+            if let Some(mode) = fast.mode {
+                (*state).mode = mode;
+                (*strm).msg = match fast.error {
+                    Some(14) => b"invalid literal/length code\0".as_ptr(),
+                    Some(15) => b"invalid distance code\0".as_ptr(),
+                    Some(17) => b"invalid distance too far back\0".as_ptr(),
+                    _ => ::core::ptr::null(),
+                } as *mut ::core::ffi::c_char;
             }
         } else {
             loop {
