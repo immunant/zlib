@@ -411,14 +411,23 @@ unsafe fn gzwrite(state: &mut crate::gzguts_h::gz_state, input: &[u8]) -> ::core
     if !policy.accepts_write() {
         return 0 as ::core::ffi::c_int;
     }
-    crate::src::gzlib::gz_clear_error(&mut state.msg, &mut state.err);
+    crate::src::gzlib::GzErrorState {
+        message: &mut state.msg,
+        error: &mut state.err,
+        buffered: &mut state.x.have,
+        again: state.again,
+        path: state.path.as_deref(),
+    }
+    .clear();
     if !gzwrite_length_fits_int(input.len()) {
-        crate::src::gzlib::gz_set_error(
-            &mut state.msg,
-            &mut state.err,
-            &mut state.x.have,
-            state.again,
-            state.path.as_deref(),
+        crate::src::gzlib::GzErrorState {
+            message: &mut state.msg,
+            error: &mut state.err,
+            buffered: &mut state.x.have,
+            again: state.again,
+            path: state.path.as_deref(),
+        }
+        .set(
             crate::zlib_h::Z_DATA_ERROR,
             Some(b"requested length does not fit in int"),
         );
@@ -458,14 +467,23 @@ unsafe fn gzfwrite(
     if !policy.accepts_write() {
         return 0 as crate::stdlib::z_size_t;
     }
-    crate::src::gzlib::gz_clear_error(&mut state.msg, &mut state.err);
+    crate::src::gzlib::GzErrorState {
+        message: &mut state.msg,
+        error: &mut state.err,
+        buffered: &mut state.x.have,
+        again: state.again,
+        path: state.path.as_deref(),
+    }
+    .clear();
     let Some(len) = gzfwrite_length(size, nitems) else {
-        crate::src::gzlib::gz_set_error(
-            &mut state.msg,
-            &mut state.err,
-            &mut state.x.have,
-            state.again,
-            state.path.as_deref(),
+        crate::src::gzlib::GzErrorState {
+            message: &mut state.msg,
+            error: &mut state.err,
+            buffered: &mut state.x.have,
+            again: state.again,
+            path: state.path.as_deref(),
+        }
+        .set(
             crate::zlib_h::Z_STREAM_ERROR,
             Some(b"request does not fit in a size_t"),
         );
@@ -571,15 +589,24 @@ unsafe fn gzputs(state: &mut crate::gzguts_h::gz_state, text: &[u8]) -> ::core::
     if !policy.accepts_write() {
         return -1 as ::core::ffi::c_int;
     }
-    crate::src::gzlib::gz_clear_error(&mut state.msg, &mut state.err);
+    crate::src::gzlib::GzErrorState {
+        message: &mut state.msg,
+        error: &mut state.err,
+        buffered: &mut state.x.have,
+        again: state.again,
+        path: state.path.as_deref(),
+    }
+    .clear();
     let len = text.len() as crate::stdlib::z_size_t;
     if !gzputs_length_fits_int(len) {
-        crate::src::gzlib::gz_set_error(
-            &mut state.msg,
-            &mut state.err,
-            &mut state.x.have,
-            state.again,
-            state.path.as_deref(),
+        crate::src::gzlib::GzErrorState {
+            message: &mut state.msg,
+            error: &mut state.err,
+            buffered: &mut state.x.have,
+            again: state.again,
+            path: state.path.as_deref(),
+        }
+        .set(
             crate::zlib_h::Z_STREAM_ERROR,
             Some(b"string length does not fit in int"),
         );

@@ -345,6 +345,58 @@ pub(crate) fn gz_clear_error(message: &mut Option<Box<[u8]>>, error: &mut ::core
     *error = crate::zlib_h::Z_OK;
 }
 
+// Error publication belongs to gzip's safe state machine, not to the
+// ABI-shaped handle.  Keep all of the mutable error fields in one
+// pointer-free view so read and write operations can share the transition
+// while a later owner facade removes their direct dependency on `gz_state`.
+pub(crate) struct GzErrorState<'a> {
+    pub(crate) message: &'a mut Option<Box<[u8]>>,
+    pub(crate) error: &'a mut ::core::ffi::c_int,
+    pub(crate) buffered: &'a mut ::core::ffi::c_uint,
+    pub(crate) again: ::core::ffi::c_int,
+    pub(crate) path: Option<&'a [u8]>,
+}
+
+impl GzErrorState<'_> {
+    pub(crate) fn clear(&mut self) {
+        gz_clear_error(self.message, self.error);
+    }
+
+    pub(crate) fn set(&mut self, err: ::core::ffi::c_int, message: Option<&[u8]>) {
+        *self.message = None;
+        if err != crate::zlib_h::Z_OK && err != crate::zlib_h::Z_BUF_ERROR && self.again == 0 {
+            *self.buffered = 0;
+        }
+        *self.error = err;
+        let Some(message) = message else {
+            return;
+        };
+        if err == crate::zlib_h::Z_MEM_ERROR {
+            return;
+        }
+        let Some(len) = self
+            .path
+            .and_then(|path| path.len().checked_add(message.len()))
+            .and_then(|len| len.checked_add(3))
+        else {
+            *self.error = crate::zlib_h::Z_MEM_ERROR;
+            return;
+        };
+        let mut text = Vec::new();
+        if text.try_reserve_exact(len).is_err() {
+            *self.error = crate::zlib_h::Z_MEM_ERROR;
+            return;
+        }
+        // A message is only formatted when a gzip path was successfully
+        // retained by the owner, matching the existing error contract.
+        text.extend_from_slice(self.path.unwrap());
+        text.extend_from_slice(b": ");
+        text.extend_from_slice(message);
+        text.push(0);
+        *self.message = Some(text.into_boxed_slice());
+    }
+}
+
 // Keep the error-state transition independent of the ABI-shaped gzip handle.
 // The callers that still hold that handle only provide the scalar fields and
 // owned byte views; a later gzip owner facade can use this directly.
@@ -357,34 +409,14 @@ pub(crate) fn gz_set_error(
     err: ::core::ffi::c_int,
     message: Option<&[u8]>,
 ) {
-    *stored_message = None;
-    if err != crate::zlib_h::Z_OK && err != crate::zlib_h::Z_BUF_ERROR && again == 0 {
-        *buffered = 0;
+    GzErrorState {
+        message: stored_message,
+        error,
+        buffered,
+        again,
+        path,
     }
-    *error = err;
-    let Some(message) = message else {
-        return;
-    };
-    if err == crate::zlib_h::Z_MEM_ERROR {
-        return;
-    }
-    let Some(len) = path
-        .and_then(|path| path.len().checked_add(message.len()))
-        .and_then(|len| len.checked_add(3))
-    else {
-        *error = crate::zlib_h::Z_MEM_ERROR;
-        return;
-    };
-    let mut text = Vec::new();
-    if text.try_reserve_exact(len).is_err() {
-        *error = crate::zlib_h::Z_MEM_ERROR;
-        return;
-    }
-    text.extend_from_slice(path.unwrap());
-    text.extend_from_slice(b": ");
-    text.extend_from_slice(message);
-    text.push(0);
-    *stored_message = Some(text.into_boxed_slice());
+    .set(err, message);
 }
 
 fn gzbuffer_want(
