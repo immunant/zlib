@@ -2044,6 +2044,100 @@ fn put_short_msb_bytes(
     *pending = pending.wrapping_add(2);
 }
 
+// The zlib wrapper header depends only on scalar compression settings and a
+// bounded pending buffer.  Keeping this emission separate from the ABI stream
+// lets the dispatcher retain just one storage projection while an eventual
+// owner-backed deflate state can reuse the exact same header logic.
+fn append_zlib_header(
+    pending_buf: &mut [crate::stdlib::Bytef],
+    pending: &mut crate::zutil_h::ulg,
+    w_bits: crate::stdlib::uInt,
+    strategy: ::core::ffi::c_int,
+    level: ::core::ffi::c_int,
+    strstart: crate::stdlib::uInt,
+    dictionary_adler: crate::stdlib::uLong,
+) -> crate::stdlib::uLong {
+    let mut header: crate::stdlib::uInt = (crate::zlib_h::Z_DEFLATED as crate::stdlib::uInt)
+        .wrapping_add(w_bits.wrapping_sub(8 as crate::stdlib::uInt) << 4 as ::core::ffi::c_int)
+        << 8 as ::core::ffi::c_int;
+    let level_flags = if strategy >= crate::zlib_h::Z_HUFFMAN_ONLY || level < 2 {
+        0
+    } else if level < 6 {
+        1
+    } else if level == 6 {
+        2
+    } else {
+        3
+    };
+    header |= level_flags << 6 as ::core::ffi::c_int;
+    let has_dictionary = strstart != 0;
+    if has_dictionary {
+        header |= crate::zutil_h::PRESET_DICT as crate::stdlib::uInt;
+    }
+    header = header.wrapping_add(
+        (31 as crate::stdlib::uInt).wrapping_sub(header.wrapping_rem(31 as crate::stdlib::uInt)),
+    );
+    put_short_msb_bytes(pending_buf, pending, header);
+    if has_dictionary {
+        put_short_msb_bytes(
+            pending_buf,
+            pending,
+            (dictionary_adler >> 16 as ::core::ffi::c_int) as crate::stdlib::uInt,
+        );
+        put_short_msb_bytes(
+            pending_buf,
+            pending,
+            (dictionary_adler & 0xffff as crate::stdlib::uLong) as crate::stdlib::uInt,
+        );
+    }
+    crate::src::adler32::adler32_z(0 as crate::stdlib::uLong, None)
+}
+
+// Finish either wrapper format through the bounded pending buffer.  The
+// caller decides when the resulting bytes are flushed and when the wrapper is
+// marked complete; this core only owns the format-specific byte ordering.
+fn append_deflate_trailer(
+    pending_buf: &mut [crate::stdlib::Bytef],
+    pending: &mut crate::zutil_h::ulg,
+    wrap: ::core::ffi::c_int,
+    check: crate::stdlib::uLong,
+    total_in: crate::stdlib::uLong,
+) {
+    if wrap == 2 {
+        append_pending_bytes(
+            pending_buf,
+            pending,
+            &[
+                (check & 0xff as crate::stdlib::uLong) as crate::stdlib::Byte,
+                (check >> 8 as ::core::ffi::c_int & 0xff as crate::stdlib::uLong)
+                    as crate::stdlib::Byte,
+                (check >> 16 as ::core::ffi::c_int & 0xff as crate::stdlib::uLong)
+                    as crate::stdlib::Byte,
+                (check >> 24 as ::core::ffi::c_int & 0xff as crate::stdlib::uLong)
+                    as crate::stdlib::Byte,
+                (total_in & 0xff as crate::stdlib::uLong) as crate::stdlib::Byte,
+                (total_in >> 8 as ::core::ffi::c_int & 0xff as crate::stdlib::uLong)
+                    as crate::stdlib::Byte,
+                (total_in >> 16 as ::core::ffi::c_int & 0xff as crate::stdlib::uLong)
+                    as crate::stdlib::Byte,
+                (total_in >> 24 as ::core::ffi::c_int & 0xff as crate::stdlib::uLong)
+                    as crate::stdlib::Byte,
+            ],
+        );
+    } else {
+        put_short_msb_bytes(
+            pending_buf,
+            pending,
+            (check >> 16 as ::core::ffi::c_int) as crate::stdlib::uInt,
+        );
+        put_short_msb_bytes(
+            pending_buf,
+            pending,
+            (check & 0xffff as crate::stdlib::uLong) as crate::stdlib::uInt,
+        );
+    }
+}
+
 fn append_pending_bytes(
     pending_buf: &mut [crate::stdlib::Bytef],
     pending: &mut crate::zutil_h::ulg,
@@ -2467,30 +2561,6 @@ pub unsafe extern "C" fn deflate(
         s.status = crate::src::deflate::BUSY_STATE;
     }
     if s.status == crate::src::deflate::INIT_STATE {
-        let mut header: crate::stdlib::uInt =
-            (crate::zlib_h::Z_DEFLATED as crate::stdlib::uInt).wrapping_add(
-                s.w_bits.wrapping_sub(8 as crate::stdlib::uInt) << 4 as ::core::ffi::c_int,
-            ) << 8 as ::core::ffi::c_int;
-        let mut level_flags: crate::stdlib::uInt = 0;
-        if s.strategy >= crate::zlib_h::Z_HUFFMAN_ONLY || s.level < 2 as ::core::ffi::c_int {
-            level_flags = 0 as crate::stdlib::uInt;
-        } else if s.level < 6 as ::core::ffi::c_int {
-            level_flags = 1 as crate::stdlib::uInt;
-        } else if s.level == 6 as ::core::ffi::c_int {
-            level_flags = 2 as crate::stdlib::uInt;
-        } else {
-            level_flags = 3 as crate::stdlib::uInt;
-        }
-        header |= level_flags << 6 as ::core::ffi::c_int;
-        if s.strstart != 0 as crate::stdlib::uInt {
-            header |= crate::zutil_h::PRESET_DICT as crate::stdlib::uInt;
-        }
-        header = header.wrapping_add(
-            (31 as crate::stdlib::uInt)
-                .wrapping_sub(header.wrapping_rem(31 as crate::stdlib::uInt)),
-        );
-        let has_dictionary = s.strstart != 0 as crate::stdlib::uInt;
-        let dictionary_adler = strm.adler;
         {
             let state = &mut *s;
             // `pending_buf` has exactly `pending_buf_size` bytes (allocated in
@@ -2502,21 +2572,16 @@ pub unsafe extern "C" fn deflate(
                     .as_ptr(),
                 state.pending_buf_size as usize,
             );
-            put_short_msb_bytes(pending_buf, &mut state.pending, header);
-            if has_dictionary {
-                put_short_msb_bytes(
-                    pending_buf,
-                    &mut state.pending,
-                    (dictionary_adler >> 16 as ::core::ffi::c_int) as crate::stdlib::uInt,
-                );
-                put_short_msb_bytes(
-                    pending_buf,
-                    &mut state.pending,
-                    (dictionary_adler & 0xffff as crate::stdlib::uLong) as crate::stdlib::uInt,
-                );
-            }
+            strm.adler = append_zlib_header(
+                pending_buf,
+                &mut state.pending,
+                state.w_bits,
+                state.strategy,
+                state.level,
+                state.strstart,
+                strm.adler,
+            );
         }
-        strm.adler = crate::src::adler32::adler32_z(0 as crate::stdlib::uLong, None);
         s.status = crate::src::deflate::BUSY_STATE;
         flush_pending(strm, s);
         if s.pending != 0 as crate::zutil_h::ulg {
@@ -2905,59 +2970,24 @@ pub unsafe extern "C" fn deflate(
     if s.wrap <= 0 as ::core::ffi::c_int {
         return crate::zlib_h::Z_STREAM_END;
     }
-    if s.wrap == 2 as ::core::ffi::c_int {
-        // The final gzip trailer has a fixed eight-byte representation.  The
-        // pending allocation has exactly `pending_buf_size` bytes, established
-        // by `deflateInit2_()` or `deflateCopy()`.
-        let pending_buf = ::core::slice::from_raw_parts_mut(
-            s.pending_buf.expect("initialized pending buffer").as_ptr(),
-            s.pending_buf_size as usize,
-        );
-        append_pending_bytes(
-            pending_buf,
-            &mut s.pending,
-            &[
-                (strm.adler & 0xff as crate::stdlib::uLong) as crate::stdlib::Byte,
-                (strm.adler >> 8 as ::core::ffi::c_int & 0xff as crate::stdlib::uLong)
-                    as crate::stdlib::Byte,
-                (strm.adler >> 16 as ::core::ffi::c_int & 0xff as crate::stdlib::uLong)
-                    as crate::stdlib::Byte,
-                (strm.adler >> 24 as ::core::ffi::c_int & 0xff as crate::stdlib::uLong)
-                    as crate::stdlib::Byte,
-                (strm.total_in & 0xff as crate::stdlib::uLong) as crate::stdlib::Byte,
-                (strm.total_in >> 8 as ::core::ffi::c_int & 0xff as crate::stdlib::uLong)
-                    as crate::stdlib::Byte,
-                (strm.total_in >> 16 as ::core::ffi::c_int & 0xff as crate::stdlib::uLong)
-                    as crate::stdlib::Byte,
-                (strm.total_in >> 24 as ::core::ffi::c_int & 0xff as crate::stdlib::uLong)
-                    as crate::stdlib::Byte,
-            ],
-        );
-    } else {
-        let adler = strm.adler;
-        {
-            let state = &mut *s;
-            // `pending_buf` has exactly `pending_buf_size` bytes (allocated in
-            // `deflateInit2_()` and copied at that extent in `deflateCopy()`).
-            let pending_buf = ::core::slice::from_raw_parts_mut(
-                state
-                    .pending_buf
-                    .expect("initialized pending buffer")
-                    .as_ptr(),
-                state.pending_buf_size as usize,
-            );
-            put_short_msb_bytes(
-                pending_buf,
-                &mut state.pending,
-                (adler >> 16 as ::core::ffi::c_int) as crate::stdlib::uInt,
-            );
-            put_short_msb_bytes(
-                pending_buf,
-                &mut state.pending,
-                (adler & 0xffff as crate::stdlib::uLong) as crate::stdlib::uInt,
-            );
-        }
-    }
+    // Both trailers write through the one callback-owned pending allocation;
+    // keep its projection at this boundary and hand the format choice to the
+    // pointer-free encoder above.
+    let state = &mut *s;
+    let pending_buf = ::core::slice::from_raw_parts_mut(
+        state
+            .pending_buf
+            .expect("initialized pending buffer")
+            .as_ptr(),
+        state.pending_buf_size as usize,
+    );
+    append_deflate_trailer(
+        pending_buf,
+        &mut state.pending,
+        state.wrap,
+        strm.adler,
+        strm.total_in,
+    );
     flush_pending(strm, s);
     if s.wrap > 0 as ::core::ffi::c_int {
         s.wrap = -s.wrap;
