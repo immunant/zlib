@@ -3091,8 +3091,12 @@ pub unsafe extern "C" fn deflateBound_ffi(
     mut strm: crate::zlib_h::z_streamp,
     mut sourceLen: crate::stdlib::uLong,
 ) -> crate::stdlib::uLong {
-    let mut bound: crate::stdlib::z_size_t =
-        deflateBound_z_ffi(strm, sourceLen as crate::stdlib::z_size_t);
+    // Dispatch directly to the safe core instead of crossing the exported
+    // `deflateBound_z` ABI boundary a second time.
+    let mut bound: crate::stdlib::z_size_t = deflate_bound_z_core(
+        sourceLen as crate::stdlib::z_size_t,
+        deflate_bound_state_at_ffi_boundary!(strm),
+    );
     if bound != bound {
         -1 as ::core::ffi::c_int as crate::stdlib::uLong
     } else {
@@ -5570,8 +5574,17 @@ unsafe fn deflate_huff(
         }
         let state = &mut *s;
         state.match_length = 0 as crate::stdlib::uInt;
-        let literal: crate::zutil_h::uch =
-            *state.window.offset(state.strstart as isize) as crate::zutil_h::uch;
+        // The Huffman-only path reads both the literal and, on a full symbol
+        // buffer, the block payload from this same callback-backed window.
+        // Establish the short-lived view once instead of doing a separate raw
+        // literal dereference before the checked range reads below.
+        if state.window.is_null() {
+            return need_more;
+        }
+        let window = core::slice::from_raw_parts(state.window, state.window_size as usize);
+        let Some(&literal) = window.get(state.strstart as usize) else {
+            return need_more;
+        };
         let layout =
             pending_storage_layout_for_state(state).expect("validated pending storage layout");
         let pending = &mut *core::ptr::slice_from_raw_parts_mut(
@@ -5592,12 +5605,14 @@ unsafe fn deflate_huff(
         if bflush != 0 {
             let stored_len = deflate_block_len(state.strstart, state.block_start);
             let stored_data = if state.block_start >= 0 as ::core::ffi::c_long {
-                Some(core::slice::from_raw_parts(
-                    state
-                        .window
-                        .add(state.block_start as ::core::ffi::c_uint as usize),
-                    stored_len as usize,
-                ))
+                let start = state.block_start as ::core::ffi::c_uint as usize;
+                let Some(end) = start.checked_add(stored_len as usize) else {
+                    return need_more;
+                };
+                let Some(data) = window.get(start..end) else {
+                    return need_more;
+                };
+                Some(data)
             } else {
                 None
             };
