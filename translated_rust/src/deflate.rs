@@ -2616,6 +2616,11 @@ pub unsafe fn deflate(
         } else {
             core::slice::from_raw_parts(strm.next_in, strm.avail_in as usize)
         };
+        // `avail_out` and `next_out` were checked on entry.  All compression
+        // engines below use the same bounded output view, so form it once
+        // instead of repeating the ABI conversion in each dispatch arm.
+        let output_len = strm.avail_out as usize;
+        let output = core::slice::from_raw_parts_mut(strm.next_out, output_len);
         let mut bstate: block_state = need_more;
         bstate = (if (*s).level == 0 as ::core::ffi::c_int
             || matches!(
@@ -2624,11 +2629,6 @@ pub unsafe fn deflate(
             )
         {
             let input_len = input.len();
-            let output_len = strm.avail_out as usize;
-            // The stream was validated above.  These short-lived views are
-            // immediately converted back into ABI cursors after the stored
-            // block engine returns.
-            let output = unsafe { core::slice::from_raw_parts_mut(strm.next_out, output_len) };
             let mut io = DeflateStoredIo {
                 input,
                 input_pos: 0,
@@ -2652,15 +2652,6 @@ pub unsafe fn deflate(
             result as ::core::ffi::c_uint
         } else if (*s).strategy == crate::zlib_h::Z_HUFFMAN_ONLY {
             let input_len = input.len();
-            let output_len = strm.avail_out as usize;
-            // As with the fast engine, the dispatcher owns the one ABI
-            // output conversion.  The Huffman-only engine receives only the
-            // bounded cursor below.
-            let output = if output_len == 0 {
-                &mut []
-            } else {
-                unsafe { core::slice::from_raw_parts_mut(strm.next_out, output_len) }
-            };
             let mut io = DeflateFastIo {
                 input,
                 input_pos: 0,
@@ -2677,9 +2668,7 @@ pub unsafe fn deflate(
                     as *mut crate::stdlib::Bytef;
             }
             strm.avail_in = io.avail_in();
-            if output_len != 0 {
-                strm.next_out = io.output.as_mut_ptr().wrapping_add(io.output_pos);
-            }
+            strm.next_out = io.output.as_mut_ptr().wrapping_add(io.output_pos);
             strm.avail_out = io.avail_out();
             strm.total_in = io.total_in;
             strm.total_out = io.total_out;
@@ -2688,16 +2677,6 @@ pub unsafe fn deflate(
             result as ::core::ffi::c_uint
         } else if (*s).strategy == crate::zlib_h::Z_RLE {
             let input_len = input.len();
-            let output_len = strm.avail_out as usize;
-            // RLE compression shares the bounded cursor protocol used by
-            // the fast, slow, and Huffman engines.  Keep the ABI output
-            // conversion in this dispatcher so the RLE loop itself remains
-            // fully slice based.
-            let output = if output_len == 0 {
-                &mut []
-            } else {
-                unsafe { core::slice::from_raw_parts_mut(strm.next_out, output_len) }
-            };
             let mut io = DeflateFastIo {
                 input,
                 input_pos: 0,
@@ -2714,9 +2693,7 @@ pub unsafe fn deflate(
                     as *mut crate::stdlib::Bytef;
             }
             strm.avail_in = io.avail_in();
-            if output_len != 0 {
-                strm.next_out = io.output.as_mut_ptr().wrapping_add(io.output_pos);
-            }
+            strm.next_out = io.output.as_mut_ptr().wrapping_add(io.output_pos);
             strm.avail_out = io.avail_out();
             strm.total_in = io.total_in;
             strm.total_out = io.total_out;
@@ -2730,15 +2707,6 @@ pub unsafe fn deflate(
                 }
                 CompressionEngine::Fast => {
                     let input_len = input.len();
-                    let output_len = strm.avail_out as usize;
-                    // A null output pointer is valid for an empty ABI range.
-                    // Avoid forming a slice from it until there are bytes to
-                    // write; the engine itself sees only the bounded slice.
-                    let output = if output_len == 0 {
-                        &mut []
-                    } else {
-                        unsafe { core::slice::from_raw_parts_mut(strm.next_out, output_len) }
-                    };
                     let mut io = DeflateFastIo {
                         input,
                         input_pos: 0,
@@ -2755,9 +2723,7 @@ pub unsafe fn deflate(
                             as *mut crate::stdlib::Bytef;
                     }
                     strm.avail_in = io.avail_in();
-                    if output_len != 0 {
-                        strm.next_out = io.output.as_mut_ptr().wrapping_add(io.output_pos);
-                    }
+                    strm.next_out = io.output.as_mut_ptr().wrapping_add(io.output_pos);
                     strm.avail_out = io.avail_out();
                     strm.total_in = io.total_in;
                     strm.total_out = io.total_out;
@@ -2767,16 +2733,6 @@ pub unsafe fn deflate(
                 }
                 CompressionEngine::Slow => {
                     let input_len = input.len();
-                    let output_len = strm.avail_out as usize;
-                    // Slow compression uses the same bounded cursors as the
-                    // fast and Huffman engines.  Keep its access to the ABI
-                    // stream in this dispatcher, so the matching loop only
-                    // operates on owned state and slices.
-                    let output = if output_len == 0 {
-                        &mut []
-                    } else {
-                        unsafe { core::slice::from_raw_parts_mut(strm.next_out, output_len) }
-                    };
                     let mut io = DeflateFastIo {
                         input,
                         input_pos: 0,
@@ -2793,9 +2749,7 @@ pub unsafe fn deflate(
                             as *mut crate::stdlib::Bytef;
                     }
                     strm.avail_in = io.avail_in();
-                    if output_len != 0 {
-                        strm.next_out = io.output.as_mut_ptr().wrapping_add(io.output_pos);
-                    }
+                    strm.next_out = io.output.as_mut_ptr().wrapping_add(io.output_pos);
                     strm.avail_out = io.avail_out();
                     strm.total_in = io.total_in;
                     strm.total_out = io.total_out;
