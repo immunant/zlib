@@ -20,20 +20,25 @@ pub use crate::zlib_h::gzFile_s;
 pub use crate::zlib_h::z_stream;
 pub use crate::zlib_h::z_stream_s;
 pub use crate::zlib_h::Z_STREAM_ERROR;
-pub unsafe fn gzclose(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
-    let close: unsafe extern "C" fn(crate::zlib_h::gzFile) -> ::core::ffi::c_int =
-        if state.mode == crate::gzguts_h::GZ_READ {
+pub unsafe fn gzclose(owned: Box<crate::gzguts_h::gz_state>) -> ::core::ffi::c_int {
+    let mode = {
+        let state: &crate::gzguts_h::gz_state = &owned;
+        state.mode
+    };
+    let close: unsafe fn(Box<crate::gzguts_h::gz_state>) -> ::core::ffi::c_int =
+        if mode == crate::gzguts_h::GZ_READ {
             crate::src::gzread::gzclose_r
         } else {
             crate::src::gzwrite::gzclose_w
         };
-    close(state as *mut _ as *mut crate::zlib_h::gzFile_s)
+    close(owned)
 }
 #[export_name = "gzclose"]
 
-pub unsafe extern "C" fn gzclose_ffi(mut file: crate::zlib_h::gzFile) -> ::core::ffi::c_int {
+pub unsafe extern "C" fn gzclose_ffi(file: crate::zlib_h::gzFile) -> ::core::ffi::c_int {
     if file.is_null() {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    gzclose(&mut *(file as *mut crate::gzguts_h::gz_state))
+    let owned = Box::from_raw(file.cast::<crate::gzguts_h::gz_state>());
+    gzclose(owned)
 }

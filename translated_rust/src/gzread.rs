@@ -894,34 +894,39 @@ pub unsafe extern "C" fn gzdirect(mut file: crate::zlib_h::gzFile) -> ::core::ff
 pub unsafe extern "C" fn gzdirect_ffi(mut file: crate::zlib_h::gzFile) -> ::core::ffi::c_int {
     gzdirect(file)
 }
-pub unsafe extern "C" fn gzclose_r(mut file: crate::zlib_h::gzFile) -> ::core::ffi::c_int {
-    if file.is_null() {
-        return crate::zlib_h::Z_STREAM_ERROR;
-    }
-    let state = &mut *(file as crate::gzguts_h::gz_statep);
-    if state.mode != crate::gzguts_h::GZ_READ {
-        return crate::zlib_h::Z_STREAM_ERROR;
-    }
-    if state.size != 0 {
-        crate::src::inflate::inflateEnd(&mut state.strm);
-        state.in_0.clear();
-    }
-    let err = if state.err == crate::zlib_h::Z_BUF_ERROR {
-        crate::zlib_h::Z_BUF_ERROR
-    } else {
-        crate::zlib_h::Z_OK
+pub unsafe fn gzclose_r(
+    mut owned: Box<crate::gzguts_h::gz_state>,
+) -> ::core::ffi::c_int {
+    let ret = {
+        let state: &mut crate::gzguts_h::gz_state = &mut owned;
+        if state.mode != crate::gzguts_h::GZ_READ {
+            return crate::zlib_h::Z_STREAM_ERROR;
+        }
+        if state.size != 0 {
+            crate::src::inflate::inflateEnd(&mut state.strm);
+            state.in_0.clear();
+        }
+        let err = if state.err == crate::zlib_h::Z_BUF_ERROR {
+            crate::zlib_h::Z_BUF_ERROR
+        } else {
+            crate::zlib_h::Z_OK
+        };
+        crate::src::gzlib::gz_error_state(state, crate::zlib_h::Z_OK, None);
+        let ret = crate::stdlib::close(state.fd);
+        if ret != 0 {
+            crate::zlib_h::Z_ERRNO
+        } else {
+            err
+        }
     };
-    crate::src::gzlib::gz_error_state(state, crate::zlib_h::Z_OK, None);
-    let ret = crate::stdlib::close(state.fd);
-    drop(Box::from_raw(state));
-    if ret != 0 {
-        crate::zlib_h::Z_ERRNO
-    } else {
-        err
-    }
+    ret
 }
 #[export_name = "gzclose_r"]
 
-pub unsafe extern "C" fn gzclose_r_ffi(mut file: crate::zlib_h::gzFile) -> ::core::ffi::c_int {
-    gzclose_r(file)
+pub unsafe extern "C" fn gzclose_r_ffi(file: crate::zlib_h::gzFile) -> ::core::ffi::c_int {
+    if file.is_null() {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    }
+    let owned = Box::from_raw(file.cast::<crate::gzguts_h::gz_state>());
+    gzclose_r(owned)
 }

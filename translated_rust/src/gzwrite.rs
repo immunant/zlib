@@ -651,39 +651,43 @@ pub unsafe extern "C" fn gzsetparams_ffi(
     };
     gzsetparams(state, level, strategy)
 }
-pub unsafe extern "C" fn gzclose_w(mut file: crate::zlib_h::gzFile) -> ::core::ffi::c_int {
-    let mut ret: ::core::ffi::c_int = crate::zlib_h::Z_OK;
-    let mut state: crate::gzguts_h::gz_statep =
-        ::core::ptr::null_mut::<crate::gzguts_h::gz_state>();
-    if file.is_null() {
-        return crate::zlib_h::Z_STREAM_ERROR;
-    }
-    state = file as crate::gzguts_h::gz_statep;
-    if (*state).mode != crate::gzguts_h::GZ_WRITE {
-        return crate::zlib_h::Z_STREAM_ERROR;
-    }
-    let state = &mut *state;
-    if state.skip != 0 && gz_zero(state) == -1 as ::core::ffi::c_int {
-        ret = (*state).err;
-    }
-    if gz_comp(state, crate::zlib_h::Z_FINISH) == -1 as ::core::ffi::c_int {
-        ret = (*state).err;
-    }
-    if (*state).size != 0 {
-        if (*state).direct == 0 {
-            crate::src::deflate::deflateEnd(&mut (*state).strm);
+/// Finish the write stream before releasing the already-owned gzip state.
+/// The opaque-handle conversion is confined to the exported boundary.
+pub unsafe fn gzclose_w(
+    mut owned: Box<crate::gzguts_h::gz_state>,
+) -> ::core::ffi::c_int {
+    let ret = {
+        let state: &mut crate::gzguts_h::gz_state = &mut owned;
+        let mut ret: ::core::ffi::c_int = crate::zlib_h::Z_OK;
+        if state.mode != crate::gzguts_h::GZ_WRITE {
+            return crate::zlib_h::Z_STREAM_ERROR;
         }
-        (*state).in_0.clear();
-    }
-    crate::src::gzlib::gz_error_state(state, crate::zlib_h::Z_OK, None);
-    if crate::stdlib::close((*state).fd) == -1 as ::core::ffi::c_int {
-        ret = crate::zlib_h::Z_ERRNO;
-    }
-    drop(Box::from_raw(state as *mut _));
-    return ret;
+        if state.skip != 0 && gz_zero(state) == -1 as ::core::ffi::c_int {
+            ret = state.err;
+        }
+        if gz_comp(state, crate::zlib_h::Z_FINISH) == -1 as ::core::ffi::c_int {
+            ret = state.err;
+        }
+        if state.size != 0 {
+            if state.direct == 0 {
+                crate::src::deflate::deflateEnd(&mut state.strm);
+            }
+            state.in_0.clear();
+        }
+        crate::src::gzlib::gz_error_state(state, crate::zlib_h::Z_OK, None);
+        if crate::stdlib::close(state.fd) == -1 as ::core::ffi::c_int {
+            ret = crate::zlib_h::Z_ERRNO;
+        }
+        ret
+    };
+    ret
 }
 #[export_name = "gzclose_w"]
 
-pub unsafe extern "C" fn gzclose_w_ffi(mut file: crate::zlib_h::gzFile) -> ::core::ffi::c_int {
-    gzclose_w(file)
+pub unsafe extern "C" fn gzclose_w_ffi(file: crate::zlib_h::gzFile) -> ::core::ffi::c_int {
+    if file.is_null() {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    }
+    let owned = Box::from_raw(file.cast::<crate::gzguts_h::gz_state>());
+    gzclose_w(owned)
 }
