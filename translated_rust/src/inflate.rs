@@ -746,6 +746,16 @@ fn copy_literal_block(input: &[crate::stdlib::Bytef], output: &mut [crate::stdli
     output.copy_from_slice(input);
 }
 
+/// Return the portion of the caller's output buffer consumed by one inflate
+/// invocation.  Keep this arithmetic checked before the legacy engine turns
+/// the resulting span into a borrowed slice for history and checksums.
+fn produced_output_len(
+    initial_available: crate::stdlib::uInt,
+    remaining_available: crate::stdlib::uInt,
+) -> Option<usize> {
+    usize::try_from(initial_available.checked_sub(remaining_available)?).ok()
+}
+
 pub fn inflate(
     strm: &mut crate::zlib_h::z_stream,
     mut flush: ::core::ffi::c_int,
@@ -825,7 +835,8 @@ pub fn inflate(
         {
             state.mode = crate::src::inflate::TYPEDO;
         }
-        put = strm.next_out as *mut ::core::ffi::c_uchar;
+        let output_start = strm.next_out;
+        put = output_start as *mut ::core::ffi::c_uchar;
         left = strm.avail_out as ::core::ffi::c_uint;
         next = strm.next_in as *mut ::core::ffi::c_uchar;
         have = strm.avail_in as ::core::ffi::c_uint;
@@ -2524,17 +2535,17 @@ pub fn inflate(
         strm.avail_in = have as crate::stdlib::uInt;
         state.hold = hold;
         state.bits = bits;
-        let produced = out.wrapping_sub(strm.avail_out as ::core::ffi::c_uint);
+        let Some(produced_len) = produced_output_len(out, strm.avail_out) else {
+            return crate::zlib_h::Z_STREAM_ERROR;
+        };
+        let produced = produced_len as ::core::ffi::c_uint;
         // The output cursor above now marks the end of this call's produced
         // bytes. Borrow that one range once for both history and checksum
         // updates, instead of rebuilding equivalent raw slices below.
         let produced_output = if produced == 0 {
             &[]
         } else {
-            ::core::slice::from_raw_parts(
-                strm.next_out.wrapping_offset(-(produced as isize)),
-                produced as usize,
-            )
+            ::core::slice::from_raw_parts(output_start, produced_len)
         };
         if state.wsize != 0
             || produced != 0
