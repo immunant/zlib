@@ -2528,22 +2528,18 @@ pub unsafe extern "C" fn inflateSetDictionary_ffi(
 ) -> ::core::ffi::c_int {
     inflateSetDictionary(strm, dictionary, dictLength)
 }
-pub unsafe extern "C" fn inflateGetHeader(
-    mut strm: crate::zlib_h::z_streamp,
-    mut head: crate::zlib_h::gz_headerp,
-) -> ::core::ffi::c_int {
-    let Some((_strm, state)) = inflateStateCheck(strm) else {
-        return crate::zlib_h::Z_STREAM_ERROR;
-    };
-    inflate_get_header(state, &mut *head)
-}
 #[export_name = "inflateGetHeader"]
 
 pub unsafe extern "C" fn inflateGetHeader_ffi(
     mut strm: crate::zlib_h::z_streamp,
     mut head: crate::zlib_h::gz_headerp,
 ) -> ::core::ffi::c_int {
-    inflateGetHeader(strm, head)
+    // This is the C ABI boundary: validate and bind the stream before
+    // binding the caller-provided header storage.
+    let Some((_strm, state)) = inflateStateCheck(strm) else {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    };
+    inflate_get_header(state, &mut *head)
 }
 
 fn inflate_get_header(
