@@ -291,6 +291,29 @@ pub(crate) fn inflate_stored_copy_len(
     remaining.min(available_input).min(available_output)
 }
 
+/// Decode zlib's overloaded `windowBits` argument without touching the ABI
+/// stream or inflate state.  The boundary remains responsible for freeing a
+/// mismatched history allocation and publishing the accepted settings.
+pub(crate) fn inflate_window_bits(
+    window_bits: ::core::ffi::c_int,
+) -> Option<(::core::ffi::c_int, ::core::ffi::c_uint)> {
+    if window_bits < -15 {
+        return None;
+    }
+    let (wrap, bits) = if window_bits < 0 {
+        (0, window_bits.checked_neg()?)
+    } else {
+        let wrap = (window_bits >> 4) + 5;
+        let bits = if window_bits < 48 {
+            window_bits & 15
+        } else {
+            window_bits
+        };
+        (wrap, bits)
+    };
+    (bits == 0 || (8..=15).contains(&bits)).then_some((wrap, bits as ::core::ffi::c_uint))
+}
+
 // This is expanded only in existing ABI/codec boundaries. It keeps raw
 // stream/state adoption at those boundaries, while the validity decision
 // itself remains the pointer-free scalar core above.
@@ -326,28 +349,30 @@ macro_rules! inflate_reset_keep_at_boundary {
         if crate::src::inflate::inflate_state_check_at_boundary!(strm) != 0 {
             crate::zlib_h::Z_STREAM_ERROR
         } else {
-            let state = (*strm).state as *mut crate::src::inflate::inflate_state;
-            (*state).total = 0 as ::core::ffi::c_ulong;
-            (*strm).total_out = (*state).total as crate::stdlib::uLong;
-            (*strm).total_in = (*strm).total_out;
-            (*strm).msg = ::core::ptr::null_mut::<::core::ffi::c_char>();
-            (*strm).data_type = 0 as ::core::ffi::c_int;
-            if (*state).wrap != 0 {
-                (*strm).adler = ((*state).wrap & 1 as ::core::ffi::c_int) as crate::stdlib::uLong;
+            let strm_ref = &mut *strm;
+            let state = strm_ref.state as *mut crate::src::inflate::inflate_state;
+            let state_ref = &mut *state;
+            state_ref.total = 0 as ::core::ffi::c_ulong;
+            strm_ref.total_out = state_ref.total as crate::stdlib::uLong;
+            strm_ref.total_in = strm_ref.total_out;
+            strm_ref.msg = ::core::ptr::null_mut::<::core::ffi::c_char>();
+            strm_ref.data_type = 0 as ::core::ffi::c_int;
+            if state_ref.wrap != 0 {
+                strm_ref.adler = (state_ref.wrap & 1 as ::core::ffi::c_int) as crate::stdlib::uLong;
             }
-            (*state).mode = crate::src::inflate::HEAD;
-            (*state).last = 0 as ::core::ffi::c_int;
-            (*state).havedict = 0 as ::core::ffi::c_int;
-            (*state).flags = -1 as ::core::ffi::c_int;
-            (*state).dmax = 32768 as ::core::ffi::c_uint;
-            (*state).head = ::core::ptr::null_mut::<crate::zlib_h::gz_header>();
-            (*state).hold = 0 as ::core::ffi::c_ulong;
-            (*state).bits = 0 as ::core::ffi::c_uint;
-            (*state).next = &raw mut (*state).codes as *mut crate::src::inftrees::code;
-            (*state).distcode = (*state).next;
-            (*state).lencode = (*state).distcode;
-            (*state).sane = 1 as ::core::ffi::c_int;
-            (*state).back = -1 as ::core::ffi::c_int;
+            state_ref.mode = crate::src::inflate::HEAD;
+            state_ref.last = 0 as ::core::ffi::c_int;
+            state_ref.havedict = 0 as ::core::ffi::c_int;
+            state_ref.flags = -1 as ::core::ffi::c_int;
+            state_ref.dmax = 32768 as ::core::ffi::c_uint;
+            state_ref.head = ::core::ptr::null_mut::<crate::zlib_h::gz_header>();
+            state_ref.hold = 0 as ::core::ffi::c_ulong;
+            state_ref.bits = 0 as ::core::ffi::c_uint;
+            state_ref.next = &raw mut state_ref.codes as *mut crate::src::inftrees::code;
+            state_ref.distcode = state_ref.next;
+            state_ref.lencode = state_ref.distcode;
+            state_ref.sane = 1 as ::core::ffi::c_int;
+            state_ref.back = -1 as ::core::ffi::c_int;
             crate::zlib_h::Z_OK
         }
     }};
@@ -360,10 +385,12 @@ macro_rules! inflate_reset_at_boundary {
         if crate::src::inflate::inflate_state_check_at_boundary!(strm) != 0 {
             crate::zlib_h::Z_STREAM_ERROR
         } else {
-            let state = (*strm).state as *mut crate::src::inflate::inflate_state;
-            (*state).wsize = 0 as ::core::ffi::c_uint;
-            (*state).whave = 0 as ::core::ffi::c_uint;
-            (*state).wnext = 0 as ::core::ffi::c_uint;
+            let strm_ref = &mut *strm;
+            let state = strm_ref.state as *mut crate::src::inflate::inflate_state;
+            let state_ref = &mut *state;
+            state_ref.wsize = 0 as ::core::ffi::c_uint;
+            state_ref.whave = 0 as ::core::ffi::c_uint;
+            state_ref.wnext = 0 as ::core::ffi::c_uint;
             crate::src::inflate::inflate_reset_keep_at_boundary!(strm)
         }
     }};
@@ -373,41 +400,41 @@ pub(crate) use inflate_reset_at_boundary;
 macro_rules! inflate_reset2_at_boundary {
     ($strm:expr, $window_bits:expr $(,)?) => {{
         let strm = $strm;
-        let mut window_bits = $window_bits;
         if crate::src::inflate::inflate_state_check_at_boundary!(strm) != 0 {
             crate::zlib_h::Z_STREAM_ERROR
-        } else if window_bits < -15 as ::core::ffi::c_int {
-            crate::zlib_h::Z_STREAM_ERROR
         } else {
-            let state = (*strm).state as *mut crate::src::inflate::inflate_state;
-            let wrap: ::core::ffi::c_int;
-            if window_bits < 0 as ::core::ffi::c_int {
-                wrap = 0 as ::core::ffi::c_int;
-                window_bits = -window_bits;
-            } else {
-                wrap = (window_bits >> 4 as ::core::ffi::c_int) + 5 as ::core::ffi::c_int;
-                if window_bits < 48 as ::core::ffi::c_int {
-                    window_bits &= 15 as ::core::ffi::c_int;
+            match crate::src::inflate::inflate_window_bits($window_bits) {
+                None => crate::zlib_h::Z_STREAM_ERROR,
+                Some((wrap, window_bits)) => {
+                    let (old_window, zfree, opaque) = {
+                        let strm_ref = &mut *strm;
+                        let state = strm_ref.state as *mut crate::src::inflate::inflate_state;
+                        let state_ref = &mut *state;
+                        if !state_ref.window.is_null() && state_ref.wbits != window_bits {
+                            (state_ref.window, strm_ref.zfree, strm_ref.opaque)
+                        } else {
+                            (
+                                ::core::ptr::null_mut::<::core::ffi::c_uchar>(),
+                                None,
+                                ::core::ptr::null_mut::<::core::ffi::c_void>(),
+                            )
+                        }
+                    };
+                    if !old_window.is_null() {
+                        if let Some(zfree) = zfree {
+                            zfree(opaque, old_window as crate::stdlib::voidpf);
+                            let strm_ref = &mut *strm;
+                            let state = strm_ref.state as *mut crate::src::inflate::inflate_state;
+                            (&mut *state).window = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
+                        }
+                    }
+                    let strm_ref = &mut *strm;
+                    let state = strm_ref.state as *mut crate::src::inflate::inflate_state;
+                    let state_ref = &mut *state;
+                    state_ref.wrap = wrap;
+                    state_ref.wbits = window_bits;
+                    crate::src::inflate::inflate_reset_at_boundary!(strm)
                 }
-            }
-            if window_bits != 0
-                && (window_bits < 8 as ::core::ffi::c_int || window_bits > 15 as ::core::ffi::c_int)
-            {
-                crate::zlib_h::Z_STREAM_ERROR
-            } else {
-                if !(*state).window.is_null()
-                    && (*state).wbits != window_bits as ::core::ffi::c_uint
-                {
-                    Some((*strm).zfree.expect("non-null function pointer"))
-                        .expect("non-null function pointer")(
-                        (*strm).opaque,
-                        (*state).window as crate::stdlib::voidpf,
-                    );
-                    (*state).window = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
-                }
-                (*state).wrap = wrap;
-                (*state).wbits = window_bits as ::core::ffi::c_uint;
-                crate::src::inflate::inflate_reset_at_boundary!(strm)
             }
         }
     }};
