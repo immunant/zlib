@@ -17,6 +17,7 @@ pub use crate::stdlib::fcntl;
 
 pub use crate::stdlib::open;
 
+pub use crate::stdlib::__O_CLOEXEC;
 pub use crate::stdlib::F_GETFD;
 pub use crate::stdlib::F_GETFL;
 pub use crate::stdlib::F_SETFD;
@@ -33,7 +34,6 @@ pub use crate::stdlib::O_WRONLY;
 pub use crate::stdlib::SEEK_CUR;
 pub use crate::stdlib::SEEK_END;
 pub use crate::stdlib::SEEK_SET;
-pub use crate::stdlib::__O_CLOEXEC;
 
 pub use crate::stdlib::__off64_t;
 pub use crate::stdlib::__off_t;
@@ -664,9 +664,7 @@ pub unsafe extern "C" fn gzerror_ffi(
         *errnum = err;
     }
     match message {
-        GzErrorMessage::OutOfMemory => {
-            b"out of memory\0".as_ptr() as *const ::core::ffi::c_char
-        }
+        GzErrorMessage::OutOfMemory => b"out of memory\0".as_ptr() as *const ::core::ffi::c_char,
         GzErrorMessage::Empty => b"\0".as_ptr() as *const ::core::ffi::c_char,
         GzErrorMessage::StateMessage => state.msg as *const ::core::ffi::c_char,
     }

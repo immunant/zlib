@@ -883,36 +883,21 @@ pub unsafe extern "C" fn deflateSetDictionary_ffi(
 ) -> ::core::ffi::c_int {
     deflateSetDictionary(strm, dictionary, dictLength)
 }
-pub unsafe extern "C" fn deflateGetDictionary(
-    mut strm: crate::zlib_h::z_streamp,
-    mut dictionary: *mut crate::stdlib::Bytef,
-    mut dictLength: *mut crate::stdlib::uInt,
-) -> ::core::ffi::c_int {
-    let mut s: *mut crate::src::deflate::deflate_state =
-        ::core::ptr::null_mut::<crate::src::deflate::deflate_state>();
+pub fn deflateGetDictionary(
+    state: &crate::src::deflate::deflate_state,
+) -> (crate::stdlib::uInt, crate::stdlib::uInt) {
     let mut len: crate::stdlib::uInt = 0;
-    if deflateStateCheck(strm) != 0 {
-        return crate::zlib_h::Z_STREAM_ERROR;
+    len = state.strstart.wrapping_add(state.lookahead);
+    if len > state.w_size {
+        len = state.w_size;
     }
-    s = (*strm).state as *mut crate::src::deflate::deflate_state;
-    len = (*s).strstart.wrapping_add((*s).lookahead);
-    if len > (*s).w_size {
-        len = (*s).w_size;
-    }
-    if !dictionary.is_null() && len != 0 {
-        crate::stdlib::memcpy(
-            dictionary as *mut ::core::ffi::c_void,
-            (*s).window
-                .offset((*s).strstart as isize)
-                .offset((*s).lookahead as isize)
-                .offset(-(len as isize)) as *const ::core::ffi::c_void,
-            len as crate::__stddef_size_t_h::size_t,
-        );
-    }
-    if !dictLength.is_null() {
-        *dictLength = len;
-    }
-    return crate::zlib_h::Z_OK;
+    return (
+        state
+            .strstart
+            .wrapping_add(state.lookahead)
+            .wrapping_sub(len),
+        len,
+    );
 }
 #[export_name = "deflateGetDictionary"]
 
@@ -921,7 +906,22 @@ pub unsafe extern "C" fn deflateGetDictionary_ffi(
     mut dictionary: *mut crate::stdlib::Bytef,
     mut dictLength: *mut crate::stdlib::uInt,
 ) -> ::core::ffi::c_int {
-    deflateGetDictionary(strm, dictionary, dictLength)
+    if deflateStateCheck(strm) != 0 {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    }
+    let state = &*((*strm).state as *mut crate::src::deflate::deflate_state);
+    let (offset, len) = deflateGetDictionary(state);
+    if !dictionary.is_null() && len != 0 {
+        crate::stdlib::memcpy(
+            dictionary as *mut ::core::ffi::c_void,
+            state.window.offset(offset as isize) as *const ::core::ffi::c_void,
+            len as crate::__stddef_size_t_h::size_t,
+        );
+    }
+    if !dictLength.is_null() {
+        *dictLength = len;
+    }
+    return crate::zlib_h::Z_OK;
 }
 pub unsafe extern "C" fn deflateResetKeep(
     mut strm: crate::zlib_h::z_streamp,
@@ -2688,8 +2688,7 @@ unsafe extern "C" fn deflate_fast(
             let c2rust_fresh53 = (*s).sym_next;
             (*s).sym_next = (*s).sym_next.wrapping_add(1);
             *(*s).sym_buf.offset(c2rust_fresh53 as isize) = cc as crate::zutil_h::uchf;
-            (*s).dyn_ltree[cc as usize].freq =
-                (*s).dyn_ltree[cc as usize].freq.wrapping_add(1);
+            (*s).dyn_ltree[cc as usize].freq = (*s).dyn_ltree[cc as usize].freq.wrapping_add(1);
             bflush = ((*s).sym_next == (*s).sym_end) as ::core::ffi::c_int;
             (*s).lookahead = (*s).lookahead.wrapping_sub(1);
             (*s).strstart = (*s).strstart.wrapping_add(1);
@@ -2959,8 +2958,7 @@ unsafe extern "C" fn deflate_slow(
             let c2rust_fresh42 = (*s).sym_next;
             (*s).sym_next = (*s).sym_next.wrapping_add(1);
             *(*s).sym_buf.offset(c2rust_fresh42 as isize) = cc as crate::zutil_h::uchf;
-            (*s).dyn_ltree[cc as usize].freq =
-                (*s).dyn_ltree[cc as usize].freq.wrapping_add(1);
+            (*s).dyn_ltree[cc as usize].freq = (*s).dyn_ltree[cc as usize].freq.wrapping_add(1);
             bflush = ((*s).sym_next == (*s).sym_end) as ::core::ffi::c_int;
             if bflush != 0 {
                 crate::src::trees::_tr_flush_block(
@@ -3005,8 +3003,7 @@ unsafe extern "C" fn deflate_slow(
         let c2rust_fresh45 = (*s).sym_next;
         (*s).sym_next = (*s).sym_next.wrapping_add(1);
         *(*s).sym_buf.offset(c2rust_fresh45 as isize) = cc_0 as crate::zutil_h::uchf;
-        (*s).dyn_ltree[cc_0 as usize].freq =
-            (*s).dyn_ltree[cc_0 as usize].freq.wrapping_add(1);
+        (*s).dyn_ltree[cc_0 as usize].freq = (*s).dyn_ltree[cc_0 as usize].freq.wrapping_add(1);
         bflush = ((*s).sym_next == (*s).sym_end) as ::core::ffi::c_int;
         (*s).match_available = 0 as ::core::ffi::c_int;
     }
@@ -3224,8 +3221,7 @@ unsafe extern "C" fn deflate_rle(
             let c2rust_fresh59 = (*s).sym_next;
             (*s).sym_next = (*s).sym_next.wrapping_add(1);
             *(*s).sym_buf.offset(c2rust_fresh59 as isize) = cc as crate::zutil_h::uchf;
-            (*s).dyn_ltree[cc as usize].freq =
-                (*s).dyn_ltree[cc as usize].freq.wrapping_add(1);
+            (*s).dyn_ltree[cc as usize].freq = (*s).dyn_ltree[cc as usize].freq.wrapping_add(1);
             bflush = ((*s).sym_next == (*s).sym_end) as ::core::ffi::c_int;
             (*s).lookahead = (*s).lookahead.wrapping_sub(1);
             (*s).strstart = (*s).strstart.wrapping_add(1);

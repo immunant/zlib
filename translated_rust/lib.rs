@@ -101,8 +101,7 @@ pub mod __stddef_null_h {
         ::core::ptr::null::<::core::ffi::c_void>() as *mut ::core::ffi::c_void;
 }
 pub mod zlib_h {
-    pub const ZLIB_VERSION: [::core::ffi::c_char; 15] =
-        crate::c_char_array(b"1.3.2.1-motley\0");
+    pub const ZLIB_VERSION: [::core::ffi::c_char; 15] = crate::c_char_array(b"1.3.2.1-motley\0");
 
     pub type alloc_func = Option<
         unsafe extern "C" fn(
