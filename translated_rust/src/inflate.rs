@@ -392,6 +392,41 @@ fn initialize_inflate_state_base(
     state.mode = crate::src::inflate::HEAD;
 }
 
+/// Allocate, initialize, and install the opaque state through one named
+/// implementation boundary.  The stream takes ownership only after its ABI
+/// state field has been installed.
+fn initialize_allocated_inflate_state(
+    strm: &mut crate::zlib_h::z_stream,
+    window_bits: ::core::ffi::c_int,
+) -> ::core::ffi::c_int {
+    let state = unsafe {
+        Some(strm.zalloc.expect("non-null function pointer"))
+            .expect("non-null function pointer")(
+            strm.opaque,
+            1 as crate::stdlib::uInt,
+            ::core::mem::size_of::<crate::src::inflate::inflate_state>() as crate::stdlib::uInt,
+        ) as *mut crate::src::inflate::inflate_state
+    };
+    if state.is_null() {
+        return crate::zlib_h::Z_MEM_ERROR;
+    }
+    unsafe {
+        state.write_bytes(0, 1);
+    }
+    strm.state = state.cast::<crate::src::deflate::internal_state>();
+    let state_ref = unsafe { &mut *state };
+    initialize_inflate_state_base(state_ref, strm);
+    let ret = inflateReset2(strm, state_ref, window_bits);
+    if ret != crate::zlib_h::Z_OK {
+        unsafe {
+            Some(strm.zfree.expect("non-null function pointer"))
+                .expect("non-null function pointer")(strm.opaque, state.cast());
+        }
+        strm.state = ::core::ptr::null_mut::<crate::src::deflate::internal_state>();
+    }
+    ret
+}
+
 pub fn inflateInit2_(
     strm: &mut crate::zlib_h::z_stream,
     mut windowBits: ::core::ffi::c_int,
@@ -423,39 +458,7 @@ pub fn inflateInit2_(
                 as unsafe extern "C" fn(crate::stdlib::voidpf, crate::stdlib::voidpf) -> (),
         ) as crate::zlib_h::free_func;
     }
-    // Custom allocation and the resulting raw state handle remain confined
-    // to this legacy bridge. The initialized state is otherwise configured
-    // through safe references below.
-    let state = unsafe {
-        Some(strm.zalloc.expect("non-null function pointer"))
-            .expect("non-null function pointer")(
-            strm.opaque,
-            1 as crate::stdlib::uInt,
-            ::core::mem::size_of::<crate::src::inflate::inflate_state>() as crate::stdlib::uInt,
-        ) as *mut crate::src::inflate::inflate_state
-    };
-    if state.is_null() {
-        return crate::zlib_h::Z_MEM_ERROR;
-    }
-    unsafe {
-        crate::stdlib::memset(
-            state as *mut ::core::ffi::c_void,
-            0 as ::core::ffi::c_int,
-            ::core::mem::size_of::<crate::src::inflate::inflate_state>(),
-        );
-    }
-    strm.state = state as *mut crate::src::deflate::internal_state;
-    let state_ref = unsafe { &mut *state };
-    initialize_inflate_state_base(state_ref, strm);
-    let ret = inflateReset2(strm, state_ref, windowBits);
-    if ret != crate::zlib_h::Z_OK {
-        unsafe {
-            Some(strm.zfree.expect("non-null function pointer"))
-                .expect("non-null function pointer")(strm.opaque, state as crate::stdlib::voidpf);
-        }
-        strm.state = ::core::ptr::null_mut::<crate::src::deflate::internal_state>();
-    }
-    ret
+    initialize_allocated_inflate_state(strm, windowBits)
 }
 #[export_name = "inflateInit2_"]
 
