@@ -1386,6 +1386,18 @@ fn gz_open(
             path.as_ptr(),
         );
     }
+    // Keep a safe copy of the immutable path for error-message construction.
+    // The C-facing path allocation above remains the descriptor API's input,
+    // while this copy lets `gz_error()` avoid raw string formatting and manual
+    // message release.
+    if !gz_register_owned_strings(state_ref, path) {
+        crate::src::zutil::zcfree(
+            ::core::ptr::null_mut(),
+            state_ref.path as crate::stdlib::voidpf,
+        );
+        crate::src::zutil::zcfree(::core::ptr::null_mut(), state as crate::stdlib::voidpf);
+        return ::core::ptr::null_mut::<crate::zlib_h::gzFile_s>();
+    }
     let oflag = gz_open_flags(state_ref, &options);
     // SAFETY: the descriptor plans use only their documented integer
     // arguments; the open path remains a valid C string for this call.
@@ -1425,6 +1437,7 @@ fn gz_open(
             ::core::ptr::null_mut(),
             state_ref.path as crate::stdlib::voidpf,
         );
+        gz_release_owned_strings(state_ref);
         crate::src::zutil::zcfree(::core::ptr::null_mut(), state as crate::stdlib::voidpf);
         return ::core::ptr::null_mut::<crate::zlib_h::gzFile_s>();
     }
@@ -1927,19 +1940,122 @@ fn gz_clear_error_state(state: &mut crate::gzguts_h::gz_state) -> bool {
 // state. Keep those choices out of that raw ownership boundary.
 pub(crate) struct GzErrorPlan {
     pub discard_message: bool,
-    pub release_message: bool,
     pub clear_have: bool,
 }
 
+// Gzip handles are opaque outside this implementation, but their C-compatible
+// state still exposes `path` and `msg` pointers. Keep the backing bytes here
+// so internal error handling can retain those pointer values without manual
+// allocation, formatting, or release. Each entry is removed before its state
+// allocation is returned to C's allocator.
+struct GzOwnedStrings {
+    path: Vec<u8>,
+    message: Option<Vec<u8>>,
+}
+
+static GZ_OWNED_STRINGS: ::std::sync::OnceLock<
+    ::std::sync::Mutex<Vec<(usize, GzOwnedStrings)>>,
+> = ::std::sync::OnceLock::new();
+
+fn gz_state_key(state: &crate::gzguts_h::gz_state) -> usize {
+    ::core::ptr::from_ref(state).addr()
+}
+
+fn gz_owned_strings() -> &'static ::std::sync::Mutex<Vec<(usize, GzOwnedStrings)>> {
+    GZ_OWNED_STRINGS.get_or_init(|| ::std::sync::Mutex::new(Vec::new()))
+}
+
+fn gz_register_owned_strings(
+    state: &crate::gzguts_h::gz_state,
+    path: &::core::ffi::CStr,
+) -> bool {
+    let mut path_copy = Vec::new();
+    let path_bytes = path.to_bytes_with_nul();
+    if path_copy.try_reserve_exact(path_bytes.len()).is_err() {
+        return false;
+    }
+    path_copy.extend_from_slice(path_bytes);
+    let mut strings = gz_owned_strings().lock().expect("gzip string registry poisoned");
+    if let Some((_, strings)) = strings
+        .iter_mut()
+        .find(|(key, _)| *key == gz_state_key(state))
+    {
+        *strings = GzOwnedStrings {
+            path: path_copy,
+            message: None,
+        };
+        return true;
+    }
+    if strings.try_reserve(1).is_err() {
+        return false;
+    }
+    strings.push((
+        gz_state_key(state),
+        GzOwnedStrings {
+            path: path_copy,
+            message: None,
+        },
+    ));
+    true
+}
+
+pub(crate) fn gz_release_owned_strings(state: &crate::gzguts_h::gz_state) {
+    let mut strings = gz_owned_strings().lock().expect("gzip string registry poisoned");
+    if let Some(index) = strings
+        .iter()
+        .position(|(key, _)| *key == gz_state_key(state))
+    {
+        strings.swap_remove(index);
+    }
+}
+
+fn gz_discard_owned_message(state: &mut crate::gzguts_h::gz_state) {
+    let mut strings = gz_owned_strings().lock().expect("gzip string registry poisoned");
+    if let Some((_, strings)) = strings
+        .iter_mut()
+        .find(|(key, _)| *key == gz_state_key(state))
+    {
+        strings.message = None;
+    }
+    state.msg = ::core::ptr::null_mut::<::core::ffi::c_char>();
+}
+
+fn gz_store_owned_message(
+    state: &mut crate::gzguts_h::gz_state,
+    msg: &[u8],
+) -> bool {
+    let mut strings = gz_owned_strings().lock().expect("gzip string registry poisoned");
+    let Some((_, strings)) = strings
+        .iter_mut()
+        .find(|(key, _)| *key == gz_state_key(state))
+    else {
+        return false;
+    };
+    let Some(path) = strings.path.strip_suffix(&[0]) else {
+        return false;
+    };
+    let Some(message_len) = path.len().checked_add(2).and_then(|len| len.checked_add(msg.len())) else {
+        return false;
+    };
+    let mut message = Vec::new();
+    if message.try_reserve_exact(message_len).is_err() {
+        return false;
+    }
+    message.extend_from_slice(path);
+    message.extend_from_slice(b": ");
+    message.extend_from_slice(msg);
+    state.msg = message.as_mut_ptr() as *mut ::core::ffi::c_char;
+    strings.message = Some(message);
+    true
+}
+
 pub(crate) fn gz_error_plan(
-    previous_err: ::core::ffi::c_int,
     has_message: bool,
     again: ::core::ffi::c_int,
     err: ::core::ffi::c_int,
 ) -> GzErrorPlan {
     GzErrorPlan {
         discard_message: has_message,
-        release_message: has_message && previous_err != crate::zlib_h::Z_MEM_ERROR,
         clear_have: err != crate::zlib_h::Z_OK && err != crate::zlib_h::Z_BUF_ERROR && again == 0,
     }
 }
@@ -1950,7 +2066,7 @@ pub(crate) fn gz_error_apply(
     plan: &GzErrorPlan,
 ) {
     if plan.discard_message {
-        state.msg = ::core::ptr::null_mut::<::core::ffi::c_char>();
+        gz_discard_owned_message(state);
     }
     if plan.clear_have {
         state.x.have = 0;
@@ -1970,20 +2086,14 @@ pub(crate) fn gz_error_needs_message_allocation(
 }
 
 // This coordinator receives an already-bound state and either no message or
-// a nul-terminated byte slice.  It owns the C allocation boundary internally,
-// letting ordinary gzip state transitions report fixed messages without raw
-// pointers or unsafe calls at each site.
+// a nul-terminated byte slice. Its safe backing storage keeps the C-facing
+// message pointer valid until the next error transition or stream close.
 pub fn gz_error(
     state: &mut crate::gzguts_h::gz_state,
     err: ::core::ffi::c_int,
     msg: Option<&[u8]>,
 ) {
-    let plan = gz_error_plan(state.err, !state.msg.is_null(), state.again, err);
-    if plan.release_message {
-        // The state owns its previous default-allocator message, so release
-        // it through the matching safe zlib adapter.
-        crate::src::zutil::zcfree(::core::ptr::null_mut(), state.msg as crate::stdlib::voidpf);
-    }
+    let plan = gz_error_plan(!state.msg.is_null(), state.again, err);
     gz_error_apply(state, err, &plan);
     let Some(msg) = msg else {
         return;
@@ -1991,26 +2101,8 @@ pub fn gz_error(
     if !gz_error_needs_message_allocation(true, err) {
         return;
     }
-    // `gz_open()` records this when it allocates the owned path. Retaining the
-    // scalar length avoids another raw C-string traversal on an error path.
-    let path_len = state.path_len;
-    // `malloc` accepts every `size_t` value. `path` and `msg` are only used
-    // below after allocation succeeds, at the C formatting boundary.
-    state.msg = crate::stdlib::malloc(path_len.wrapping_add(msg.len().wrapping_add(2)))
-        as *mut ::core::ffi::c_char;
-    if state.msg.is_null() {
+    if !gz_store_owned_message(state, msg) {
         gz_error_allocation_failed(state);
-        return;
-    }
-    unsafe {
-        crate::stdlib::snprintf(
-            state.msg,
-            path_len.wrapping_add(msg.len().wrapping_add(2)),
-            b"%s%s%s\0".as_ptr() as *const ::core::ffi::c_char,
-            state.path,
-            b": \0".as_ptr() as *const ::core::ffi::c_char,
-            msg.as_ptr() as *const ::core::ffi::c_char,
-        );
     }
 }
 #[export_name = "gz_error"]

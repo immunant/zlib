@@ -877,6 +877,7 @@ pub fn gzclose_w(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
     // and the state allocation is released only after its fields are no
     // longer needed.
     crate::src::zutil::zcfree(::core::ptr::null_mut(), path as crate::stdlib::voidpf);
+    crate::src::gzlib::gz_release_owned_strings(state);
     if crate::stdlib::close(fd) == -1 as ::core::ffi::c_int {
         ret = crate::zlib_h::Z_ERRNO;
     }
