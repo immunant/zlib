@@ -129,6 +129,22 @@ pub(crate) fn gz_rewind_complete(state: &mut crate::gzguts_h::gz_state) {
     gzclearerr(state);
 }
 
+// Keep the descriptor result classification with the state transition it
+// enables. The caller remains responsible only for seeking the owned
+// descriptor; a successful seek is what makes resetting this read state
+// observable.
+pub(crate) fn gz_rewind_result(
+    state: &mut crate::gzguts_h::gz_state,
+    position: crate::stdlib::__off64_t,
+) -> ::core::ffi::c_int {
+    if position == -1 as crate::stdlib::__off64_t {
+        -1
+    } else {
+        gz_rewind_complete(state);
+        0
+    }
+}
+
 // A newly opened read handle has no transparent/gzip classification yet.
 // Leave the lookup itself at the allocation and descriptor boundary.
 pub(crate) fn gz_direct_needs_look(state: &crate::gzguts_h::gz_state) -> bool {
@@ -1527,17 +1543,14 @@ fn gzrewind(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
         return -1 as ::core::ffi::c_int;
     }
     // SAFETY: `fd` belongs to the bound gzip state and is not retained.
-    if unsafe {
+    let position = unsafe {
         crate::stdlib::lseek64(
             state.fd,
             state.start as crate::stdlib::off64_t,
             crate::stdlib::SEEK_SET,
-        ) == -1 as crate::stdlib::__off64_t
-    } {
-        return -1 as ::core::ffi::c_int;
-    }
-    gz_rewind_complete(state);
-    0 as ::core::ffi::c_int
+        )
+    };
+    gz_rewind_result(state, position)
 }
 #[export_name = "gzrewind"]
 
