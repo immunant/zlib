@@ -216,6 +216,21 @@ unsafe extern "C" fn inflateStateCheck(mut strm: crate::zlib_h::z_streamp) -> ::
     }
     return 0 as ::core::ffi::c_int;
 }
+
+fn inflate_state_invalid(strm: &crate::zlib_h::z_stream) -> bool {
+    if strm.zalloc.is_none() || strm.zfree.is_none() {
+        return true;
+    }
+    let Some(state_handle) = strm.inflate_state() else {
+        return true;
+    };
+    let state = state_handle.borrow();
+    !::core::ptr::eq(state.strm, strm)
+        || (state.mode as ::core::ffi::c_uint)
+            < crate::src::inflate::HEAD as ::core::ffi::c_int as ::core::ffi::c_uint
+        || (state.mode as ::core::ffi::c_uint)
+            > crate::src::inflate::SYNC as ::core::ffi::c_int as ::core::ffi::c_uint
+}
 pub unsafe extern "C" fn inflateResetKeep(
     mut strm: crate::zlib_h::z_streamp,
 ) -> ::core::ffi::c_int {
@@ -2563,26 +2578,29 @@ pub unsafe extern "C" fn inflateCopy_ffi(
 ) -> ::core::ffi::c_int {
     inflateCopy(dest, source)
 }
-pub unsafe extern "C" fn inflateUndermine(
-    mut strm: crate::zlib_h::z_streamp,
+pub fn inflateUndermine(
+    strm: &mut crate::zlib_h::z_stream,
     _subvert: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
-    if inflateStateCheck(strm) != 0 {
+    if inflate_state_invalid(strm) {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    let state_handle = (&*strm)
+    let state_handle = strm
         .inflate_state()
         .expect("inflate state was checked above");
     let mut state = state_handle.borrow_mut();
-    (*state).sane = 1 as ::core::ffi::c_int;
+    state.sane = 1 as ::core::ffi::c_int;
     return crate::zlib_h::Z_DATA_ERROR;
 }
 #[export_name = "inflateUndermine"]
 
 pub unsafe extern "C" fn inflateUndermine_ffi(
-    mut strm: crate::zlib_h::z_streamp,
-    mut subvert: ::core::ffi::c_int,
+    strm: crate::zlib_h::z_streamp,
+    subvert: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
+    let Some(strm) = (unsafe { strm.as_mut() }) else {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    };
     inflateUndermine(strm, subvert)
 }
 pub unsafe extern "C" fn inflateValidate(
