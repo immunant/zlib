@@ -470,12 +470,10 @@ unsafe extern "C" fn gz_read(
                 if (*state).x.have < n {
                     n = (*state).x.have;
                 }
-                crate::stdlib::memcpy(
-                    buf as *mut ::core::ffi::c_void,
-                    (*state).x.next as *const ::core::ffi::c_void,
-                    n as crate::__stddef_size_t_h::size_t,
-                );
-                (*state).x.next = (*state).x.next.offset(n as isize);
+                let input = ::core::slice::from_raw_parts((*state).x.next, n as usize);
+                let output = ::core::slice::from_raw_parts_mut(buf.cast::<u8>(), n as usize);
+                copy_buffered_input(input, output);
+                (*state).x.next = (*state).x.next.wrapping_add(n as usize);
                 (*state).x.have = (*state).x.have.wrapping_sub(n);
                 if (*state).err != crate::zlib_h::Z_OK {
                     err = -1 as ::core::ffi::c_int;
@@ -505,7 +503,7 @@ unsafe extern "C" fn gz_read(
                 }
             }
             len = len.wrapping_sub(n as crate::stdlib::z_size_t);
-            buf = (buf as *mut ::core::ffi::c_char).offset(n as isize) as crate::stdlib::voidp;
+            buf = (buf as *mut u8).wrapping_add(n as usize) as crate::stdlib::voidp;
             got = got.wrapping_add(n as crate::stdlib::z_size_t);
             (*state).x.pos += n as crate::stdlib::off64_t;
         }
