@@ -3573,6 +3573,135 @@ fn finish_block(
     }
 }
 
+// A block flush only needs bounded storage, scalar configuration, and the
+// tree bookkeeping fields.  Keep those in a pointer-free view so deflate's
+// strategy routines can eventually invoke this core without reconstructing
+// an ABI-shaped state object.
+pub(crate) struct BlockFlushState<'a> {
+    pub(crate) level: ::core::ffi::c_int,
+    pub(crate) strategy: ::core::ffi::c_int,
+    pub(crate) pending_buf: &'a mut [crate::stdlib::Bytef],
+    pub(crate) pending: &'a mut crate::zutil_h::ulg,
+    pub(crate) bi_buf: &'a mut crate::zutil_h::ush,
+    pub(crate) bi_valid: &'a mut ::core::ffi::c_int,
+    pub(crate) bi_used: &'a mut ::core::ffi::c_int,
+    pub(crate) dyn_ltree: &'a mut [crate::src::deflate::ct_data_s; 573],
+    pub(crate) dyn_dtree: &'a mut [crate::src::deflate::ct_data_s; 61],
+    pub(crate) bl_tree: &'a mut [crate::src::deflate::ct_data_s; 39],
+    pub(crate) l_desc: &'a mut crate::src::deflate::tree_desc_s,
+    pub(crate) d_desc: &'a mut crate::src::deflate::tree_desc_s,
+    pub(crate) bl_desc: &'a mut crate::src::deflate::tree_desc_s,
+    pub(crate) heap: &'a mut [::core::ffi::c_int; crate::src::deflate::HEAP_SIZE as usize],
+    pub(crate) heap_len: &'a mut ::core::ffi::c_int,
+    pub(crate) heap_max: &'a mut ::core::ffi::c_int,
+    pub(crate) depth: &'a mut [crate::zutil_h::uch; crate::src::deflate::HEAP_SIZE as usize],
+    pub(crate) bl_count: &'a mut [crate::zutil_h::ush; 16],
+    pub(crate) opt_len: &'a mut crate::zutil_h::ulg,
+    pub(crate) static_len: &'a mut crate::zutil_h::ulg,
+    pub(crate) matches: &'a mut crate::stdlib::uInt,
+    pub(crate) sym_buf_start: usize,
+    pub(crate) sym_next: &'a mut crate::stdlib::uInt,
+}
+
+pub(crate) fn flush_block_from_views(
+    data_type: Option<&mut ::core::ffi::c_int>,
+    state: BlockFlushState<'_>,
+    input: Option<&[crate::stdlib::Bytef]>,
+    stored_len: crate::zutil_h::ulg,
+    last: ::core::ffi::c_int,
+) {
+    let BlockFlushState {
+        level,
+        strategy,
+        pending_buf,
+        pending,
+        bi_buf,
+        bi_valid,
+        bi_used,
+        dyn_ltree,
+        dyn_dtree,
+        bl_tree,
+        l_desc,
+        d_desc,
+        bl_desc,
+        heap,
+        heap_len,
+        heap_max,
+        depth,
+        bl_count,
+        opt_len,
+        static_len,
+        matches,
+        sym_buf_start,
+        sym_next,
+    } = state;
+    let plan = prepare_block(
+        data_type,
+        level,
+        strategy,
+        dyn_ltree,
+        dyn_dtree,
+        bl_tree,
+        l_desc,
+        d_desc,
+        bl_desc,
+        heap,
+        heap_len,
+        heap_max,
+        depth,
+        bl_count,
+        opt_len,
+        static_len,
+        stored_len,
+        input.is_some(),
+    );
+    let sym_next_value = *sym_next;
+    match plan {
+        BlockPlan::Stored => {
+            stored_block_bytes(
+                pending_buf,
+                pending,
+                bi_buf,
+                bi_valid,
+                bi_used,
+                input.expect("stored block has input"),
+                stored_len,
+                last,
+            );
+        }
+        plan => emit_nonstored_block(
+            plan,
+            pending_buf,
+            pending,
+            bi_buf,
+            bi_valid,
+            last,
+            sym_buf_start,
+            sym_next_value,
+            dyn_ltree,
+            dyn_dtree,
+            bl_tree,
+            l_desc,
+            d_desc,
+        ),
+    }
+    finish_block(
+        pending_buf,
+        pending,
+        bi_buf,
+        bi_valid,
+        bi_used,
+        dyn_ltree,
+        dyn_dtree,
+        bl_tree,
+        static_len,
+        opt_len,
+        matches,
+        sym_next,
+        last,
+    );
+}
+
 pub unsafe extern "C" fn _tr_flush_block(
     mut s: *mut crate::src::deflate::deflate_state,
     mut buf: *mut crate::stdlib::charf,
@@ -3585,92 +3714,54 @@ pub unsafe extern "C" fn _tr_flush_block(
     } else {
         None
     };
-    let plan = prepare_block(
-        data_type,
-        state.level,
-        state.strategy,
-        &mut state.dyn_ltree,
-        &mut state.dyn_dtree,
-        &mut state.bl_tree,
-        &mut state.l_desc,
-        &mut state.d_desc,
-        &mut state.bl_desc,
-        &mut state.heap,
-        &mut state.heap_len,
-        &mut state.heap_max,
-        &mut state.depth,
-        &mut state.bl_count,
-        &mut state.opt_len,
-        &mut state.static_len,
-        stored_len,
-        !buf.is_null(),
+    let input = if buf.is_null() {
+        None
+    } else if stored_len == 0 {
+        Some(&[][..])
+    } else {
+        Some(::core::slice::from_raw_parts(
+            buf as *const crate::stdlib::Bytef,
+            stored_len as usize,
+        ))
+    };
+    let pending_buf = ::core::slice::from_raw_parts_mut(
+        state
+            .pending_buf
+            .expect("initialized pending buffer")
+            .as_ptr(),
+        state.pending_buf_size as usize,
     );
-    match plan {
-        BlockPlan::Stored => {
-            _tr_stored_block(s, buf, stored_len, last);
-            let pending_buf = ::core::slice::from_raw_parts_mut(
-                state
-                    .pending_buf
-                    .expect("initialized pending buffer")
-                    .as_ptr(),
-                state.pending_buf_size as usize,
-            );
-            finish_block(
-                pending_buf,
-                &mut state.pending,
-                &mut state.bi_buf,
-                &mut state.bi_valid,
-                &mut state.bi_used,
-                &mut state.dyn_ltree,
-                &mut state.dyn_dtree,
-                &mut state.bl_tree,
-                &mut state.static_len,
-                &mut state.opt_len,
-                &mut state.matches,
-                &mut state.sym_next,
-                last,
-            );
-        }
-        plan => {
-            let pending_buf = ::core::slice::from_raw_parts_mut(
-                state
-                    .pending_buf
-                    .expect("initialized pending buffer")
-                    .as_ptr(),
-                state.pending_buf_size as usize,
-            );
-            emit_nonstored_block(
-                plan,
-                pending_buf,
-                &mut state.pending,
-                &mut state.bi_buf,
-                &mut state.bi_valid,
-                last,
-                state.sym_buf_start,
-                state.sym_next,
-                &mut state.dyn_ltree,
-                &mut state.dyn_dtree,
-                &mut state.bl_tree,
-                &state.l_desc,
-                &state.d_desc,
-            );
-            finish_block(
-                pending_buf,
-                &mut state.pending,
-                &mut state.bi_buf,
-                &mut state.bi_valid,
-                &mut state.bi_used,
-                &mut state.dyn_ltree,
-                &mut state.dyn_dtree,
-                &mut state.bl_tree,
-                &mut state.static_len,
-                &mut state.opt_len,
-                &mut state.matches,
-                &mut state.sym_next,
-                last,
-            );
-        }
-    }
+    flush_block_from_views(
+        data_type,
+        BlockFlushState {
+            level: state.level,
+            strategy: state.strategy,
+            pending_buf,
+            pending: &mut state.pending,
+            bi_buf: &mut state.bi_buf,
+            bi_valid: &mut state.bi_valid,
+            bi_used: &mut state.bi_used,
+            dyn_ltree: &mut state.dyn_ltree,
+            dyn_dtree: &mut state.dyn_dtree,
+            bl_tree: &mut state.bl_tree,
+            l_desc: &mut state.l_desc,
+            d_desc: &mut state.d_desc,
+            bl_desc: &mut state.bl_desc,
+            heap: &mut state.heap,
+            heap_len: &mut state.heap_len,
+            heap_max: &mut state.heap_max,
+            depth: &mut state.depth,
+            bl_count: &mut state.bl_count,
+            opt_len: &mut state.opt_len,
+            static_len: &mut state.static_len,
+            matches: &mut state.matches,
+            sym_buf_start: state.sym_buf_start,
+            sym_next: &mut state.sym_next,
+        },
+        input,
+        stored_len,
+        last,
+    );
 }
 #[export_name = "_tr_flush_block"]
 
