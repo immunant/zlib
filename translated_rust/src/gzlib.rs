@@ -757,6 +757,24 @@ pub(crate) fn gz_write_error_result(
     gz_write_result(requested, remaining, state.again != 0)
 }
 
+// Closing gzip streams has distinct raw cleanup operations, but choosing
+// which one applies depends only on fields in the already-bound state. Keep
+// that classification outside the allocator and deflater/inflater boundary.
+pub(crate) enum GzReadCloseCleanup {
+    None,
+    Inflater,
+}
+
+pub(crate) fn gz_read_close_cleanup(
+    state: &crate::gzguts_h::gz_state,
+) -> GzReadCloseCleanup {
+    if state.size == 0 {
+        GzReadCloseCleanup::None
+    } else {
+        GzReadCloseCleanup::Inflater
+    }
+}
+
 pub(crate) fn gz_zero_progress(
     state: &mut crate::gzguts_h::gz_state,
     offered: ::core::ffi::c_uint,

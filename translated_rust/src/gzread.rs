@@ -839,17 +839,18 @@ pub fn gzclose_r(
     if !crate::src::gzlib::gz_has_mode(state, crate::gzguts_h::GZ_READ) {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    // SAFETY: this close path owns the initialized inflater and gzip buffers.
-    // The dispatcher bound `file` to this state, and no allocation escapes
-    // after it is released.
-    unsafe {
-        if state.size != 0 {
+    match crate::src::gzlib::gz_read_close_cleanup(state) {
+        crate::src::gzlib::GzReadCloseCleanup::None => {}
+        crate::src::gzlib::GzReadCloseCleanup::Inflater => unsafe {
+            // SAFETY: this close path owns the initialized inflater and gzip
+            // buffers. The dispatcher bound `file` to this state, and no
+            // allocation escapes after it is released.
             crate::src::inflate::inflateEnd(
                 &raw mut state.strm as *mut _ as *mut crate::zlib_h::z_stream_s,
             );
             crate::stdlib::free(state.out as *mut ::core::ffi::c_void);
             crate::stdlib::free(state.in_0 as *mut ::core::ffi::c_void);
-        }
+        },
     }
     err = gz_close_read_finish(state);
     let path = state.path;
