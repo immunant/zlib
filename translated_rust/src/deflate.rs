@@ -853,7 +853,11 @@ pub unsafe extern "C" fn deflateSetDictionary(
             (*s).block_start = 0 as ::core::ffi::c_long;
             (*s).insert = 0 as crate::stdlib::uInt;
         }
-        dictionary = dictionary.offset(dictLength.wrapping_sub((*s).w_size) as isize);
+        // The caller-provided dictionary covers `dictLength` bytes, and the
+        // retained suffix starts at this validated in-range byte position.
+        // Preserve the cursor semantics without an in-bounds raw-pointer
+        // operation.
+        dictionary = dictionary.wrapping_add(dictLength.wrapping_sub((*s).w_size) as usize);
         dictLength = (*s).w_size;
     }
     avail = (*strm).avail_in as ::core::ffi::c_uint;
