@@ -1592,7 +1592,7 @@ pub unsafe extern "C" fn deflateResetKeep_ffi(
 ) -> ::core::ffi::c_int {
     deflateResetKeep(strm)
 }
-unsafe fn lm_init(s: &mut crate::src::deflate::deflate_state) {
+fn lm_init(s: &mut crate::src::deflate::deflate_state) {
     s.window_size = (2 as ::core::ffi::c_long as crate::zutil_h::ulg)
         .wrapping_mul(s.w_size as crate::zutil_h::ulg);
 
@@ -1652,7 +1652,7 @@ pub unsafe fn deflateReset(strm: &mut crate::zlib_h::z_stream_s) -> ::core::ffi:
     };
     s.last_flush = -2 as ::core::ffi::c_int;
     crate::src::trees::tr_init(s);
-    unsafe { lm_init(s) };
+    lm_init(s);
     crate::zlib_h::Z_OK
 }
 #[export_name = "deflateReset"]
