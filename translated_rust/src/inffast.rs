@@ -583,10 +583,18 @@ pub fn inflate_fast(
     bits = bits.wrapping_sub(len << 3 as ::core::ffi::c_int);
     hold &= ((1 as ::core::ffi::c_uint) << bits).wrapping_sub(1 as ::core::ffi::c_uint)
         as ::core::ffi::c_ulong;
-    strm.next_in = input.as_ptr().wrapping_add(in_index) as *mut crate::stdlib::Bytef;
+    let Some(next_input) = input.get(in_index..) else {
+        state.mode = crate::src::inflate::BAD;
+        return;
+    };
+    strm.next_in = next_input.as_ptr() as *mut crate::stdlib::Bytef;
     out_index = output.index();
     end_index = output.fast_end();
-    strm.next_out = output.bytes.as_mut_ptr().wrapping_add(out_index);
+    let Some(next_output) = output.bytes.get_mut(out_index..) else {
+        state.mode = crate::src::inflate::BAD;
+        return;
+    };
+    strm.next_out = next_output.as_mut_ptr();
     strm.avail_in = input.len().wrapping_sub(in_index) as crate::stdlib::uInt;
     strm.avail_out = (if out_index < end_index {
         (257usize).wrapping_add(end_index.wrapping_sub(out_index))
