@@ -2522,7 +2522,36 @@ pub unsafe fn deflate(
                 flush,
             ) as ::core::ffi::c_uint
         } else if (*s).strategy == crate::zlib_h::Z_RLE {
-            deflate_rle(s, flush) as ::core::ffi::c_uint
+            let state = &mut *s;
+            let strm = &mut *state.strm;
+            let window = ::core::slice::from_raw_parts_mut(state.window, state.window_size as usize);
+            let head = ::core::slice::from_raw_parts_mut(state.head, state.hash_size as usize);
+            let prev = ::core::slice::from_raw_parts_mut(state.prev, state.w_size as usize);
+            let input = if strm.avail_in == 0 {
+                &[]
+            } else {
+                ::core::slice::from_raw_parts(strm.next_in, strm.avail_in as usize)
+            };
+            let pending_buf = ::core::slice::from_raw_parts_mut(
+                state.pending_buf,
+                state.pending_buf_size as usize,
+            );
+            let output = if strm.avail_out == 0 {
+                &mut []
+            } else {
+                ::core::slice::from_raw_parts_mut(strm.next_out, strm.avail_out as usize)
+            };
+            deflate_rle(
+                state,
+                strm,
+                window,
+                head,
+                prev,
+                input,
+                pending_buf,
+                output,
+                flush,
+            ) as ::core::ffi::c_uint
         } else {
             let Some(kind) = configuration_table
                 .get((*s).level as usize)
@@ -3856,55 +3885,57 @@ unsafe extern "C" fn deflate_slow(
     return block_done;
 }
 
-unsafe extern "C" fn deflate_rle(
-    mut s: *mut crate::src::deflate::deflate_state,
-    mut flush: ::core::ffi::c_int,
+fn deflate_rle(
+    state: &mut crate::src::deflate::deflate_state,
+    strm: &mut crate::zlib_h::z_stream,
+    window: &mut [crate::stdlib::Bytef],
+    head: &mut [crate::src::deflate::Posf],
+    prev: &mut [crate::src::deflate::Posf],
+    mut input: &[crate::stdlib::Bytef],
+    pending_buf: &mut [crate::stdlib::Bytef],
+    output: &mut [crate::stdlib::Bytef],
+    flush: ::core::ffi::c_int,
 ) -> block_state {
     let mut bflush: ::core::ffi::c_int = 0;
     loop {
-        if (*s).lookahead <= crate::zutil_h::MAX_MATCH as crate::stdlib::uInt {
-            fill_window_from_raw!(s);
-            if (*s).lookahead <= crate::zutil_h::MAX_MATCH as crate::stdlib::uInt
+        if state.lookahead <= crate::zutil_h::MAX_MATCH as crate::stdlib::uInt {
+            let available_before = strm.avail_in as usize;
+            fill_window(state, strm, window, head, prev, input);
+            let Some(consumed) = available_before.checked_sub(strm.avail_in as usize) else {
+                return need_more;
+            };
+            let Some(remaining) = input.get(consumed..) else {
+                return need_more;
+            };
+            input = remaining;
+            if state.lookahead <= crate::zutil_h::MAX_MATCH as crate::stdlib::uInt
                 && flush == crate::zlib_h::Z_NO_FLUSH
             {
                 return need_more;
             }
-            if (*s).lookahead == 0 as crate::stdlib::uInt {
+            if state.lookahead == 0 as crate::stdlib::uInt {
                 break;
             }
         }
-        (*s).match_length = 0 as crate::stdlib::uInt;
-        if (*s).lookahead >= crate::zutil_h::MIN_MATCH as crate::stdlib::uInt
-            && (*s).strstart > 0 as crate::stdlib::uInt
+        state.match_length = 0 as crate::stdlib::uInt;
+        if state.lookahead >= crate::zutil_h::MIN_MATCH as crate::stdlib::uInt
+            && state.strstart > 0 as crate::stdlib::uInt
         {
-            let state = &mut *s;
-            let window = ::core::slice::from_raw_parts(state.window, state.window_size as usize);
             state.match_length = rle_match_length(window, state.strstart, state.lookahead);
         }
-        if (*s).match_length >= crate::zutil_h::MIN_MATCH as crate::stdlib::uInt {
+        if state.match_length >= crate::zutil_h::MIN_MATCH as crate::stdlib::uInt {
             let len: crate::zutil_h::uch =
-                (*s).match_length.wrapping_sub(3 as crate::stdlib::uInt) as crate::zutil_h::uch;
-            let state = &mut *s;
-            let pending_buf = ::core::slice::from_raw_parts_mut(
-                state.pending_buf,
-                state.pending_buf_size as usize,
-            );
+                state.match_length.wrapping_sub(3 as crate::stdlib::uInt) as crate::zutil_h::uch;
             bflush = crate::src::trees::tr_tally(
                 state,
                 pending_buf,
                 1 as ::core::ffi::c_uint,
                 len as ::core::ffi::c_uint,
             );
-            (*s).lookahead = (*s).lookahead.wrapping_sub((*s).match_length);
-            (*s).strstart = (*s).strstart.wrapping_add((*s).match_length);
-            (*s).match_length = 0 as crate::stdlib::uInt;
+            state.lookahead = state.lookahead.wrapping_sub(state.match_length);
+            state.strstart = state.strstart.wrapping_add(state.match_length);
+            state.match_length = 0 as crate::stdlib::uInt;
         } else {
-            let state = &mut *s;
-            let window = ::core::slice::from_raw_parts(state.window, state.window_size as usize);
-            let pending_buf = ::core::slice::from_raw_parts_mut(
-                state.pending_buf,
-                state.pending_buf_size as usize,
-            );
             let Some(flush) = tally_literal(state, window, pending_buf) else {
                 return need_more;
             };
@@ -3913,18 +3944,13 @@ unsafe extern "C" fn deflate_rle(
             state.strstart = state.strstart.wrapping_add(1);
         }
         if bflush != 0 {
-            let state = &mut *s;
-            let strm = &mut *state.strm;
-            let window = ::core::slice::from_raw_parts(state.window, state.window_size as usize);
-            let pending_buf = ::core::slice::from_raw_parts_mut(
-                state.pending_buf,
-                state.pending_buf_size as usize,
-            );
             if !flush_strategy_block(state, strm, window, pending_buf, 0) {
                 return need_more;
             }
-            flush_pending(strm);
-            if (*(*s).strm).avail_out == 0 as crate::stdlib::uInt {
+            if !flush_strategy_pending(state, strm, pending_buf, output) {
+                return need_more;
+            }
+            if strm.avail_out == 0 as crate::stdlib::uInt {
                 return (if false {
                     finish_started as ::core::ffi::c_int
                 } else {
@@ -3933,20 +3959,15 @@ unsafe extern "C" fn deflate_rle(
             }
         }
     }
-    (*s).insert = 0 as crate::stdlib::uInt;
+    state.insert = 0 as crate::stdlib::uInt;
     if flush == crate::zlib_h::Z_FINISH {
-        let state = &mut *s;
-        let strm = &mut *state.strm;
-        let window = ::core::slice::from_raw_parts(state.window, state.window_size as usize);
-        let pending_buf = ::core::slice::from_raw_parts_mut(
-            state.pending_buf,
-            state.pending_buf_size as usize,
-        );
         if !flush_strategy_block(state, strm, window, pending_buf, 1) {
             return need_more;
         }
-        flush_pending(strm);
-        if (*(*s).strm).avail_out == 0 as crate::stdlib::uInt {
+        if !flush_strategy_pending(state, strm, pending_buf, output) {
+            return need_more;
+        }
+        if strm.avail_out == 0 as crate::stdlib::uInt {
             return (if true {
                 finish_started as ::core::ffi::c_int
             } else {
@@ -3955,19 +3976,14 @@ unsafe extern "C" fn deflate_rle(
         }
         return finish_done;
     }
-    if (*s).sym_next != 0 {
-        let state = &mut *s;
-        let strm = &mut *state.strm;
-        let window = ::core::slice::from_raw_parts(state.window, state.window_size as usize);
-        let pending_buf = ::core::slice::from_raw_parts_mut(
-            state.pending_buf,
-            state.pending_buf_size as usize,
-        );
+    if state.sym_next != 0 {
         if !flush_strategy_block(state, strm, window, pending_buf, 0) {
             return need_more;
         }
-        flush_pending(strm);
-        if (*(*s).strm).avail_out == 0 as crate::stdlib::uInt {
+        if !flush_strategy_pending(state, strm, pending_buf, output) {
+            return need_more;
+        }
+        if strm.avail_out == 0 as crate::stdlib::uInt {
             return (if false {
                 finish_started as ::core::ffi::c_int
             } else {
