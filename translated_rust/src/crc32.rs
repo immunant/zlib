@@ -4727,10 +4727,7 @@ fn byte_swap(mut word: z_word_t) -> z_word_t {
 
 pub const POLY: ::core::ffi::c_uint = 0xedb88320 as ::core::ffi::c_uint;
 
-fn multmodp(
-    mut a: crate::stdlib::uLong,
-    mut b: crate::stdlib::uLong,
-) -> crate::stdlib::uLong {
+fn multmodp(mut a: crate::stdlib::uLong, mut b: crate::stdlib::uLong) -> crate::stdlib::uLong {
     let mut m: crate::stdlib::uLong = 0;
     let mut p: crate::stdlib::uLong = 0;
     m = (1 as ::core::ffi::c_int as crate::stdlib::uLong) << 31 as ::core::ffi::c_int;
@@ -4752,10 +4749,7 @@ fn multmodp(
     return p;
 }
 
-fn x2nmodp(
-    mut n: crate::stdlib::off64_t,
-    mut k: ::core::ffi::c_uint,
-) -> crate::stdlib::uLong {
+fn x2nmodp(mut n: crate::stdlib::off64_t, mut k: ::core::ffi::c_uint) -> crate::stdlib::uLong {
     let mut p: crate::stdlib::uLong = 0;
     p = (1 as ::core::ffi::c_int as crate::stdlib::uLong) << 31 as ::core::ffi::c_int;
     while n != 0 {
@@ -4813,10 +4807,7 @@ pub fn crc32_z(
     crc ^ 0xffff_ffff as crate::stdlib::uLong
 }
 
-pub fn crc32(
-    crc: crate::stdlib::uLong,
-    buf: &[crate::stdlib::Bytef],
-) -> crate::stdlib::uLong {
+pub fn crc32(crc: crate::stdlib::uLong, buf: &[crate::stdlib::Bytef]) -> crate::stdlib::uLong {
     crc32_z(crc, buf)
 }
 
@@ -4843,9 +4834,7 @@ pub unsafe extern "C" fn crc32_ffi(
     }
     crc32(crc, ::core::slice::from_raw_parts(buf, len as usize))
 }
-pub fn crc32_combine_gen64(
-    mut len2: crate::stdlib::off64_t,
-) -> crate::stdlib::uLong {
+pub fn crc32_combine_gen64(mut len2: crate::stdlib::off64_t) -> crate::stdlib::uLong {
     if len2 < 0 as crate::stdlib::off64_t {
         return 0 as crate::stdlib::uLong;
     }

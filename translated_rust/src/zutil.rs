@@ -153,7 +153,11 @@ pub unsafe extern "C" fn zcalloc_ffi(
     mut items: ::core::ffi::c_uint,
     mut size: ::core::ffi::c_uint,
 ) -> crate::stdlib::voidpf {
-    zcalloc(crate::zlib_h::Opaque::from_address(opaque.addr()), items, size)
+    zcalloc(
+        crate::zlib_h::Opaque::from_address(opaque.addr()),
+        items,
+        size,
+    )
 }
 pub extern "C" fn zcfree(_opaque: crate::zlib_h::Opaque, mut ptr: crate::stdlib::voidpf) {
     crate::stdlib::free(ptr as *mut ::core::ffi::c_void);

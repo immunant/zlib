@@ -104,7 +104,10 @@ fn gz_reset_safe(state: &mut crate::gzguts_h::gz_state) {
 }
 
 /// Open a named gzip stream without exposing C pointers to implementation code.
-pub fn gzopen(path: &std::ffi::CStr, mode: &std::ffi::CStr) -> Option<Box<crate::gzguts_h::gz_state>> {
+pub fn gzopen(
+    path: &std::ffi::CStr,
+    mode: &std::ffi::CStr,
+) -> Option<Box<crate::gzguts_h::gz_state>> {
     use std::os::unix::ffi::OsStrExt as _;
     use std::os::unix::fs::OpenOptionsExt as _;
 
@@ -122,17 +125,29 @@ pub fn gzopen(path: &std::ffi::CStr, mode: &std::ffi::CStr) -> Option<Box<crate:
             options.append(true);
         }
     }
-    let flags = (if mode.close_on_exec { crate::stdlib::O_CLOEXEC } else { 0 })
-        | (if mode.nonblocking { crate::stdlib::O_NONBLOCK } else { 0 });
+    let flags = (if mode.close_on_exec {
+        crate::stdlib::O_CLOEXEC
+    } else {
+        0
+    }) | (if mode.nonblocking {
+        crate::stdlib::O_NONBLOCK
+    } else {
+        0
+    });
     options.mode(0o666).custom_flags(flags);
     let file = options
-        .open(std::path::Path::new(std::ffi::OsStr::from_bytes(path.to_bytes())))
+        .open(std::path::Path::new(std::ffi::OsStr::from_bytes(
+            path.to_bytes(),
+        )))
         .ok()?;
     Some(gzopen_with_file(path.to_owned(), mode, file))
 }
 
 /// `gzopen64` has the same safe implementation as `gzopen` on this target.
-pub fn gzopen64(path: &std::ffi::CStr, mode: &std::ffi::CStr) -> Option<Box<crate::gzguts_h::gz_state>> {
+pub fn gzopen64(
+    path: &std::ffi::CStr,
+    mode: &std::ffi::CStr,
+) -> Option<Box<crate::gzguts_h::gz_state>> {
     gzopen(path, mode)
 }
 #[export_name = "gzopen"]
@@ -628,7 +643,7 @@ fn parse_gz_mode(mode: &std::ffi::CStr) -> Option<GzOpenMode> {
             b'G' => result.direct = -1,
             b'N' => result.nonblocking = true,
             b'T' => result.direct = 1,
-            _ => {},
+            _ => {}
         }
     }
     if result.mode == crate::gzguts_h::GZ_NONE
@@ -645,7 +660,11 @@ fn parse_gz_mode(mode: &std::ffi::CStr) -> Option<GzOpenMode> {
 
 fn new_gz_state(path: std::ffi::CString) -> crate::gzguts_h::gz_state {
     crate::gzguts_h::gz_state {
-        x: crate::zlib_h::gzFile_s { have: 0, next: 0, pos: 0 },
+        x: crate::zlib_h::gzFile_s {
+            have: 0,
+            next: 0,
+            pos: 0,
+        },
         mode: crate::gzguts_h::GZ_NONE,
         fd: -1,
         write_file: None,
