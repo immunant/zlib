@@ -240,7 +240,7 @@ pub mod zlib_h {
     }
 }
 pub mod stdlib {
-    extern "C" {
+    unsafe extern "C" {
         pub fn __errno_location() -> *mut ::core::ffi::c_int;
         pub fn fcntl(
             __fd: ::core::ffi::c_int,
@@ -259,9 +259,9 @@ pub mod stdlib {
             __format: *const ::core::ffi::c_char,
             ...
         ) -> ::core::ffi::c_int;
-        pub fn malloc(__size: crate::__stddef_size_t_h::size_t) -> *mut ::core::ffi::c_void;
+        pub safe fn malloc(__size: crate::__stddef_size_t_h::size_t) -> *mut ::core::ffi::c_void;
 
-        pub fn calloc(
+        pub safe fn calloc(
             __nmemb: crate::__stddef_size_t_h::size_t,
             __size: crate::__stddef_size_t_h::size_t,
         ) -> *mut ::core::ffi::c_void;

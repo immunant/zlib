@@ -74,17 +74,13 @@ pub extern "C" fn zcalloc(
     mut items: ::core::ffi::c_uint,
     mut size: ::core::ffi::c_uint,
 ) -> crate::stdlib::voidpf {
-    // SAFETY: `malloc` and `calloc` accept all size values; their result is
-    // returned untouched for the caller to handle according to the zlib ABI.
-    unsafe {
-        return if ::core::mem::size_of::<crate::stdlib::uInt>() > 2 as usize {
-            crate::stdlib::malloc(items.wrapping_mul(size) as crate::__stddef_size_t_h::size_t)
-        } else {
-            crate::stdlib::calloc(
-                items as crate::__stddef_size_t_h::size_t,
-                size as crate::__stddef_size_t_h::size_t,
-            )
-        };
+    if ::core::mem::size_of::<crate::stdlib::uInt>() > 2 as usize {
+        crate::stdlib::malloc(items.wrapping_mul(size) as crate::__stddef_size_t_h::size_t)
+    } else {
+        crate::stdlib::calloc(
+            items as crate::__stddef_size_t_h::size_t,
+            size as crate::__stddef_size_t_h::size_t,
+        )
     }
 }
 #[export_name = "zcalloc"]
