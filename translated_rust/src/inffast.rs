@@ -680,6 +680,33 @@ pub fn inflate_fast(
         (257usize).wrapping_sub(progress.output_index.wrapping_sub(progress.fast_end))
     }) as ::core::ffi::c_uint as crate::stdlib::uInt;
 }
+/// Validate the ABI-derived fast-path views and run the decoder.  The export
+/// wrapper only creates those views; all decoder validation and error-state
+/// transitions live here.
+fn inflate_fast_for_stream(
+    strm: &mut crate::zlib_h::z_stream,
+    state: &mut crate::src::inflate::inflate_state,
+    start: ::core::ffi::c_uint,
+    input: Option<&[crate::stdlib::Bytef]>,
+    output: Option<&mut [crate::stdlib::Bytef]>,
+    history: Option<&[crate::stdlib::Bytef]>,
+) {
+    let available_input = strm.avail_in as usize;
+    let available_output = strm.avail_out as usize;
+    let start_len = start as usize;
+    if input.is_none() || output.is_none() || available_output < 257 {
+        state.mode = crate::src::inflate::BAD;
+        return;
+    }
+    let input = input.expect("checked input view");
+    let output = output.expect("checked output view");
+    if input.len() != available_input || output.len() != start_len {
+        state.mode = crate::src::inflate::BAD;
+        return;
+    }
+    inflate_fast(strm, state, start, history, false, input, output)
+}
+
 #[export_name = "inflate_fast"]
 
 pub unsafe extern "C" fn inflate_fast_ffi(
@@ -689,40 +716,31 @@ pub unsafe extern "C" fn inflate_fast_ffi(
     let Some(strm) = strm.as_mut() else {
         return;
     };
-    let state = unsafe { &mut *(strm.state as *mut crate::src::inflate::inflate_state) };
+    let Some(state) = (strm.state as *mut crate::src::inflate::inflate_state).as_mut() else {
+        return;
+    };
     let available_input = strm.avail_in as usize;
     let available_output = strm.avail_out as usize;
     let start_len = start as usize;
-    let Some(output_offset) = start_len.checked_sub(available_output) else {
-        state.mode = crate::src::inflate::BAD;
-        return;
-    };
-    if strm.next_in.is_null() && available_input != 0
-        || strm.next_out.is_null()
-        || available_output < 257
-    {
-        state.mode = crate::src::inflate::BAD;
-        return;
-    }
-    // `start` is the caller's original output span. The checked offset above
-    // proves that the current cursor and remaining availability still fit in
-    // that one span before it is borrowed below.
-    let output_start = strm.next_out.wrapping_sub(output_offset);
     let input = if available_input == 0 {
-        &[]
-    } else {
-        unsafe { ::core::slice::from_raw_parts(strm.next_in, available_input) }
-    };
-    let output = unsafe { ::core::slice::from_raw_parts_mut(output_start, start_len) };
-    let history = if state.window.load(::core::sync::atomic::Ordering::Relaxed).is_null() || state.wsize == 0 {
+        Some(&[][..])
+    } else if strm.next_in.is_null() {
         None
     } else {
-        Some(unsafe {
-            ::core::slice::from_raw_parts(
-                state.window.load(::core::sync::atomic::Ordering::Relaxed),
-                state.wsize as usize,
-            )
-        })
+        Some(::core::slice::from_raw_parts(strm.next_in, available_input))
     };
-    inflate_fast(strm, state, start, history, false, input, output)
+    let output = match start_len.checked_sub(available_output) {
+        Some(output_offset) if !strm.next_out.is_null() => Some(::core::slice::from_raw_parts_mut(
+            strm.next_out.wrapping_sub(output_offset),
+            start_len,
+        )),
+        _ => None,
+    };
+    let window = state.window.load(::core::sync::atomic::Ordering::Relaxed);
+    let history = if window.is_null() || state.wsize == 0 {
+        None
+    } else {
+        Some(::core::slice::from_raw_parts(window, state.wsize as usize))
+    };
+    inflate_fast_for_stream(strm, state, start, input, output, history)
 }

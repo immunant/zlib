@@ -1257,6 +1257,104 @@ where
     strm.avail_in = have as crate::stdlib::uInt;
     return ret;
 }
+/// An ABI callback result after its buffer has been converted at the boundary.
+enum InflateBackCallbackInput<'a> {
+    Chunk(&'a [u8]),
+    Exhausted,
+    Invalid(usize),
+}
+
+/// The safe adapter's result, expressed as an offset into the ABI callback's
+/// most recent input span.  The wrapper alone converts that offset back to a
+/// raw cursor.
+struct InflateBackCallbackResult {
+    result: ::core::ffi::c_int,
+    input_cursor: InflateBackInputCursor,
+}
+
+enum InflateBackInputCursor {
+    Preserve,
+    Null,
+    Offset(usize),
+}
+
+/// Adapt already-validated callback chunks to the owned input buffer used by
+/// the decoder.  This keeps buffering, refill sequencing, and restoration
+/// decisions out of the ABI entry point.
+fn inflate_back_with_callback_adapter<'a, F, R>(
+    strm: &mut crate::zlib_h::z_stream,
+    state: &mut crate::src::inflate::inflate_state,
+    window: &mut [u8],
+    initial_input: &[u8],
+    mut source: F,
+    emit_window: R,
+) -> InflateBackCallbackResult
+where
+    F: FnMut() -> InflateBackCallbackInput<'a>,
+    R: FnMut(&mut [u8], ::core::ffi::c_uint) -> bool,
+{
+    let window_bits = match usize::try_from(state.wbits) {
+        Ok(bits) if (8..=15).contains(&bits) => bits,
+        _ => {
+            return InflateBackCallbackResult {
+                result: crate::zlib_h::Z_STREAM_ERROR,
+                input_cursor: InflateBackInputCursor::Preserve,
+            };
+        }
+    };
+    let Some(window_len) = 1usize.checked_shl(window_bits as u32) else {
+        return InflateBackCallbackResult {
+            result: crate::zlib_h::Z_STREAM_ERROR,
+            input_cursor: InflateBackInputCursor::Preserve,
+        };
+    };
+    if usize::try_from(state.wsize).ok() != Some(window_len) || window.len() != window_len {
+        return InflateBackCallbackResult {
+            result: crate::zlib_h::Z_STREAM_ERROR,
+            input_cursor: InflateBackInputCursor::Preserve,
+        };
+    }
+    let mut callback_exhausted = false;
+    let mut current_input_len = initial_input.len();
+    let input = initial_input.to_vec();
+    let mut refill = |input: &mut Vec<u8>| {
+        let chunk = match source() {
+            InflateBackCallbackInput::Chunk(chunk) if !chunk.is_empty() => {
+                current_input_len = chunk.len();
+                chunk
+            }
+            InflateBackCallbackInput::Exhausted => {
+                callback_exhausted = true;
+                current_input_len = 0;
+                return false;
+            }
+            InflateBackCallbackInput::Chunk(_) => {
+                current_input_len = 0;
+                return false;
+            }
+            InflateBackCallbackInput::Invalid(length) => {
+                current_input_len = length;
+                return false;
+            }
+        };
+        input.extend_from_slice(chunk);
+        true
+    };
+    let result = inflateBack(strm, state, window, input, &mut refill, emit_window);
+    drop(refill);
+    let input_cursor = if callback_exhausted {
+        InflateBackInputCursor::Null
+    } else if let Some(offset) = current_input_len.checked_sub(strm.avail_in as usize) {
+        InflateBackInputCursor::Offset(offset)
+    } else {
+        return InflateBackCallbackResult {
+            result: crate::zlib_h::Z_STREAM_ERROR,
+            input_cursor: InflateBackInputCursor::Preserve,
+        };
+    };
+    InflateBackCallbackResult { result, input_cursor }
+}
+
 #[export_name = "inflateBack"]
 
 pub unsafe extern "C" fn inflateBack_ffi(
@@ -1279,62 +1377,53 @@ pub unsafe extern "C" fn inflateBack_ffi(
     let Some(window_len) = 1usize.checked_shl(window_bits as u32) else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
-    if usize::try_from(state.wsize).ok() != Some(window_len) {
-        return crate::zlib_h::Z_STREAM_ERROR;
-    }
     let window = state.window.load(::core::sync::atomic::Ordering::Relaxed);
-    if window.is_null() {
+    if window.is_null() || (strm.avail_in != 0 && strm.next_in.is_null()) {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    if strm.avail_in != 0 && strm.next_in.is_null() {
+    let Some(in_0) = in_0 else {
         return crate::zlib_h::Z_STREAM_ERROR;
-    }
-    // Copy each ABI callback result into an owned buffer before dispatching.
-    // The closure retains the original cursor solely to restore z_stream's
-    // externally visible input position after the safe decoder returns.
-    let mut current_input = strm.next_in;
-    let mut current_input_len = strm.avail_in as usize;
-    let mut callback_exhausted = false;
-    let input = if current_input_len == 0 {
-        Vec::new()
+    };
+    let Some(out) = out else {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    };
+    let initial_input = if strm.avail_in == 0 {
+        &[][..]
     } else {
-        ::core::slice::from_raw_parts(current_input, current_input_len).to_vec()
+        ::core::slice::from_raw_parts(strm.next_in, strm.avail_in as usize)
     };
-    let mut refill = |input: &mut Vec<u8>| {
-        let mut callback_input = ::core::ptr::null_mut();
-        let length = in_0.expect("non-null function pointer")(in_desc, &raw mut callback_input);
-        current_input = callback_input;
-        current_input_len = length as usize;
-        callback_exhausted = length == 0;
-        if length == 0 {
-            return false;
-        }
-        if callback_input.is_null() {
-            return false;
-        }
-        input.extend_from_slice(::core::slice::from_raw_parts(
-            callback_input,
-            length as usize,
-        ));
-        true
-    };
-    // The buffer was checked and retained by inflateBackInit_; it is the
-    // decoder's single history/output span for this call.
     let window = ::core::slice::from_raw_parts_mut(window, window_len);
-    let emit_window = |bytes: &mut [u8], length: ::core::ffi::c_uint| {
-        out.expect("non-null function pointer")(out_desc, bytes.as_mut_ptr(), length) == 0
-    };
-    let result = inflateBack(strm, state, window, input, &mut refill, emit_window);
-    drop(refill);
-    let remaining = strm.avail_in as usize;
-    strm.next_in = if callback_exhausted {
-        ::core::ptr::null_mut()
-    } else if remaining > current_input_len {
-        return crate::zlib_h::Z_STREAM_ERROR;
-    } else {
-        current_input.wrapping_add(current_input_len - remaining)
-    };
-    result
+    let mut current_input = strm.next_in;
+    let callback_result = inflate_back_with_callback_adapter(
+        strm,
+        state,
+        window,
+        initial_input,
+        || {
+            let mut callback_input = ::core::ptr::null_mut();
+            let length = in_0(in_desc, &raw mut callback_input);
+            current_input = callback_input;
+            if length == 0 {
+                InflateBackCallbackInput::Exhausted
+            } else if callback_input.is_null() {
+                InflateBackCallbackInput::Invalid(length as usize)
+            } else {
+                InflateBackCallbackInput::Chunk(::core::slice::from_raw_parts(
+                    callback_input,
+                    length as usize,
+                ))
+            }
+        },
+        |bytes: &mut [u8], length: ::core::ffi::c_uint| {
+            out(out_desc, bytes.as_mut_ptr(), length) == 0
+        },
+    );
+    match callback_result.input_cursor {
+        InflateBackInputCursor::Preserve => {}
+        InflateBackInputCursor::Null => strm.next_in = ::core::ptr::null_mut(),
+        InflateBackInputCursor::Offset(offset) => strm.next_in = current_input.wrapping_add(offset),
+    }
+    callback_result.result
 }
 fn inflate_back_end<F>(
     strm: &mut crate::zlib_h::z_stream,
