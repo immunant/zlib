@@ -61,6 +61,21 @@ impl ct_data_s {
     pub fn len(&self) -> crate::zutil_h::ush {
         unsafe { self.dl.len }
     }
+
+    #[inline]
+    pub fn freq(&self) -> crate::zutil_h::ush {
+        unsafe { self.fc.freq }
+    }
+
+    #[inline]
+    pub fn dad(&self) -> crate::zutil_h::ush {
+        unsafe { self.dl.dad }
+    }
+
+    #[inline]
+    pub fn set_len(&mut self, len: crate::zutil_h::ush) {
+        self.dl.len = len;
+    }
 }
 #[derive(Copy, Clone)]
 #[repr(C)]
