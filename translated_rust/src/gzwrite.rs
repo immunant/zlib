@@ -45,10 +45,15 @@ pub use crate::zlib_h::Z_STREAM_ERROR;
 unsafe fn gz_init(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
     let mut ret: ::core::ffi::c_int = 0;
     let strm: &mut crate::zlib_h::z_stream = &mut state.strm;
-    state.in_0 = crate::stdlib::malloc(
-        (state.want << 1 as ::core::ffi::c_int) as crate::__stddef_size_t_h::size_t,
-    ) as *mut ::core::ffi::c_uchar;
-    if state.in_0.is_null() {
+    let Some(input_len) = (state.want as usize).checked_mul(2) else {
+        crate::src::gzlib::gz_error_state(
+            state,
+            crate::zlib_h::Z_MEM_ERROR,
+            Some(c"out of memory"),
+        );
+        return -1 as ::core::ffi::c_int;
+    };
+    if state.in_0.try_reserve_exact(input_len).is_err() {
         crate::src::gzlib::gz_error_state(
             state,
             crate::zlib_h::Z_MEM_ERROR,
@@ -56,13 +61,14 @@ unsafe fn gz_init(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
         );
         return -1 as ::core::ffi::c_int;
     }
+    state.in_0.resize(input_len, 0);
     if state.direct == 0 {
         let output_len = state.want as usize;
         if state.out.try_reserve_exact(output_len).is_ok() {
             state.out.resize(output_len, 0);
         }
         if state.out.len() != output_len {
-            crate::stdlib::free(state.in_0 as *mut ::core::ffi::c_void);
+            state.in_0.clear();
             crate::src::gzlib::gz_error_state(
                 state,
                 crate::zlib_h::Z_MEM_ERROR,
@@ -84,7 +90,7 @@ unsafe fn gz_init(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
             ::core::mem::size_of::<crate::zlib_h::z_stream>() as ::core::ffi::c_int,
         );
         if ret != crate::zlib_h::Z_OK {
-            crate::stdlib::free(state.in_0 as *mut ::core::ffi::c_void);
+            state.in_0.clear();
             state.out.clear();
             crate::src::gzlib::gz_error_state(
                 state,
@@ -247,13 +253,13 @@ unsafe fn gz_zero(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
             state.size
         };
         if first != 0 {
-            // `gz_init` allocates at least `state.size` bytes for `in_0` before
-            // `size` becomes non-zero, and `n` is bounded by that size above.
-            ::core::slice::from_raw_parts_mut(state.in_0, n as usize).fill(0);
+            // `gz_init` sizes this staging buffer before `size` becomes
+            // non-zero, and `n` is bounded by that size above.
+            state.in_0[..n as usize].fill(0);
             first = 0 as ::core::ffi::c_int;
         }
         state.strm.avail_in = n as crate::stdlib::uInt;
-        state.strm.next_in = state.in_0 as *mut crate::stdlib::Bytef;
+        state.strm.next_in = state.in_0.as_mut_ptr() as *mut crate::stdlib::Bytef;
         ret = gz_comp(state, crate::zlib_h::Z_NO_FLUSH);
         n = n.wrapping_sub(state.strm.avail_in as ::core::ffi::c_uint);
         state.x.pos += n as crate::stdlib::off64_t;
@@ -299,20 +305,20 @@ unsafe extern "C" fn gz_write(
     let Ok(capacity) = usize::try_from(state.size) else {
         return 0 as crate::stdlib::z_size_t;
     };
-    if capacity == 0 || state.in_0.is_null() {
+    if capacity == 0 || state.in_0.len() < capacity {
         return 0 as crate::stdlib::z_size_t;
     }
     let mut consumed = 0usize;
     if input.len() < capacity {
         loop {
             if state.strm.avail_in == 0 as crate::stdlib::uInt {
-                state.strm.next_in = state.in_0 as *mut crate::stdlib::Bytef;
+                state.strm.next_in = state.in_0.as_mut_ptr() as *mut crate::stdlib::Bytef;
             }
             let Some(have) = state
                 .strm
                 .next_in
                 .addr()
-                .checked_sub(state.in_0.addr())
+                .checked_sub(state.in_0.as_ptr().addr())
                 .and_then(|offset| offset.checked_add(state.strm.avail_in as usize))
             else {
                 return 0 as crate::stdlib::z_size_t;
@@ -321,10 +327,7 @@ unsafe extern "C" fn gz_write(
                 return 0 as crate::stdlib::z_size_t;
             }
             let copy = (capacity - have).min(input.len() - consumed);
-            // `have` and `copy` are bounded by `capacity`, which is the
-            // initialized input allocation's usable prefix.
-            ::core::slice::from_raw_parts_mut(state.in_0, capacity)[have..have + copy]
-                .copy_from_slice(&input[consumed..consumed + copy]);
+            state.in_0[have..have + copy].copy_from_slice(&input[consumed..consumed + copy]);
             state.strm.avail_in = state
                 .strm
                 .avail_in
@@ -635,7 +638,7 @@ pub unsafe extern "C" fn gzclose_w(mut file: crate::zlib_h::gzFile) -> ::core::f
         if (*state).direct == 0 {
             crate::src::deflate::deflateEnd(&mut (*state).strm);
         }
-        crate::stdlib::free((*state).in_0 as *mut ::core::ffi::c_void);
+        (*state).in_0.clear();
     }
     crate::src::gzlib::gz_error_state(state, crate::zlib_h::Z_OK, None);
     if crate::stdlib::close((*state).fd) == -1 as ::core::ffi::c_int {

@@ -111,7 +111,7 @@ fn gz_open_state(
         path: std::ffi::CString::default(),
         size: 0,
         want: crate::gzguts_h::GZBUFSIZE as ::core::ffi::c_uint,
-        in_0: ::core::ptr::null_mut(),
+        in_0: Vec::new(),
         out: Vec::new(),
         direct: 0,
         junk: 0,

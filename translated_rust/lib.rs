@@ -45,7 +45,9 @@ pub mod gzguts_h {
         pub path: std::ffi::CString,
         pub size: ::core::ffi::c_uint,
         pub want: ::core::ffi::c_uint,
-        pub in_0: *mut ::core::ffi::c_uchar,
+        /// Input staging buffer owned by this gzip session.  Codec cursors may
+        /// temporarily point into it, but it is never manually allocated.
+        pub in_0: Vec<u8>,
         /// Buffer owned by this gzip session.  `x.next` and the codec stream
         /// may temporarily point into it, but ownership never leaves here.
         pub out: Vec<u8>,
