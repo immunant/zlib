@@ -6,6 +6,7 @@ pub use crate::stdlib::uLong;
 pub use crate::stdlib::voidpf;
 pub use crate::zlib_h::ZLIB_VERSION;
 use core::ffi::CStr;
+use std::sync::{Mutex, OnceLock};
 
 const ZLIB_VERSION_TEXT: &CStr = c"1.3.2.1-motley";
 static ERROR_NEED_DICT: [u8; 16] = *b"need dictionary\0";
@@ -51,6 +52,40 @@ static ERROR_MESSAGES: [&[u8]; 10] = [
 // allocator as well.
 #[repr(align(64))]
 struct ZcallocUnit([u8; 64]);
+
+struct ZcallocAllocation {
+    address: usize,
+    units: Vec<ZcallocUnit>,
+}
+
+static ZCALLOC_ALLOCATIONS: OnceLock<Mutex<Vec<ZcallocAllocation>>> = OnceLock::new();
+
+fn zcalloc_allocations() -> &'static Mutex<Vec<ZcallocAllocation>> {
+    ZCALLOC_ALLOCATIONS.get_or_init(|| Mutex::new(Vec::new()))
+}
+
+fn retain_zcalloc_allocation(address: usize, units: Vec<ZcallocUnit>) -> bool {
+    let mut allocations = zcalloc_allocations()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    if allocations.try_reserve(1).is_err() {
+        return false;
+    }
+    allocations.push(ZcallocAllocation { address, units });
+    true
+}
+
+fn release_zcalloc_allocation(address: usize) {
+    let mut allocations = zcalloc_allocations()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    if let Some(index) = allocations
+        .iter()
+        .position(|allocation| allocation.address == address)
+    {
+        allocations.swap_remove(index);
+    }
+}
 
 fn zcalloc_units(items: ::core::ffi::c_uint, size: ::core::ffi::c_uint) -> Option<usize> {
     let bytes = (items as usize).checked_mul(size as usize)?;
@@ -167,9 +202,12 @@ pub unsafe extern "C" fn zcalloc(
     if allocation.try_reserve_exact(units).is_err() {
         return ::core::ptr::null_mut();
     }
-    let pointer = allocation.as_mut_ptr().cast();
-    ::core::mem::forget(allocation);
-    pointer
+    let pointer: crate::stdlib::voidpf = allocation.as_mut_ptr().cast();
+    if retain_zcalloc_allocation(pointer.addr(), allocation) {
+        pointer
+    } else {
+        ::core::ptr::null_mut()
+    }
 }
 #[export_name = "zcalloc"]
 
@@ -181,7 +219,7 @@ pub unsafe extern "C" fn zcalloc_ffi(
     zcalloc(opaque, items, size)
 }
 pub unsafe extern "C" fn zcfree(_opaque: crate::stdlib::voidpf, mut ptr: crate::stdlib::voidpf) {
-    crate::stdlib::free(ptr as *mut ::core::ffi::c_void);
+    release_zcalloc_allocation(ptr.addr());
 }
 #[export_name = "zcfree"]
 
