@@ -1807,24 +1807,29 @@ fn flush_pending_bound(
     }
 }
 
-// Private raw adapters are Rust-ABI functions. The public `_ffi` wrappers
-// remain the only C ABI boundary for callers outside this crate.
-unsafe fn flush_pending(mut strm: crate::zlib_h::z_streamp) {
-    let state = &mut *((*strm).state as *mut crate::src::deflate::deflate_state);
-    let stream = &mut *strm;
-    let pending_buf = ::core::slice::from_raw_parts_mut(
-        state.pending_buf,
-        state.pending_buf_size as usize,
-    );
-    let output = if stream.avail_out == 0 {
-        None
-    } else {
-        Some(::core::slice::from_raw_parts_mut(
-            stream.next_out,
-            stream.avail_out as usize,
-        ))
-    };
-    flush_pending_bound(state, stream, pending_buf, output);
+// The validated deflate dispatch is the only caller. Bind its state-owned
+// pending allocation and the caller output once, then keep flushing bounded
+// and reference-based in `flush_pending_bound()`.
+fn flush_pending(strm: crate::zlib_h::z_streamp) {
+    // SAFETY: `deflate()` validates `strm`, its state link, and its non-null
+    // output cursor before any path that can call this private adapter.
+    unsafe {
+        let state = &mut *((*strm).state as *mut crate::src::deflate::deflate_state);
+        let stream = &mut *strm;
+        let pending_buf = ::core::slice::from_raw_parts_mut(
+            state.pending_buf,
+            state.pending_buf_size as usize,
+        );
+        let output = if stream.avail_out == 0 {
+            None
+        } else {
+            Some(::core::slice::from_raw_parts_mut(
+                stream.next_out,
+                stream.avail_out as usize,
+            ))
+        };
+        flush_pending_bound(state, stream, pending_buf, output);
+    }
 }
 
 fn deflate_flush_rank(flush: ::core::ffi::c_int) -> ::core::ffi::c_int {
