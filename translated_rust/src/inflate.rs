@@ -3082,7 +3082,7 @@ pub fn inflateCopy(
     // Derive all source-state information needed after allocation before
     // calling the source allocator. This value snapshot prevents a Rust
     // reference to source state from spanning that user callback.
-    let (plan, source_state, initial_zalloc, initial_opaque) = {
+    let (plan, mut source_state, initial_zalloc, initial_opaque) = {
         let Some((source, state)) = inflateStateCheck(source) else {
             return crate::zlib_h::Z_STREAM_ERROR;
         };
@@ -3144,19 +3144,39 @@ pub fn inflateCopy(
     let Some((source, _live_state)) = inflateStateCheck(source) else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
+    // `updatewindow()` only inspects this source-state snapshot, so it cannot
+    // allocate or otherwise invoke a callback. Reusing that established
+    // owner-window binder keeps the source history as a checked slice instead
+    // of reopening the saved raw cursor here.
+    let source_stream = *source;
     let copy = &mut *copy;
-    let window = if window.is_null() {
-        None
+    if window.is_null() {
+        inflate_copy_state(dest, &source_stream, copy, &source_state, &plan, None);
     } else {
-        Some((
-            ::core::slice::from_raw_parts(source_state.window, plan.window_copy_len),
-            ::core::slice::from_raw_parts_mut(
-                window,
-                plan.window_len.expect("window allocation has a length"),
-            ),
-        ))
-    };
-    inflate_copy_state(dest, source, copy, &source_state, &plan, window);
+        let destination_window = ::core::slice::from_raw_parts_mut(
+            window,
+            plan.window_len.expect("window allocation has a length"),
+        );
+        updatewindow(
+            source,
+            &mut source_state,
+            InflateWindowAccess::Inspect,
+            |source_state, source_window| {
+                inflate_copy_state(
+                    dest,
+                    &source_stream,
+                    copy,
+                    source_state,
+                    &plan,
+                    Some((
+                        source_window.expect("source copy window is bound"),
+                        destination_window,
+                    )),
+                );
+            },
+        )
+        .expect("a copied source window is already allocated");
+    }
     dest.state =
         copy as *mut crate::src::inflate::inflate_state as *mut crate::src::deflate::internal_state;
     return crate::zlib_h::Z_OK;
