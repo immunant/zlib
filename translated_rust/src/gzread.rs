@@ -425,6 +425,36 @@ fn gz_read_buffer_copy_commit_state(
     true
 }
 
+/// Limit one `gzgets` copy to the caller's remaining space and, when one was
+/// found in that range, include the newline byte.  The boundary still locates
+/// that byte in its raw buffered output.
+fn gzgets_buffer_copy_plan(
+    have: ::core::ffi::c_uint,
+    left: ::core::ffi::c_uint,
+    newline_offset: Option<::core::ffi::c_uint>,
+) -> ::core::ffi::c_uint {
+    let copy = have.min(left);
+    match newline_offset {
+        Some(offset) if offset < copy => offset + 1,
+        _ => copy,
+    }
+}
+
+/// Commit a preflighted `gzgets` buffered copy after the boundary has copied
+/// bytes and advanced its raw cursors.
+fn gzgets_buffer_copy_commit_state(
+    state: &mut crate::gzguts_h::gz_state,
+    left: ::core::ffi::c_uint,
+    copied: ::core::ffi::c_uint,
+) -> Option<::core::ffi::c_uint> {
+    if copied > state.x.have || copied > left {
+        return None;
+    }
+    state.x.have = state.x.have.wrapping_sub(copied);
+    state.x.pos = state.x.pos.wrapping_add(copied as crate::stdlib::off64_t);
+    Some(left.wrapping_sub(copied))
+}
+
 unsafe extern "C" fn gz_skip(mut state: crate::gzguts_h::gz_statep) -> ::core::ffi::c_int {
     let mut n: ::core::ffi::c_uint = 0;
     loop {
@@ -810,29 +840,28 @@ pub unsafe extern "C" fn gzgets(
                 (*state).past = 1 as ::core::ffi::c_int;
                 break;
             } else {
-                n = if (*state).x.have > left {
-                    left
-                } else {
-                    (*state).x.have
-                };
+                n = gzgets_buffer_copy_plan((*state).x.have, left, None);
                 eol = crate::stdlib::memchr(
                     (*state).x.next as *const ::core::ffi::c_void,
                     '\n' as ::core::ffi::c_int,
                     n as crate::__stddef_size_t_h::size_t,
                 ) as *mut ::core::ffi::c_uchar;
-                if !eol.is_null() {
-                    n = (eol.offset_from((*state).x.next) as ::core::ffi::c_uint)
-                        .wrapping_add(1 as ::core::ffi::c_uint);
-                }
+                let newline_offset = if eol.is_null() {
+                    None
+                } else {
+                    Some(eol.offset_from((*state).x.next) as ::core::ffi::c_uint)
+                };
+                n = gzgets_buffer_copy_plan((*state).x.have, left, newline_offset);
                 crate::stdlib::memcpy(
                     buf as *mut ::core::ffi::c_void,
                     (*state).x.next as *const ::core::ffi::c_void,
                     n as crate::__stddef_size_t_h::size_t,
                 );
-                (*state).x.have = (*state).x.have.wrapping_sub(n);
                 (*state).x.next = (*state).x.next.offset(n as isize);
-                (*state).x.pos += n as crate::stdlib::off64_t;
-                left = left.wrapping_sub(n);
+                let Some(remaining) = gzgets_buffer_copy_commit_state(&mut *state, left, n) else {
+                    return ::core::ptr::null_mut::<::core::ffi::c_char>();
+                };
+                left = remaining;
                 buf = buf.offset(n as isize);
                 if !(left != 0 && eol.is_null()) {
                     break;
