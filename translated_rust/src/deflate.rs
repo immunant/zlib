@@ -2733,7 +2733,44 @@ pub unsafe fn deflate(
                     strm.data_type = io.data_type;
                     result
                 }
-                CompressionEngine::Slow => deflate_slow(&mut *s, strm, flush, input),
+                CompressionEngine::Slow => {
+                    let input_len = input.len();
+                    let output_len = strm.avail_out as usize;
+                    // Slow compression uses the same bounded cursors as the
+                    // fast and Huffman engines.  Keep its access to the ABI
+                    // stream in this dispatcher, so the matching loop only
+                    // operates on owned state and slices.
+                    let output = if output_len == 0 {
+                        &mut []
+                    } else {
+                        unsafe { core::slice::from_raw_parts_mut(strm.next_out, output_len) }
+                    };
+                    let mut io = DeflateFastIo {
+                        input,
+                        input_pos: 0,
+                        output,
+                        output_pos: 0,
+                        total_in: strm.total_in,
+                        total_out: strm.total_out,
+                        adler: strm.adler,
+                        data_type: strm.data_type,
+                    };
+                    let result = deflate_slow(&mut *s, &mut io, flush);
+                    if input_len != 0 {
+                        strm.next_in = io.input.as_ptr().wrapping_add(io.input_pos)
+                            as *mut crate::stdlib::Bytef;
+                    }
+                    strm.avail_in = io.avail_in();
+                    if output_len != 0 {
+                        strm.next_out = io.output.as_mut_ptr().wrapping_add(io.output_pos);
+                    }
+                    strm.avail_out = io.avail_out();
+                    strm.total_in = io.total_in;
+                    strm.total_out = io.total_out;
+                    strm.adler = io.adler;
+                    strm.data_type = io.data_type;
+                    result
+                }
             }) as ::core::ffi::c_uint
         }) as block_state;
         if bstate as ::core::ffi::c_uint
@@ -3969,17 +4006,16 @@ fn deflate_fast(
     return block_done;
 }
 
-unsafe fn deflate_slow(
+fn deflate_slow(
     s: &mut crate::src::deflate::deflate_state,
-    strm: &mut crate::zlib_h::z_stream_s,
+    io: &mut DeflateFastIo<'_>,
     mut flush: ::core::ffi::c_int,
-    input: &[crate::stdlib::Bytef],
 ) -> block_state {
     let mut hash_head: crate::src::deflate::IPos = 0;
     let mut bflush: ::core::ffi::c_int = 0;
     loop {
         if (*s).lookahead < crate::src::deflate::MIN_LOOKAHEAD as crate::stdlib::uInt {
-            fill_window_from_input(s, strm, Some(input));
+            fill_window_from_fast_io(s, io);
             if (*s).lookahead < crate::src::deflate::MIN_LOOKAHEAD as crate::stdlib::uInt
                 && flush == crate::zlib_h::Z_NO_FLUSH
             {
@@ -4073,14 +4109,14 @@ unsafe fn deflate_slow(
                 };
                 crate::src::trees::tr_flush_block(
                     s,
-                    Some(&mut strm.data_type),
+                    Some(&mut io.data_type),
                     block.as_deref(),
                     block_len,
                     0,
                 );
                 (*s).block_start = (*s).strstart as ::core::ffi::c_long;
-                flush_pending_impl(s, strm);
-                if strm.avail_out == 0 as crate::stdlib::uInt {
+                io.flush_pending(s);
+                if io.avail_out() == 0 as crate::stdlib::uInt {
                     return (if false {
                         finish_started as ::core::ffi::c_int
                     } else {
@@ -4105,17 +4141,17 @@ unsafe fn deflate_slow(
                 };
                 crate::src::trees::tr_flush_block(
                     s,
-                    Some(&mut strm.data_type),
+                    Some(&mut io.data_type),
                     block.as_deref(),
                     block_len,
                     0,
                 );
                 (*s).block_start = (*s).strstart as ::core::ffi::c_long;
-                flush_pending_impl(s, strm);
+                io.flush_pending(s);
             }
             (*s).strstart = (*s).strstart.wrapping_add(1);
             (*s).lookahead = (*s).lookahead.wrapping_sub(1);
-            if strm.avail_out == 0 as crate::stdlib::uInt {
+            if io.avail_out() == 0 as crate::stdlib::uInt {
                 return need_more;
             }
         } else {
@@ -4150,14 +4186,14 @@ unsafe fn deflate_slow(
         };
         crate::src::trees::tr_flush_block(
             s,
-            Some(&mut strm.data_type),
+            Some(&mut io.data_type),
             block.as_deref(),
             block_len,
             1,
         );
         (*s).block_start = (*s).strstart as ::core::ffi::c_long;
-        flush_pending_impl(s, strm);
-        if strm.avail_out == 0 as crate::stdlib::uInt {
+        io.flush_pending(s);
+        if io.avail_out() == 0 as crate::stdlib::uInt {
             return (if true {
                 finish_started as ::core::ffi::c_int
             } else {
@@ -4176,14 +4212,14 @@ unsafe fn deflate_slow(
         };
         crate::src::trees::tr_flush_block(
             s,
-            Some(&mut strm.data_type),
+            Some(&mut io.data_type),
             block.as_deref(),
             block_len,
             0,
         );
         (*s).block_start = (*s).strstart as ::core::ffi::c_long;
-        flush_pending_impl(s, strm);
-        if strm.avail_out == 0 as crate::stdlib::uInt {
+        io.flush_pending(s);
+        if io.avail_out() == 0 as crate::stdlib::uInt {
             return (if false {
                 finish_started as ::core::ffi::c_int
             } else {
