@@ -984,20 +984,6 @@ fn inflatePrime(
     inflate_prime_bits(owner.normal, bits, value)
 }
 
-// The export wrapper owns stream validation/conversion; this adapter retains
-// the stream-lifetime-bound opaque-state projection and then produces the
-// pointer-free owner consumed by the scalar core above.
-unsafe fn inflate_prime_stream(
-    strm: &mut crate::zlib_h::z_stream_s,
-    bits: ::core::ffi::c_int,
-    value: ::core::ffi::c_int,
-) -> ::core::ffi::c_int {
-    let Some((_strm, state)) = inflate_stream_and_state(strm) else {
-        return crate::zlib_h::Z_STREAM_ERROR;
-    };
-    let mut owner = InflateNormalStateOwner::new(&mut state.decoder.normal);
-    inflatePrime(&mut owner, bits, value)
-}
 #[export_name = "inflatePrime"]
 
 pub unsafe extern "C" fn inflatePrime_ffi(
@@ -1008,7 +994,8 @@ pub unsafe extern "C" fn inflatePrime_ffi(
     let Some(strm) = strm.as_mut() else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
-    inflate_prime_stream(strm, bits, value)
+    inflate_normal_scalar_from_stream(strm, InflateNormalScalarAction::Prime { bits, value })
+        .status()
 }
 fn copy_history_window(
     window: &mut [u8],
@@ -3590,6 +3577,10 @@ fn inflate_sync_point(
 // without reopening the ABI stream boundary.
 #[derive(Clone, Copy)]
 enum InflateNormalScalarAction {
+    Prime {
+        bits: ::core::ffi::c_int,
+        value: ::core::ffi::c_int,
+    },
     SyncPoint,
     Undermine,
     Validate(::core::ffi::c_int),
@@ -3627,27 +3618,30 @@ impl InflateNormalScalarResult {
 }
 
 fn inflate_normal_scalar(
-    normal: &mut InflateNormalState,
+    owner: &mut InflateNormalStateOwner<'_>,
     action: InflateNormalScalarAction,
 ) -> InflateNormalScalarResult {
     match action {
-        InflateNormalScalarAction::SyncPoint => {
-            InflateNormalScalarResult::Status(inflate_sync_point(normal.mode, normal.bits))
+        InflateNormalScalarAction::Prime { bits, value } => {
+            InflateNormalScalarResult::Status(inflatePrime(owner, bits, value))
         }
+        InflateNormalScalarAction::SyncPoint => InflateNormalScalarResult::Status(
+            inflate_sync_point(owner.normal.mode, owner.normal.bits),
+        ),
         InflateNormalScalarAction::Undermine => {
-            InflateNormalScalarResult::Status(inflate_undermine_sane(&mut normal.sane))
+            InflateNormalScalarResult::Status(inflate_undermine_sane(&mut owner.normal.sane))
         }
         InflateNormalScalarAction::Validate(check) => {
-            InflateNormalScalarResult::Status(inflateValidate(normal, check))
+            InflateNormalScalarResult::Status(inflateValidate(owner.normal, check))
         }
         InflateNormalScalarAction::Mark => InflateNormalScalarResult::Mark(inflate_mark_value(
-            normal.back,
-            normal.mode,
-            normal.length,
-            normal.was,
+            owner.normal.back,
+            owner.normal.mode,
+            owner.normal.length,
+            owner.normal.was,
         )),
         InflateNormalScalarAction::CodesUsed => {
-            InflateNormalScalarResult::CodesUsed(inflate_codes_used(normal.next))
+            InflateNormalScalarResult::CodesUsed(inflate_codes_used(owner.normal.next))
         }
     }
 }
@@ -3662,7 +3656,8 @@ fn inflate_normal_scalar_stream_error(
         InflateNormalScalarAction::CodesUsed => {
             InflateNormalScalarResult::CodesUsed(-1 as ::core::ffi::c_int as ::core::ffi::c_ulong)
         }
-        InflateNormalScalarAction::SyncPoint
+        InflateNormalScalarAction::Prime { .. }
+        | InflateNormalScalarAction::SyncPoint
         | InflateNormalScalarAction::Undermine
         | InflateNormalScalarAction::Validate(_) => {
             InflateNormalScalarResult::Status(crate::zlib_h::Z_STREAM_ERROR)
@@ -3677,7 +3672,8 @@ unsafe fn inflate_normal_scalar_from_stream(
     let Some((_strm, state)) = inflate_stream_and_state(strm) else {
         return inflate_normal_scalar_stream_error(action);
     };
-    inflate_normal_scalar(&mut state.decoder.normal, action)
+    let mut owner = InflateNormalStateOwner::new(&mut state.decoder.normal);
+    inflate_normal_scalar(&mut owner, action)
 }
 
 #[export_name = "inflateSyncPoint"]
