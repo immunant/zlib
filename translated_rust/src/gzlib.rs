@@ -73,11 +73,7 @@ unsafe fn gz_reset(state: &mut crate::gzguts_h::gz_state) {
     }
     state.again = 0 as ::core::ffi::c_int;
     state.skip = 0 as crate::stdlib::off64_t;
-    gz_error(
-        state as *mut crate::gzguts_h::gz_state,
-        crate::zlib_h::Z_OK,
-        ::core::ptr::null::<::core::ffi::c_char>(),
-    );
+    gz_error_state(state, crate::zlib_h::Z_OK, None);
     state.x.pos = 0 as crate::stdlib::off64_t;
     state.strm.avail_in = 0 as crate::stdlib::uInt;
 }
