@@ -412,6 +412,35 @@ fn gz_read_should_continue(len: crate::stdlib::z_size_t, err: ::core::ffi::c_int
     len != 0 && err == 0
 }
 
+#[derive(Debug, PartialEq, Eq)]
+struct GzReadLoopProgress {
+    len: crate::stdlib::z_size_t,
+    got: crate::stdlib::z_size_t,
+    pos: crate::stdlib::off64_t,
+    should_continue: bool,
+}
+
+fn gz_read_loop_progress(
+    advance: bool,
+    len: crate::stdlib::z_size_t,
+    got: crate::stdlib::z_size_t,
+    pos: crate::stdlib::off64_t,
+    chunk_len: ::core::ffi::c_uint,
+    err: ::core::ffi::c_int,
+) -> GzReadLoopProgress {
+    let (len, got, pos) = if advance {
+        gz_read_progress(len, got, pos, chunk_len)
+    } else {
+        (len, got, pos)
+    };
+    GzReadLoopProgress {
+        len,
+        got,
+        pos,
+        should_continue: gz_read_should_continue(len, err),
+    }
+}
+
 fn gz_read_request_is_empty(len: crate::stdlib::z_size_t) -> bool {
     len == 0 as crate::stdlib::z_size_t
 }
@@ -1845,6 +1874,45 @@ mod tests {
     }
 
     #[test]
+    fn gz_read_loop_progress_advances_scalars_and_continues() {
+        assert_eq!(
+            gz_read_loop_progress(true, 10, 4, 42, 3, 0),
+            GzReadLoopProgress {
+                len: 7,
+                got: 7,
+                pos: 45,
+                should_continue: true,
+            }
+        );
+    }
+
+    #[test]
+    fn gz_read_loop_progress_preserves_scalars_without_advance() {
+        assert_eq!(
+            gz_read_loop_progress(false, 10, 4, 42, 3, 0),
+            GzReadLoopProgress {
+                len: 10,
+                got: 4,
+                pos: 42,
+                should_continue: true,
+            }
+        );
+    }
+
+    #[test]
+    fn gz_read_loop_progress_stops_after_error() {
+        assert_eq!(
+            gz_read_loop_progress(true, 10, 4, 42, 3, -1),
+            GzReadLoopProgress {
+                len: 7,
+                got: 7,
+                pos: 45,
+                should_continue: false,
+            }
+        );
+    }
+
+    #[test]
     fn gz_read_request_is_empty_matches_only_zero_length_requests() {
         assert!(gz_read_request_is_empty(0));
         assert!(!gz_read_request_is_empty(1));
@@ -2351,12 +2419,15 @@ unsafe fn gz_read(
                 true
             }
         };
+        let progress = gz_read_loop_progress(advance, len, got, (*state).x.pos, n, err);
+        len = progress.len;
+        got = progress.got;
+        (*state).x.pos = progress.pos;
         if advance {
-            (len, got, (*state).x.pos) = gz_read_progress(len, got, (*state).x.pos, n);
             buf =
                 (buf as *mut ::core::ffi::c_char).wrapping_add(n as usize) as crate::stdlib::voidp;
         }
-        if !gz_read_should_continue(len, err) {
+        if !progress.should_continue {
             break;
         }
     }

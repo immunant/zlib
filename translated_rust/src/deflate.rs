@@ -541,6 +541,13 @@ fn fill_window_zero_range(
     }
 }
 
+fn fill_window_should_refill(
+    lookahead: crate::stdlib::uInt,
+    avail_in: crate::stdlib::uInt,
+) -> bool {
+    lookahead < crate::src::deflate::MIN_LOOKAHEAD as crate::stdlib::uInt && avail_in != 0
+}
+
 unsafe fn fill_window(mut s: *mut crate::src::deflate::deflate_state) {
     let mut n: ::core::ffi::c_uint = 0;
     let mut more: ::core::ffi::c_uint = 0;
@@ -609,9 +616,7 @@ unsafe fn fill_window(mut s: *mut crate::src::deflate::deflate_state) {
                 }
             }
         }
-        if !((*s).lookahead < crate::src::deflate::MIN_LOOKAHEAD as crate::stdlib::uInt
-            && (*(*s).strm).avail_in != 0 as crate::stdlib::uInt)
-        {
+        if !fill_window_should_refill((*s).lookahead, (*(*s).strm).avail_in) {
             break;
         }
     }
@@ -2501,16 +2506,41 @@ fn longest_match_limit(
     }
 }
 
+fn longest_match_search_parameters(
+    max_chain_length: crate::stdlib::uInt,
+    prev_length: crate::stdlib::uInt,
+    good_match: crate::stdlib::uInt,
+    nice_match: ::core::ffi::c_int,
+    lookahead: crate::stdlib::uInt,
+) -> (::core::ffi::c_uint, ::core::ffi::c_int) {
+    let mut chain_length: ::core::ffi::c_uint = max_chain_length as ::core::ffi::c_uint;
+    let mut nice_match = nice_match;
+
+    if prev_length >= good_match {
+        chain_length >>= 2 as ::core::ffi::c_int;
+    }
+    if nice_match as crate::stdlib::uInt > lookahead {
+        nice_match = lookahead as ::core::ffi::c_int;
+    }
+
+    (chain_length, nice_match)
+}
+
 unsafe fn longest_match(
     mut s: *mut crate::src::deflate::deflate_state,
     mut cur_match: crate::src::deflate::IPos,
 ) -> crate::stdlib::uInt {
-    let mut chain_length: ::core::ffi::c_uint = (*s).max_chain_length as ::core::ffi::c_uint;
+    let (mut chain_length, mut nice_match) = longest_match_search_parameters(
+        (*s).max_chain_length,
+        (*s).prev_length,
+        (*s).good_match,
+        (*s).nice_match,
+        (*s).lookahead,
+    );
     let mut scan: *mut crate::stdlib::Bytef = (*s).window.offset((*s).strstart as isize);
     let mut match_0: *mut crate::stdlib::Bytef = ::core::ptr::null_mut::<crate::stdlib::Bytef>();
     let mut len: ::core::ffi::c_int = 0;
     let mut best_len: ::core::ffi::c_int = (*s).prev_length as ::core::ffi::c_int;
-    let mut nice_match: ::core::ffi::c_int = (*s).nice_match;
     let mut limit: crate::src::deflate::IPos = longest_match_limit((*s).strstart, (*s).w_size);
     let mut prev: *mut crate::src::deflate::Posf = (*s).prev;
     let mut wmask: crate::stdlib::uInt = (*s).w_mask;
@@ -2521,12 +2551,6 @@ unsafe fn longest_match(
     let mut scan_end1: crate::stdlib::Byte =
         *scan.offset((best_len - 1 as ::core::ffi::c_int) as isize) as crate::stdlib::Byte;
     let mut scan_end: crate::stdlib::Byte = *scan.offset(best_len as isize) as crate::stdlib::Byte;
-    if (*s).prev_length >= (*s).good_match {
-        chain_length >>= 2 as ::core::ffi::c_int;
-    }
-    if nice_match as crate::stdlib::uInt > (*s).lookahead {
-        nice_match = (*s).lookahead as ::core::ffi::c_int;
-    }
     loop {
         match_0 = (*s).window.offset(cur_match as isize);
         if !(*match_0.offset(best_len as isize) as ::core::ffi::c_int
@@ -3787,11 +3811,12 @@ mod tests {
         deflate_request_is_invalid, deflate_reset_status_and_adler,
         deflate_should_return_buf_error, deflate_state_status_valid, deflate_version_matches,
         dictionary_tail_offset, fill_window_available_space, fill_window_cursor,
-        fill_window_insert_after_slide, fill_window_zero_range, flush_pending_accounting,
-        gzip_default_xfl, gzip_header_crc, gzip_header_crc_pending, gzip_header_crc_pending_range,
-        longest_match_limit, normalize_deflate_params, pending_buffer_needs_flush,
-        pending_output_len, pending_short_cursors, read_buf_len, read_buf_total_in_after_copy,
-        short_msb_bytes, slide_hash_entry, stored_block_available_output, stored_block_can_emit,
+        fill_window_insert_after_slide, fill_window_should_refill, fill_window_zero_range,
+        flush_pending_accounting, gzip_default_xfl, gzip_header_crc, gzip_header_crc_pending,
+        gzip_header_crc_pending_range, longest_match_limit, longest_match_search_parameters,
+        normalize_deflate_params, pending_buffer_needs_flush, pending_output_len,
+        pending_short_cursors, read_buf_len, read_buf_total_in_after_copy, short_msb_bytes,
+        slide_hash_entry, stored_block_available_output, stored_block_can_emit,
         stored_block_is_last, stored_block_min_size, stored_block_should_wait,
         stored_insert_after_input, symbol_triplet_cursors, zlib_header, DeflatePreflight,
     };
@@ -4018,6 +4043,19 @@ mod tests {
     }
 
     #[test]
+    fn longest_match_search_parameters_preserve_initialization_and_adjustments() {
+        assert_eq!(
+            longest_match_search_parameters(1023, 3, 4, 100, 50),
+            (1023, 50),
+        );
+        assert_eq!(
+            longest_match_search_parameters(1023, 4, 4, 100, 50),
+            (255, 50),
+        );
+        assert_eq!(longest_match_search_parameters(7, 0, 1, -1, 9), (7, 9),);
+    }
+
+    #[test]
     fn read_buf_len_clamps_to_requested_input() {
         assert_eq!(read_buf_len(0, 0), 0);
         assert_eq!(read_buf_len(0, 8), 0);
@@ -4075,6 +4113,15 @@ mod tests {
             fill_window_available_space(0, 1, 0, 32, true),
             ::core::ffi::c_uint::MAX - 1,
         );
+    }
+
+    #[test]
+    fn fill_window_should_refill_preserves_loop_break_condition() {
+        let min_lookahead = crate::src::deflate::MIN_LOOKAHEAD as crate::stdlib::uInt;
+
+        assert!(fill_window_should_refill(min_lookahead - 1, 1));
+        assert!(!fill_window_should_refill(min_lookahead, 1));
+        assert!(!fill_window_should_refill(0, 0));
     }
 
     #[test]

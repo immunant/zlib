@@ -177,6 +177,18 @@ fn inflate_state_is_usable(
         && inflate_state_metadata_is_valid(stream_matches, mode)
 }
 
+fn inflate_state_check_result(
+    has_stream: bool,
+    has_state: bool,
+    state_is_usable: bool,
+) -> ::core::ffi::c_int {
+    if has_stream && has_state && state_is_usable {
+        0
+    } else {
+        1
+    }
+}
+
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 enum InflateZlibHeaderError {
     IncorrectCheck,
@@ -600,23 +612,21 @@ fn inflate_reset2_params(
 
 unsafe fn inflateStateCheck(mut strm: crate::zlib_h::z_streamp) -> ::core::ffi::c_int {
     if strm.is_null() {
-        return 1 as ::core::ffi::c_int;
+        return inflate_state_check_result(false, false, false);
     }
     let stream = &*strm;
     let state = stream.state as *mut crate::src::inflate::inflate_state;
     if state.is_null() {
-        return 1 as ::core::ffi::c_int;
+        return inflate_state_check_result(true, false, false);
     }
     let state = &*state;
-    if !inflate_state_is_usable(
+    let state_is_usable = inflate_state_is_usable(
         stream.zalloc.is_some(),
         stream.zfree.is_some(),
         state.strm == strm,
         state.mode,
-    ) {
-        return 1 as ::core::ffi::c_int;
-    }
-    return 0 as ::core::ffi::c_int;
+    );
+    inflate_state_check_result(true, true, state_is_usable)
 }
 pub unsafe extern "C" fn inflateResetKeep(
     mut strm: crate::zlib_h::z_streamp,
@@ -2906,7 +2916,7 @@ mod tests {
         inflate_mark_value, inflate_match_copy_plan, inflate_mode_data_type_flags,
         inflate_mode_is_valid, inflate_needs_buffer_error, inflate_output_checksum,
         inflate_prime_update, inflate_reset2_params, inflate_should_update_window,
-        inflate_state_is_usable, inflate_state_metadata_is_valid,
+        inflate_state_check_result, inflate_state_is_usable, inflate_state_metadata_is_valid,
         inflate_stream_has_allocator_callbacks, inflate_sync_input_progress,
         inflate_sync_normalized_wrap, inflate_sync_point_value, inflate_sync_remaining_input,
         inflate_sync_search_core, inflate_undermine_core, inflate_validate_core,
@@ -3594,6 +3604,34 @@ mod tests {
         assert!(!inflate_state_is_usable(true, false, true, HEAD));
         assert!(!inflate_state_is_usable(true, true, false, HEAD));
         assert!(!inflate_state_is_usable(true, true, true, SYNC + 1));
+    }
+
+    #[test]
+    fn inflate_state_check_result_requires_stream_state_and_usable_metadata() {
+        let cases = [
+            (false, false, false, 1, "null stream"),
+            (
+                false,
+                false,
+                true,
+                1,
+                "null stream with otherwise usable state",
+            ),
+            (false, true, false, 1, "null stream with state"),
+            (false, true, true, 1, "null stream with usable state"),
+            (true, false, false, 1, "null state"),
+            (true, false, true, 1, "null state with usable metadata"),
+            (true, true, false, 1, "invalid metadata"),
+            (true, true, true, 0, "valid state"),
+        ];
+
+        for (has_stream, has_state, state_is_usable, expected, scenario) in cases {
+            assert_eq!(
+                inflate_state_check_result(has_stream, has_state, state_is_usable),
+                expected,
+                "{scenario}"
+            );
+        }
     }
 
     #[test]
