@@ -3432,6 +3432,38 @@ pub(crate) fn stored_block_len_bytes(stored_len: crate::zutil_h::ulg) -> [crate:
         (nlen as ::core::ffi::c_int >> 8 as ::core::ffi::c_int) as crate::stdlib::Bytef,
     ]
 }
+
+pub(crate) fn tr_tally_symbol_bytes(
+    dist: ::core::ffi::c_uint,
+    lc: ::core::ffi::c_uint,
+) -> [crate::zutil_h::uchf; 3] {
+    [
+        dist as crate::zutil_h::uch as crate::zutil_h::uchf,
+        (dist >> 8 as ::core::ffi::c_int) as crate::zutil_h::uch as crate::zutil_h::uchf,
+        lc as crate::zutil_h::uch as crate::zutil_h::uchf,
+    ]
+}
+
+pub(crate) fn tr_tally_update_counts(
+    dyn_ltree: &mut [crate::src::deflate::ct_data; 573],
+    dyn_dtree: &mut [crate::src::deflate::ct_data; 61],
+    matches: &mut crate::stdlib::uInt,
+    dist: ::core::ffi::c_uint,
+    lc: ::core::ffi::c_uint,
+    length_code: ::core::ffi::c_int,
+    dist_code: ::core::ffi::c_int,
+) {
+    if dist == 0 as ::core::ffi::c_uint {
+        dyn_ltree[lc as usize].freq = dyn_ltree[lc as usize].freq.wrapping_add(1);
+    } else {
+        *matches = matches.wrapping_add(1);
+        let length_index =
+            (length_code + crate::src::deflate::LITERALS + 1 as ::core::ffi::c_int) as usize;
+        dyn_ltree[length_index].freq = dyn_ltree[length_index].freq.wrapping_add(1);
+        let dist_index = dist_code as usize;
+        dyn_dtree[dist_index].freq = dyn_dtree[dist_index].freq.wrapping_add(1);
+    }
+}
 #[export_name = "_tr_stored_block"]
 
 pub unsafe extern "C" fn _tr_stored_block_ffi(
@@ -3870,48 +3902,42 @@ pub unsafe extern "C" fn _tr_tally_ffi(
     mut dist: ::core::ffi::c_uint,
     mut lc: ::core::ffi::c_uint,
 ) -> ::core::ffi::c_int {
-    let c2rust_fresh0 = (*s).sym_next;
-    (*s).sym_next = (*s).sym_next.wrapping_add(1);
-    *(*s).sym_buf.offset(c2rust_fresh0 as isize) =
-        dist as crate::zutil_h::uch as crate::zutil_h::uchf;
-    let c2rust_fresh1 = (*s).sym_next;
-    (*s).sym_next = (*s).sym_next.wrapping_add(1);
-    *(*s).sym_buf.offset(c2rust_fresh1 as isize) =
-        (dist >> 8 as ::core::ffi::c_int) as crate::zutil_h::uch as crate::zutil_h::uchf;
-    let c2rust_fresh2 = (*s).sym_next;
-    (*s).sym_next = (*s).sym_next.wrapping_add(1);
-    *(*s).sym_buf.offset(c2rust_fresh2 as isize) =
-        lc as crate::zutil_h::uch as crate::zutil_h::uchf;
-    if dist == 0 as ::core::ffi::c_uint {
-        (*s).dyn_ltree[lc as usize].freq = (*s).dyn_ltree[lc as usize].freq.wrapping_add(1);
-    } else {
-        (*s).matches = (*s).matches.wrapping_add(1);
-        dist = dist.wrapping_sub(1);
-        (*s).dyn_ltree[(crate::src::trees::_length_code[lc as usize] as ::core::ffi::c_int
-            + crate::src::deflate::LITERALS
-            + 1 as ::core::ffi::c_int) as usize]
-            .freq = (*s).dyn_ltree[(crate::src::trees::_length_code[lc as usize]
-            as ::core::ffi::c_int
-            + crate::src::deflate::LITERALS
-            + 1 as ::core::ffi::c_int) as usize]
-            .freq
-            .wrapping_add(1);
-        (*s).dyn_dtree[(if dist < 256 as ::core::ffi::c_uint {
-            crate::src::trees::_dist_code[dist as usize] as ::core::ffi::c_int
-        } else {
-            crate::src::trees::_dist_code[(256 as ::core::ffi::c_uint)
-                .wrapping_add(dist >> 7 as ::core::ffi::c_int)
-                as usize] as ::core::ffi::c_int
-        }) as usize]
-            .freq = (*s).dyn_dtree[(if dist < 256 as ::core::ffi::c_uint {
-            crate::src::trees::_dist_code[dist as usize] as ::core::ffi::c_int
-        } else {
-            crate::src::trees::_dist_code[(256 as ::core::ffi::c_uint)
-                .wrapping_add(dist >> 7 as ::core::ffi::c_int)
-                as usize] as ::core::ffi::c_int
-        }) as usize]
-            .freq
-            .wrapping_add(1);
+    let state = &mut *s;
+    let original_dist = dist;
+    for byte in tr_tally_symbol_bytes(dist, lc) {
+        let sym_next = state.sym_next;
+        state.sym_next = state.sym_next.wrapping_add(1);
+        *state.sym_buf.offset(sym_next as isize) = byte;
     }
-    return ((*s).sym_next == (*s).sym_end) as ::core::ffi::c_int;
+    if dist == 0 as ::core::ffi::c_uint {
+        tr_tally_update_counts(
+            &mut state.dyn_ltree,
+            &mut state.dyn_dtree,
+            &mut state.matches,
+            dist,
+            lc,
+            0,
+            0,
+        );
+    } else {
+        dist = dist.wrapping_sub(1);
+        let length_code = crate::src::trees::_length_code[lc as usize] as ::core::ffi::c_int;
+        let dist_code = if dist < 256 as ::core::ffi::c_uint {
+            crate::src::trees::_dist_code[dist as usize] as ::core::ffi::c_int
+        } else {
+            crate::src::trees::_dist_code[(256 as ::core::ffi::c_uint)
+                .wrapping_add(dist >> 7 as ::core::ffi::c_int)
+                as usize] as ::core::ffi::c_int
+        };
+        tr_tally_update_counts(
+            &mut state.dyn_ltree,
+            &mut state.dyn_dtree,
+            &mut state.matches,
+            original_dist,
+            lc,
+            length_code,
+            dist_code,
+        );
+    }
+    return (state.sym_next == state.sym_end) as ::core::ffi::c_int;
 }
