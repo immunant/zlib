@@ -762,33 +762,29 @@ unsafe fn gz_write(
     if gz_write_is_empty(len) {
         return 0 as crate::stdlib::z_size_t;
     }
-    if !gz_buffer_is_initialized((*state).size) && gz_init(state) == -1 as ::core::ffi::c_int {
+    let state = &mut *state;
+    if !gz_buffer_is_initialized(state.size) && gz_init(state) == -1 as ::core::ffi::c_int {
         return 0 as crate::stdlib::z_size_t;
     }
-    if gz_has_pending_skip((*state).skip) && gz_zero(state) == -1 as ::core::ffi::c_int {
+    if gz_has_pending_skip(state.skip) && gz_zero(state) == -1 as ::core::ffi::c_int {
         return 0 as crate::stdlib::z_size_t;
     }
-    if gz_write_uses_buffered_path(len, (*state).size) {
+    if gz_write_uses_buffered_path(len, state.size) {
         loop {
-            if !gz_has_pending_input((*state).strm.avail_in) {
-                (*state).strm.next_in = (*state).in_0;
-                (*state).x.have = 0;
+            if !gz_has_pending_input(state.strm.avail_in) {
+                state.strm.next_in = state.in_0;
+                state.x.have = 0;
             }
-            let have = (*state).x.have;
-            let progress = gz_write_buffered_progress(
-                (*state).size,
-                have,
-                (*state).strm.avail_in,
-                (*state).x.pos,
-                len,
-            );
+            let have = state.x.have;
+            let progress =
+                gz_write_buffered_progress(state.size, have, state.strm.avail_in, state.x.pos, len);
             let copy = progress.copy;
-            (*state).strm.avail_in = progress.avail_in;
-            (*state).x.have = progress.have;
-            (*state).x.pos = progress.pos;
+            state.strm.avail_in = progress.avail_in;
+            state.x.have = progress.have;
+            state.x.pos = progress.pos;
             len = progress.remaining;
             crate::stdlib::memcpy(
-                (*state).in_0.wrapping_add(have as usize) as *mut ::core::ffi::c_void,
+                state.in_0.wrapping_add(have as usize) as *mut ::core::ffi::c_void,
                 buf as *const ::core::ffi::c_void,
                 copy as crate::__stddef_size_t_h::size_t,
             );
@@ -798,11 +794,10 @@ unsafe fn gz_write(
                 break;
             }
             if gz_comp(state, crate::zlib_h::Z_NO_FLUSH) == -1 as ::core::ffi::c_int {
-                return gz_write_error_result((*state).again, put, len);
+                return gz_write_error_result(state.again, put, len);
             }
         }
     } else {
-        let state = &mut *state;
         if gz_has_pending_input(state.strm.avail_in)
             && gz_comp(state, crate::zlib_h::Z_NO_FLUSH) == -1 as ::core::ffi::c_int
         {
