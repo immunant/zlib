@@ -46,7 +46,17 @@ pub use crate::zlib_h::Z_STREAM_ERROR;
 use std::os::fd::BorrowedFd;
 
 fn gz_load_error(state: &mut crate::gzguts_h::gz_state, error: rustix::io::Errno) {
+    errno::set_errno(errno::Errno(error.raw_os_error()));
     let message = ::std::ffi::CString::new(::std::io::Error::from(error).to_string()).ok();
+    crate::src::gzlib::gz_error_state(state, crate::zlib_h::Z_ERRNO, message.as_deref());
+}
+
+fn gz_current_errno_error(state: &mut crate::gzguts_h::gz_state) {
+    let error = errno::errno();
+    let message = ::std::ffi::CString::new(
+        ::std::io::Error::from_raw_os_error(error.0).to_string(),
+    )
+    .ok();
     crate::src::gzlib::gz_error_state(state, crate::zlib_h::Z_ERRNO, message.as_deref());
 }
 
@@ -699,15 +709,7 @@ fn gzread(
             return -1 as ::core::ffi::c_int;
         }
         if state.again != 0 {
-            unsafe {
-                crate::src::gzlib::gz_error_state(
-                    state,
-                    crate::zlib_h::Z_ERRNO,
-                    Some(::std::ffi::CStr::from_ptr(crate::stdlib::strerror(
-                        *crate::stdlib::__errno_location(),
-                    ))),
-                );
-            }
+            gz_current_errno_error(state);
             return -1 as ::core::ffi::c_int;
         }
     }
