@@ -786,15 +786,6 @@ fn gz_read_buffer(
     return got;
 }
 
-/// Legacy stream-facing entry retained while gzip's ABI stream is migrated.
-/// Internal slice callers use `gz_read_buffer()` directly.
-unsafe fn gz_read_impl(
-    state: &mut crate::gzguts_h::gz_state,
-    buf: &mut [u8],
-) -> crate::stdlib::z_size_t {
-    gz_read_buffer(state, buf)
-}
-
 pub unsafe extern "C" fn gzread(
     mut file: crate::zlib_h::gzFile,
     mut buf: crate::stdlib::voidp,
@@ -828,7 +819,7 @@ pub unsafe extern "C" fn gzread(
     len = if len == 0 {
         0
     } else {
-        gz_read_impl(
+        gz_read_buffer(
             state,
             ::core::slice::from_raw_parts_mut(buf.cast::<u8>(), len as crate::stdlib::z_size_t),
         ) as ::core::ffi::c_uint
