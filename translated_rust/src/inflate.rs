@@ -192,7 +192,10 @@ enum InflateStateOwner {
     Default(Box<inflate_state>),
     Callback {
         state: Box<inflate_state>,
-        allocation_address: usize,
+        // The allocator token is recorded only after the callback succeeds.
+        // Reserving the Rust owner first means a registry allocation failure
+        // never leaves an ABI allocation that needs a cleanup callback.
+        allocation_address: Option<usize>,
     },
 }
 
@@ -218,9 +221,43 @@ pub(crate) fn retain_default_inflate_state(state: Box<inflate_state>) -> bool {
     retain_inflate_state_owner(address, InflateStateOwner::Default(state))
 }
 
+/// Retain a callback-backed state before requesting its opaque ABI allocation.
+/// The returned address is the stable Rust owner address exposed through the
+/// stream; the callback allocation is only a token recorded afterwards.
+pub(crate) fn retain_callback_inflate_state(state: Box<inflate_state>) -> Option<usize> {
+    let address = core::ptr::from_ref(state.as_ref()).addr();
+    retain_inflate_state_owner(
+        address,
+        InflateStateOwner::Callback {
+            state,
+            allocation_address: None,
+        },
+    )
+    .then_some(address)
+}
+
+/// Associate a successfully allocated ABI token with its pre-retained Rust
+/// owner.  The owner is inserted before calling the allocator, so this update
+/// cannot allocate or fail under normal operation.
+pub(crate) fn set_callback_inflate_state_allocation(address: usize, allocation_address: usize) {
+    let mut states = inflate_state_owners()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let Some(InflateStateOwner::Callback {
+        allocation_address: slot,
+        ..
+    }) = states.get_mut(&address)
+    else {
+        debug_assert!(false, "callback state owner must be retained first");
+        return;
+    };
+    debug_assert!(slot.is_none(), "callback allocation token recorded twice");
+    *slot = Some(allocation_address);
+}
+
 /// Drop the Rust state owner and return the callback allocation token, when
 /// there is one, for the ABI boundary to return to `zfree`.
-fn release_inflate_state_owner(address: usize) -> Option<usize> {
+pub(crate) fn release_inflate_state_owner(address: usize) -> Option<usize> {
     let owner = inflate_state_owners()
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner())
@@ -235,7 +272,7 @@ fn release_inflate_state_owner(address: usize) -> Option<usize> {
             allocation_address,
         } => {
             drop(state);
-            Some(allocation_address)
+            allocation_address
         }
     }
 }
@@ -677,7 +714,7 @@ unsafe fn inflate_allocate_state(
                 state_pointer.addr(),
                 InflateStateOwner::Callback {
                     state: state.take().expect("new state"),
-                    allocation_address: allocation.addr(),
+                    allocation_address: Some(allocation.addr()),
                 },
             );
             true

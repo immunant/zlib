@@ -207,8 +207,8 @@ fn prepare_inflate_back_init<'a>(
     Ok(BackInitPreparation { strm, state })
 }
 
-/// Install a fully prepared back-inflater in storage supplied by the stream's
-/// ABI allocator.  The raw allocation is kept here so preparation stays safe.
+/// Install a fully prepared back-inflater.  A custom ABI allocation is only an
+/// opaque token; the actual decoder state remains Rust-owned.
 unsafe fn inflate_back_init_boundary(
     strm: Option<&mut crate::zlib_h::z_stream_s>,
     window: Option<&mut [u8]>,
@@ -233,17 +233,24 @@ unsafe fn inflate_back_init_boundary(
     let (Some(zalloc), Some(_)) = (strm.zalloc, strm.zfree) else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
-    let state_allocation = zalloc(
+    let state = Box::new(state);
+    let state_pointer = core::ptr::from_ref(state.as_ref());
+    let Some(state_address) = crate::src::inflate::retain_callback_inflate_state(state) else {
+        return crate::zlib_h::Z_MEM_ERROR;
+    };
+    let allocation = zalloc(
         strm.opaque,
         1,
         ::core::mem::size_of::<crate::src::inflate::inflate_state>() as crate::stdlib::uInt,
-    )
-    .cast::<crate::src::inflate::inflate_state>();
-    if state_allocation.is_null() {
+    );
+    if allocation.is_null() {
+        debug_assert!(crate::src::inflate::release_inflate_state_owner(state_address).is_none());
         return crate::zlib_h::Z_MEM_ERROR;
     }
-    state_allocation.write(state);
-    strm.state = state_allocation.cast::<crate::src::deflate::internal_state>();
+    crate::src::inflate::set_callback_inflate_state_allocation(state_address, allocation.addr());
+    strm.state = state_pointer
+        .cast_mut()
+        .cast::<crate::src::deflate::internal_state>();
     crate::zlib_h::Z_OK
 }
 #[export_name = "inflateBackInit_"]
@@ -1044,7 +1051,9 @@ fn inflate_back_end_impl(
             crate::src::inflate::release_default_inflate_state(state_address);
             None
         }
-        InflateBackStateOwner::Callback => Some(state_address),
+        InflateBackStateOwner::Callback => {
+            crate::src::inflate::release_inflate_state_owner(state_address)
+        }
     }
 }
 
