@@ -1682,9 +1682,10 @@ pub unsafe extern "C" fn inflate(
                                                                     }
                                                                     copy = (*state).length;
                                                                     if copy != 0 {
-                                                                        copy = inflate_stored_copy_len(
-                                                                            copy, have, left,
-                                                                        );
+                                                                        copy =
+                                                                            inflate_stored_copy_len(
+                                                                                copy, have, left,
+                                                                            );
                                                                         if copy == 0 {
                                                                             break '_inf_leave;
                                                                         }

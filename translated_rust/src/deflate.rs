@@ -3481,14 +3481,15 @@ unsafe extern "C" fn deflate_stored(
             len = copy.remaining;
         }
         if len != 0 {
-            read_buf((*s).strm, (*(*s).strm).next_out, len);
+            let state = &mut *s;
+            let stream = state.strm;
+            let strm = &mut *stream;
+            read_buf(stream, strm.next_out, len);
             // `read_buf()` consumed at most the requested `len` bytes, so
             // this is a cursor update only; no pointer dereference is needed.
-            (*(*s).strm).next_out = (*(*s).strm).next_out.wrapping_add(len as usize);
-            (*(*s).strm).avail_out = (*(*s).strm).avail_out.wrapping_sub(len);
-            (*(*s).strm).total_out = (*(*s).strm)
-                .total_out
-                .wrapping_add(len as crate::stdlib::uLong);
+            strm.next_out = strm.next_out.wrapping_add(len as usize);
+            strm.avail_out = strm.avail_out.wrapping_sub(len);
+            strm.total_out = strm.total_out.wrapping_add(len as crate::stdlib::uLong);
         }
         if last != 0 as ::core::ffi::c_int {
             break;
@@ -3500,71 +3501,77 @@ unsafe extern "C" fn deflate_stored(
         strm.avail_in
     });
     if used != 0 {
-        let Ok(window_len) = usize::try_from((*s).window_size) else {
+        let state = &mut *s;
+        let strm = &mut *state.strm;
+        let Ok(window_len) = usize::try_from(state.window_size) else {
             return need_more;
         };
         let Ok(used_len) = usize::try_from(used) else {
             return need_more;
         };
-        if (*s).window.is_null() || (*(*s).strm).next_in.is_null() {
+        if state.window.is_null() || strm.next_in.is_null() {
             return need_more;
         }
-        let window = ::core::slice::from_raw_parts_mut((*s).window, window_len);
-        let consumed = ::core::slice::from_raw_parts(
-            (*(*s).strm).next_in.wrapping_sub(used as usize),
-            used_len,
-        );
-        if !update_stored_history_state(&mut *s, window, consumed) {
+        let window = ::core::slice::from_raw_parts_mut(state.window, window_len);
+        let consumed =
+            ::core::slice::from_raw_parts(strm.next_in.wrapping_sub(used as usize), used_len);
+        if !update_stored_history_state(state, window, consumed) {
             return need_more;
         }
     }
     if last != 0 {
-        (*s).bi_used = 8 as ::core::ffi::c_int;
+        (&mut *s).bi_used = 8 as ::core::ffi::c_int;
         return finish_done;
     }
-    if flush != crate::zlib_h::Z_NO_FLUSH
-        && flush != crate::zlib_h::Z_FINISH
-        && (*(*s).strm).avail_in == 0 as crate::stdlib::uInt
-        && (*s).strstart as ::core::ffi::c_long == (*s).block_start
     {
-        return block_done;
+        let state = &mut *s;
+        let stream = state.strm;
+        let strm = &mut *stream;
+        if flush != crate::zlib_h::Z_NO_FLUSH
+            && flush != crate::zlib_h::Z_FINISH
+            && strm.avail_in == 0 as crate::stdlib::uInt
+            && state.strstart as ::core::ffi::c_long == state.block_start
+        {
+            return block_done;
+        }
+        let Ok(window_len) = usize::try_from(state.window_size) else {
+            return need_more;
+        };
+        if window_len != 0 && state.window.is_null() {
+            return need_more;
+        }
+        let window = if window_len == 0 {
+            &mut []
+        } else {
+            ::core::slice::from_raw_parts_mut(state.window, window_len)
+        };
+        let Some(next_have) = rebalance_stored_window_state(state, window, strm.avail_in) else {
+            return need_more;
+        };
+        have = next_have;
+        if have > strm.avail_in {
+            have = strm.avail_in as ::core::ffi::c_uint;
+        }
+        if have != 0 {
+            let output = state.window.wrapping_add(state.strstart as usize);
+            read_buf(stream, output, have);
+            record_stored_input_state(state, have);
+        }
     }
-    let Ok(window_len) = usize::try_from((*s).window_size) else {
-        return need_more;
+    let tail_plan = {
+        let state = &mut *s;
+        let strm = &mut *state.strm;
+        stored_tail_block_plan(
+            state.pending_buf_size,
+            state.bi_valid,
+            state.w_size,
+            state.strstart,
+            state.block_start,
+            strm.avail_in,
+            flush,
+        )
     };
-    if window_len != 0 && (*s).window.is_null() {
-        return need_more;
-    }
-    let window = if window_len == 0 {
-        &mut []
-    } else {
-        ::core::slice::from_raw_parts_mut((*s).window, window_len)
-    };
-    let Some(next_have) = rebalance_stored_window_state(&mut *s, window, (*(*s).strm).avail_in)
-    else {
-        return need_more;
-    };
-    have = next_have;
-    if have > (*(*s).strm).avail_in {
-        have = (*(*s).strm).avail_in as ::core::ffi::c_uint;
-    }
-    if have != 0 {
-        read_buf(
-            (*s).strm,
-            (*s).window.wrapping_add((*s).strstart as usize),
-            have,
-        );
-        record_stored_input_state(&mut *s, have);
-    }
-    if let Some(plan) = stored_tail_block_plan(
-        (*s).pending_buf_size,
-        (*s).bi_valid,
-        (*s).w_size,
-        (*s).strstart,
-        (*s).block_start,
-        (*(*s).strm).avail_in,
-        flush,
-    ) {
+    if let Some(plan) = tail_plan {
         len = plan.len;
         last = plan.last;
         let state = &mut *s;
@@ -3586,7 +3593,7 @@ unsafe extern "C" fn deflate_stored(
         flush_pending(state.strm);
     }
     if last != 0 {
-        (*s).bi_used = 8 as ::core::ffi::c_int;
+        (&mut *s).bi_used = 8 as ::core::ffi::c_int;
     }
     return (if last != 0 {
         finish_started as ::core::ffi::c_int
