@@ -84,7 +84,8 @@ pub struct internal_state {
     pub status: ::core::ffi::c_int,
     pub pending_buf: *mut crate::stdlib::Bytef,
     pub pending_buf_size: crate::zutil_h::ulg,
-    pub pending_out: *mut crate::stdlib::Bytef,
+    // Offset of the first pending byte in `deflate_buffers::pending`.
+    pub pending_out: usize,
     pub pending: crate::zutil_h::ulg,
     pub wrap: ::core::ffi::c_int,
     pub gzindex: crate::zutil_h::ulg,
@@ -197,7 +198,7 @@ impl Default for internal_state {
     fn default() -> Self {
         Self {
             strm: ::core::ptr::null_mut(), status: 0, pending_buf: ::core::ptr::null_mut(),
-            pending_buf_size: 0, pending_out: ::core::ptr::null_mut(), pending: 0, wrap: 0,
+            pending_buf_size: 0, pending_out: 0, pending: 0, wrap: 0,
             gzindex: 0, method: 0, last_flush: 0, w_size: 0,
             w_bits: 0, w_mask: 0, window: ::core::ptr::null_mut(), window_size: 0,
             prev: ::core::ptr::null_mut(), head: ::core::ptr::null_mut(), ins_h: 0, hash_size: 0,
@@ -940,7 +941,7 @@ pub unsafe extern "C" fn deflateResetKeep(
     s = (*strm).state as *mut crate::src::deflate::deflate_state;
     let s = &mut *s;
     s.pending = 0 as crate::zutil_h::ulg;
-    s.pending_out = s.pending_buf;
+    s.pending_out = 0;
     if s.wrap < 0 as ::core::ffi::c_int {
         s.wrap = -s.wrap;
     }
@@ -983,7 +984,7 @@ unsafe extern "C" fn lm_init(mut s: *mut crate::src::deflate::deflate_state) {
     };
     s.pending_buf = pending_buf;
     s.pending_buf_size = pending_len as crate::zutil_h::ulg;
-    s.pending_out = pending_buf;
+    s.pending_out = 0;
     s.window = window;
     s.prev = prev;
     s.head = head;
@@ -1176,17 +1177,15 @@ pub unsafe extern "C" fn deflatePrime(
         return crate::zlib_h::Z_STREAM_ERROR;
     }
     s = (*strm).state as *mut crate::src::deflate::deflate_state;
+    let s = &mut *s;
+    let required = ((crate::src::deflate::Buf_size + 7 as ::core::ffi::c_int)
+        >> 3 as ::core::ffi::c_int) as usize;
     if bits < 0 as ::core::ffi::c_int
         || bits > 16 as ::core::ffi::c_int
-        || (*s).sym_buf
-            < (*s).pending_out.offset(
-                (crate::src::deflate::Buf_size + 7 as ::core::ffi::c_int >> 3 as ::core::ffi::c_int)
-                    as isize,
-            )
+        || s.pending_out.checked_add(required).map_or(true, |end| end > s.lit_bufsize as usize)
     {
         return crate::zlib_h::Z_BUF_ERROR;
     }
-    let s = &mut *s;
     loop {
         put = crate::src::deflate::Buf_size - (*s).bi_valid;
         if put > bits {
@@ -1479,34 +1478,41 @@ unsafe extern "C" fn putShortMSB(
         (b & 0xff as crate::stdlib::uInt) as crate::stdlib::Byte;
 }
 
-unsafe extern "C" fn flush_pending(mut strm: crate::zlib_h::z_streamp) {
+unsafe extern "C" fn flush_pending(strm: crate::zlib_h::z_streamp) {
     let mut len: ::core::ffi::c_uint = 0;
-    let mut s: *mut crate::src::deflate::deflate_state =
-        (*strm).state as *mut crate::src::deflate::deflate_state;
-    let s = &mut *s;
+    let strm = &mut *strm;
+    let s = &mut *(strm.state as *mut crate::src::deflate::deflate_state);
     let pending_buf =
-        ::core::slice::from_raw_parts_mut((*s).pending_buf, (*s).pending_buf_size as usize);
+        ::core::slice::from_raw_parts_mut(s.pending_buf, s.pending_buf_size as usize);
     crate::src::trees::bi_flush(s, pending_buf);
-    len = if (*s).pending > (*strm).avail_out as crate::zutil_h::ulg {
-        (*strm).avail_out as ::core::ffi::c_uint
+    len = if s.pending > strm.avail_out as crate::zutil_h::ulg {
+        strm.avail_out as ::core::ffi::c_uint
     } else {
-        (*s).pending as ::core::ffi::c_uint
+        s.pending as ::core::ffi::c_uint
     };
     if len == 0 as ::core::ffi::c_uint {
         return;
     }
-    crate::stdlib::memcpy(
-        (*strm).next_out as *mut ::core::ffi::c_void,
-        (*s).pending_out as *const ::core::ffi::c_void,
-        len as crate::__stddef_size_t_h::size_t,
-    );
-    (*strm).next_out = (*strm).next_out.offset(len as isize);
-    (*s).pending_out = (*s).pending_out.offset(len as isize);
-    (*strm).total_out = (*strm).total_out.wrapping_add(len as crate::stdlib::uLong);
-    (*strm).avail_out = (*strm).avail_out.wrapping_sub(len);
-    (*s).pending = (*s).pending.wrapping_sub(len as crate::zutil_h::ulg);
-    if (*s).pending == 0 as crate::zutil_h::ulg {
-        (*s).pending_out = (*s).pending_buf;
+    let output_end = s.pending_out.checked_add(len as usize).expect("pending output overflow");
+    {
+        let pending_output = &s
+            .buffers
+            .as_ref()
+            .expect("deflate buffers initialized")
+            .pending[s.pending_out..output_end];
+        crate::stdlib::memcpy(
+            strm.next_out as *mut ::core::ffi::c_void,
+            pending_output.as_ptr() as *const ::core::ffi::c_void,
+            len as crate::__stddef_size_t_h::size_t,
+        );
+    }
+    strm.next_out = strm.next_out.offset(len as isize);
+    s.pending_out = output_end;
+    strm.total_out = strm.total_out.wrapping_add(len as crate::stdlib::uLong);
+    strm.avail_out = strm.avail_out.wrapping_sub(len);
+    s.pending = s.pending.wrapping_sub(len as crate::zutil_h::ulg);
+    if s.pending == 0 as crate::zutil_h::ulg {
+        s.pending_out = 0;
     }
 }
 pub fn deflate(
@@ -2141,7 +2147,7 @@ pub unsafe extern "C" fn deflateCopy(
         return crate::zlib_h::Z_STREAM_ERROR;
     }
     let ss = &*( (*source).state as *const crate::src::deflate::deflate_state);
-    let pending_offset = ss.pending_out.offset_from(ss.pending_buf) as usize;
+    let pending_offset = ss.pending_out;
     let mut copied = ss.clone();
     copied.strm = dest;
     let (pending_buf, window, prev, head, pending_len) = {
@@ -2156,7 +2162,7 @@ pub unsafe extern "C" fn deflateCopy(
     };
     copied.pending_buf = pending_buf;
     copied.pending_buf_size = pending_len as crate::zutil_h::ulg;
-    copied.pending_out = pending_buf.wrapping_add(pending_offset);
+    copied.pending_out = pending_offset;
     copied.window = window;
     copied.prev = prev;
     copied.head = head;
