@@ -119,12 +119,7 @@ pub unsafe extern "C" fn adler32_ffi(
     mut buf: *const crate::stdlib::Bytef,
     mut len: crate::stdlib::uInt,
 ) -> crate::stdlib::uLong {
-    match adler32_input_plan(buf.is_null(), len as crate::stdlib::z_size_t) {
-        Adler32InputPlan::Initial => adler32_initial(),
-        Adler32InputPlan::Slice { len } => {
-            adler32_update(adler, ::core::slice::from_raw_parts(buf, len))
-        }
-    }
+    adler32_z_ffi(adler, buf, len as crate::stdlib::z_size_t)
 }
 fn adler32_combine_(
     adler1: crate::stdlib::uLong,
