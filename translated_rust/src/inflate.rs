@@ -2379,70 +2379,11 @@ fn syncsearch(have: &mut ::core::ffi::c_uint, buf: &[u8]) -> ::core::ffi::c_uint
     *have = got;
     next
 }
-pub unsafe fn inflateSync(
-    mut strm: crate::zlib_h::z_streamp,
-    input: &[u8],
-) -> ::core::ffi::c_int {
-    let mut len: ::core::ffi::c_uint = 0;
-    let mut flags: ::core::ffi::c_int = 0;
-    let mut in_0: ::core::ffi::c_ulong = 0;
-    let mut out: ::core::ffi::c_ulong = 0;
-    let mut buf: [::core::ffi::c_uchar; 4] = [0; 4];
-    let mut state: *mut crate::src::inflate::inflate_state =
-        ::core::ptr::null_mut::<crate::src::inflate::inflate_state>();
-    if inflateStateCheck(strm) != 0 {
-        return crate::zlib_h::Z_STREAM_ERROR;
-    }
-    state = (*strm).state as *mut crate::src::inflate::inflate_state;
-    if (*strm).avail_in == 0 as crate::stdlib::uInt && (*state).bits < 8 as ::core::ffi::c_uint {
-        return crate::zlib_h::Z_BUF_ERROR;
-    }
-    if (*state).mode as ::core::ffi::c_uint
-        != crate::src::inflate::SYNC as ::core::ffi::c_int as ::core::ffi::c_uint
-    {
-        (*state).mode = crate::src::inflate::SYNC;
-        (*state).hold >>= (*state).bits & 7 as ::core::ffi::c_uint;
-        (*state).bits = (*state)
-            .bits
-            .wrapping_sub((*state).bits & 7 as ::core::ffi::c_uint);
-        len = 0 as ::core::ffi::c_uint;
-        while (*state).bits >= 8 as ::core::ffi::c_uint {
-            let c2rust_fresh35 = len;
-            len = len.wrapping_add(1);
-            buf[c2rust_fresh35 as usize] = (*state).hold as ::core::ffi::c_uchar;
-            (*state).hold >>= 8 as ::core::ffi::c_int;
-            (*state).bits = (*state).bits.wrapping_sub(8 as ::core::ffi::c_uint);
-        }
-        (*state).have = 0 as ::core::ffi::c_uint;
-        syncsearch(&mut (*state).have, &buf[..len as usize]);
-    }
-    len = syncsearch(&mut (*state).have, input);
-    (*strm).avail_in = (*strm).avail_in.wrapping_sub(len);
-    (*strm).next_in = (*strm).next_in.offset(len as isize);
-    (*strm).total_in = (*strm).total_in.wrapping_add(len as crate::stdlib::uLong);
-    if (*state).have != 4 as ::core::ffi::c_uint {
-        return crate::zlib_h::Z_DATA_ERROR;
-    }
-    if (*state).flags == -1 as ::core::ffi::c_int {
-        (*state).wrap = 0 as ::core::ffi::c_int;
-    } else {
-        (*state).wrap &= !(4 as ::core::ffi::c_int);
-    }
-    flags = (*state).flags;
-    in_0 = (*strm).total_in as ::core::ffi::c_ulong;
-    out = (*strm).total_out as ::core::ffi::c_ulong;
-    inflateReset(strm);
-    (*strm).total_in = in_0 as crate::stdlib::uLong;
-    (*strm).total_out = out as crate::stdlib::uLong;
-    (*state).flags = flags;
-    (*state).mode = crate::src::inflate::TYPE;
-    return crate::zlib_h::Z_OK;
-}
 #[export_name = "inflateSync"]
 
 pub unsafe extern "C" fn inflateSync_ffi(mut strm: crate::zlib_h::z_streamp) -> ::core::ffi::c_int {
     if strm.is_null() {
-        return inflateSync(strm, &[]);
+        return crate::zlib_h::Z_STREAM_ERROR;
     }
     let len = (*strm).avail_in as usize;
     let input = if len == 0 {
@@ -2452,7 +2393,55 @@ pub unsafe extern "C" fn inflateSync_ffi(mut strm: crate::zlib_h::z_streamp) -> 
     } else {
         ::core::slice::from_raw_parts((*strm).next_in as *const u8, len)
     };
-    inflateSync(strm, input)
+    let mut len: ::core::ffi::c_uint = 0;
+    let mut flags: ::core::ffi::c_int = 0;
+    let mut in_0: ::core::ffi::c_ulong = 0;
+    let mut out: ::core::ffi::c_ulong = 0;
+    let mut buf: [::core::ffi::c_uchar; 4] = [0; 4];
+    if inflateStateCheck(strm) != 0 {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    }
+    let state = (*strm).state as *mut crate::src::inflate::inflate_state;
+    if (*strm).avail_in == 0 && (*state).bits < 8 {
+        return crate::zlib_h::Z_BUF_ERROR;
+    }
+    if (*state).mode as ::core::ffi::c_uint
+        != crate::src::inflate::SYNC as ::core::ffi::c_int as ::core::ffi::c_uint
+    {
+        (*state).mode = crate::src::inflate::SYNC;
+        (*state).hold >>= (*state).bits & 7;
+        (*state).bits = (*state).bits.wrapping_sub((*state).bits & 7);
+        while (*state).bits >= 8 {
+            let next = len as usize;
+            len = len.wrapping_add(1);
+            buf[next] = (*state).hold as ::core::ffi::c_uchar;
+            (*state).hold >>= 8;
+            (*state).bits = (*state).bits.wrapping_sub(8);
+        }
+        (*state).have = 0;
+        syncsearch(&mut (*state).have, &buf[..len as usize]);
+    }
+    len = syncsearch(&mut (*state).have, input);
+    (*strm).avail_in = (*strm).avail_in.wrapping_sub(len);
+    (*strm).next_in = (*strm).next_in.offset(len as isize);
+    (*strm).total_in = (*strm).total_in.wrapping_add(len as crate::stdlib::uLong);
+    if (*state).have != 4 {
+        return crate::zlib_h::Z_DATA_ERROR;
+    }
+    if (*state).flags == -1 {
+        (*state).wrap = 0;
+    } else {
+        (*state).wrap &= !4;
+    }
+    flags = (*state).flags;
+    in_0 = (*strm).total_in as ::core::ffi::c_ulong;
+    out = (*strm).total_out as ::core::ffi::c_ulong;
+    inflateReset(strm);
+    (*strm).total_in = in_0 as crate::stdlib::uLong;
+    (*strm).total_out = out as crate::stdlib::uLong;
+    (*state).flags = flags;
+    (*state).mode = crate::src::inflate::TYPE;
+    crate::zlib_h::Z_OK
 }
 #[export_name = "inflateSyncPoint"]
 pub unsafe extern "C" fn inflateSyncPoint_ffi(
