@@ -3524,10 +3524,7 @@ fn inflate_sync_core(
     (state, consumed, crate::zlib_h::Z_OK)
 }
 
-pub unsafe extern "C" fn inflateSync(mut strm: crate::zlib_h::z_streamp) -> ::core::ffi::c_int {
-    let Some(strm_ref) = strm.as_mut() else {
-        return crate::zlib_h::Z_STREAM_ERROR;
-    };
+pub unsafe fn inflateSync(strm_ref: &mut crate::zlib_h::z_stream_s) -> ::core::ffi::c_int {
     let Some((strm_ref, state)) = inflate_stream_and_state(strm_ref) else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
@@ -3583,6 +3580,9 @@ pub unsafe extern "C" fn inflateSync(mut strm: crate::zlib_h::z_streamp) -> ::co
 #[export_name = "inflateSync"]
 
 pub unsafe extern "C" fn inflateSync_ffi(mut strm: crate::zlib_h::z_streamp) -> ::core::ffi::c_int {
+    let Some(strm) = strm.as_mut() else {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    };
     inflateSync(strm)
 }
 
