@@ -978,6 +978,7 @@ pub unsafe extern "C" fn deflateGetDictionary_ffi(
 }
 pub unsafe extern "C" fn deflateResetKeep(
     mut strm: crate::zlib_h::z_streamp,
+    initialize_matcher: bool,
 ) -> ::core::ffi::c_int {
     if deflateStateCheck(strm) != 0 {
         return crate::zlib_h::Z_STREAM_ERROR;
@@ -986,6 +987,9 @@ pub unsafe extern "C" fn deflateResetKeep(
     let state = &mut *(strm.state as *mut crate::src::deflate::deflate_state);
     let result = deflate_reset_keep(strm, state);
     crate::src::trees::_tr_init(state);
+    if result == crate::zlib_h::Z_OK && initialize_matcher {
+        lm_init(state);
+    }
     result
 }
 
@@ -1020,13 +1024,11 @@ fn deflate_reset_keep(
 pub unsafe extern "C" fn deflateResetKeep_ffi(
     mut strm: crate::zlib_h::z_streamp,
 ) -> ::core::ffi::c_int {
-    deflateResetKeep(strm)
+    deflateResetKeep(strm, false)
 }
-// This private reset helper receives the state pointer that its validated
-// deflater caller already owns. The state and hash bindings stay scoped here.
-fn lm_init(state: *mut crate::src::deflate::deflate_state) {
-    // SAFETY: `deflateReset()` has validated this state pointer before reset.
-    let state = unsafe { &mut *state };
+// This private reset helper receives the validated state reference that its
+// deflater caller already owns. The hash binding stays scoped here.
+fn lm_init(state: &mut crate::src::deflate::deflate_state) {
     // SAFETY: the validated deflater owns a `hash_size`-entry head allocation.
     let head = unsafe {
         ::core::slice::from_raw_parts_mut(state.head, state.hash_size as usize)
@@ -1058,11 +1060,7 @@ fn lm_init_state(
     state.ins_h = 0;
 }
 pub unsafe extern "C" fn deflateReset(mut strm: crate::zlib_h::z_streamp) -> ::core::ffi::c_int {
-    let ret = deflateResetKeep(strm);
-    if ret == crate::zlib_h::Z_OK {
-        lm_init((*strm).state as *mut crate::src::deflate::deflate_state);
-    }
-    ret
+    deflateResetKeep(strm, true)
 }
 #[export_name = "deflateReset"]
 
