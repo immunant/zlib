@@ -185,6 +185,17 @@ fn inflate_state_values_are_valid(
         && (crate::src::inflate::HEAD..=crate::src::inflate::SYNC).contains(&mode)
 }
 
+/// Bound one stored-block transfer by the decoder's remaining input and
+/// output. The ABI loops keep their cursors at the boundary; this core owns
+/// only the scalar progress calculation.
+pub(crate) fn inflate_stored_copy_len(
+    remaining: ::core::ffi::c_uint,
+    available_input: ::core::ffi::c_uint,
+    available_output: ::core::ffi::c_uint,
+) -> ::core::ffi::c_uint {
+    remaining.min(available_input).min(available_output)
+}
+
 pub(crate) unsafe extern "C" fn inflateStateCheck(
     mut strm: crate::zlib_h::z_streamp,
 ) -> ::core::ffi::c_int {
@@ -1626,15 +1637,10 @@ pub unsafe extern "C" fn inflate(
                                                                     }
                                                                     copy = (*state).length;
                                                                     if copy != 0 {
-                                                                        if copy > have {
-                                                                            copy = have;
-                                                                        }
-                                                                        if copy > left {
-                                                                            copy = left;
-                                                                        }
-                                                                        if copy == 0
-                                                                            as ::core::ffi::c_uint
-                                                                        {
+                                                                        copy = inflate_stored_copy_len(
+                                                                            copy, have, left,
+                                                                        );
+                                                                        if copy == 0 {
                                                                             break '_inf_leave;
                                                                         }
                                                                         // The bounded stored-block

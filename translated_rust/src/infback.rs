@@ -315,12 +315,7 @@ pub unsafe extern "C" fn inflateBack_ffi(
                                 break '_inf_leave;
                             }
                         }
-                        if copy > have {
-                            copy = have;
-                        }
-                        if copy > left {
-                            copy = left;
-                        }
+                        copy = crate::src::inflate::inflate_stored_copy_len(copy, have, left);
                         let Ok(copy_len) = usize::try_from(copy) else {
                             ret = crate::zlib_h::Z_BUF_ERROR;
                             break '_inf_leave;
