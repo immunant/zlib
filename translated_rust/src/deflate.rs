@@ -345,37 +345,31 @@ pub(crate) fn clear_hash_state(
 }
 
 /// Translate the legacy state-owned hash allocations into temporary slices for
-/// the pre-existing private window-fill adapter.  Export boundaries call the
-/// slice core directly instead.
-pub(crate) unsafe fn slide_hash(mut s: *mut crate::src::deflate::deflate_state) {
-    if s.is_null() {
-        return;
-    }
-    // This legacy adapter still has to lend the callback-allocated hash
-    // buffers, but adopt the validated state record once so the remainder of
-    // the state transition uses ordinary field access.
-    let s = &mut *s;
-    let Ok(head_len) = usize::try_from(s.hash_size) else {
+/// the pre-existing private window-fill adapter.  `fill_window` has already
+/// adopted this state record before calling here, so this adapter does not
+/// need another raw state boundary.
+pub(crate) unsafe fn slide_hash(state: &mut crate::src::deflate::deflate_state) {
+    let Ok(head_len) = usize::try_from(state.hash_size) else {
         return;
     };
-    let Ok(prev_len) = usize::try_from(s.w_size) else {
+    let Ok(prev_len) = usize::try_from(state.w_size) else {
         return;
     };
-    if (head_len != 0 && s.head.is_null()) || (prev_len != 0 && s.prev.is_null()) {
+    if (head_len != 0 && state.head.is_null()) || (prev_len != 0 && state.prev.is_null()) {
         return;
     }
     let head = if head_len == 0 {
         &mut []
     } else {
-        ::core::slice::from_raw_parts_mut(s.head, head_len)
+        ::core::slice::from_raw_parts_mut(state.head, head_len)
     };
     let prev = if prev_len == 0 {
         &mut []
     } else {
-        ::core::slice::from_raw_parts_mut(s.prev, prev_len)
+        ::core::slice::from_raw_parts_mut(state.prev, prev_len)
     };
-    slide_hash_state(head, prev, s.w_size);
-    s.slid = 1;
+    slide_hash_state(head, prev, state.w_size);
+    state.slid = 1;
 }
 
 fn read_buf_state(
@@ -751,7 +745,7 @@ unsafe fn fill_window(mut s: *mut crate::src::deflate::deflate_state) {
             ) else {
                 return;
             };
-            slide_hash(s);
+            slide_hash(state);
             more = next_more;
         }
         // `read_buf()` consumes at most this exact available-input snapshot.
