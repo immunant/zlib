@@ -4096,12 +4096,10 @@ pub unsafe extern "C" fn inflateCopy_ffi(
     }
     let dest_stream = &mut *dest;
     *dest_stream = *source_stream;
-    crate::stdlib::memcpy(
-        copy as *mut ::core::ffi::c_void,
-        state as *mut crate::src::inflate::inflate_state as *const ::core::ffi::c_void,
-        ::core::mem::size_of::<crate::src::inflate::inflate_state>()
-            as crate::__stddef_size_t_h::size_t,
-    );
+    // `inflate_state` is an opaque, fully initialized `Copy` record at this
+    // ownership boundary.  Copy its fields directly instead of using the C
+    // byte-copy routine; the separately allocated window is rebound below.
+    *copy = *state;
     let copy = &mut *copy;
     copy.strm = dest;
     copy.next = state.next;
