@@ -3391,11 +3391,6 @@ pub mod trees_h {
         16384 as ::core::ffi::c_int,
         24576 as ::core::ffi::c_int,
     ];
-
-    
-    
-    
-    
 }
 pub use crate::__stddef_size_t_h::size_t;
 pub use crate::src::deflate::ct_data;
@@ -3418,7 +3413,6 @@ pub use crate::src::deflate::LENGTH_CODES;
 pub use crate::src::deflate::LITERALS;
 pub use crate::src::deflate::L_CODES;
 pub use crate::src::deflate::MAX_BITS;
-
 
 pub use crate::src::trees::trees_h::base_dist;
 pub use crate::src::trees::trees_h::base_length;

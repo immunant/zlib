@@ -1,8 +1,6 @@
 pub use crate::__stddef_size_t_h::size_t;
 pub use crate::stdlib::__off_t;
 
-
-
 pub use crate::stdlib::off_t;
 pub use crate::stdlib::uInt;
 pub use crate::stdlib::uLong;
@@ -156,7 +154,10 @@ pub unsafe extern "C" fn zcalloc_ffi(
 ) -> crate::stdlib::voidpf {
     zcalloc(opaque, items, size)
 }
-pub unsafe extern "C" fn zcfree(mut _opaque: crate::stdlib::voidpf, mut ptr: crate::stdlib::voidpf) {
+pub unsafe extern "C" fn zcfree(
+    mut _opaque: crate::stdlib::voidpf,
+    mut ptr: crate::stdlib::voidpf,
+) {
     crate::stdlib::free(ptr as *mut ::core::ffi::c_void);
 }
 #[export_name = "zcfree"]

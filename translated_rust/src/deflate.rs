@@ -165,7 +165,6 @@ pub use crate::src::zutil::zcalloc;
 pub use crate::src::zutil::zcfree;
 pub use crate::stdlib::charf;
 
-
 pub use crate::stdlib::uInt;
 pub use crate::stdlib::uLong;
 pub use crate::stdlib::voidpf;
@@ -255,135 +254,135 @@ pub const TOO_FAR: ::core::ffi::c_int = 4096 as ::core::ffi::c_int;
 
 static configuration_table: [config; 10] = [
     config_s {
-            good_length: 0 as crate::zutil_h::ush,
-            max_lazy: 0 as crate::zutil_h::ush,
-            nice_length: 0 as crate::zutil_h::ush,
-            max_chain: 0 as crate::zutil_h::ush,
-            func: Some(
-                deflate_stored
-                    as unsafe extern "C" fn(
-                        *mut crate::src::deflate::deflate_state,
-                        ::core::ffi::c_int,
-                    ) -> block_state,
-            ),
-        },
-        config_s {
-            good_length: 4 as crate::zutil_h::ush,
-            max_lazy: 4 as crate::zutil_h::ush,
-            nice_length: 8 as crate::zutil_h::ush,
-            max_chain: 4 as crate::zutil_h::ush,
-            func: Some(
-                deflate_fast
-                    as unsafe extern "C" fn(
-                        *mut crate::src::deflate::deflate_state,
-                        ::core::ffi::c_int,
-                    ) -> block_state,
-            ),
-        },
-        config_s {
-            good_length: 4 as crate::zutil_h::ush,
-            max_lazy: 5 as crate::zutil_h::ush,
-            nice_length: 16 as crate::zutil_h::ush,
-            max_chain: 8 as crate::zutil_h::ush,
-            func: Some(
-                deflate_fast
-                    as unsafe extern "C" fn(
-                        *mut crate::src::deflate::deflate_state,
-                        ::core::ffi::c_int,
-                    ) -> block_state,
-            ),
-        },
-        config_s {
-            good_length: 4 as crate::zutil_h::ush,
-            max_lazy: 6 as crate::zutil_h::ush,
-            nice_length: 32 as crate::zutil_h::ush,
-            max_chain: 32 as crate::zutil_h::ush,
-            func: Some(
-                deflate_fast
-                    as unsafe extern "C" fn(
-                        *mut crate::src::deflate::deflate_state,
-                        ::core::ffi::c_int,
-                    ) -> block_state,
-            ),
-        },
-        config_s {
-            good_length: 4 as crate::zutil_h::ush,
-            max_lazy: 4 as crate::zutil_h::ush,
-            nice_length: 16 as crate::zutil_h::ush,
-            max_chain: 16 as crate::zutil_h::ush,
-            func: Some(
-                deflate_slow
-                    as unsafe extern "C" fn(
-                        *mut crate::src::deflate::deflate_state,
-                        ::core::ffi::c_int,
-                    ) -> block_state,
-            ),
-        },
-        config_s {
-            good_length: 8 as crate::zutil_h::ush,
-            max_lazy: 16 as crate::zutil_h::ush,
-            nice_length: 32 as crate::zutil_h::ush,
-            max_chain: 32 as crate::zutil_h::ush,
-            func: Some(
-                deflate_slow
-                    as unsafe extern "C" fn(
-                        *mut crate::src::deflate::deflate_state,
-                        ::core::ffi::c_int,
-                    ) -> block_state,
-            ),
-        },
-        config_s {
-            good_length: 8 as crate::zutil_h::ush,
-            max_lazy: 16 as crate::zutil_h::ush,
-            nice_length: 128 as crate::zutil_h::ush,
-            max_chain: 128 as crate::zutil_h::ush,
-            func: Some(
-                deflate_slow
-                    as unsafe extern "C" fn(
-                        *mut crate::src::deflate::deflate_state,
-                        ::core::ffi::c_int,
-                    ) -> block_state,
-            ),
-        },
-        config_s {
-            good_length: 8 as crate::zutil_h::ush,
-            max_lazy: 32 as crate::zutil_h::ush,
-            nice_length: 128 as crate::zutil_h::ush,
-            max_chain: 256 as crate::zutil_h::ush,
-            func: Some(
-                deflate_slow
-                    as unsafe extern "C" fn(
-                        *mut crate::src::deflate::deflate_state,
-                        ::core::ffi::c_int,
-                    ) -> block_state,
-            ),
-        },
-        config_s {
-            good_length: 32 as crate::zutil_h::ush,
-            max_lazy: 128 as crate::zutil_h::ush,
-            nice_length: 258 as crate::zutil_h::ush,
-            max_chain: 1024 as crate::zutil_h::ush,
-            func: Some(
-                deflate_slow
-                    as unsafe extern "C" fn(
-                        *mut crate::src::deflate::deflate_state,
-                        ::core::ffi::c_int,
-                    ) -> block_state,
-            ),
-        },
-        config_s {
-            good_length: 32 as crate::zutil_h::ush,
-            max_lazy: 258 as crate::zutil_h::ush,
-            nice_length: 258 as crate::zutil_h::ush,
-            max_chain: 4096 as crate::zutil_h::ush,
-            func: Some(
-                deflate_slow
-                    as unsafe extern "C" fn(
-                        *mut crate::src::deflate::deflate_state,
-                        ::core::ffi::c_int,
-                    ) -> block_state,
-            ),
-        },
+        good_length: 0 as crate::zutil_h::ush,
+        max_lazy: 0 as crate::zutil_h::ush,
+        nice_length: 0 as crate::zutil_h::ush,
+        max_chain: 0 as crate::zutil_h::ush,
+        func: Some(
+            deflate_stored
+                as unsafe extern "C" fn(
+                    *mut crate::src::deflate::deflate_state,
+                    ::core::ffi::c_int,
+                ) -> block_state,
+        ),
+    },
+    config_s {
+        good_length: 4 as crate::zutil_h::ush,
+        max_lazy: 4 as crate::zutil_h::ush,
+        nice_length: 8 as crate::zutil_h::ush,
+        max_chain: 4 as crate::zutil_h::ush,
+        func: Some(
+            deflate_fast
+                as unsafe extern "C" fn(
+                    *mut crate::src::deflate::deflate_state,
+                    ::core::ffi::c_int,
+                ) -> block_state,
+        ),
+    },
+    config_s {
+        good_length: 4 as crate::zutil_h::ush,
+        max_lazy: 5 as crate::zutil_h::ush,
+        nice_length: 16 as crate::zutil_h::ush,
+        max_chain: 8 as crate::zutil_h::ush,
+        func: Some(
+            deflate_fast
+                as unsafe extern "C" fn(
+                    *mut crate::src::deflate::deflate_state,
+                    ::core::ffi::c_int,
+                ) -> block_state,
+        ),
+    },
+    config_s {
+        good_length: 4 as crate::zutil_h::ush,
+        max_lazy: 6 as crate::zutil_h::ush,
+        nice_length: 32 as crate::zutil_h::ush,
+        max_chain: 32 as crate::zutil_h::ush,
+        func: Some(
+            deflate_fast
+                as unsafe extern "C" fn(
+                    *mut crate::src::deflate::deflate_state,
+                    ::core::ffi::c_int,
+                ) -> block_state,
+        ),
+    },
+    config_s {
+        good_length: 4 as crate::zutil_h::ush,
+        max_lazy: 4 as crate::zutil_h::ush,
+        nice_length: 16 as crate::zutil_h::ush,
+        max_chain: 16 as crate::zutil_h::ush,
+        func: Some(
+            deflate_slow
+                as unsafe extern "C" fn(
+                    *mut crate::src::deflate::deflate_state,
+                    ::core::ffi::c_int,
+                ) -> block_state,
+        ),
+    },
+    config_s {
+        good_length: 8 as crate::zutil_h::ush,
+        max_lazy: 16 as crate::zutil_h::ush,
+        nice_length: 32 as crate::zutil_h::ush,
+        max_chain: 32 as crate::zutil_h::ush,
+        func: Some(
+            deflate_slow
+                as unsafe extern "C" fn(
+                    *mut crate::src::deflate::deflate_state,
+                    ::core::ffi::c_int,
+                ) -> block_state,
+        ),
+    },
+    config_s {
+        good_length: 8 as crate::zutil_h::ush,
+        max_lazy: 16 as crate::zutil_h::ush,
+        nice_length: 128 as crate::zutil_h::ush,
+        max_chain: 128 as crate::zutil_h::ush,
+        func: Some(
+            deflate_slow
+                as unsafe extern "C" fn(
+                    *mut crate::src::deflate::deflate_state,
+                    ::core::ffi::c_int,
+                ) -> block_state,
+        ),
+    },
+    config_s {
+        good_length: 8 as crate::zutil_h::ush,
+        max_lazy: 32 as crate::zutil_h::ush,
+        nice_length: 128 as crate::zutil_h::ush,
+        max_chain: 256 as crate::zutil_h::ush,
+        func: Some(
+            deflate_slow
+                as unsafe extern "C" fn(
+                    *mut crate::src::deflate::deflate_state,
+                    ::core::ffi::c_int,
+                ) -> block_state,
+        ),
+    },
+    config_s {
+        good_length: 32 as crate::zutil_h::ush,
+        max_lazy: 128 as crate::zutil_h::ush,
+        nice_length: 258 as crate::zutil_h::ush,
+        max_chain: 1024 as crate::zutil_h::ush,
+        func: Some(
+            deflate_slow
+                as unsafe extern "C" fn(
+                    *mut crate::src::deflate::deflate_state,
+                    ::core::ffi::c_int,
+                ) -> block_state,
+        ),
+    },
+    config_s {
+        good_length: 32 as crate::zutil_h::ush,
+        max_lazy: 258 as crate::zutil_h::ush,
+        nice_length: 258 as crate::zutil_h::ush,
+        max_chain: 4096 as crate::zutil_h::ush,
+        func: Some(
+            deflate_slow
+                as unsafe extern "C" fn(
+                    *mut crate::src::deflate::deflate_state,
+                    ::core::ffi::c_int,
+                ) -> block_state,
+        ),
+    },
 ];
 
 unsafe extern "C" fn slide_hash(mut s: *mut crate::src::deflate::deflate_state) {

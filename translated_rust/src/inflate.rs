@@ -106,7 +106,6 @@ pub struct inflate_state {
 }
 pub use crate::__stddef_size_t_h::size_t;
 
-
 pub use crate::src::adler32::adler32;
 pub use crate::src::crc32::crc32;
 pub use crate::src::deflate::internal_state;
@@ -122,7 +121,6 @@ pub use crate::src::inftrees::ENOUGH_LENS;
 pub use crate::src::inftrees::LENS;
 pub use crate::src::zutil::zcalloc;
 pub use crate::src::zutil::zcfree;
-
 
 pub use crate::stdlib::uInt;
 pub use crate::stdlib::uLong;
