@@ -3340,30 +3340,28 @@ unsafe extern "C" fn compress_block(
     };
 }
 
-unsafe extern "C" fn detect_data_type(
-    mut s: *mut crate::src::deflate::deflate_state,
-) -> ::core::ffi::c_int {
+unsafe fn detect_data_type(s: &crate::src::deflate::deflate_state) -> ::core::ffi::c_int {
     let mut block_mask: ::core::ffi::c_ulong = 0xf3ffc07f as ::core::ffi::c_ulong;
     let mut n: ::core::ffi::c_int = 0;
     n = 0 as ::core::ffi::c_int;
     while n <= 31 as ::core::ffi::c_int {
         if block_mask & 1 as ::core::ffi::c_ulong != 0
-            && (*s).dyn_ltree[n as usize].fc as ::core::ffi::c_int != 0 as ::core::ffi::c_int
+            && s.dyn_ltree[n as usize].fc as ::core::ffi::c_int != 0 as ::core::ffi::c_int
         {
             return crate::zlib_h::Z_BINARY;
         }
         n += 1;
         block_mask >>= 1 as ::core::ffi::c_int;
     }
-    if (*s).dyn_ltree[9 as usize].fc as ::core::ffi::c_int != 0 as ::core::ffi::c_int
-        || (*s).dyn_ltree[10 as usize].fc as ::core::ffi::c_int != 0 as ::core::ffi::c_int
-        || (*s).dyn_ltree[13 as usize].fc as ::core::ffi::c_int != 0 as ::core::ffi::c_int
+    if s.dyn_ltree[9 as usize].fc as ::core::ffi::c_int != 0 as ::core::ffi::c_int
+        || s.dyn_ltree[10 as usize].fc as ::core::ffi::c_int != 0 as ::core::ffi::c_int
+        || s.dyn_ltree[13 as usize].fc as ::core::ffi::c_int != 0 as ::core::ffi::c_int
     {
         return crate::zlib_h::Z_TEXT;
     }
     n = 32 as ::core::ffi::c_int;
     while n < crate::src::deflate::LITERALS {
-        if (*s).dyn_ltree[n as usize].fc as ::core::ffi::c_int != 0 as ::core::ffi::c_int {
+        if s.dyn_ltree[n as usize].fc as ::core::ffi::c_int != 0 as ::core::ffi::c_int {
             return crate::zlib_h::Z_TEXT;
         }
         n += 1;
@@ -3413,7 +3411,7 @@ unsafe fn tr_flush_block_impl(
         let unknown_data_type = unsafe { s.strm.as_ref() }
             .is_some_and(|strm| strm.data_type == crate::zlib_h::Z_UNKNOWN);
         if unknown_data_type {
-            let data_type = unsafe { detect_data_type(s as *mut crate::src::deflate::deflate_state) };
+            let data_type = unsafe { detect_data_type(s) };
             if let Some(strm) = unsafe { s.strm.as_mut() } {
                 strm.data_type = data_type;
             }
