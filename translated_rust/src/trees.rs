@@ -3457,12 +3457,30 @@ pub(crate) fn tr_tally_update_counts(
         dyn_ltree[lc as usize].freq = dyn_ltree[lc as usize].freq.wrapping_add(1);
     } else {
         *matches = matches.wrapping_add(1);
-        let length_index =
-            (length_code + crate::src::deflate::LITERALS + 1 as ::core::ffi::c_int) as usize;
-        dyn_ltree[length_index].freq = dyn_ltree[length_index].freq.wrapping_add(1);
-        let dist_index = dist_code as usize;
-        dyn_dtree[dist_index].freq = dyn_dtree[dist_index].freq.wrapping_add(1);
+        tr_tally_update_match_counts(dyn_ltree, dyn_dtree, length_code, dist_code);
     }
+}
+
+pub(crate) fn dist_code_table_index(dist_minus_one: ::core::ffi::c_uint) -> usize {
+    if dist_minus_one < 256 as ::core::ffi::c_uint {
+        dist_minus_one as usize
+    } else {
+        (256 as ::core::ffi::c_uint)
+            .wrapping_add(dist_minus_one >> 7 as ::core::ffi::c_int) as usize
+    }
+}
+
+pub(crate) fn tr_tally_update_match_counts(
+    dyn_ltree: &mut [crate::src::deflate::ct_data; 573],
+    dyn_dtree: &mut [crate::src::deflate::ct_data; 61],
+    length_code: ::core::ffi::c_int,
+    dist_code: ::core::ffi::c_int,
+) {
+    let length_index =
+        (length_code + crate::src::deflate::LITERALS + 1 as ::core::ffi::c_int) as usize;
+    dyn_ltree[length_index].freq = dyn_ltree[length_index].freq.wrapping_add(1);
+    let dist_index = dist_code as usize;
+    dyn_dtree[dist_index].freq = dyn_dtree[dist_index].freq.wrapping_add(1);
 }
 #[export_name = "_tr_stored_block"]
 
@@ -3656,13 +3674,8 @@ unsafe extern "C" fn compress_block(
                     }
                 }
                 dist = dist.wrapping_sub(1);
-                code = (if dist < 256 as ::core::ffi::c_uint {
-                    crate::src::trees::_dist_code[dist as usize] as ::core::ffi::c_int
-                } else {
-                    crate::src::trees::_dist_code[(256 as ::core::ffi::c_uint)
-                        .wrapping_add(dist >> 7 as ::core::ffi::c_int)
-                        as usize] as ::core::ffi::c_int
-                }) as ::core::ffi::c_uint;
+                code = crate::src::trees::_dist_code[dist_code_table_index(dist)]
+                    as ::core::ffi::c_uint;
                 let mut len_2: ::core::ffi::c_int =
                     (*dtree.offset(code as isize)).dad as ::core::ffi::c_int;
                 if (*s).bi_valid > crate::src::deflate::Buf_size - len_2 {
@@ -3922,13 +3935,8 @@ pub unsafe extern "C" fn _tr_tally_ffi(
     } else {
         dist = dist.wrapping_sub(1);
         let length_code = crate::src::trees::_length_code[lc as usize] as ::core::ffi::c_int;
-        let dist_code = if dist < 256 as ::core::ffi::c_uint {
-            crate::src::trees::_dist_code[dist as usize] as ::core::ffi::c_int
-        } else {
-            crate::src::trees::_dist_code[(256 as ::core::ffi::c_uint)
-                .wrapping_add(dist >> 7 as ::core::ffi::c_int)
-                as usize] as ::core::ffi::c_int
-        };
+        let dist_code =
+            crate::src::trees::_dist_code[dist_code_table_index(dist)] as ::core::ffi::c_int;
         tr_tally_update_counts(
             &mut state.dyn_ltree,
             &mut state.dyn_dtree,
