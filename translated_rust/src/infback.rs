@@ -515,7 +515,8 @@ pub unsafe extern "C" fn inflateBackInit__ffi(
     inflate_back_initialize_state(stream, state, window, plan.window_bits);
     crate::zlib_h::Z_OK
 }
-pub unsafe extern "C" fn inflateBack(
+#[export_name = "inflateBack"]
+pub unsafe extern "C" fn inflateBack_ffi(
     mut strm: crate::zlib_h::z_streamp,
     mut in_0: crate::zlib_h::in_func,
     mut in_desc: *mut ::core::ffi::c_void,
@@ -1241,17 +1242,6 @@ pub unsafe extern "C" fn inflateBack(
     (*strm).next_in = next as *mut crate::stdlib::Bytef;
     (*strm).avail_in = have as crate::stdlib::uInt;
     return ret;
-}
-#[export_name = "inflateBack"]
-
-pub unsafe extern "C" fn inflateBack_ffi(
-    mut strm: crate::zlib_h::z_streamp,
-    mut in_0: crate::zlib_h::in_func,
-    mut in_desc: *mut ::core::ffi::c_void,
-    mut out: crate::zlib_h::out_func,
-    mut out_desc: *mut ::core::ffi::c_void,
-) -> ::core::ffi::c_int {
-    inflateBack(strm, in_0, in_desc, out, out_desc)
 }
 #[export_name = "inflateBackEnd"]
 
