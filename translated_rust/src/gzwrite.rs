@@ -685,27 +685,22 @@ pub unsafe extern "C" fn gzflush_ffi(
     mut file: crate::zlib_h::gzFile,
     mut flush: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
-    let mut state: crate::gzguts_h::gz_statep =
-        ::core::ptr::null_mut::<crate::gzguts_h::gz_state>();
     if file.is_null() {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    state = file as crate::gzguts_h::gz_statep;
-    if !gz_write_state_ready(&*state) {
+    let state = &mut *(file as crate::gzguts_h::gz_statep);
+    if !gz_write_state_ready(state) {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    crate::src::gzlib::gz_error_clear(&mut *state, crate::zlib_h::Z_OK);
+    crate::src::gzlib::gz_error_clear(state, crate::zlib_h::Z_OK);
     if !gzflush_valid_flush(flush) {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    {
-        let state_ref = &mut *state;
-        if state_ref.skip != 0 && gz_zero(state_ref) == -1 as ::core::ffi::c_int {
-            return state_ref.err;
-        }
+    if state.skip != 0 && gz_zero(state) == -1 as ::core::ffi::c_int {
+        return state.err;
     }
-    gz_comp(&mut *state, flush);
-    return (*state).err;
+    gz_comp(state, flush);
+    return state.err;
 }
 fn gzsetparams_unchanged(
     state: &crate::gzguts_h::gz_state,
