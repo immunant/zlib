@@ -3914,29 +3914,90 @@ fn flush_huff_block(
     true
 }
 
+fn flush_huff_pending(
+    state: &mut crate::src::deflate::deflate_state,
+    strm: &mut crate::zlib_h::z_stream,
+    pending_buf: &mut [crate::stdlib::Bytef],
+    output: &mut [crate::stdlib::Bytef],
+) -> bool {
+    let Some(pending_start) = state
+        .pending_out
+        .addr()
+        .checked_sub(pending_buf.as_ptr().addr())
+    else {
+        return false;
+    };
+    if pending_start > pending_buf.len() {
+        return false;
+    }
+    let Ok(available) = usize::try_from(strm.avail_out) else {
+        return false;
+    };
+    let Some(output_start) = output.len().checked_sub(available) else {
+        return false;
+    };
+    let Some(output) = output.get_mut(output_start..) else {
+        return false;
+    };
+    flush_pending_impl(strm, state, pending_buf, pending_start, output)
+}
+
 unsafe fn deflate_huff(
     state: &mut crate::src::deflate::deflate_state,
-    mut flush: ::core::ffi::c_int,
+    flush: ::core::ffi::c_int,
 ) -> block_state {
-    // The translated dispatcher still enters through a raw state pointer.
-    // Keep all storage conversion here, so the strategy bookkeeping below
-    // works through named state and stream references.
+    // The translated dispatcher still owns the raw state storage. Convert
+    // each allocation once here, then keep the strategy loop slice-based.
     let strm = &mut *state.strm;
+    let window = ::core::slice::from_raw_parts_mut(state.window, state.window_size as usize);
+    let head = ::core::slice::from_raw_parts_mut(state.head, state.hash_size as usize);
+    let prev = ::core::slice::from_raw_parts_mut(state.prev, state.w_size as usize);
+    let input = if strm.avail_in == 0 {
+        &[]
+    } else {
+        ::core::slice::from_raw_parts(strm.next_in, strm.avail_in as usize)
+    };
+    let pending_buf = ::core::slice::from_raw_parts_mut(
+        state.pending_buf,
+        state.pending_buf_size as usize,
+    );
+    let output = ::core::slice::from_raw_parts_mut(strm.next_out, strm.avail_out as usize);
+    deflate_huff_impl(
+        state,
+        strm,
+        window,
+        head,
+        prev,
+        input,
+        pending_buf,
+        output,
+        flush,
+    )
+}
+
+fn deflate_huff_impl(
+    state: &mut crate::src::deflate::deflate_state,
+    strm: &mut crate::zlib_h::z_stream,
+    window: &mut [crate::stdlib::Bytef],
+    head: &mut [crate::src::deflate::Posf],
+    prev: &mut [crate::src::deflate::Posf],
+    mut input: &[crate::stdlib::Bytef],
+    pending_buf: &mut [crate::stdlib::Bytef],
+    output: &mut [crate::stdlib::Bytef],
+    flush: ::core::ffi::c_int,
+) -> block_state {
     let mut bflush: ::core::ffi::c_int = 0;
     loop {
         if state.lookahead == 0 as crate::stdlib::uInt {
-            let window = ::core::slice::from_raw_parts_mut(
-                state.window,
-                state.window_size as usize,
-            );
-            let head = ::core::slice::from_raw_parts_mut(state.head, state.hash_size as usize);
-            let prev = ::core::slice::from_raw_parts_mut(state.prev, state.w_size as usize);
-            let input = if strm.avail_in == 0 {
-                &[]
-            } else {
-                ::core::slice::from_raw_parts(strm.next_in, strm.avail_in as usize)
-            };
+            let available_before = strm.avail_in as usize;
             fill_window(state, strm, window, head, prev, input);
+            let Some(consumed) = available_before.checked_sub(strm.avail_in as usize) else {
+                return need_more;
+            };
+            let Some(remaining) = input.get(consumed..) else {
+                return need_more;
+            };
+            input = remaining;
             if state.lookahead == 0 as crate::stdlib::uInt {
                 if flush == crate::zlib_h::Z_NO_FLUSH {
                     return need_more;
@@ -3945,16 +4006,9 @@ unsafe fn deflate_huff(
             }
         }
         state.match_length = 0 as crate::stdlib::uInt;
-        let window = ::core::slice::from_raw_parts(state.window, state.window_size as usize);
         let Some(&cc) = window.get(state.strstart as usize) else {
             return need_more;
         };
-        // The legacy strategy owns the raw state and pending allocation.  Its
-        // literal tally itself is shared with the checked safe tree helper.
-        let pending_buf = ::core::slice::from_raw_parts_mut(
-            state.pending_buf,
-            state.pending_buf_size as usize,
-        );
         bflush = crate::src::trees::tr_tally(
             state,
             pending_buf,
@@ -3964,15 +4018,12 @@ unsafe fn deflate_huff(
         state.lookahead = state.lookahead.wrapping_sub(1);
         state.strstart = state.strstart.wrapping_add(1);
         if bflush != 0 {
-            let window = ::core::slice::from_raw_parts(state.window, state.window_size as usize);
-            let pending_buf = ::core::slice::from_raw_parts_mut(
-                state.pending_buf,
-                state.pending_buf_size as usize,
-            );
             if !flush_huff_block(state, strm, window, pending_buf, 0 as ::core::ffi::c_int) {
                 return need_more;
             }
-            flush_pending(strm);
+            if !flush_huff_pending(state, strm, pending_buf, output) {
+                return need_more;
+            }
             if strm.avail_out == 0 as crate::stdlib::uInt {
                 return (if false {
                     finish_started as ::core::ffi::c_int
@@ -3984,15 +4035,12 @@ unsafe fn deflate_huff(
     }
     state.insert = 0 as crate::stdlib::uInt;
     if flush == crate::zlib_h::Z_FINISH {
-        let window = ::core::slice::from_raw_parts(state.window, state.window_size as usize);
-        let pending_buf = ::core::slice::from_raw_parts_mut(
-            state.pending_buf,
-            state.pending_buf_size as usize,
-        );
         if !flush_huff_block(state, strm, window, pending_buf, 1 as ::core::ffi::c_int) {
             return need_more;
         }
-        flush_pending(strm);
+        if !flush_huff_pending(state, strm, pending_buf, output) {
+            return need_more;
+        }
         if strm.avail_out == 0 as crate::stdlib::uInt {
             return (if true {
                 finish_started as ::core::ffi::c_int
@@ -4003,15 +4051,12 @@ unsafe fn deflate_huff(
         return finish_done;
     }
     if state.sym_next != 0 {
-        let window = ::core::slice::from_raw_parts(state.window, state.window_size as usize);
-        let pending_buf = ::core::slice::from_raw_parts_mut(
-            state.pending_buf,
-            state.pending_buf_size as usize,
-        );
         if !flush_huff_block(state, strm, window, pending_buf, 0 as ::core::ffi::c_int) {
             return need_more;
         }
-        flush_pending(strm);
+        if !flush_huff_pending(state, strm, pending_buf, output) {
+            return need_more;
+        }
         if strm.avail_out == 0 as crate::stdlib::uInt {
             return (if false {
                 finish_started as ::core::ffi::c_int
