@@ -5,6 +5,7 @@ pub use crate::stdlib::uInt;
 pub use crate::stdlib::uLong;
 pub use crate::stdlib::voidpf;
 pub use crate::zlib_h::ZLIB_VERSION;
+use core::sync::atomic::AtomicPtr;
 static Z_ERROR_MESSAGES: [&[u8]; 10] = [
     b"need dictionary\0",
     b"stream end\0",
@@ -19,17 +20,17 @@ static Z_ERROR_MESSAGES: [&[u8]; 10] = [
 ];
 
 #[no_mangle]
-pub static mut z_errmsg: [*mut ::core::ffi::c_char; 10] = [
-    Z_ERROR_MESSAGES[0].as_ptr() as *mut ::core::ffi::c_char,
-    Z_ERROR_MESSAGES[1].as_ptr() as *mut ::core::ffi::c_char,
-    Z_ERROR_MESSAGES[2].as_ptr() as *mut ::core::ffi::c_char,
-    Z_ERROR_MESSAGES[3].as_ptr() as *mut ::core::ffi::c_char,
-    Z_ERROR_MESSAGES[4].as_ptr() as *mut ::core::ffi::c_char,
-    Z_ERROR_MESSAGES[5].as_ptr() as *mut ::core::ffi::c_char,
-    Z_ERROR_MESSAGES[6].as_ptr() as *mut ::core::ffi::c_char,
-    Z_ERROR_MESSAGES[7].as_ptr() as *mut ::core::ffi::c_char,
-    Z_ERROR_MESSAGES[8].as_ptr() as *mut ::core::ffi::c_char,
-    Z_ERROR_MESSAGES[9].as_ptr() as *mut ::core::ffi::c_char,
+pub static z_errmsg: [AtomicPtr<::core::ffi::c_char>; 10] = [
+    AtomicPtr::new(Z_ERROR_MESSAGES[0].as_ptr() as *mut ::core::ffi::c_char),
+    AtomicPtr::new(Z_ERROR_MESSAGES[1].as_ptr() as *mut ::core::ffi::c_char),
+    AtomicPtr::new(Z_ERROR_MESSAGES[2].as_ptr() as *mut ::core::ffi::c_char),
+    AtomicPtr::new(Z_ERROR_MESSAGES[3].as_ptr() as *mut ::core::ffi::c_char),
+    AtomicPtr::new(Z_ERROR_MESSAGES[4].as_ptr() as *mut ::core::ffi::c_char),
+    AtomicPtr::new(Z_ERROR_MESSAGES[5].as_ptr() as *mut ::core::ffi::c_char),
+    AtomicPtr::new(Z_ERROR_MESSAGES[6].as_ptr() as *mut ::core::ffi::c_char),
+    AtomicPtr::new(Z_ERROR_MESSAGES[7].as_ptr() as *mut ::core::ffi::c_char),
+    AtomicPtr::new(Z_ERROR_MESSAGES[8].as_ptr() as *mut ::core::ffi::c_char),
+    AtomicPtr::new(Z_ERROR_MESSAGES[9].as_ptr() as *mut ::core::ffi::c_char),
 ];
 pub fn zlibVersion() -> &'static [::core::ffi::c_char; 15] {
     &crate::zlib_h::ZLIB_VERSION
