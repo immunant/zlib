@@ -1071,6 +1071,7 @@ fn inflate_back_prepare_stream(strm: &mut crate::zlib_h::z_stream) {
 fn inflate_back_init_state(
     strm: &mut crate::zlib_h::z_stream,
     state: &mut crate::src::inflate::inflate_state,
+    window: &mut ::core::ffi::c_uchar,
     config: InflateBackStateConfig,
 ) {
     strm.state = state as *mut crate::src::inflate::inflate_state
@@ -1085,6 +1086,7 @@ fn inflate_back_init_state(
     // inflater.  `inflateBack()` can then use the established checked binder
     // instead of reopening this raw state pointer itself.
     state.strm = strm as *mut crate::zlib_h::z_stream;
+    state.window = window;
     state.mode = crate::src::inflate::TYPE;
 }
 
@@ -1099,8 +1101,6 @@ fn inflateBackInit_(
     version_first: Option<::core::ffi::c_char>,
     mut stream_size: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
-    let mut state: *mut crate::src::inflate::inflate_state =
-        ::core::ptr::null_mut::<crate::src::inflate::inflate_state>();
     let config = match inflate_back_init_config(
         version_first,
         stream_size,
@@ -1112,12 +1112,12 @@ fn inflateBackInit_(
         Err(error) => return error,
     };
     let strm_ref = strm.expect("configuration preflight requires a stream");
-    let window = window.expect("configuration preflight requires a window") as *mut _;
+    let window = window.expect("configuration preflight requires a window");
     inflate_back_prepare_stream(strm_ref);
     // SAFETY: preflight requires the initialized allocator. This is the
     // allocation contract paired with `inflateBackEnd()` for the newly
     // initialized stream state.
-    state = unsafe {
+    let state = unsafe {
         Some(strm_ref.zalloc.expect("non-null function pointer"))
             .expect("non-null function pointer")(
             strm_ref.opaque,
@@ -1131,8 +1131,7 @@ fn inflateBackInit_(
     // SAFETY: the allocator above returned a non-null state allocation with
     // the exact layout requested for `inflate_state`.
     let state_ref = unsafe { &mut *state };
-    state_ref.window = window;
-    inflate_back_init_state(strm_ref, state_ref, config);
+    inflate_back_init_state(strm_ref, state_ref, window, config);
     return crate::zlib_h::Z_OK;
 }
 #[export_name = "inflateBackInit_"]
