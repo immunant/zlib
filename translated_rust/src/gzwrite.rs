@@ -1090,47 +1090,85 @@ pub unsafe extern "C" fn gzputc_ffi(
     };
     gzputc(state, c)
 }
-unsafe fn gzputs(state: &mut crate::gzguts_h::gz_state, text: &[u8]) -> ::core::ffi::c_int {
+// `gzputs()` has no handle-specific policy beyond admission, error staging,
+// and the bounded caller string. Keep that portion pointer-free so the one
+// ABI-shaped state adapter below remains the only path that reaches the
+// embedded compressor.
+enum GzPutsPlan<'a> {
+    Return(::core::ffi::c_int),
+    Write {
+        transaction: GzWriteTransaction<'a>,
+        len: crate::stdlib::z_size_t,
+    },
+}
+
+impl GzPutsPlan<'_> {
+    fn write_result(
+        len: crate::stdlib::z_size_t,
+        put: crate::stdlib::z_size_t,
+    ) -> ::core::ffi::c_int {
+        if len != 0 && put == 0 {
+            -1
+        } else {
+            put as ::core::ffi::c_int
+        }
+    }
+}
+
+fn gzputs<'input>(
+    text: &'input [u8],
+    policy: GzWritePolicy,
+    mut error: crate::src::gzlib::GzErrorState<'_>,
+) -> GzPutsPlan<'input> {
+    if !policy.accepts_write() {
+        return GzPutsPlan::Return(-1);
+    }
+    error.clear();
+    let len = text.len() as crate::stdlib::z_size_t;
+    if !gzputs_length_fits_int(len) {
+        error.set(
+            crate::zlib_h::Z_STREAM_ERROR,
+            Some(b"string length does not fit in int"),
+        );
+        return GzPutsPlan::Return(-1);
+    }
+    match gz_write(text) {
+        Some(transaction) => GzPutsPlan::Write { transaction, len },
+        None => GzPutsPlan::Return(0),
+    }
+}
+
+// The caller has already formed the bounded C-string slice. This adapter
+// owns the remaining gzip-state projection and dispatches the pointer-free
+// plan through the existing compressor boundary.
+unsafe fn gzputs_from_state(
+    state: &mut crate::gzguts_h::gz_state,
+    text: &[u8],
+) -> ::core::ffi::c_int {
     let policy = GzWritePolicy {
         mode: state.mode,
         err: state.err,
         again: state.again,
         direct: state.direct,
     };
-    if !policy.accepts_write() {
-        return -1 as ::core::ffi::c_int;
-    }
-    crate::src::gzlib::GzErrorState {
-        message: &mut state.msg,
-        error: &mut state.err,
-        buffered: &mut state.x.have,
-        again: state.again,
-        path: state.path.as_deref(),
-    }
-    .clear();
-    let len = text.len() as crate::stdlib::z_size_t;
-    if !gzputs_length_fits_int(len) {
+    let plan = gzputs(
+        text,
+        policy,
         crate::src::gzlib::GzErrorState {
             message: &mut state.msg,
             error: &mut state.err,
             buffered: &mut state.x.have,
             again: state.again,
             path: state.path.as_deref(),
+        },
+    );
+    match plan {
+        GzPutsPlan::Return(result) => result,
+        GzPutsPlan::Write { transaction, len } => {
+            let put = gzip_write_state_adapter(state, transaction);
+            GzPutsPlan::write_result(len, put)
         }
-        .set(
-            crate::zlib_h::Z_STREAM_ERROR,
-            Some(b"string length does not fit in int"),
-        );
-        return -1 as ::core::ffi::c_int;
     }
-    let put = gz_write(text)
-        .map(|transaction| gzip_write_state_adapter(state, transaction))
-        .unwrap_or(0);
-    return if len != 0 && put == 0 as crate::stdlib::z_size_t {
-        -1 as ::core::ffi::c_int
-    } else {
-        put as ::core::ffi::c_int
-    };
 }
 #[export_name = "gzputs"]
 
@@ -1145,7 +1183,7 @@ pub unsafe extern "C" fn gzputs_ffi(
     let Some(state) = (file as crate::gzguts_h::gz_statep).as_mut() else {
         return -1 as ::core::ffi::c_int;
     };
-    gzputs(state, text)
+    gzputs_from_state(state, text)
 }
 unsafe fn gzflush(
     state: &mut crate::gzguts_h::gz_state,
