@@ -2295,22 +2295,16 @@ pub unsafe extern "C" fn gzgets_ffi(
 ) -> *mut ::core::ffi::c_char {
     gzgets(file, buf, len)
 }
-pub unsafe extern "C" fn gzdirect(mut file: crate::zlib_h::gzFile) -> ::core::ffi::c_int {
-    let mut state: crate::gzguts_h::gz_statep =
-        ::core::ptr::null_mut::<crate::gzguts_h::gz_state>();
+#[export_name = "gzdirect"]
+pub unsafe extern "C" fn gzdirect_ffi(mut file: crate::zlib_h::gzFile) -> ::core::ffi::c_int {
     if file.is_null() {
         return 0 as ::core::ffi::c_int;
     }
-    state = file as crate::gzguts_h::gz_statep;
+    let state = file as crate::gzguts_h::gz_statep;
     if gz_read_needs_look((*state).mode, (*state).how, (*state).x.have) {
         gz_look(state);
     }
-    return gzdirect_result((*state).direct);
-}
-#[export_name = "gzdirect"]
-
-pub unsafe extern "C" fn gzdirect_ffi(mut file: crate::zlib_h::gzFile) -> ::core::ffi::c_int {
-    gzdirect(file)
+    gzdirect_result((*state).direct)
 }
 pub unsafe extern "C" fn gzclose_r(mut file: crate::zlib_h::gzFile) -> ::core::ffi::c_int {
     let mut ret: ::core::ffi::c_int = 0;
