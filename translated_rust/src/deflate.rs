@@ -2538,70 +2538,89 @@ pub unsafe fn deflate(
         (state_ptr, invalid)
     };
     if invalid_stream_or_state {
-        (*strm).msg =
-            crate::src::zutil::z_errmsg[(if (-2 as ::core::ffi::c_int) < -6 as ::core::ffi::c_int
-                || -2 as ::core::ffi::c_int > 2 as ::core::ffi::c_int
-            {
-                9 as ::core::ffi::c_int
-            } else {
-                2 as ::core::ffi::c_int - -2 as ::core::ffi::c_int
-            }) as usize] as *const ::core::ffi::c_char as *mut ::core::ffi::c_char;
+        let stream = &mut *strm;
+        stream.msg = crate::src::zutil::z_errmsg[(if (-2 as ::core::ffi::c_int)
+            < -6 as ::core::ffi::c_int
+            || -2 as ::core::ffi::c_int > 2 as ::core::ffi::c_int
+        {
+            9 as ::core::ffi::c_int
+        } else {
+            2 as ::core::ffi::c_int - -2 as ::core::ffi::c_int
+        }) as usize] as *const ::core::ffi::c_char as *mut ::core::ffi::c_char;
         return -2 as ::core::ffi::c_int;
     }
-    if (*strm).avail_out == 0 as crate::stdlib::uInt {
-        (*strm).msg =
-            crate::src::zutil::z_errmsg[(if (-5 as ::core::ffi::c_int) < -6 as ::core::ffi::c_int
-                || -5 as ::core::ffi::c_int > 2 as ::core::ffi::c_int
-            {
-                9 as ::core::ffi::c_int
-            } else {
-                2 as ::core::ffi::c_int - -5 as ::core::ffi::c_int
-            }) as usize] as *const ::core::ffi::c_char as *mut ::core::ffi::c_char;
+    if (&*strm).avail_out == 0 as crate::stdlib::uInt {
+        let stream = &mut *strm;
+        stream.msg = crate::src::zutil::z_errmsg[(if (-5 as ::core::ffi::c_int)
+            < -6 as ::core::ffi::c_int
+            || -5 as ::core::ffi::c_int > 2 as ::core::ffi::c_int
+        {
+            9 as ::core::ffi::c_int
+        } else {
+            2 as ::core::ffi::c_int - -5 as ::core::ffi::c_int
+        }) as usize] as *const ::core::ffi::c_char as *mut ::core::ffi::c_char;
         return -5 as ::core::ffi::c_int;
     }
-    old_flush = (*s).last_flush;
-    (*s).last_flush = flush;
-    if (*s).pending != 0 as crate::zutil_h::ulg {
-        flush_pending(strm);
-        if (*strm).avail_out == 0 as crate::stdlib::uInt {
-            (*s).last_flush = -1 as ::core::ffi::c_int;
+    let (pending, avail_in) = {
+        let stream = &*strm;
+        let state = &mut *s;
+        old_flush = state.last_flush;
+        state.last_flush = flush;
+        (state.pending != 0, stream.avail_in)
+    };
+    if pending {
+        if flush_pending(strm) == 0 as crate::stdlib::uInt {
+            let state = &mut *s;
+            state.last_flush = -1 as ::core::ffi::c_int;
             return crate::zlib_h::Z_OK;
         }
-    } else if repeated_flush_is_buffer_error((*strm).avail_in, flush, old_flush) {
-        (*strm).msg =
-            crate::src::zutil::z_errmsg[(if (-5 as ::core::ffi::c_int) < -6 as ::core::ffi::c_int
-                || -5 as ::core::ffi::c_int > 2 as ::core::ffi::c_int
-            {
-                9 as ::core::ffi::c_int
-            } else {
-                2 as ::core::ffi::c_int - -5 as ::core::ffi::c_int
-            }) as usize] as *const ::core::ffi::c_char as *mut ::core::ffi::c_char;
+    } else if repeated_flush_is_buffer_error(avail_in, flush, old_flush) {
+        let stream = &mut *strm;
+        stream.msg = crate::src::zutil::z_errmsg[(if (-5 as ::core::ffi::c_int)
+            < -6 as ::core::ffi::c_int
+            || -5 as ::core::ffi::c_int > 2 as ::core::ffi::c_int
+        {
+            9 as ::core::ffi::c_int
+        } else {
+            2 as ::core::ffi::c_int - -5 as ::core::ffi::c_int
+        }) as usize] as *const ::core::ffi::c_char as *mut ::core::ffi::c_char;
         return -5 as ::core::ffi::c_int;
     }
-    if (*s).status == crate::src::deflate::FINISH_STATE
-        && (*strm).avail_in != 0 as crate::stdlib::uInt
+    let finish_with_input = {
+        let stream = &*strm;
+        let state = &*s;
+        state.status == crate::src::deflate::FINISH_STATE
+            && stream.avail_in != 0 as crate::stdlib::uInt
+    };
+    if finish_with_input {
+        let stream = &mut *strm;
+        stream.msg = crate::src::zutil::z_errmsg[(if (-5 as ::core::ffi::c_int)
+            < -6 as ::core::ffi::c_int
+            || -5 as ::core::ffi::c_int > 2 as ::core::ffi::c_int
+        {
+            9 as ::core::ffi::c_int
+        } else {
+            2 as ::core::ffi::c_int - -5 as ::core::ffi::c_int
+        }) as usize] as *const ::core::ffi::c_char as *mut ::core::ffi::c_char;
+        return -5 as ::core::ffi::c_int;
+    }
     {
-        (*strm).msg =
-            crate::src::zutil::z_errmsg[(if (-5 as ::core::ffi::c_int) < -6 as ::core::ffi::c_int
-                || -5 as ::core::ffi::c_int > 2 as ::core::ffi::c_int
-            {
-                9 as ::core::ffi::c_int
-            } else {
-                2 as ::core::ffi::c_int - -5 as ::core::ffi::c_int
-            }) as usize] as *const ::core::ffi::c_char as *mut ::core::ffi::c_char;
-        return -5 as ::core::ffi::c_int;
+        let state = &mut *s;
+        if state.status == crate::src::deflate::INIT_STATE && state.wrap == 0 as ::core::ffi::c_int
+        {
+            state.status = crate::src::deflate::BUSY_STATE;
+        }
     }
-    if (*s).status == crate::src::deflate::INIT_STATE && (*s).wrap == 0 as ::core::ffi::c_int {
-        (*s).status = crate::src::deflate::BUSY_STATE;
-    }
-    if (*s).status == crate::src::deflate::INIT_STATE {
+    let initialized_zlib_header = (&*s).status == crate::src::deflate::INIT_STATE;
+    if initialized_zlib_header {
+        let stream = &mut *strm;
         let state = &mut *s;
         let (header, dictionary_adler) = zlib_header_words(
             state.w_bits,
             state.strategy,
             state.level,
             state.strstart,
-            (*strm).adler,
+            stream.adler,
         );
         let Ok(pending_len) = usize::try_from(state.pending_buf_size) else {
             return crate::zlib_h::Z_STREAM_ERROR;
@@ -2625,11 +2644,14 @@ pub unsafe fn deflate(
         if !header_written {
             return crate::zlib_h::Z_STREAM_ERROR;
         }
-        (*strm).adler = crate::src::adler32::ADLER32_INITIAL;
+        stream.adler = crate::src::adler32::ADLER32_INITIAL;
         state.status = crate::src::deflate::BUSY_STATE;
+    }
+    if initialized_zlib_header && (&*s).pending != 0 {
         flush_pending(strm);
-        if (*s).pending != 0 as crate::zutil_h::ulg {
-            (*s).last_flush = -1 as ::core::ffi::c_int;
+        if (&*s).pending != 0 as crate::zutil_h::ulg {
+            let state = &mut *s;
+            state.last_flush = -1 as ::core::ffi::c_int;
             return crate::zlib_h::Z_OK;
         }
     }
