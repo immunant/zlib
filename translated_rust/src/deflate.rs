@@ -840,19 +840,19 @@ pub(crate) unsafe fn deflate_tree_bit_output_from_state(
     state: &mut crate::src::deflate::deflate_state,
     action: crate::src::trees::BitOutputAction<'_>,
 ) -> ::core::ffi::c_int {
-    let pending_ptr = state
-        .pending_buf
-        .expect("initialized pending buffer")
-        .as_ptr();
-    // This is the legacy opaque-state projection boundary.  It forms the one
-    // callback-backed slice required by tree output; the persistent C4 owner
-    // admits the borrow using its lifecycle ledger and immutable geometry.
-    let pending = unsafe {
-        ::core::slice::from_raw_parts_mut(pending_ptr, state.callback_storage.pending_len())
-    };
-    let pending_buf = state
-        .callback_storage
-        .pending_storage(Some(pending))
+    // The legacy exports own only an opaque state handle.  Let the common C4
+    // owner form their one pending view as well, so tree output cannot become
+    // a second raw callback-buffer projection boundary.
+    let storage_layout = state.callback_storage.storage();
+    let complete_storage = state.callback_storage.is_complete();
+    let (state, storage) = callback_owner::storage_request(
+        state,
+        storage_layout,
+        complete_storage,
+        &DeflateStorageProjection::Pending,
+    );
+    let pending_buf = storage
+        .into_pending_storage()
         .expect("initialized pending storage projection")
         .pending_buf;
     deflate_tree_bit_output(
@@ -1354,6 +1354,24 @@ mod callback_owner {
         let lifecycle = state.callback_storage;
         let request = match projection {
             DeflateStorageProjection::None => lifecycle.empty_request(),
+            DeflateStorageProjection::Pending => {
+                let pending = lifecycle.pending.then(|| {
+                    ::core::slice::from_raw_parts_mut(
+                        state
+                            .pending_buf
+                            .expect("initialized pending buffer")
+                            .as_ptr(),
+                        storage_layout
+                            .pending
+                            .byte_len()
+                            .expect("validated pending allocation geometry"),
+                    )
+                });
+                lifecycle
+                    .pending_storage(pending)
+                    .map(DeflateCallbackStorageRequest::Pending)
+                    .unwrap_or_else(|| lifecycle.empty_request())
+            }
             DeflateStorageProjection::Hash => {
                 let head = lifecycle.is_complete().then(|| {
                     ::core::slice::from_raw_parts_mut(
@@ -2009,6 +2027,7 @@ fn deflate_state_status_is_valid(status: ::core::ffi::c_int) -> bool {
 // or recovering geometry from mutable codec fields.
 enum DeflateCallbackStorageRequest<'stream> {
     Empty,
+    Pending(DeflatePendingStorage<'stream>),
     Hash {
         head: &'stream mut [crate::src::deflate::Posf],
     },
@@ -2048,14 +2067,21 @@ impl<'stream> DeflateCallbackStorageRequest<'stream> {
     fn window(&self) -> Option<&[crate::stdlib::Bytef]> {
         match self {
             Self::Dictionary(storage) => Some(&storage.window),
-            Self::Empty | Self::Hash { .. } | Self::Complete { .. } => None,
+            Self::Empty | Self::Pending(_) | Self::Hash { .. } | Self::Complete { .. } => None,
         }
     }
 
     fn into_head(self) -> Option<&'stream mut [crate::src::deflate::Posf]> {
         match self {
             Self::Hash { head } => Some(head),
-            Self::Empty | Self::Dictionary(_) | Self::Complete { .. } => None,
+            Self::Empty | Self::Pending(_) | Self::Dictionary(_) | Self::Complete { .. } => None,
+        }
+    }
+
+    fn into_pending_storage(self) -> Option<DeflatePendingStorage<'stream>> {
+        match self {
+            Self::Pending(storage) => Some(storage),
+            Self::Empty | Self::Hash { .. } | Self::Dictionary(_) | Self::Complete { .. } => None,
         }
     }
 
@@ -2065,7 +2091,7 @@ impl<'stream> DeflateCallbackStorageRequest<'stream> {
     fn into_dictionary_storage(self) -> Option<DeflateDictionaryStorage<'stream>> {
         match self {
             Self::Dictionary(storage) => Some(storage),
-            Self::Empty | Self::Hash { .. } | Self::Complete { .. } => None,
+            Self::Empty | Self::Pending(_) | Self::Hash { .. } | Self::Complete { .. } => None,
         }
     }
 
@@ -2075,7 +2101,7 @@ impl<'stream> DeflateCallbackStorageRequest<'stream> {
     fn into_dispatch_storage(self) -> Option<DeflateDispatchStorage<'stream>> {
         match self {
             Self::Complete { storage, .. } => Some(storage),
-            Self::Empty | Self::Hash { .. } | Self::Dictionary(_) => None,
+            Self::Empty | Self::Pending(_) | Self::Hash { .. } | Self::Dictionary(_) => None,
         }
     }
 
@@ -2088,6 +2114,7 @@ impl<'stream> DeflateCallbackStorageRequest<'stream> {
                 cursors: Some(cursors),
             } => Some((storage, cursors)),
             Self::Empty
+            | Self::Pending(_)
             | Self::Hash { .. }
             | Self::Dictionary(_)
             | Self::Complete { cursors: None, .. } => None,
@@ -2136,6 +2163,9 @@ struct DeflatePendingStorage<'storage> {
 
 enum DeflateStorageProjection<'request> {
     None,
+    // Legacy tree exports need only pending output.  They still obtain it
+    // through the common C4 owner, rather than making a second raw slice.
+    Pending,
     // A full reset only clears the hash table.  Keep that bounded callback
     // view in the shared stream/state projection, rather than reconstructing
     // it at the reset adapter after the opaque state has been borrowed.
