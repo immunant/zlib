@@ -1145,7 +1145,7 @@ unsafe fn gz_fetch(mut state: crate::gzguts_h::gz_statep) -> ::core::ffi::c_int 
             GzFetchAction::Copy => {
                 let load = gz_load(state, (*state).out, gz_output_buffer_len((*state).size));
                 (*state).x.have = load.have;
-                if load.failed {
+                if gz_fetch_copy_action(&load) == GzFetchCopyAction::Error {
                     return -1 as ::core::ffi::c_int;
                 }
                 (*state).x.next = (*state).out;
@@ -1186,6 +1186,20 @@ enum GzFetchAction {
 enum GzFetchAfterLook {
     Return,
     Continue,
+}
+
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+enum GzFetchCopyAction {
+    Error,
+    Commit,
+}
+
+fn gz_fetch_copy_action(load: &GzLoadResult) -> GzFetchCopyAction {
+    if load.failed {
+        GzFetchCopyAction::Error
+    } else {
+        GzFetchCopyAction::Commit
+    }
 }
 
 fn gz_fetch_after_look(how: ::core::ffi::c_int) -> GzFetchAfterLook {
@@ -1509,6 +1523,24 @@ mod tests {
         assert_eq!(
             gz_avail_load_action(::core::ffi::c_uint::MAX, &load),
             GzAvailLoadAction::Commit { avail_in: 0 }
+        );
+    }
+
+    #[test]
+    fn gz_fetch_copy_action_preserves_load_failure_status() {
+        assert_eq!(
+            gz_fetch_copy_action(&GzLoadResult {
+                have: 3,
+                failed: true,
+            }),
+            GzFetchCopyAction::Error
+        );
+        assert_eq!(
+            gz_fetch_copy_action(&GzLoadResult {
+                have: 0,
+                failed: false,
+            }),
+            GzFetchCopyAction::Commit
         );
     }
 

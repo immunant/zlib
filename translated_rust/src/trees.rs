@@ -4388,6 +4388,35 @@ fn classify_tree_run(
     }
 }
 
+fn tally_scan_tree_action(
+    bl_tree: &mut [crate::src::deflate::ct_data],
+    current_len: ::core::ffi::c_int,
+    action: ScanTreeAction,
+) {
+    match action {
+        ScanTreeAction::LiteralCount(literal_count) => {
+            bl_tree[current_len as usize].fc.value =
+                (bl_tree[current_len as usize].fc.value as ::core::ffi::c_int
+                    + literal_count as ::core::ffi::c_int) as crate::zutil_h::ush;
+        }
+        ScanTreeAction::RepeatLength { emit_length_once } => {
+            if emit_length_once {
+                bl_tree[current_len as usize].fc.value =
+                    bl_tree[current_len as usize].fc.value.wrapping_add(1);
+            }
+            bl_tree[REP_3_6 as usize].fc.value = bl_tree[REP_3_6 as usize].fc.value.wrapping_add(1);
+        }
+        ScanTreeAction::RepeatZeroShort => {
+            bl_tree[REPZ_3_10 as usize].fc.value =
+                bl_tree[REPZ_3_10 as usize].fc.value.wrapping_add(1);
+        }
+        ScanTreeAction::RepeatZeroLong => {
+            bl_tree[REPZ_11_138 as usize].fc.value =
+                bl_tree[REPZ_11_138 as usize].fc.value.wrapping_add(1);
+        }
+    }
+}
+
 fn tree_run_extra_bits(
     action: ScanTreeAction,
     count: ::core::ffi::c_int,
@@ -4450,30 +4479,11 @@ unsafe fn scan_tree(
         nextlen = (*tree.wrapping_add(tree_next_cursor(n))).dl.len as ::core::ffi::c_int;
         count += 1;
         if !tree_run_continues(count, max_count, curlen, nextlen) {
-            match classify_tree_run(count, min_count, curlen, prevlen) {
-                ScanTreeAction::LiteralCount(literal_count) => {
-                    (*s).bl_tree[curlen as usize].fc.value = ((*s).bl_tree[curlen as usize].fc.value
-                        as ::core::ffi::c_int
-                        + literal_count as ::core::ffi::c_int)
-                        as crate::zutil_h::ush;
-                }
-                ScanTreeAction::RepeatLength { emit_length_once } => {
-                    if emit_length_once {
-                        (*s).bl_tree[curlen as usize].fc.value =
-                            (*s).bl_tree[curlen as usize].fc.value.wrapping_add(1);
-                    }
-                    (*s).bl_tree[REP_3_6 as usize].fc.value =
-                        (*s).bl_tree[REP_3_6 as usize].fc.value.wrapping_add(1);
-                }
-                ScanTreeAction::RepeatZeroShort => {
-                    (*s).bl_tree[REPZ_3_10 as usize].fc.value =
-                        (*s).bl_tree[REPZ_3_10 as usize].fc.value.wrapping_add(1);
-                }
-                ScanTreeAction::RepeatZeroLong => {
-                    (*s).bl_tree[REPZ_11_138 as usize].fc.value =
-                        (*s).bl_tree[REPZ_11_138 as usize].fc.value.wrapping_add(1);
-                }
-            }
+            tally_scan_tree_action(
+                &mut (*s).bl_tree,
+                curlen,
+                classify_tree_run(count, min_count, curlen, prevlen),
+            );
             count = 0 as ::core::ffi::c_int;
             prevlen = curlen;
             (max_count, min_count) = tree_run_limits(curlen, nextlen);
@@ -5506,11 +5516,11 @@ mod tests {
         reset_bit_length_counts, reset_block_trees, select_block_encoding, static_bl_desc,
         static_d_desc, static_l_desc, supplemental_tree_node, supplemental_tree_opt_len,
         symbol_buffer_is_full, symbol_triplet_cursors, tally_match_tree_indices,
-        tally_symbol_bytes, tally_tree_update, tree_bit_length_cost,
+        tally_scan_tree_action, tally_symbol_bytes, tally_tree_update, tree_bit_length_cost,
         tree_bit_length_totals_after_node, tree_next_cursor, tree_parent_depth, tree_run_continues,
         tree_run_extra_bits, tree_run_limits, BlockEncoding, GenBitlenOverflowNode,
         GenBitlenOverflowReassignment, HeapChild, ScanTreeAction, TallyTreeUpdate,
-        BL_CODE_ORDER_LEN, END_BLOCK, MAX_BITS,
+        BL_CODE_ORDER_LEN, END_BLOCK, MAX_BITS, REPZ_11_138, REPZ_3_10, REP_3_6,
     };
 
     fn ltree_with_frequency(
@@ -5695,6 +5705,52 @@ mod tests {
             classify_tree_run(11, 3, 0, -1),
             ScanTreeAction::RepeatZeroLong
         );
+    }
+
+    #[test]
+    fn scan_tree_action_tally_updates_expected_frequency_codes() {
+        let empty = crate::src::deflate::ct_data {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 { value: 0 },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 { dad: 0 },
+        };
+        let mut bl_tree = [empty; crate::src::deflate::BL_CODES as usize];
+
+        tally_scan_tree_action(&mut bl_tree, 5, ScanTreeAction::LiteralCount(2));
+        tally_scan_tree_action(
+            &mut bl_tree,
+            5,
+            ScanTreeAction::RepeatLength {
+                emit_length_once: true,
+            },
+        );
+        tally_scan_tree_action(
+            &mut bl_tree,
+            5,
+            ScanTreeAction::RepeatLength {
+                emit_length_once: false,
+            },
+        );
+        tally_scan_tree_action(&mut bl_tree, 0, ScanTreeAction::RepeatZeroShort);
+        tally_scan_tree_action(&mut bl_tree, 0, ScanTreeAction::RepeatZeroLong);
+
+        assert_eq!(bl_tree[5].fc.value, 3);
+        assert_eq!(bl_tree[REP_3_6 as usize].fc.value, 2);
+        assert_eq!(bl_tree[REPZ_3_10 as usize].fc.value, 1);
+        assert_eq!(bl_tree[REPZ_11_138 as usize].fc.value, 1);
+    }
+
+    #[test]
+    fn scan_tree_action_tally_preserves_literal_frequency_wrapping() {
+        let empty = crate::src::deflate::ct_data {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 { value: 0 },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 { dad: 0 },
+        };
+        let mut bl_tree = [empty; crate::src::deflate::BL_CODES as usize];
+        bl_tree[4].fc.value = crate::zutil_h::ush::MAX;
+
+        tally_scan_tree_action(&mut bl_tree, 4, ScanTreeAction::LiteralCount(1));
+
+        assert_eq!(bl_tree[4].fc.value, 0);
     }
 
     #[test]

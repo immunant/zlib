@@ -271,6 +271,10 @@ fn gz_write_error_result(
     }
 }
 
+fn gz_write_comp_failed(result: ::core::ffi::c_int) -> bool {
+    result == -1 as ::core::ffi::c_int
+}
+
 fn gz_write_uses_buffered_path(len: crate::stdlib::z_size_t, size: ::core::ffi::c_uint) -> bool {
     len < size as crate::stdlib::z_size_t
 }
@@ -1055,13 +1059,13 @@ unsafe fn gz_write(
             if gz_write_is_empty(len) {
                 break;
             }
-            if gz_comp(state, crate::zlib_h::Z_NO_FLUSH) == -1 as ::core::ffi::c_int {
+            if gz_write_comp_failed(gz_comp(state, crate::zlib_h::Z_NO_FLUSH)) {
                 return gz_write_error_result(state.again, put, len);
             }
         }
     } else {
         if gz_has_pending_input(state.strm.avail_in)
-            && gz_comp(state, crate::zlib_h::Z_NO_FLUSH) == -1 as ::core::ffi::c_int
+            && gz_write_comp_failed(gz_comp(state, crate::zlib_h::Z_NO_FLUSH))
         {
             return 0 as crate::stdlib::z_size_t;
         }
@@ -1449,19 +1453,20 @@ mod tests {
         gz_has_pending_skip, gz_init_allocation_plan, gz_init_mode, gz_init_stream_defaults,
         gz_write_advanced_pos, gz_write_apply_chunk_progress, gz_write_apply_direct_progress,
         gz_write_buffered_copy_len, gz_write_buffered_input_action, gz_write_buffered_progress,
-        gz_write_chunk_len, gz_write_consumed, gz_write_direct_action, gz_write_errno_is_retryable,
-        gz_write_error_result, gz_write_is_empty, gz_write_preparation, gz_write_progress,
-        gz_write_remaining_after_consumption, gz_write_state_is_usable,
-        gz_write_uses_buffered_path, gz_zero_action, gz_zero_apply_progress, gz_zero_chunk_len,
-        gz_zero_chunk_step, gz_zero_initial_step, gz_zero_needs_initialization,
-        gz_zero_pending_step, gz_zero_progress, gzclose_buffer_action, gzclose_mode_is_writable,
-        gzclose_w_result, gzflush_action, gzflush_mode_is_valid, gzfwrite_result, gzputc_result,
-        gzputc_write_action, gzputs_len_fits_int, gzputs_result, gzsetparams_buffer_action,
-        gzsetparams_settings_match, gzsetparams_state_is_usable, gzwrite_request,
-        GzCloseBufferAction, GzCompDeflateAction, GzCompOutputBufferAction, GzCompResetAction,
-        GzCompWriteFailure, GzCompWriteResult, GzFlushAction, GzInitAllocationPlan, GzInitMode,
-        GzPutcWriteAction, GzSetParamsBufferAction, GzWriteBufferedInputAction,
-        GzWriteDirectAction, GzWritePreparation, GzZeroAction, GzZeroStep,
+        gz_write_chunk_len, gz_write_comp_failed, gz_write_consumed, gz_write_direct_action,
+        gz_write_errno_is_retryable, gz_write_error_result, gz_write_is_empty,
+        gz_write_preparation, gz_write_progress, gz_write_remaining_after_consumption,
+        gz_write_state_is_usable, gz_write_uses_buffered_path, gz_zero_action,
+        gz_zero_apply_progress, gz_zero_chunk_len, gz_zero_chunk_step, gz_zero_initial_step,
+        gz_zero_needs_initialization, gz_zero_pending_step, gz_zero_progress,
+        gzclose_buffer_action, gzclose_mode_is_writable, gzclose_w_result, gzflush_action,
+        gzflush_mode_is_valid, gzfwrite_result, gzputc_result, gzputc_write_action,
+        gzputs_len_fits_int, gzputs_result, gzsetparams_buffer_action, gzsetparams_settings_match,
+        gzsetparams_state_is_usable, gzwrite_request, GzCloseBufferAction, GzCompDeflateAction,
+        GzCompOutputBufferAction, GzCompResetAction, GzCompWriteFailure, GzCompWriteResult,
+        GzFlushAction, GzInitAllocationPlan, GzInitMode, GzPutcWriteAction,
+        GzSetParamsBufferAction, GzWriteBufferedInputAction, GzWriteDirectAction,
+        GzWritePreparation, GzZeroAction, GzZeroStep,
     };
 
     #[test]
@@ -2273,6 +2278,14 @@ mod tests {
     #[test]
     fn gz_write_error_result_discards_partial_count_when_not_retryable() {
         assert_eq!(gz_write_error_result(0, 10, 4), 0);
+    }
+
+    #[test]
+    fn gz_write_comp_failed_matches_only_the_failure_sentinel() {
+        assert!(gz_write_comp_failed(-1));
+        assert!(!gz_write_comp_failed(0));
+        assert!(!gz_write_comp_failed(1));
+        assert!(!gz_write_comp_failed(::core::ffi::c_int::MIN));
     }
 
     #[test]

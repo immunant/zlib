@@ -1236,41 +1236,36 @@ pub unsafe extern "C" fn inflate(
                     hold = hold.wrapping_add((*c2rust_fresh1 as ::core::ffi::c_ulong) << bits);
                     bits = bits.wrapping_add(8 as ::core::ffi::c_uint);
                 }
-                let gzip_flags = inflate_gzip_flags(hold);
+                let (gzip_flags, gzip_flags_error) = inflate_gzip_flags_validation(hold);
                 (*state).flags = gzip_flags.flags;
-                if inflate_gzip_flags_error((*state).flags)
-                    == Some(InflateGzipFlagsError::UnknownCompressionMethod)
-                {
-                    (*strm).msg = b"unknown compression method\0".as_ptr()
-                        as *const ::core::ffi::c_char
+                if let Some(gzip_flags_error) = gzip_flags_error {
+                    (*strm).msg = match gzip_flags_error {
+                        InflateGzipFlagsError::UnknownCompressionMethod => {
+                            b"unknown compression method\0".as_ptr()
+                        }
+                        InflateGzipFlagsError::UnknownHeaderFlags => {
+                            b"unknown header flags set\0".as_ptr()
+                        }
+                    } as *const ::core::ffi::c_char
                         as *mut ::core::ffi::c_char;
                     (*state).mode = crate::src::inflate::BAD;
                     continue;
-                } else if inflate_gzip_flags_error((*state).flags)
-                    == Some(InflateGzipFlagsError::UnknownHeaderFlags)
-                {
-                    (*strm).msg = b"unknown header flags set\0".as_ptr()
-                        as *const ::core::ffi::c_char
-                        as *mut ::core::ffi::c_char;
-                    (*state).mode = crate::src::inflate::BAD;
-                    continue;
-                } else {
-                    if !(*state).head.is_null() {
-                        (*(*state).head).text = gzip_flags.text;
-                    }
-                    if inflate_header_crc_enabled((*state).flags, (*state).wrap) {
-                        hbuf[0 as ::core::ffi::c_int as usize] = hold as ::core::ffi::c_uchar;
-                        hbuf[1 as ::core::ffi::c_int as usize] =
-                            (hold >> 8 as ::core::ffi::c_int) as ::core::ffi::c_uchar;
-                        (*state).check = crate::src::crc32::crc32_z(
-                            (*state).check as crate::stdlib::uLong,
-                            &hbuf[..2],
-                        ) as ::core::ffi::c_ulong;
-                    }
-                    hold = 0 as ::core::ffi::c_ulong;
-                    bits = 0 as ::core::ffi::c_uint;
-                    (*state).mode = crate::src::inflate::TIME;
                 }
+                if !(*state).head.is_null() {
+                    (*(*state).head).text = gzip_flags.text;
+                }
+                if inflate_header_crc_enabled((*state).flags, (*state).wrap) {
+                    hbuf[0 as ::core::ffi::c_int as usize] = hold as ::core::ffi::c_uchar;
+                    hbuf[1 as ::core::ffi::c_int as usize] =
+                        (hold >> 8 as ::core::ffi::c_int) as ::core::ffi::c_uchar;
+                    (*state).check = crate::src::crc32::crc32_z(
+                        (*state).check as crate::stdlib::uLong,
+                        &hbuf[..2],
+                    ) as ::core::ffi::c_ulong;
+                }
+                hold = 0 as ::core::ffi::c_ulong;
+                bits = 0 as ::core::ffi::c_uint;
+                (*state).mode = crate::src::inflate::TIME;
                 c2rust_current_block = 15855550149339537395;
             }
             16182 => {
@@ -2610,6 +2605,14 @@ fn inflate_gzip_flags_error(flags: ::core::ffi::c_int) -> Option<InflateGzipFlag
     }
 }
 
+fn inflate_gzip_flags_validation(
+    hold: crate::stdlib::uLong,
+) -> (InflateGzipFlags, Option<InflateGzipFlagsError>) {
+    let flags = inflate_gzip_flags(hold);
+    let error = inflate_gzip_flags_error(flags.flags);
+    (flags, error)
+}
+
 fn inflate_gzip_header_has_extra(flags: ::core::ffi::c_int) -> bool {
     flags & 0x400 != 0
 }
@@ -3098,10 +3101,10 @@ mod tests {
         inflate_codes_used_offset_value, inflate_copy_match_from_output, inflate_copy_progress,
         inflate_data_type_value, inflate_dictionary_id_from_hold, inflate_dictionary_is_allowed,
         inflate_get_dictionary_result, inflate_gzip_extra_progress, inflate_gzip_flags,
-        inflate_gzip_flags_error, inflate_gzip_header_crc_is_valid, inflate_gzip_header_has_extra,
-        inflate_gzip_header_has_name, inflate_gzip_window_bits, inflate_head_skip_mode,
-        inflate_header_crc_enabled, inflate_header_wrap_allows_capture, inflate_is_gzip_header,
-        inflate_mark_progress, inflate_mark_value, inflate_match_copy_plan,
+        inflate_gzip_flags_error, inflate_gzip_flags_validation, inflate_gzip_header_crc_is_valid,
+        inflate_gzip_header_has_extra, inflate_gzip_header_has_name, inflate_gzip_window_bits,
+        inflate_head_skip_mode, inflate_header_crc_enabled, inflate_header_wrap_allows_capture,
+        inflate_is_gzip_header, inflate_mark_progress, inflate_mark_value, inflate_match_copy_plan,
         inflate_mode_data_type_flags, inflate_mode_is_valid, inflate_mode_on_entry,
         inflate_needs_buffer_error, inflate_output_checksum, inflate_prime_update,
         inflate_reset2_discards_window, inflate_reset2_params, inflate_reset_keep_adler,
@@ -3385,6 +3388,40 @@ mod tests {
         assert_eq!(
             inflate_gzip_flags_error(0xe008),
             Some(InflateGzipFlagsError::UnknownHeaderFlags)
+        );
+    }
+
+    #[test]
+    fn inflate_gzip_flags_validation_combines_decoding_with_ordered_errors() {
+        assert_eq!(
+            inflate_gzip_flags_validation(0x108),
+            (
+                InflateGzipFlags {
+                    flags: 0x108,
+                    text: 1,
+                },
+                None,
+            )
+        );
+        assert_eq!(
+            inflate_gzip_flags_validation(0xe009),
+            (
+                InflateGzipFlags {
+                    flags: 0xe009,
+                    text: 0,
+                },
+                Some(InflateGzipFlagsError::UnknownCompressionMethod),
+            )
+        );
+        assert_eq!(
+            inflate_gzip_flags_validation(0xe008),
+            (
+                InflateGzipFlags {
+                    flags: 0xe008,
+                    text: 0,
+                },
+                Some(InflateGzipFlagsError::UnknownHeaderFlags),
+            )
         );
     }
 

@@ -148,7 +148,6 @@ fn match_copy_layout(
     (match_length / 3, match_length % 3)
 }
 
-
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 enum FastLitLenAction {
     Literal,
@@ -917,7 +916,6 @@ mod tests {
             (1_431_655_765, 0)
         );
     }
-
 
     #[test]
     fn fast_window_copy_plan_preserves_exact_first_segment_boundaries() {
