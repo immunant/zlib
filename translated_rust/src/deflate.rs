@@ -2293,13 +2293,13 @@ pub fn deflate(
     }
     // The stream/state handle has now passed the ABI validation above. Keep
     // the raw handle conversion inside its own legacy boundary.
-    let state = unsafe {
-        let state = strm.state as *mut crate::src::deflate::deflate_state;
-        if !deflate_stream_state_valid(Some(strm), Some(&*state)) {
-            return crate::zlib_h::Z_STREAM_ERROR;
-        }
-        &mut *state
+    let Some(state) = (unsafe { (strm.state as *mut crate::src::deflate::deflate_state).as_mut() })
+    else {
+        return crate::zlib_h::Z_STREAM_ERROR;
     };
+    if !deflate_stream_state_valid(Some(strm), Some(state)) {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    }
     if strm.next_out.is_null()
         || strm.avail_in != 0 as crate::stdlib::uInt && strm.next_in.is_null()
         || state.status == crate::src::deflate::FINISH_STATE && flush != crate::zlib_h::Z_FINISH
