@@ -440,8 +440,7 @@ unsafe extern "C" fn gz_read(
             if (*state).eof != 0 && (*state).strm.avail_in == 0 as crate::stdlib::uInt {
                 break;
             }
-            if (*state).how == crate::gzguts_h::LOOK || n < (*state).size << 1 as ::core::ffi::c_int
-            {
+            if gz_read_should_fetch((*state).how, n, (*state).size) {
                 if gz_fetch(state) == -1 as ::core::ffi::c_int
                     && (*state).x.have == 0 as ::core::ffi::c_uint
                 {
@@ -485,6 +484,14 @@ unsafe extern "C" fn gz_read(
 
 fn gzread_len_fits_int(len: ::core::ffi::c_uint) -> bool {
     gz_uInt_fits_int(len)
+}
+
+fn gz_read_should_fetch(
+    how: ::core::ffi::c_int,
+    n: crate::stdlib::uInt,
+    size: crate::stdlib::uInt,
+) -> bool {
+    how == crate::gzguts_h::LOOK || n < size << 1 as ::core::ffi::c_int
 }
 
 fn gz_read_state_ready(state: &crate::gzguts_h::gz_state) -> bool {

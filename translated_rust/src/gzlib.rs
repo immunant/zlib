@@ -124,6 +124,31 @@ fn gz_parse_open_mode(mode: &[u8]) -> Option<GzOpenMode> {
     Some(parsed)
 }
 
+fn gz_open_oflag_for_mode(
+    mut oflag: ::core::ffi::c_int,
+    mode: ::core::ffi::c_int,
+    exclusive: ::core::ffi::c_int,
+) -> ::core::ffi::c_int {
+    oflag |= crate::stdlib::O_LARGEFILE
+        | if mode == crate::gzguts_h::GZ_READ {
+            crate::stdlib::O_RDONLY
+        } else {
+            crate::stdlib::O_WRONLY
+                | crate::stdlib::O_CREAT
+                | if exclusive != 0 {
+                    crate::stdlib::O_EXCL
+                } else {
+                    0 as ::core::ffi::c_int
+                }
+                | if mode == crate::gzguts_h::GZ_WRITE {
+                    crate::stdlib::O_TRUNC
+                } else {
+                    crate::stdlib::O_APPEND
+                }
+        };
+    oflag
+}
+
 unsafe extern "C" fn gz_reset(mut state: crate::gzguts_h::gz_statep) {
     (*state).x.have = 0 as ::core::ffi::c_uint;
     if (*state).mode == crate::gzguts_h::GZ_READ {
@@ -194,23 +219,7 @@ unsafe fn gz_open(
         b"%s\0".as_ptr() as *const ::core::ffi::c_char,
         path as *const ::core::ffi::c_char,
     );
-    oflag |= crate::stdlib::O_LARGEFILE
-        | (if (*state).mode == crate::gzguts_h::GZ_READ {
-            crate::stdlib::O_RDONLY
-        } else {
-            crate::stdlib::O_WRONLY
-                | crate::stdlib::O_CREAT
-                | (if exclusive != 0 {
-                    crate::stdlib::O_EXCL
-                } else {
-                    0 as ::core::ffi::c_int
-                })
-                | (if (*state).mode == crate::gzguts_h::GZ_WRITE {
-                    crate::stdlib::O_TRUNC
-                } else {
-                    crate::stdlib::O_APPEND
-                })
-        });
+    oflag = gz_open_oflag_for_mode(oflag, (*state).mode, exclusive);
     if fd == -1 as ::core::ffi::c_int {
         (*state).fd = crate::stdlib::open(
             path as *const ::core::ffi::c_char,
@@ -778,7 +787,7 @@ pub unsafe extern "C" fn gz_error(
         }
         (*state).msg = ::core::ptr::null_mut::<::core::ffi::c_char>();
     }
-    if err != crate::zlib_h::Z_OK && err != crate::zlib_h::Z_BUF_ERROR && (*state).again == 0 {
+    if gz_error_should_clear_buffer(err, (*state).again) {
         (*state).x.have = 0 as ::core::ffi::c_uint;
     }
     (*state).err = err;
@@ -807,6 +816,10 @@ pub unsafe extern "C" fn gz_error(
         b": \0".as_ptr() as *const ::core::ffi::c_char,
         msg,
     );
+}
+
+fn gz_error_should_clear_buffer(err: ::core::ffi::c_int, again: ::core::ffi::c_int) -> bool {
+    err != crate::zlib_h::Z_OK && err != crate::zlib_h::Z_BUF_ERROR && again == 0
 }
 #[export_name = "gz_error"]
 
