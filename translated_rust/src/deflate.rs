@@ -1011,16 +1011,17 @@ pub unsafe extern "C" fn deflateGetDictionary(
     let window = if len == 0 {
         None
     } else {
-        let end = state.strstart.wrapping_add(state.lookahead) as usize;
-        let window = ::core::slice::from_raw_parts(state.window, state.window_size as usize);
-        Some(&window[end - len as usize..end])
+        Some(::core::slice::from_raw_parts(
+            state.window,
+            state.window_size as usize,
+        ))
     };
     let dict_length = if dictLength.is_null() {
         None
     } else {
         Some(&mut *dictLength)
     };
-    deflate_get_dictionary(window, dictionary, dict_length, len)
+    deflate_get_dictionary(state, window, dictionary, dict_length)
 }
 
 // Once the ABI adapter has bound the state window and optional caller ranges,
@@ -1033,13 +1034,15 @@ fn deflate_dictionary_length(state: &crate::src::deflate::deflate_state) -> crat
 }
 
 fn deflate_get_dictionary(
+    state: &crate::src::deflate::deflate_state,
     window: Option<&[crate::stdlib::Bytef]>,
     dictionary: Option<&mut [crate::stdlib::Bytef]>,
     dict_length: Option<&mut crate::stdlib::uInt>,
-    len: crate::stdlib::uInt,
 ) -> ::core::ffi::c_int {
+    let len = deflate_dictionary_length(state);
     if let (Some(window), Some(dictionary)) = (window, dictionary) {
-        dictionary.copy_from_slice(window);
+        let end = state.strstart.wrapping_add(state.lookahead) as usize;
+        dictionary.copy_from_slice(&window[end - len as usize..end]);
     }
     if let Some(dict_length) = dict_length {
         *dict_length = len;
