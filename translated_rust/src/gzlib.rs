@@ -566,7 +566,10 @@ pub unsafe extern "C" fn gzrewind_ffi(mut file: crate::zlib_h::gzFile) -> ::core
     {
         return -1;
     }
-    gz_error(state, crate::zlib_h::Z_OK, ::core::ptr::null());
+    let message = state.msg;
+    if gz_clear_error_state(state) && !message.is_null() {
+        crate::stdlib::free(message as *mut ::core::ffi::c_void);
+    }
     0
 }
 /// Validate and normalize a gzip seek request without touching the opaque
@@ -863,11 +866,10 @@ macro_rules! gzseek_at_boundary {
                 state.x.next = state.x.next.offset(result.advance as isize);
             }
             if result.clear_error {
-                gz_error(
-                    state,
-                    crate::zlib_h::Z_OK,
-                    ::core::ptr::null::<::core::ffi::c_char>(),
-                );
+                let message = state.msg;
+                if gz_clear_error_state(state) && !message.is_null() {
+                    crate::stdlib::free(message as *mut ::core::ffi::c_void);
+                }
             }
             result.position
         }
@@ -1063,11 +1065,10 @@ pub unsafe extern "C" fn gzclearerr_ffi(mut file: crate::zlib_h::gzFile) {
     }
     let state = &mut *(file as crate::gzguts_h::gz_statep);
     if gzclearerr(state) {
-        gz_error(
-            state,
-            crate::zlib_h::Z_OK,
-            ::core::ptr::null::<::core::ffi::c_char>(),
-        );
+        let message = state.msg;
+        if gz_clear_error_state(state) && !message.is_null() {
+            crate::stdlib::free(message as *mut ::core::ffi::c_void);
+        }
     }
 }
 
@@ -1109,6 +1110,16 @@ fn gz_error_apply_transition(
     }
     state.err = err;
     transition.compose_message
+}
+
+/// Clear a previously recorded gzip error without touching its boundary-owned
+/// message allocation.  The caller retains the old pointer only long enough
+/// to release it at the FFI boundary when this returns `true`.
+fn gz_clear_error_state(state: &mut crate::gzguts_h::gz_state) -> bool {
+    let release_message = !state.msg.is_null() && state.err != crate::zlib_h::Z_MEM_ERROR;
+    state.msg = ::core::ptr::null_mut();
+    state.err = crate::zlib_h::Z_OK;
+    release_message
 }
 
 /// Calculate the storage required for the legacy `"path: message"` error
