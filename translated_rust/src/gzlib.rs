@@ -267,38 +267,33 @@ fn gz_open(
             }
             (*state).fd = fd;
         }
-        {
-            let state_ref = &mut *state;
-            state_ref.path_len = len as crate::__stddef_size_t_h::size_t;
-            if state_ref.fd == -1 as ::core::ffi::c_int {
-                crate::stdlib::free(state_ref.path as *mut ::core::ffi::c_void);
-                crate::stdlib::free(state as *mut ::core::ffi::c_void);
-                return ::core::ptr::null_mut::<crate::zlib_h::gzFile_s>();
-            }
-            if state_ref.mode == crate::gzguts_h::GZ_APPEND {
-                crate::stdlib::lseek64(
-                    state_ref.fd,
-                    0 as crate::stdlib::__off64_t,
-                    crate::stdlib::SEEK_END,
-                );
-                state_ref.mode = crate::gzguts_h::GZ_WRITE;
-            }
-            if state_ref.mode == crate::gzguts_h::GZ_READ {
-                state_ref.start = crate::stdlib::lseek64(
-                    state_ref.fd,
-                    0 as crate::stdlib::__off64_t,
-                    crate::stdlib::SEEK_CUR,
-                ) as crate::stdlib::off64_t;
-                if state_ref.start == -1 as ::core::ffi::c_int as crate::stdlib::off64_t {
-                    state_ref.start = 0 as crate::stdlib::off64_t;
-                }
-            }
-            gz_reset_before_error(state_ref);
+        let state_ref = &mut *state;
+        state_ref.path_len = len as crate::__stddef_size_t_h::size_t;
+        if state_ref.fd == -1 as ::core::ffi::c_int {
+            crate::stdlib::free(state_ref.path as *mut ::core::ffi::c_void);
+            crate::stdlib::free(state as *mut ::core::ffi::c_void);
+            return ::core::ptr::null_mut::<crate::zlib_h::gzFile_s>();
         }
-        {
-            let state_ref = &mut *state;
-            gz_reset_after_error(state_ref);
+        if state_ref.mode == crate::gzguts_h::GZ_APPEND {
+            crate::stdlib::lseek64(
+                state_ref.fd,
+                0 as crate::stdlib::__off64_t,
+                crate::stdlib::SEEK_END,
+            );
+            state_ref.mode = crate::gzguts_h::GZ_WRITE;
         }
+        if state_ref.mode == crate::gzguts_h::GZ_READ {
+            state_ref.start = crate::stdlib::lseek64(
+                state_ref.fd,
+                0 as crate::stdlib::__off64_t,
+                crate::stdlib::SEEK_CUR,
+            ) as crate::stdlib::off64_t;
+            if state_ref.start == -1 as ::core::ffi::c_int as crate::stdlib::off64_t {
+                state_ref.start = 0 as crate::stdlib::off64_t;
+            }
+        }
+        gz_reset_before_error(state_ref);
+        gz_reset_after_error(state_ref);
         return state as crate::zlib_h::gzFile;
     }
 }
