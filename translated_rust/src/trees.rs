@@ -3417,6 +3417,17 @@ pub(crate) fn tr_tally_symbol_bytes(
     ]
 }
 
+fn append_sym_bytes(
+    sym_buf: &mut [crate::zutil_h::uchf],
+    sym_next: &mut crate::stdlib::uInt,
+    bytes: [crate::zutil_h::uchf; 3],
+) {
+    let start = *sym_next as usize;
+    let end = start + bytes.len();
+    sym_buf[start..end].copy_from_slice(&bytes);
+    *sym_next = sym_next.wrapping_add(bytes.len() as crate::stdlib::uInt);
+}
+
 pub(crate) fn tr_tally_literal_update(
     dyn_ltree: &mut [crate::src::deflate::ct_data; 573],
     literal: crate::zutil_h::uch,
@@ -3968,11 +3979,12 @@ pub unsafe extern "C" fn _tr_tally_ffi(
 ) -> ::core::ffi::c_int {
     let state = &mut *s;
     let original_dist = dist;
-    for byte in tr_tally_symbol_bytes(dist, lc) {
-        let sym_next = state.sym_next;
-        state.sym_next = state.sym_next.wrapping_add(1);
-        *state.sym_buf.offset(sym_next as isize) = byte;
-    }
+    let sym_buf = ::core::slice::from_raw_parts_mut(state.sym_buf, state.sym_end as usize);
+    append_sym_bytes(
+        sym_buf,
+        &mut state.sym_next,
+        tr_tally_symbol_bytes(dist, lc),
+    );
     if dist == 0 as ::core::ffi::c_uint {
         tr_tally_update_counts(
             &mut state.dyn_ltree,

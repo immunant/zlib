@@ -1131,6 +1131,18 @@ fn deflate_prime_step(
         value: value >> put,
     }
 }
+
+fn append_deflate_pending_bytes(
+    pending_buf: &mut [crate::stdlib::Bytef],
+    pending: &mut crate::zutil_h::ulg,
+    bytes: &[crate::stdlib::Byte],
+) {
+    let start = *pending as usize;
+    let end = start + bytes.len();
+    pending_buf[start..end].copy_from_slice(bytes);
+    *pending = pending.wrapping_add(bytes.len() as crate::zutil_h::ulg);
+}
+
 #[export_name = "deflatePrime"]
 
 pub unsafe extern "C" fn deflatePrime_ffi(
@@ -1154,15 +1166,14 @@ pub unsafe extern "C" fn deflatePrime_ffi(
     {
         return crate::zlib_h::Z_BUF_ERROR;
     }
+    let state = &mut *s;
+    let pending_buf =
+        ::core::slice::from_raw_parts_mut(state.pending_buf, state.pending_buf_size as usize);
     loop {
-        let step = deflate_prime_step((*s).bi_buf, (*s).bi_valid, bits, value);
-        for byte in step.bytes[..step.len].iter().copied() {
-            let pending = (*s).pending;
-            (*s).pending = (*s).pending.wrapping_add(1);
-            *(*s).pending_buf.offset(pending as isize) = byte;
-        }
-        (*s).bi_buf = step.bi_buf;
-        (*s).bi_valid = step.bi_valid;
+        let step = deflate_prime_step(state.bi_buf, state.bi_valid, bits, value);
+        append_deflate_pending_bytes(pending_buf, &mut state.pending, &step.bytes[..step.len]);
+        state.bi_buf = step.bi_buf;
+        state.bi_valid = step.bi_valid;
         value = step.value;
         bits = step.bits;
         if !(bits != 0) {

@@ -495,6 +495,27 @@ fn gz_store_buffered_byte(
     buf[offset as usize] = c as ::core::ffi::c_uchar;
 }
 
+fn gzputc_buffered(
+    state: &mut crate::gzguts_h::gz_state,
+    buf: &mut [crate::stdlib::Bytef],
+    c: ::core::ffi::c_int,
+) -> Option<::core::ffi::c_int> {
+    if state.size == 0 {
+        return None;
+    }
+    if state.strm.avail_in == 0 as crate::stdlib::uInt {
+        state.strm.next_in = state.in_0 as *mut crate::stdlib::Bytef;
+    }
+    let have = gz_buffered_input_used(state);
+    if have < state.size {
+        gz_store_buffered_byte(buf, have, c);
+        gz_note_buffered_input(state, 1 as ::core::ffi::c_uint);
+        Some(c & 0xff as ::core::ffi::c_int)
+    } else {
+        None
+    }
+}
+
 fn gzwrite_len_fits_int(len: ::core::ffi::c_uint) -> bool {
     gz_uInt_fits_int(len)
 }
@@ -572,16 +593,13 @@ pub unsafe extern "C" fn gzputc_ffi(
     mut file: crate::zlib_h::gzFile,
     mut c: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
-    let mut have: ::core::ffi::c_uint = 0;
     let mut buf: [::core::ffi::c_uchar; 1] = [0; 1];
     let mut state: crate::gzguts_h::gz_statep =
         ::core::ptr::null_mut::<crate::gzguts_h::gz_state>();
-    let mut strm: crate::zlib_h::z_streamp = ::core::ptr::null_mut::<crate::zlib_h::z_stream>();
     if file.is_null() {
         return -1 as ::core::ffi::c_int;
     }
     state = file as crate::gzguts_h::gz_statep;
-    strm = &raw mut (*state).strm as crate::zlib_h::z_streamp;
     if !gz_write_state_ready(&*state) {
         return -1 as ::core::ffi::c_int;
     }
@@ -597,15 +615,9 @@ pub unsafe extern "C" fn gzputc_ffi(
         }
     }
     if (*state).size != 0 {
-        if (*strm).avail_in == 0 as crate::stdlib::uInt {
-            (*strm).next_in = (*state).in_0 as *mut crate::stdlib::Bytef;
-        }
-        have = gz_buffered_input_used(&*state);
-        if have < (*state).size {
-            let buf = ::core::slice::from_raw_parts_mut((*state).in_0, (*state).size as usize);
-            gz_store_buffered_byte(buf, have, c);
-            gz_note_buffered_input(&mut *state, 1 as ::core::ffi::c_uint);
-            return c & 0xff as ::core::ffi::c_int;
+        let buffered = ::core::slice::from_raw_parts_mut((*state).in_0, (*state).size as usize);
+        if let Some(ret) = gzputc_buffered(&mut *state, buffered, c) {
+            return ret;
         }
     }
     buf[0 as ::core::ffi::c_int as usize] = c as ::core::ffi::c_uchar;
