@@ -2769,39 +2769,43 @@ pub unsafe fn inflate(
         }
         ret
     };
+    // Move the scalar completion out before publishing it.  This drops the
+    // bounded extra/name/comment borrows first, so the retained registration
+    // is reborrowed only after the decoder's header view has ended.
+    let header_publication = header.map(|output| output.publication);
     // Publish only scalar/pointer-slot changes after the pointer-free decoder
     // has finished with its call-scoped slices.  Use the retained `NonNull`
     // directly so provenance is never reconstructed from an address token.
-    if let (Some(registered), Some(output)) = (registered_header, header.as_mut()) {
+    if let (Some(registered), Some(publication)) = (registered_header, header_publication) {
         let header = &mut *registered.as_ptr();
-        if let Some(value) = output.publication.text {
+        if let Some(value) = publication.text {
             header.text = value;
         }
-        if let Some(value) = output.publication.time {
+        if let Some(value) = publication.time {
             header.time = value;
         }
-        if let Some(value) = output.publication.xflags {
+        if let Some(value) = publication.xflags {
             header.xflags = value;
         }
-        if let Some(value) = output.publication.os {
+        if let Some(value) = publication.os {
             header.os = value;
         }
-        if let Some(value) = output.publication.extra_len {
+        if let Some(value) = publication.extra_len {
             header.extra_len = value;
         }
-        if let Some(value) = output.publication.hcrc {
+        if let Some(value) = publication.hcrc {
             header.hcrc = value;
         }
-        if let Some(value) = output.publication.done {
+        if let Some(value) = publication.done {
             header.done = value;
         }
-        if output.publication.clear_extra {
+        if publication.clear_extra {
             header.extra = ::core::ptr::null_mut();
         }
-        if output.publication.clear_name {
+        if publication.clear_name {
             header.name = ::core::ptr::null_mut();
         }
-        if output.publication.clear_comment {
+        if publication.clear_comment {
             header.comment = ::core::ptr::null_mut();
         }
     }
