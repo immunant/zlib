@@ -590,10 +590,11 @@ unsafe fn gzread(
             return -1 as ::core::ffi::c_int;
         }
         if state.again != 0 {
+            let errno_value = errno::errno().0;
             crate::src::gzlib::gz_error(
                 state,
                 crate::zlib_h::Z_ERRNO,
-                crate::stdlib::strerror(*crate::stdlib::__errno_location()),
+                crate::stdlib::strerror(errno_value),
             );
             return -1 as ::core::ffi::c_int;
         }
