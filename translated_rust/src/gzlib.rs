@@ -61,25 +61,25 @@ pub use crate::zlib_h::Z_MEM_ERROR;
 pub use crate::zlib_h::Z_OK;
 pub use crate::zlib_h::Z_RLE;
 
-unsafe extern "C" fn gz_reset(mut state: crate::gzguts_h::gz_statep) {
-    (*state).x.have = 0 as ::core::ffi::c_uint;
-    if (*state).mode == crate::gzguts_h::GZ_READ {
-        (*state).eof = 0 as ::core::ffi::c_int;
-        (*state).past = 0 as ::core::ffi::c_int;
-        (*state).how = crate::gzguts_h::LOOK;
-        (*state).junk = -1 as ::core::ffi::c_int;
+unsafe fn gz_reset(state: &mut crate::gzguts_h::gz_state) {
+    state.x.have = 0 as ::core::ffi::c_uint;
+    if state.mode == crate::gzguts_h::GZ_READ {
+        state.eof = 0 as ::core::ffi::c_int;
+        state.past = 0 as ::core::ffi::c_int;
+        state.how = crate::gzguts_h::LOOK;
+        state.junk = -1 as ::core::ffi::c_int;
     } else {
-        (*state).reset = 0 as ::core::ffi::c_int;
+        state.reset = 0 as ::core::ffi::c_int;
     }
-    (*state).again = 0 as ::core::ffi::c_int;
-    (*state).skip = 0 as crate::stdlib::off64_t;
+    state.again = 0 as ::core::ffi::c_int;
+    state.skip = 0 as crate::stdlib::off64_t;
     gz_error(
-        state,
+        state as *mut crate::gzguts_h::gz_state,
         crate::zlib_h::Z_OK,
         ::core::ptr::null::<::core::ffi::c_char>(),
     );
-    (*state).x.pos = 0 as crate::stdlib::off64_t;
-    (*state).strm.avail_in = 0 as crate::stdlib::uInt;
+    state.x.pos = 0 as crate::stdlib::off64_t;
+    state.strm.avail_in = 0 as crate::stdlib::uInt;
 }
 
 unsafe extern "C" fn gz_open(
@@ -255,7 +255,7 @@ unsafe extern "C" fn gz_open(
             (*state).start = 0 as crate::stdlib::off64_t;
         }
     }
-    gz_reset(state);
+    gz_reset(&mut *state);
     return state as crate::zlib_h::gzFile;
 }
 pub unsafe extern "C" fn gzopen(
@@ -385,7 +385,7 @@ pub unsafe extern "C" fn gzrewind(mut file: crate::zlib_h::gzFile) -> ::core::ff
     {
         return -1 as ::core::ffi::c_int;
     }
-    gz_reset(state);
+    gz_reset(&mut *state);
     return 0 as ::core::ffi::c_int;
 }
 #[export_name = "gzrewind"]
