@@ -699,7 +699,7 @@ pub unsafe extern "C" fn inflatePrime_ffi(
 }
 unsafe extern "C" fn updatewindow(
     mut strm: crate::zlib_h::z_streamp,
-    mut end: *const crate::stdlib::Bytef,
+    mut produced_start: *const crate::stdlib::Bytef,
     mut copy: ::core::ffi::c_uint,
 ) -> ::core::ffi::c_int {
     let mut state: *mut crate::src::inflate::inflate_state =
@@ -727,7 +727,7 @@ unsafe extern "C" fn updatewindow(
     let produced = if copy == 0 {
         &[]
     } else {
-        core::slice::from_raw_parts(end.wrapping_sub(copy as usize), copy as usize)
+        core::slice::from_raw_parts(produced_start, copy as usize)
     };
     plan = apply_window_update(window, (*state).wnext, (*state).whave, produced);
     (*state).wnext = plan.wnext;
@@ -743,6 +743,7 @@ pub unsafe extern "C" fn inflate(
         ::core::ptr::null_mut::<crate::src::inflate::inflate_state>();
     let mut next: *mut ::core::ffi::c_uchar = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
     let mut put: *mut ::core::ffi::c_uchar = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
+    let mut output_start: *const crate::stdlib::Bytef = ::core::ptr::null::<crate::stdlib::Bytef>();
     let mut have: ::core::ffi::c_uint = 0;
     let mut left: ::core::ffi::c_uint = 0;
     let mut hold: ::core::ffi::c_ulong = 0;
@@ -777,6 +778,7 @@ pub unsafe extern "C" fn inflate(
         (*state).mode = crate::src::inflate::TYPEDO;
     }
     put = (*strm).next_out as *mut ::core::ffi::c_uchar;
+    output_start = put as *const crate::stdlib::Bytef;
     left = (*strm).avail_out as ::core::ffi::c_uint;
     next = (*strm).next_in as *mut ::core::ffi::c_uchar;
     have = (*strm).avail_in as ::core::ffi::c_uint;
@@ -2144,7 +2146,7 @@ pub unsafe extern "C" fn inflate(
     (*state).hold = hold;
     (*state).bits = bits;
     if inflate_should_update_window((*state).wsize, out, left, (*state).mode, flush) {
-        if updatewindow(strm, (*strm).next_out, out.wrapping_sub(left)) != 0 {
+        if updatewindow(strm, output_start, inflate_produced_output_len(out, left)) != 0 {
             (*state).mode = crate::src::inflate::MEM;
             return crate::zlib_h::Z_MEM_ERROR;
         }
@@ -2274,7 +2276,7 @@ pub unsafe extern "C" fn inflateSetDictionary(
     }
     ret = updatewindow(
         strm,
-        dictionary.offset(dictLength as isize),
+        dictionary,
         dictLength as ::core::ffi::c_uint,
     );
     if ret != 0 {
@@ -2380,6 +2382,13 @@ fn inflate_should_update_window(
         || initial_out != remaining_out
             && mode < crate::src::inflate::BAD
             && (mode < crate::src::inflate::CHECK || flush != crate::zlib_h::Z_FINISH)
+}
+
+fn inflate_produced_output_len(
+    output_capacity: ::core::ffi::c_uint,
+    remaining_output: ::core::ffi::c_uint,
+) -> ::core::ffi::c_uint {
+    output_capacity.wrapping_sub(remaining_output)
 }
 
 fn syncsearch_safe(have: &mut ::core::ffi::c_uint, buf: &[::core::ffi::c_uchar]) -> usize {
@@ -3345,5 +3354,12 @@ mod tests {
         assert_eq!(update.wnext, 3);
         assert_eq!(update.whave, 5);
         assert_eq!(window, *b"abcdefgh");
+    }
+
+    #[test]
+    fn produced_output_length_tracks_output_cursor_progress() {
+        assert_eq!(super::inflate_produced_output_len(8, 8), 0);
+        assert_eq!(super::inflate_produced_output_len(8, 3), 5);
+        assert_eq!(super::inflate_produced_output_len(8, 0), 8);
     }
 }

@@ -2228,8 +2228,8 @@ pub unsafe extern "C" fn gzungetc(
         GzUngetcAction::Empty { write_index } => {
             let (have, pos, past) = gz_ungetc_progress((*state).x.have, (*state).x.pos);
             (*state).x.have = have;
-            (*state).x.next = (*state).out.offset(write_index as isize);
-            *(*state).x.next.offset(0 as ::core::ffi::c_int as isize) = c as ::core::ffi::c_uchar;
+            (*state).x.next = (*state).out.wrapping_add(write_index);
+            *(*state).x.next = c as ::core::ffi::c_uchar;
             (*state).x.pos = pos;
             (*state).past = past;
             return c;
@@ -2245,10 +2245,10 @@ pub unsafe extern "C" fn gzungetc(
         GzUngetcAction::Pushable { compact } => {
             if compact {
                 let mut src: *mut ::core::ffi::c_uchar =
-                    (*state).out.offset((*state).x.have as isize);
+                    (*state).out.wrapping_add((*state).x.have as usize);
                 let mut dest: *mut ::core::ffi::c_uchar = (*state)
                     .out
-                    .offset(gz_output_buffer_len((*state).size) as isize);
+                    .wrapping_add(gz_output_buffer_len((*state).size) as usize);
                 while src > (*state).out {
                     src = src.wrapping_sub(1);
                     dest = dest.wrapping_sub(1);
@@ -2261,7 +2261,7 @@ pub unsafe extern "C" fn gzungetc(
     let (have, pos, past) = gz_ungetc_progress((*state).x.have, (*state).x.pos);
     (*state).x.have = have;
     (*state).x.next = (*state).x.next.wrapping_sub(1);
-    *(*state).x.next.offset(0 as ::core::ffi::c_int as isize) = c as ::core::ffi::c_uchar;
+    *(*state).x.next = c as ::core::ffi::c_uchar;
     (*state).x.pos = pos;
     (*state).past = past;
     return c;

@@ -404,7 +404,7 @@ fn gz_write_buffered_step(
     (
         copy,
         avail_in.wrapping_add(copy),
-        pos + copy as crate::stdlib::off64_t,
+        gz_write_advanced_pos(pos, copy),
         remaining.wrapping_sub(copy as crate::stdlib::z_size_t),
     )
 }
@@ -1534,6 +1534,11 @@ mod tests {
             gz_write_buffered_step(1024, 1000, 17, 10, 99),
             (24, 41, 34, 75)
         );
+    }
+
+    #[test]
+    fn gz_write_buffered_step_uses_shared_position_advance() {
+        assert_eq!(gz_write_buffered_step(2, 0, 0, -1, 1), (1, 1, 0, 0));
     }
 
     #[test]

@@ -3624,6 +3624,15 @@ fn dist_code_index(dist: ::core::ffi::c_uint) -> usize {
     }
 }
 
+fn symbol_triplet_cursors(
+    start: ::core::ffi::c_uint,
+) -> ([::core::ffi::c_uint; 3], ::core::ffi::c_uint) {
+    (
+        [start, start.wrapping_add(1), start.wrapping_add(2)],
+        start.wrapping_add(3),
+    )
+}
+
 fn bi_flush_core(
     bi_buf: &mut crate::zutil_h::ush,
     bi_valid: &mut ::core::ffi::c_int,
@@ -4706,20 +4715,16 @@ unsafe extern "C" fn compress_block(
     let mut extra: ::core::ffi::c_int = 0;
     if (*s).sym_next != 0 as crate::stdlib::uInt {
         loop {
-            let c2rust_fresh10 = sx;
-            sx = sx.wrapping_add(1);
-            dist = (*(*s).sym_buf.offset(c2rust_fresh10 as isize) as ::core::ffi::c_int
+            let (cursors, next_sx) = symbol_triplet_cursors(sx);
+            sx = next_sx;
+            dist = (*(*s).sym_buf.offset(cursors[0] as isize) as ::core::ffi::c_int
                 & 0xff as ::core::ffi::c_int) as ::core::ffi::c_uint;
-            let c2rust_fresh11 = sx;
-            sx = sx.wrapping_add(1);
             dist = dist.wrapping_add(
-                ((*(*s).sym_buf.offset(c2rust_fresh11 as isize) as ::core::ffi::c_int
+                ((*(*s).sym_buf.offset(cursors[1] as isize) as ::core::ffi::c_int
                     & 0xff as ::core::ffi::c_int) as ::core::ffi::c_uint)
                     << 8 as ::core::ffi::c_int,
             );
-            let c2rust_fresh12 = sx;
-            sx = sx.wrapping_add(1);
-            lc = *(*s).sym_buf.offset(c2rust_fresh12 as isize) as ::core::ffi::c_int;
+            lc = *(*s).sym_buf.offset(cursors[2] as isize) as ::core::ffi::c_int;
             if dist == 0 as ::core::ffi::c_uint {
                 let mut len: ::core::ffi::c_int =
                     (*ltree.offset(lc as isize)).dl.len as ::core::ffi::c_int;
@@ -5132,8 +5137,8 @@ mod tests {
         bi_flush_core, bi_reverse, bi_windup_core, bl_order, detect_data_type_from_ltree,
         dist_code_index, heap_node_precedes, next_code_for_len, next_codes,
         pending_cursor_after_bytes, reset_block_trees, static_bl_desc, static_d_desc,
-        static_l_desc, tally_match_tree_indices, tally_symbol_bytes, tree_run_limits, END_BLOCK,
-        MAX_BITS,
+        static_l_desc, symbol_triplet_cursors, tally_match_tree_indices, tally_symbol_bytes,
+        tree_run_limits, END_BLOCK, MAX_BITS,
     };
 
     fn ltree_with_frequency(
@@ -5263,6 +5268,18 @@ mod tests {
         assert_eq!(dist_code_index(383), 258);
         assert_eq!(dist_code_index(384), 259);
         assert_eq!(dist_code_index(32_767), 511);
+    }
+
+    #[test]
+    fn symbol_triplet_cursors_preserve_order_and_wrapping() {
+        assert_eq!(symbol_triplet_cursors(4), ([4, 5, 6], 7));
+        assert_eq!(
+            symbol_triplet_cursors(::core::ffi::c_uint::MAX - 1),
+            (
+                [::core::ffi::c_uint::MAX - 1, ::core::ffi::c_uint::MAX, 0],
+                1
+            )
+        );
     }
 
     #[test]
