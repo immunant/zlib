@@ -822,73 +822,59 @@ fn gz_finish_open(state: &mut crate::gzguts_h::gz_state, current_offset: crate::
     gz_reset_state(state);
 }
 
-unsafe fn gz_open(
-    mut path: *const ::core::ffi::c_void,
-    mut fd: ::core::ffi::c_int,
+fn gz_open(
+    state: &mut crate::gzguts_h::gz_state,
+    mode: &[u8],
+) -> Option<GzOpenPlan> {
+    gz_open_initialize_state(state, mode)
+}
+
+#[export_name = "gzopen"]
+pub unsafe extern "C" fn gzopen_ffi(
+    mut path: *const ::core::ffi::c_char,
     mut mode: *const ::core::ffi::c_char,
 ) -> crate::zlib_h::gzFile {
-    let mut state: crate::gzguts_h::gz_statep =
-        ::core::ptr::null_mut::<crate::gzguts_h::gz_state>();
-    let mut len: crate::stdlib::z_size_t = 0;
     if !gz_open_has_required_inputs(!path.is_null(), !mode.is_null()) {
         return ::core::ptr::null_mut::<crate::zlib_h::gzFile_s>();
     }
-    state = crate::stdlib::malloc(
-        ::core::mem::size_of::<crate::gzguts_h::gz_state>() as crate::__stddef_size_t_h::size_t
+    let path = unsafe { ::core::ffi::CStr::from_ptr(path) };
+    let mode = unsafe { ::core::ffi::CStr::from_ptr(mode) };
+    let state = crate::stdlib::malloc(
+        ::core::mem::size_of::<crate::gzguts_h::gz_state>() as crate::__stddef_size_t_h::size_t,
     ) as crate::gzguts_h::gz_statep;
     if state.is_null() {
         return ::core::ptr::null_mut::<crate::zlib_h::gzFile_s>();
     }
-    let state = &mut *state;
-    let plan = match gz_open_initialize_state(state, ::core::ffi::CStr::from_ptr(mode).to_bytes()) {
+    let state = unsafe { &mut *state };
+    let plan = match gz_open(state, mode.to_bytes()) {
         Some(plan) => plan,
         None => {
-            crate::stdlib::free(
-                state as *mut crate::gzguts_h::gz_state as *mut ::core::ffi::c_void,
-            );
+            crate::stdlib::free(state as *mut crate::gzguts_h::gz_state as *mut ::core::ffi::c_void);
             return ::core::ptr::null_mut::<crate::zlib_h::gzFile_s>();
         }
     };
-    len = crate::stdlib::strlen(path as *const ::core::ffi::c_char) as crate::stdlib::z_size_t;
-    state.path = crate::stdlib::malloc(gz_open_path_buffer_len(len)) as *mut ::core::ffi::c_char;
+    let len = path.to_bytes().len() as crate::stdlib::z_size_t;
+    state.path = unsafe { crate::stdlib::malloc(gz_open_path_buffer_len(len)) }
+        as *mut ::core::ffi::c_char;
     if state.path.is_null() {
         crate::stdlib::free(state as *mut crate::gzguts_h::gz_state as *mut ::core::ffi::c_void);
         return ::core::ptr::null_mut::<crate::zlib_h::gzFile_s>();
     }
-    crate::stdlib::snprintf(
-        state.path,
-        gz_open_path_buffer_len(len),
-        b"%s\0".as_ptr() as *const ::core::ffi::c_char,
-        path as *const ::core::ffi::c_char,
-    );
-    match gz_open_fd_plan(fd, plan.oflag) {
+    unsafe {
+        crate::stdlib::snprintf(
+            state.path,
+            gz_open_path_buffer_len(len),
+            b"%s\0".as_ptr() as *const ::core::ffi::c_char,
+            path.as_ptr(),
+        );
+    }
+    match gz_open_fd_plan(-1, plan.oflag) {
         GzOpenFdPlan::OpenPath => {
-            state.fd = crate::stdlib::open(
-                path as *const ::core::ffi::c_char,
-                plan.oflag,
-                0o666 as ::core::ffi::c_int,
-            );
+            state.fd = unsafe {
+                crate::stdlib::open(path.as_ptr(), plan.oflag, 0o666 as ::core::ffi::c_int)
+            };
         }
-        GzOpenFdPlan::AdoptFd {
-            set_nonblocking,
-            set_close_on_exec,
-        } => {
-            if set_nonblocking {
-                crate::stdlib::fcntl(
-                    fd,
-                    crate::stdlib::F_SETFL,
-                    crate::stdlib::fcntl(fd, crate::stdlib::F_GETFL) | crate::stdlib::O_NONBLOCK,
-                );
-            }
-            if set_close_on_exec {
-                crate::stdlib::fcntl(
-                    fd,
-                    crate::stdlib::F_SETFD,
-                    crate::stdlib::fcntl(fd, crate::stdlib::F_GETFD) | crate::stdlib::O_CLOEXEC,
-                );
-            }
-            state.fd = fd;
-        }
+        GzOpenFdPlan::AdoptFd { .. } => unreachable!(),
     }
     if !gz_open_fd_succeeded(state.fd) {
         crate::stdlib::free(state.path as *mut ::core::ffi::c_void);
@@ -897,43 +883,32 @@ unsafe fn gz_open(
     }
     let current_offset = match gz_open_offset_plan(state.mode) {
         Some(plan) => {
-            let offset =
+            let offset = unsafe {
                 crate::stdlib::lseek64(state.fd, 0 as crate::stdlib::__off64_t, plan.whence)
-                    as crate::stdlib::off64_t;
+            } as crate::stdlib::off64_t;
             gz_open_recorded_offset(plan.record_offset, offset)
         }
         None => 0,
     };
     gz_finish_open(state, current_offset);
-    gz_error(
-        state as *mut crate::gzguts_h::gz_state,
-        crate::zlib_h::Z_OK,
-        ::core::ptr::null::<::core::ffi::c_char>(),
-    );
-    return state as *mut crate::gzguts_h::gz_state as crate::zlib_h::gzFile;
+    unsafe {
+        gz_error(
+            state as *mut crate::gzguts_h::gz_state,
+            crate::zlib_h::Z_OK,
+            ::core::ptr::null::<::core::ffi::c_char>(),
+        );
+    }
+    state as *mut crate::gzguts_h::gz_state as crate::zlib_h::gzFile
 }
-#[export_name = "gzopen"]
-pub unsafe extern "C" fn gzopen_ffi(
-    mut path: *const ::core::ffi::c_char,
-    mut mode: *const ::core::ffi::c_char,
-) -> crate::zlib_h::gzFile {
-    gz_open(
-        path as *const ::core::ffi::c_void,
-        -1 as ::core::ffi::c_int,
-        mode,
-    )
-}
+
 #[export_name = "gzopen64"]
 pub unsafe extern "C" fn gzopen64_ffi(
     mut path: *const ::core::ffi::c_char,
     mut mode: *const ::core::ffi::c_char,
 ) -> crate::zlib_h::gzFile {
-    gz_open(
-        path as *const ::core::ffi::c_void,
-        -1 as ::core::ffi::c_int,
-        mode,
-    )
+    unsafe { gzopen_ffi(path, mode) }
 }
+
 fn gzdopen_has_valid_descriptor(fd: ::core::ffi::c_int) -> bool {
     fd != -1 as ::core::ffi::c_int
 }
@@ -955,20 +930,110 @@ pub unsafe extern "C" fn gzdopen_ffi(
     if !gzdopen_has_valid_descriptor(fd) {
         return ::core::ptr::null_mut::<crate::zlib_h::gzFile_s>();
     }
-    let path = crate::stdlib::malloc(gzdopen_path_buffer_len()) as *mut ::core::ffi::c_char;
+    let path = unsafe { crate::stdlib::malloc(gzdopen_path_buffer_len()) }
+        as *mut ::core::ffi::c_char;
     if path.is_null() {
         return ::core::ptr::null_mut::<crate::zlib_h::gzFile_s>();
     }
-    crate::stdlib::snprintf(
-        path,
-        gzdopen_path_buffer_len(),
-        b"<fd:%d>\0".as_ptr() as *const ::core::ffi::c_char,
-        fd,
-    );
-    let gz = gz_open(path as *const ::core::ffi::c_void, fd, mode);
-    crate::stdlib::free(path as *mut ::core::ffi::c_void);
-    gz
+    unsafe {
+        crate::stdlib::snprintf(
+            path,
+            gzdopen_path_buffer_len(),
+            b"<fd:%d>\0".as_ptr() as *const ::core::ffi::c_char,
+            fd,
+        );
+    }
+    if mode.is_null() {
+        crate::stdlib::free(path as *mut ::core::ffi::c_void);
+        return ::core::ptr::null_mut::<crate::zlib_h::gzFile_s>();
+    }
+    let path = unsafe { ::core::ffi::CStr::from_ptr(path) };
+    let mode = unsafe { ::core::ffi::CStr::from_ptr(mode) };
+    let state = unsafe {
+        crate::stdlib::malloc(
+            ::core::mem::size_of::<crate::gzguts_h::gz_state>()
+                as crate::__stddef_size_t_h::size_t,
+        )
+    } as crate::gzguts_h::gz_statep;
+    if state.is_null() {
+        crate::stdlib::free(path.as_ptr() as *mut ::core::ffi::c_void);
+        return ::core::ptr::null_mut::<crate::zlib_h::gzFile_s>();
+    }
+    let state = unsafe { &mut *state };
+    let plan = match gz_open(state, mode.to_bytes()) {
+        Some(plan) => plan,
+        None => {
+            crate::stdlib::free(path.as_ptr() as *mut ::core::ffi::c_void);
+            crate::stdlib::free(state as *mut crate::gzguts_h::gz_state as *mut ::core::ffi::c_void);
+            return ::core::ptr::null_mut::<crate::zlib_h::gzFile_s>();
+        }
+    };
+    let len = path.to_bytes().len() as crate::stdlib::z_size_t;
+    state.path = unsafe { crate::stdlib::malloc(gz_open_path_buffer_len(len)) }
+        as *mut ::core::ffi::c_char;
+    if state.path.is_null() {
+        crate::stdlib::free(path.as_ptr() as *mut ::core::ffi::c_void);
+        crate::stdlib::free(state as *mut crate::gzguts_h::gz_state as *mut ::core::ffi::c_void);
+        return ::core::ptr::null_mut::<crate::zlib_h::gzFile_s>();
+    }
+    unsafe {
+        crate::stdlib::snprintf(
+            state.path,
+            gz_open_path_buffer_len(len),
+            b"%s\0".as_ptr() as *const ::core::ffi::c_char,
+            path.as_ptr(),
+        );
+    }
+    match gz_open_fd_plan(fd, plan.oflag) {
+        GzOpenFdPlan::OpenPath => unreachable!(),
+        GzOpenFdPlan::AdoptFd {
+            set_nonblocking,
+            set_close_on_exec,
+        } => {
+            if set_nonblocking {
+                unsafe {
+                    crate::stdlib::fcntl(
+                        fd,
+                        crate::stdlib::F_SETFL,
+                        crate::stdlib::fcntl(fd, crate::stdlib::F_GETFL)
+                            | crate::stdlib::O_NONBLOCK,
+                    );
+                }
+            }
+            if set_close_on_exec {
+                unsafe {
+                    crate::stdlib::fcntl(
+                        fd,
+                        crate::stdlib::F_SETFD,
+                        crate::stdlib::fcntl(fd, crate::stdlib::F_GETFD)
+                            | crate::stdlib::O_CLOEXEC,
+                    );
+                }
+            }
+            state.fd = fd;
+        }
+    }
+    crate::stdlib::free(path.as_ptr() as *mut ::core::ffi::c_void);
+    let current_offset = match gz_open_offset_plan(state.mode) {
+        Some(plan) => {
+            let offset = unsafe {
+                crate::stdlib::lseek64(state.fd, 0 as crate::stdlib::__off64_t, plan.whence)
+            } as crate::stdlib::off64_t;
+            gz_open_recorded_offset(plan.record_offset, offset)
+        }
+        None => 0,
+    };
+    gz_finish_open(state, current_offset);
+    unsafe {
+        gz_error(
+            state as *mut crate::gzguts_h::gz_state,
+            crate::zlib_h::Z_OK,
+            ::core::ptr::null::<::core::ffi::c_char>(),
+        );
+    }
+    state as *mut crate::gzguts_h::gz_state as crate::zlib_h::gzFile
 }
+
 fn gzbuffer_normalized_want(size: ::core::ffi::c_uint) -> Option<::core::ffi::c_uint> {
     size.checked_mul(2)?;
     Some(size.max(8 as ::core::ffi::c_uint))
