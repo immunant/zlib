@@ -150,6 +150,31 @@ impl<'input, 'output, 'state> InflateFastRequest<'input, 'output, 'state> {
     }
 }
 
+// This facade owns one complete fast-stream invocation without retaining an
+// ABI stream, cursor, or opaque state handle.  The projection adapter builds
+// it from its short-lived bounded views, then receives only this pointer-free
+// update back for ABI cursor and scalar publication.
+pub(crate) struct InflateFastStreamFacade<'input, 'output, 'state> {
+    request: InflateFastRequest<'input, 'output, 'state>,
+}
+
+impl<'input, 'output, 'state> InflateFastStreamFacade<'input, 'output, 'state> {
+    pub(crate) fn from_views(
+        input: &'input [u8],
+        output: &'output mut [u8],
+        output_pos: usize,
+        state: InflateFastState<'state>,
+    ) -> Option<Self> {
+        Some(Self {
+            request: InflateFastRequest::new(input, output, output_pos, state)?,
+        })
+    }
+
+    pub(crate) fn decode(self) -> InflateFastStreamUpdate {
+        InflateFastStreamUpdate::from_completion(inflate_fast_from_abi_boundary(self.request))
+    }
+}
+
 #[inline]
 fn table_entry(table: CodeTableRef, codes: &[code], index: usize) -> code {
     code::copied_from(table.get(codes, index as isize))
@@ -417,11 +442,11 @@ pub(crate) unsafe fn inflate_fast_from_stream(
         codes: &state.codes,
         sane: state.sane != 0,
     };
-    let request = InflateFastRequest::new(input, output, written, fast_state);
-    let Some(request) = request else {
+    let facade = InflateFastStreamFacade::from_views(input, output, written, fast_state);
+    let Some(facade) = facade else {
         return;
     };
-    let update = InflateFastStreamUpdate::from_completion(inflate_fast_from_abi_boundary(request));
+    let update = facade.decode();
     strm.next_in = strm.next_in.wrapping_add(update.input_used);
     strm.avail_in = update.input_remaining as crate::stdlib::uInt;
     strm.next_out = output_start.wrapping_add(update.output_used);
