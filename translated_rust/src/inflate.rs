@@ -825,23 +825,25 @@ pub unsafe extern "C" fn inflateReset2_ffi(
         return crate::zlib_h::Z_STREAM_ERROR;
     }
     state = (*strm).state as *mut crate::src::inflate::inflate_state;
+    let state_ref = &mut *state;
     let Some(config) = inflate_reset2_config(windowBits) else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
     if inflate_reset2_should_free_window(
-        (*state).window.is_null(),
-        (*state).wbits,
+        state_ref.window.is_null(),
+        state_ref.wbits,
         config.window_bits,
     ) {
         Some((*strm).zfree.expect("non-null function pointer")).expect("non-null function pointer")(
             (*strm).opaque,
-            (*state).window as crate::stdlib::voidpf,
+            state_ref.window as crate::stdlib::voidpf,
         );
-        (*state).window = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
+        state_ref.window = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
     }
-    (*state).wrap = config.wrap;
-    (*state).wbits = config.window_bits as ::core::ffi::c_uint;
-    return inflateReset_ffi(strm);
+    state_ref.wrap = config.wrap;
+    state_ref.wbits = config.window_bits as ::core::ffi::c_uint;
+    inflate_reset_window_state(state_ref);
+    return inflate_reset_keep_state(&mut *strm, state_ref);
 }
 #[export_name = "inflateInit2_"]
 pub unsafe extern "C" fn inflateInit2__ffi(

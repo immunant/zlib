@@ -270,11 +270,6 @@ unsafe fn gz_open(
         }
         gz_reset_before_error(state_ref);
     }
-    gz_error(
-        state,
-        crate::zlib_h::Z_OK,
-        ::core::ptr::null::<::core::ffi::c_char>(),
-    );
     {
         let state_ref = &mut *state;
         gz_reset_after_error(state_ref);

@@ -1838,11 +1838,9 @@ pub unsafe extern "C" fn deflate_ffi(
                 }
             }
             if (*(*s).gzhead).hcrc != 0 {
-                (*strm).adler = crate::src::crc32::crc32_z_ffi(
-                    (*strm).adler,
-                    (*s).pending_buf,
-                    (*s).pending as crate::stdlib::z_size_t,
-                );
+                let hcrc_bytes =
+                    ::core::slice::from_raw_parts((*s).pending_buf, (*s).pending as usize);
+                (*strm).adler = crate::src::crc32::crc32_update((*strm).adler, hcrc_bytes);
             }
             (*s).gzindex = 0 as crate::zutil_h::ulg;
             (*s).status = crate::src::deflate::EXTRA_STATE;
@@ -1865,12 +1863,13 @@ pub unsafe extern "C" fn deflate_ffi(
                 );
                 (*s).pending = (*s).pending_buf_size;
                 if (*(*s).gzhead).hcrc != 0 && (*s).pending > beg {
-                    (*strm).adler = crate::src::crc32::crc32_z_ffi(
-                        (*strm).adler,
+                    let hcrc_bytes = ::core::slice::from_raw_parts(
                         (*s).pending_buf.offset(beg as isize),
                         ((*s).pending as crate::stdlib::z_size_t)
-                            .wrapping_sub(beg as crate::stdlib::z_size_t),
+                            .wrapping_sub(beg as crate::stdlib::z_size_t)
+                            as usize,
                     );
+                    (*strm).adler = crate::src::crc32::crc32_update((*strm).adler, hcrc_bytes);
                 }
                 (*s).gzindex = (*s).gzindex.wrapping_add(copy);
                 flush_pending(strm);
@@ -1888,12 +1887,12 @@ pub unsafe extern "C" fn deflate_ffi(
             );
             (*s).pending = (*s).pending.wrapping_add(left);
             if (*(*s).gzhead).hcrc != 0 && (*s).pending > beg {
-                (*strm).adler = crate::src::crc32::crc32_z_ffi(
-                    (*strm).adler,
+                let hcrc_bytes = ::core::slice::from_raw_parts(
                     (*s).pending_buf.offset(beg as isize),
                     ((*s).pending as crate::stdlib::z_size_t)
-                        .wrapping_sub(beg as crate::stdlib::z_size_t),
+                        .wrapping_sub(beg as crate::stdlib::z_size_t) as usize,
                 );
+                (*strm).adler = crate::src::crc32::crc32_update((*strm).adler, hcrc_bytes);
             }
             (*s).gzindex = 0 as crate::zutil_h::ulg;
         }
@@ -1906,12 +1905,13 @@ pub unsafe extern "C" fn deflate_ffi(
             loop {
                 if (*s).pending == (*s).pending_buf_size {
                     if (*(*s).gzhead).hcrc != 0 && (*s).pending > beg_0 {
-                        (*strm).adler = crate::src::crc32::crc32_z_ffi(
-                            (*strm).adler,
+                        let hcrc_bytes = ::core::slice::from_raw_parts(
                             (*s).pending_buf.offset(beg_0 as isize),
                             ((*s).pending as crate::stdlib::z_size_t)
-                                .wrapping_sub(beg_0 as crate::stdlib::z_size_t),
+                                .wrapping_sub(beg_0 as crate::stdlib::z_size_t)
+                                as usize,
                         );
+                        (*strm).adler = crate::src::crc32::crc32_update((*strm).adler, hcrc_bytes);
                     }
                     flush_pending(strm);
                     if (*s).pending != 0 as crate::zutil_h::ulg {
@@ -1931,12 +1931,13 @@ pub unsafe extern "C" fn deflate_ffi(
                 }
             }
             if (*(*s).gzhead).hcrc != 0 && (*s).pending > beg_0 {
-                (*strm).adler = crate::src::crc32::crc32_z_ffi(
-                    (*strm).adler,
+                let hcrc_bytes = ::core::slice::from_raw_parts(
                     (*s).pending_buf.offset(beg_0 as isize),
                     ((*s).pending as crate::stdlib::z_size_t)
-                        .wrapping_sub(beg_0 as crate::stdlib::z_size_t),
+                        .wrapping_sub(beg_0 as crate::stdlib::z_size_t)
+                        as usize,
                 );
+                (*strm).adler = crate::src::crc32::crc32_update((*strm).adler, hcrc_bytes);
             }
             (*s).gzindex = 0 as crate::zutil_h::ulg;
         }
@@ -1949,12 +1950,13 @@ pub unsafe extern "C" fn deflate_ffi(
             loop {
                 if (*s).pending == (*s).pending_buf_size {
                     if (*(*s).gzhead).hcrc != 0 && (*s).pending > beg_1 {
-                        (*strm).adler = crate::src::crc32::crc32_z_ffi(
-                            (*strm).adler,
+                        let hcrc_bytes = ::core::slice::from_raw_parts(
                             (*s).pending_buf.offset(beg_1 as isize),
                             ((*s).pending as crate::stdlib::z_size_t)
-                                .wrapping_sub(beg_1 as crate::stdlib::z_size_t),
+                                .wrapping_sub(beg_1 as crate::stdlib::z_size_t)
+                                as usize,
                         );
+                        (*strm).adler = crate::src::crc32::crc32_update((*strm).adler, hcrc_bytes);
                     }
                     flush_pending(strm);
                     if (*s).pending != 0 as crate::zutil_h::ulg {
@@ -1975,12 +1977,13 @@ pub unsafe extern "C" fn deflate_ffi(
                 }
             }
             if (*(*s).gzhead).hcrc != 0 && (*s).pending > beg_1 {
-                (*strm).adler = crate::src::crc32::crc32_z_ffi(
-                    (*strm).adler,
+                let hcrc_bytes = ::core::slice::from_raw_parts(
                     (*s).pending_buf.offset(beg_1 as isize),
                     ((*s).pending as crate::stdlib::z_size_t)
-                        .wrapping_sub(beg_1 as crate::stdlib::z_size_t),
+                        .wrapping_sub(beg_1 as crate::stdlib::z_size_t)
+                        as usize,
                 );
+                (*strm).adler = crate::src::crc32::crc32_update((*strm).adler, hcrc_bytes);
             }
         }
         (*s).status = crate::src::deflate::HCRC_STATE;
