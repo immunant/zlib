@@ -2355,12 +2355,11 @@ fn bi_reverse(mut code: ::core::ffi::c_uint, mut len: ::core::ffi::c_int) -> ::c
     return res >> 1 as ::core::ffi::c_int;
 }
 
-/// Flush complete bytes from the bit buffer of an already-validated state.
-///
-/// `deflate_state` still carries raw owned allocations, so this helper stays
-/// unsafe until the state owner is converted.  It does not, however, need to
-/// recreate the exclusive state borrow from a raw pointer itself.
-unsafe fn bi_flush(s: &mut crate::src::deflate::deflate_state) {
+/// Flush complete bytes from the bit buffer using the state's checked pending
+/// output operation.  This is shared by codec implementations that already
+/// hold an exclusive state borrow, so it does not need to recreate one from a
+/// raw pointer.
+pub(crate) fn flush_bits_impl(s: &mut crate::src::deflate::deflate_state) {
     if s.bi_valid == 16 as ::core::ffi::c_int {
         s.put_pending_byte(
             (s.bi_buf as ::core::ffi::c_int & 0xff as ::core::ffi::c_int) as crate::zutil_h::uch,
@@ -2375,6 +2374,10 @@ unsafe fn bi_flush(s: &mut crate::src::deflate::deflate_state) {
         s.bi_buf = (s.bi_buf as ::core::ffi::c_int >> 8 as ::core::ffi::c_int) as crate::zutil_h::ush;
         s.bi_valid -= 8 as ::core::ffi::c_int;
     }
+}
+
+unsafe fn bi_flush(s: &mut crate::src::deflate::deflate_state) {
+    flush_bits_impl(s);
 }
 
 /// Finish the current bit buffer for an already-validated deflate state.
@@ -3052,7 +3055,7 @@ pub unsafe extern "C" fn _tr_stored_block_ffi(
     _tr_stored_block(s, buf, stored_len, last)
 }
 pub unsafe fn _tr_flush_bits(s: &mut crate::src::deflate::deflate_state) {
-    bi_flush(s);
+    flush_bits_impl(s);
 }
 #[export_name = "_tr_flush_bits"]
 

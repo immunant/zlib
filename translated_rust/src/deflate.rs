@@ -1559,7 +1559,7 @@ pub unsafe extern "C" fn deflatePrime(
                 as crate::zutil_h::ush as ::core::ffi::c_int)
             as crate::zutil_h::ush;
         s.bi_valid += put;
-        crate::src::trees::_tr_flush_bits(s);
+        crate::src::trees::flush_bits_impl(s);
         value >>= put;
         bits -= put;
         if bits == 0 {
