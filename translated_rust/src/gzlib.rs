@@ -82,6 +82,14 @@ fn gz_reset_state(state: &mut crate::gzguts_h::gz_state) {
     state.strm.avail_in = 0;
 }
 
+/// Check whether a public gzip read or write request fits the signed `int`
+/// result range used by the legacy API.  The FFI adapters retain their raw
+/// buffers and error reporting; this is only the shared scalar admission
+/// rule.
+pub(crate) fn gz_request_len_fits_int(len: ::core::ffi::c_uint) -> bool {
+    len <= gz_intmax() as ::core::ffi::c_uint
+}
+
 unsafe extern "C" fn gz_open(
     mut path: *const ::core::ffi::c_void,
     mut fd: ::core::ffi::c_int,

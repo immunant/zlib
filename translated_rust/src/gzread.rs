@@ -623,7 +623,7 @@ pub unsafe extern "C" fn gzread(
         crate::zlib_h::Z_OK,
         ::core::ptr::null::<::core::ffi::c_char>(),
     );
-    if (len as ::core::ffi::c_int) < 0 as ::core::ffi::c_int {
+    if !crate::src::gzlib::gz_request_len_fits_int(len) {
         crate::src::gzlib::gz_error(
             state as *mut crate::gzguts_h::gz_state,
             crate::zlib_h::Z_STREAM_ERROR,
