@@ -567,7 +567,10 @@ pub unsafe extern "C" fn gzrewind_ffi(mut file: crate::zlib_h::gzFile) -> ::core
         return -1;
     }
     let message = state.msg;
-    if gz_clear_error_state(state) && !message.is_null() {
+    let clear = gz_clear_error_transition(!message.is_null(), state.err);
+    state.msg = ::core::ptr::null_mut();
+    state.err = crate::zlib_h::Z_OK;
+    if clear.release_message && !message.is_null() {
         crate::stdlib::free(message as *mut ::core::ffi::c_void);
     }
     0
@@ -867,7 +870,10 @@ macro_rules! gzseek_at_boundary {
             }
             if result.clear_error {
                 let message = state.msg;
-                if gz_clear_error_state(state) && !message.is_null() {
+                let clear = gz_clear_error_transition(!message.is_null(), state.err);
+                state.msg = ::core::ptr::null_mut();
+                state.err = crate::zlib_h::Z_OK;
+                if clear.release_message && !message.is_null() {
                     crate::stdlib::free(message as *mut ::core::ffi::c_void);
                 }
             }
@@ -1066,7 +1072,10 @@ pub unsafe extern "C" fn gzclearerr_ffi(mut file: crate::zlib_h::gzFile) {
     let state = &mut *(file as crate::gzguts_h::gz_statep);
     if gzclearerr(state) {
         let message = state.msg;
-        if gz_clear_error_state(state) && !message.is_null() {
+        let clear = gz_clear_error_transition(!message.is_null(), state.err);
+        state.msg = ::core::ptr::null_mut();
+        state.err = crate::zlib_h::Z_OK;
+        if clear.release_message && !message.is_null() {
             crate::stdlib::free(message as *mut ::core::ffi::c_void);
         }
     }
@@ -1088,14 +1097,18 @@ struct GzErrorUpdate {
     message: Option<::std::ffi::CString>,
 }
 
-/// Clear a previously recorded gzip error without touching its boundary-owned
-/// message allocation.  The caller retains the old pointer only long enough
-/// to release it at the FFI boundary when this returns `true`.
-fn gz_clear_error_state(state: &mut crate::gzguts_h::gz_state) -> bool {
-    let release_message = !state.msg.is_null() && state.err != crate::zlib_h::Z_MEM_ERROR;
-    state.msg = ::core::ptr::null_mut();
-    state.err = crate::zlib_h::Z_OK;
-    release_message
+/// The pointer-free portion of clearing a gzip error.  The boundary retains
+/// the old C allocation only long enough to free it when requested, then
+/// clears the ABI mirror's message and error fields.
+#[derive(Clone, Copy)]
+struct GzErrorClear {
+    release_message: bool,
+}
+
+fn gz_clear_error_transition(has_message: bool, err: ::core::ffi::c_int) -> GzErrorClear {
+    GzErrorClear {
+        release_message: has_message && err != crate::zlib_h::Z_MEM_ERROR,
+    }
 }
 
 /// Construct the legacy `"path: message"` text before the raw error-storage
