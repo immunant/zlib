@@ -407,9 +407,10 @@ unsafe extern "C" fn read_buf(
     }
     stream.avail_in = stream.avail_in.wrapping_sub(len);
     let input = ::core::slice::from_raw_parts(stream.next_in, len as usize);
+    let next_in = input.as_ptr_range().end.cast_mut();
     let output = ::core::slice::from_raw_parts_mut(buf, len as usize);
     stream.adler = read_buf_bytes(input, output, stream.adler, (*stream.state).wrap);
-    stream.next_in = stream.next_in.offset(len as isize);
+    stream.next_in = next_in;
     stream.total_in = stream.total_in.wrapping_add(len as crate::stdlib::uLong);
     return len;
 }
