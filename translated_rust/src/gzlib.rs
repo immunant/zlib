@@ -634,29 +634,26 @@ pub unsafe extern "C" fn gzeof_ffi(mut file: crate::zlib_h::gzFile) -> ::core::f
     let state = &*(file as *const crate::gzguts_h::gz_state);
     gzeof_impl(state.mode, state.past)
 }
-pub unsafe extern "C" fn gzerror(
-    mut file: crate::zlib_h::gzFile,
-    mut errnum: *mut ::core::ffi::c_int,
-) -> *const ::core::ffi::c_char {
-    let mut state: crate::gzguts_h::gz_statep =
-        ::core::ptr::null_mut::<crate::gzguts_h::gz_state>();
-    if file.is_null() {
-        return ::core::ptr::null::<::core::ffi::c_char>();
+/// Return the error code and message while the gzip state is borrowed.
+///
+/// The caller materializes the C pointer only at the ABI boundary, so this
+/// helper keeps the mode validation and message selection in safe Rust.
+fn gzerror_result(
+    state: &crate::gzguts_h::gz_state,
+) -> Option<(::core::ffi::c_int, &::core::ffi::CStr)> {
+    if state.mode != crate::gzguts_h::GZ_READ && state.mode != crate::gzguts_h::GZ_WRITE {
+        return None;
     }
-    state = file as crate::gzguts_h::gz_statep;
-    if (*state).mode != crate::gzguts_h::GZ_READ && (*state).mode != crate::gzguts_h::GZ_WRITE {
-        return ::core::ptr::null::<::core::ffi::c_char>();
-    }
-    if !errnum.is_null() {
-        *errnum = (*state).err;
-    }
-    return if (*state).err == crate::zlib_h::Z_MEM_ERROR {
-        b"out of memory\0".as_ptr() as *const ::core::ffi::c_char
-    } else if (*state).msg.is_none() {
-        b"\0".as_ptr() as *const ::core::ffi::c_char
+
+    let empty = ::core::ffi::CStr::from_bytes_with_nul(b"\0")
+        .expect("an empty C string includes its NUL terminator");
+    let message = if state.err == crate::zlib_h::Z_MEM_ERROR {
+        ::core::ffi::CStr::from_bytes_with_nul(b"out of memory\0")
+            .expect("the fixed out-of-memory message includes its NUL terminator")
     } else {
-        (*state).msg.as_ref().unwrap().as_ptr()
+        state.msg.as_deref().unwrap_or(empty)
     };
+    Some((state.err, message))
 }
 #[export_name = "gzerror"]
 
@@ -664,7 +661,16 @@ pub unsafe extern "C" fn gzerror_ffi(
     mut file: crate::zlib_h::gzFile,
     mut errnum: *mut ::core::ffi::c_int,
 ) -> *const ::core::ffi::c_char {
-    gzerror(file, errnum)
+    let Some(state) = file.cast::<crate::gzguts_h::gz_state>().as_ref() else {
+        return ::core::ptr::null::<::core::ffi::c_char>();
+    };
+    let Some((error, message)) = gzerror_result(state) else {
+        return ::core::ptr::null::<::core::ffi::c_char>();
+    };
+    if let Some(errnum) = errnum.as_mut() {
+        *errnum = error;
+    }
+    message.as_ptr()
 }
 fn gzclearerr_state(state: &mut crate::gzguts_h::gz_state) {
     if state.mode != crate::gzguts_h::GZ_READ && state.mode != crate::gzguts_h::GZ_WRITE {
