@@ -2401,6 +2401,14 @@ pub unsafe extern "C" fn inflateSync_ffi(mut strm: crate::zlib_h::z_streamp) -> 
     (*state).mode = crate::src::inflate::TYPE;
     crate::zlib_h::Z_OK
 }
+fn inflate_sync_point_value(
+    mode: ::core::ffi::c_uint,
+    bits: ::core::ffi::c_uint,
+) -> ::core::ffi::c_int {
+    (mode == crate::src::inflate::STORED as ::core::ffi::c_int as ::core::ffi::c_uint && bits == 0)
+        as ::core::ffi::c_int
+}
+
 pub unsafe extern "C" fn inflateSyncPoint(
     mut strm: crate::zlib_h::z_streamp,
 ) -> ::core::ffi::c_int {
@@ -2410,12 +2418,10 @@ pub unsafe extern "C" fn inflateSyncPoint(
         return crate::zlib_h::Z_STREAM_ERROR;
     }
     state = (*strm).state as *mut crate::src::inflate::inflate_state;
-    return ((*state).mode as ::core::ffi::c_uint
-        == crate::src::inflate::STORED as ::core::ffi::c_int as ::core::ffi::c_uint
-        && (*state).bits == 0 as ::core::ffi::c_uint) as ::core::ffi::c_int;
+    inflate_sync_point_value((*state).mode as ::core::ffi::c_uint, (*state).bits)
 }
-#[export_name = "inflateSyncPoint"]
 
+#[export_name = "inflateSyncPoint"]
 pub unsafe extern "C" fn inflateSyncPoint_ffi(
     mut strm: crate::zlib_h::z_streamp,
 ) -> ::core::ffi::c_int {
@@ -2621,8 +2627,9 @@ mod tests {
     use super::{
         apply_window_update, dynamic_header_counts, inflate_mark_value, inflate_mode_is_valid,
         inflate_prime_update, inflate_reset2_params, inflate_state_metadata_is_valid,
-        inflate_sync_search_core, inflate_validate_wrap, initial_window_metadata, syncsearch_safe, window_update_plan,
-        InflatePrimeUpdate, InflateSyncSearch, BAD, CODE_LENGTH_ORDER, COPY_1, HEAD, MATCH, SYNC,
+        inflate_sync_point_value, inflate_sync_search_core, inflate_validate_wrap,
+        initial_window_metadata, syncsearch_safe, window_update_plan,
+        InflatePrimeUpdate, InflateSyncSearch, BAD, CODE_LENGTH_ORDER, COPY_1, HEAD, MATCH, STORED, SYNC,
     };
 
     #[test]
@@ -2631,6 +2638,14 @@ mod tests {
         assert_eq!(inflate_validate_wrap(4, -1), 4);
         assert_eq!(inflate_validate_wrap(9, 0), 9);
         assert_eq!(inflate_validate_wrap(0, 1), 0);
+    }
+
+    #[test]
+    fn inflate_sync_point_value_requires_stored_mode_without_pending_bits() {
+        assert_eq!(inflate_sync_point_value(STORED as u32, 0), 1);
+        assert_eq!(inflate_sync_point_value(STORED as u32, 1), 0);
+        assert_eq!(inflate_sync_point_value(HEAD as u32, 0), 0);
+        assert_eq!(inflate_sync_point_value(u32::MAX, 0), 0);
     }
 
     #[test]
