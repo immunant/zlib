@@ -336,30 +336,20 @@ fn inflate_fast_slices(
         crate::src::inflate::InflateWindowAccess::Existing,
         |state, window| {
             let window = window.as_deref().unwrap_or(&[]);
-            let lcode_fixed = ::core::ptr::eq(
-                state.lencode,
-                crate::src::inftrees::inffixed_h::lenfix.as_ptr(),
-            );
-            let dcode_fixed = ::core::ptr::eq(
-                state.distcode,
-                crate::src::inftrees::inffixed_h::distfix.as_ptr(),
-            );
-            // Dynamic decode tables are subranges of the state-owned
-            // workspace. Fixed tables retain their static slices.
-            let code_base = state.codes.as_ptr().addr();
-            let code_size = ::core::mem::size_of::<crate::src::inftrees::code>();
-            let lcode = if lcode_fixed {
-                &crate::src::inftrees::inffixed_h::lenfix[..]
-            } else {
-                let start = state.lencode.addr().wrapping_sub(code_base) / code_size;
-                &state.codes[start..start + crate::src::inftrees::ENOUGH_LENS as usize]
-            };
-            let dcode = if dcode_fixed {
-                &crate::src::inftrees::inffixed_h::distfix[..]
-            } else {
-                let start = state.distcode.addr().wrapping_sub(code_base) / code_size;
-                &state.codes[start..start + crate::src::inftrees::ENOUGH_DISTS as usize]
-            };
+            // Fixed tables are static; dynamic tables are checked subranges
+            // of the state-owned workspace.  Resolve both through the
+            // inflater's cursor validator so this slice-only core does not
+            // repeat raw table-address arithmetic.
+            let lcode = crate::src::inflate::inflate_code_table(
+                state,
+                crate::src::inflate::InflateCodeTable::Length,
+            )
+            .expect("live inflater length cursor has a complete decode table");
+            let dcode = crate::src::inflate::inflate_code_table(
+                state,
+                crate::src::inflate::InflateCodeTable::Distance,
+            )
+            .expect("live inflater distance cursor has a complete decode table");
             inflate_fast_bound(
                 &mut fast_state,
                 input,

@@ -3123,6 +3123,47 @@ fn inflate_codes_cursor_index(
     Some(offset / code_size)
 }
 
+// A live decoder uses either zlib's fixed tables or a bounded subrange of its
+// own `codes` workspace.  Keep the raw cursor identity check beside the
+// existing checked cursor-index conversion, so consumers of a decode table
+// only receive a slice whose complete fast-path capacity has been verified.
+pub(crate) enum InflateCodeTable {
+    Length,
+    Distance,
+}
+
+pub(crate) fn inflate_code_table(
+    state: &crate::src::inflate::inflate_state,
+    table: InflateCodeTable,
+) -> Option<&[crate::src::inftrees::code]> {
+    let (cursor, fixed, required) = match table {
+        InflateCodeTable::Length => (
+            state.lencode,
+            crate::src::inftrees::inffixed_h::lenfix.as_ptr(),
+            crate::src::inftrees::ENOUGH_LENS as usize,
+        ),
+        InflateCodeTable::Distance => (
+            state.distcode,
+            crate::src::inftrees::inffixed_h::distfix.as_ptr(),
+            crate::src::inftrees::ENOUGH_DISTS as usize,
+        ),
+    };
+    if ::core::ptr::eq(cursor, fixed) {
+        return match table {
+            InflateCodeTable::Length => Some(&crate::src::inftrees::inffixed_h::lenfix[..]),
+            InflateCodeTable::Distance => Some(&crate::src::inftrees::inffixed_h::distfix[..]),
+        };
+    }
+    let start = inflate_codes_cursor_index(
+        state.codes.len(),
+        ::core::mem::size_of::<crate::src::inftrees::code>(),
+        state.codes.as_ptr().addr(),
+        cursor.addr(),
+        false,
+    )?;
+    state.codes.get(start..start.checked_add(required)?)
+}
+
 fn inflate_copy_state(
     dest: &mut crate::zlib_h::z_stream,
     source: &crate::zlib_h::z_stream,
