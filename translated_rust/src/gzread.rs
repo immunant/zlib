@@ -1254,6 +1254,13 @@ enum GzSkipAction {
     Fetch,
 }
 
+#[derive(Debug, Eq, PartialEq)]
+enum GzSkipLoopDecision {
+    Error,
+    Done,
+    Continue,
+}
+
 fn gz_skip_action(
     have: ::core::ffi::c_uint,
     eof: ::core::ffi::c_int,
@@ -1268,12 +1275,19 @@ fn gz_skip_action(
     }
 }
 
-fn gz_skip_should_continue(skip: crate::stdlib::off64_t) -> bool {
-    skip != 0
-}
-
-fn gz_skip_fetch_failed(fetch_result: ::core::ffi::c_int) -> bool {
-    fetch_result == -1 as ::core::ffi::c_int
+fn gz_skip_loop_decision(
+    action: GzSkipAction,
+    fetch_failed: bool,
+    skip: crate::stdlib::off64_t,
+) -> GzSkipLoopDecision {
+    match action {
+        GzSkipAction::StopAtEof => GzSkipLoopDecision::Done,
+        GzSkipAction::Fetch if fetch_failed => GzSkipLoopDecision::Error,
+        GzSkipAction::ConsumeBuffered | GzSkipAction::Fetch if skip != 0 => {
+            GzSkipLoopDecision::Continue
+        }
+        GzSkipAction::ConsumeBuffered | GzSkipAction::Fetch => GzSkipLoopDecision::Done,
+    }
 }
 
 fn gz_skip_consume_buffered(state: &mut crate::gzguts_h::gz_state, n: ::core::ffi::c_uint) {
@@ -1372,17 +1386,12 @@ unsafe fn gz_skip(mut state: crate::gzguts_h::gz_statep) -> ::core::ffi::c_int {
             }
             action
         };
-        match action {
-            GzSkipAction::ConsumeBuffered => {}
-            GzSkipAction::StopAtEof => break,
-            GzSkipAction::Fetch => {
-                if gz_skip_fetch_failed(gz_fetch(state)) {
-                    return -1 as ::core::ffi::c_int;
-                }
-            }
-        }
-        if !gz_skip_should_continue((*state).skip) {
-            break;
+        let fetch_failed =
+            matches!(action, GzSkipAction::Fetch) && gz_fetch(state) == -1 as ::core::ffi::c_int;
+        match gz_skip_loop_decision(action, fetch_failed, (*state).skip) {
+            GzSkipLoopDecision::Error => return -1 as ::core::ffi::c_int,
+            GzSkipLoopDecision::Done => break,
+            GzSkipLoopDecision::Continue => {}
         }
     }
     return 0 as ::core::ffi::c_int;
@@ -2538,17 +2547,39 @@ mod tests {
     }
 
     #[test]
-    fn gz_skip_should_continue_requires_remaining_skip() {
-        assert!(!gz_skip_should_continue(0));
-        assert!(gz_skip_should_continue(1));
-        assert!(gz_skip_should_continue(-1));
+    fn gz_skip_loop_decision_preserves_buffered_skip_progress() {
+        assert_eq!(
+            gz_skip_loop_decision(GzSkipAction::ConsumeBuffered, false, 1),
+            GzSkipLoopDecision::Continue
+        );
+        assert_eq!(
+            gz_skip_loop_decision(GzSkipAction::ConsumeBuffered, false, 0),
+            GzSkipLoopDecision::Done
+        );
     }
 
     #[test]
-    fn gz_skip_fetch_failed_accepts_only_fetch_failures() {
-        assert!(gz_skip_fetch_failed(-1));
-        assert!(!gz_skip_fetch_failed(0));
-        assert!(!gz_skip_fetch_failed(1));
+    fn gz_skip_loop_decision_stops_at_eof_before_fetch_status() {
+        assert_eq!(
+            gz_skip_loop_decision(GzSkipAction::StopAtEof, true, 1),
+            GzSkipLoopDecision::Done
+        );
+    }
+
+    #[test]
+    fn gz_skip_loop_decision_reports_fetch_failure_or_remaining_work() {
+        assert_eq!(
+            gz_skip_loop_decision(GzSkipAction::Fetch, true, 1),
+            GzSkipLoopDecision::Error
+        );
+        assert_eq!(
+            gz_skip_loop_decision(GzSkipAction::Fetch, false, 1),
+            GzSkipLoopDecision::Continue
+        );
+        assert_eq!(
+            gz_skip_loop_decision(GzSkipAction::Fetch, false, 0),
+            GzSkipLoopDecision::Done
+        );
     }
 
     #[test]
