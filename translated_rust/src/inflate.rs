@@ -554,6 +554,7 @@ pub unsafe extern "C" fn inflate(
     let mut out: ::core::ffi::c_uint = 0;
     let mut copy: ::core::ffi::c_uint = 0;
     let mut from: *mut ::core::ffi::c_uchar = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
+    let mut from_window: bool = false;
     let mut here: crate::src::inftrees::code = crate::src::inftrees::code {
         op: 0,
         bits: 0,
@@ -2155,7 +2156,9 @@ pub unsafe extern "C" fn inflate(
             break;
         }
         copy = out.wrapping_sub(left);
+        from_window = false;
         if (*state).offset > copy {
+            from_window = true;
             copy = (*state).offset.wrapping_sub(copy);
             if copy > (*state).whave {
                 if (*state).sane != 0 {
@@ -2170,11 +2173,11 @@ pub unsafe extern "C" fn inflate(
                 copy = copy.wrapping_sub((*state).wnext);
                 from = (*state)
                     .window
-                    .offset((*state).wsize.wrapping_sub(copy) as isize);
+                    .wrapping_add((*state).wsize.wrapping_sub(copy) as usize);
             } else {
                 from = (*state)
                     .window
-                    .offset((*state).wnext.wrapping_sub(copy) as isize);
+                    .wrapping_add((*state).wnext.wrapping_sub(copy) as usize);
             }
             if copy > (*state).length {
                 copy = (*state).length;
@@ -2188,16 +2191,19 @@ pub unsafe extern "C" fn inflate(
         }
         left = left.wrapping_sub(copy);
         (*state).length = (*state).length.wrapping_sub(copy);
-        loop {
-            let c2rust_fresh30 = from;
-            from = from.offset(1);
-            let c2rust_fresh31 = put;
-            put = put.offset(1);
-            *c2rust_fresh31 = *c2rust_fresh30;
-            copy = copy.wrapping_sub(1);
-            if copy == 0 {
-                break;
+        let copy_len = copy as usize;
+        if from_window {
+            let source = ::core::slice::from_raw_parts(from, copy_len);
+            let output = ::core::slice::from_raw_parts_mut(put, copy_len);
+            output.copy_from_slice(source);
+            put = output[copy_len..].as_mut_ptr();
+        } else {
+            let distance = (*state).offset as usize;
+            let output = ::core::slice::from_raw_parts_mut(from, distance + copy_len);
+            for index in distance..distance + copy_len {
+                output[index] = output[index - distance];
             }
+            put = output[distance + copy_len..].as_mut_ptr();
         }
         if (*state).length == 0 as ::core::ffi::c_uint {
             (*state).mode = crate::src::inflate::LEN;
