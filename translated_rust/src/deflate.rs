@@ -2587,7 +2587,7 @@ fn flush_block(
 ) {
     let sym_buf = state.symbol_slice()[..state.sym_next as usize].to_vec();
     state.with_pending(|state, pending_buf| {
-        crate::src::trees::tr_flush_block_safe(state, pending_buf, &sym_buf, stored, last)
+        crate::src::trees::_tr_flush_block(state, pending_buf, &sym_buf, stored, last)
     });
 }
 

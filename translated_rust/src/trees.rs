@@ -4370,10 +4370,11 @@ fn detect_data_type(dyn_ltree: &[crate::src::deflate::ct_data; 573]) -> ::core::
     crate::zlib_h::Z_BINARY
 }
 
-/// Slice-based block encoding used by Rust compressor paths.  The FFI wrapper
-/// below is intentionally separate: this implementation never dereferences a
-/// stream or buffer pointer.
-pub fn tr_flush_block_safe(
+/// Encode one block using only Rust-owned state and borrowed slices.
+///
+/// The exported wrapper below performs the ABI pointer conversion; compressor
+/// code calls this implementation directly.
+pub fn _tr_flush_block(
     s: &mut crate::src::deflate::deflate_state,
     pending_buf: &mut [crate::stdlib::Bytef],
     sym_buf: &[crate::zutil_h::uchf],
@@ -4448,7 +4449,8 @@ pub fn tr_flush_block_safe(
     }
 }
 
-pub unsafe extern "C" fn _tr_flush_block(
+#[export_name = "_tr_flush_block"]
+pub unsafe extern "C" fn _tr_flush_block_ffi(
     s: *mut crate::src::deflate::deflate_state,
     buf: *mut crate::stdlib::charf,
     stored_len: crate::zutil_h::ulg,
@@ -4467,18 +4469,8 @@ pub unsafe extern "C" fn _tr_flush_block(
         ))
     };
     s.with_pending(|state, pending_buf| {
-        tr_flush_block_safe(state, pending_buf, &sym_buf, stored, last)
+        _tr_flush_block(state, pending_buf, &sym_buf, stored, last)
     });
-}
-#[export_name = "_tr_flush_block"]
-
-pub unsafe extern "C" fn _tr_flush_block_ffi(
-    mut s: *mut crate::src::deflate::deflate_state,
-    mut buf: *mut crate::stdlib::charf,
-    mut stored_len: crate::zutil_h::ulg,
-    mut last: ::core::ffi::c_int,
-) {
-    _tr_flush_block(s, buf, stored_len, last)
 }
 pub fn _tr_tally(
     sym_buf: &mut [crate::zutil_h::uchf],
