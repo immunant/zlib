@@ -2781,36 +2781,25 @@ pub unsafe extern "C" fn inflateSetDictionary_ffi(
     };
     inflate_set_dictionary(target, dictionary)
 }
-fn inflate_get_header_impl(wrap: ::core::ffi::c_int) -> ::core::ffi::c_int {
-    if wrap & 2 as ::core::ffi::c_int == 0 as ::core::ffi::c_int {
-        return crate::zlib_h::Z_STREAM_ERROR;
-    }
-    crate::zlib_h::Z_OK
-}
-
-pub unsafe fn inflateGetHeader(
-    strm: crate::zlib_h::z_streamp,
-    head: crate::zlib_h::gz_headerp,
+/// Attach the caller's header result to an initialized gzip-capable inflater.
+///
+/// The ABI wrapper has already turned the three opaque pointers into borrows.
+/// Keeping validation and state mutation here lets the exported entry point
+/// remain only a conversion-and-dispatch boundary.
+fn inflate_get_header_impl(
+    strm: &mut crate::zlib_h::z_stream_s,
+    state: &mut crate::src::inflate::inflate_state,
+    head: &mut crate::zlib_h::gz_header_s,
 ) -> ::core::ffi::c_int {
-    let Some(strm) = strm.as_mut() else {
-        return crate::zlib_h::Z_STREAM_ERROR;
-    };
-    let Some(state) = (strm.state as *mut crate::src::inflate::inflate_state).as_mut() else {
-        return crate::zlib_h::Z_STREAM_ERROR;
-    };
     if !inflate_state_valid(strm, state) {
         return crate::zlib_h::Z_STREAM_ERROR;
     }
-    let ret = inflate_get_header_impl(state.wrap);
-    if ret != crate::zlib_h::Z_OK {
-        return ret;
-    }
-    let Some(head) = head.as_mut() else {
+    if state.wrap & 2 as ::core::ffi::c_int == 0 as ::core::ffi::c_int {
         return crate::zlib_h::Z_STREAM_ERROR;
-    };
+    }
     state.head = head;
     head.done = 0 as ::core::ffi::c_int;
-    ret
+    crate::zlib_h::Z_OK
 }
 #[export_name = "inflateGetHeader"]
 
@@ -2818,7 +2807,20 @@ pub unsafe extern "C" fn inflateGetHeader_ffi(
     mut strm: crate::zlib_h::z_streamp,
     mut head: crate::zlib_h::gz_headerp,
 ) -> ::core::ffi::c_int {
-    inflateGetHeader(strm, head)
+    let Some(strm) = strm.as_mut() else {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    };
+    let Some(state) = strm
+        .state
+        .cast::<crate::src::inflate::inflate_state>()
+        .as_mut()
+    else {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    };
+    let Some(head) = head.as_mut() else {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    };
+    inflate_get_header_impl(strm, state, head)
 }
 fn syncsearch(have: &mut ::core::ffi::c_uint, buf: &[u8]) -> ::core::ffi::c_uint {
     let mut got = *have;
