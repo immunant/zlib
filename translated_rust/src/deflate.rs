@@ -603,7 +603,7 @@ pub use crate::src::trees::_dist_code;
 pub use crate::src::trees::_length_code;
 pub use crate::src::trees::_tr_align;
 pub use crate::src::trees::_tr_flush_bits;
-pub use crate::src::trees::_tr_flush_block;
+pub use crate::src::trees::tr_flush_block_from_raw as _tr_flush_block;
 pub use crate::src::trees::_tr_init;
 pub use crate::src::trees::_tr_stored_block;
 pub use crate::src::zutil::z_errmsg;
@@ -2541,7 +2541,7 @@ pub unsafe fn deflate(
             (match configuration_table[(*s).level as usize].func {
                 CompressionEngine::Stored => deflate_stored(&mut *s, strm, flush),
                 CompressionEngine::Fast => deflate_fast(s, strm, flush),
-                CompressionEngine::Slow => deflate_slow(&mut *s, flush),
+                CompressionEngine::Slow => deflate_slow(&mut *s, strm, flush),
             }) as ::core::ffi::c_uint
         }) as block_state;
         if bstate as ::core::ffi::c_uint
@@ -3362,6 +3362,7 @@ unsafe fn deflate_fast(
 
 unsafe fn deflate_slow(
     s: &mut crate::src::deflate::deflate_state,
+    strm: &mut crate::zlib_h::z_stream_s,
     mut flush: ::core::ffi::c_int,
 ) -> block_state {
     let mut hash_head: crate::src::deflate::IPos = 0;
@@ -3453,27 +3454,24 @@ unsafe fn deflate_slow(
                 (crate::zutil_h::MIN_MATCH - 1 as ::core::ffi::c_int) as crate::stdlib::uInt;
             (*s).strstart = (*s).strstart.wrapping_add(1);
             if bflush != 0 {
-                crate::src::trees::_tr_flush_block(
-                    s as *mut crate::src::deflate::internal_state,
-                    if (*s).block_start >= 0 as ::core::ffi::c_long {
-                        (*s).window
-                            .as_deref()
-                            .and_then(|window| window.get((*s).block_start as usize))
-                            .map_or(::core::ptr::null_mut(), |byte| {
-                                core::ptr::from_ref(byte)
-                                    .cast_mut()
-                                    .cast::<crate::stdlib::charf>()
-                            })
-                    } else {
-                        ::core::ptr::null_mut::<crate::stdlib::charf>()
-                    },
+                let block_len =
                     ((*s).strstart as ::core::ffi::c_long - (*s).block_start)
-                        as crate::zutil_h::ulg,
-                    0 as ::core::ffi::c_int,
+                        as crate::zutil_h::ulg;
+                let block = if (*s).block_start >= 0 {
+                    (*s).block_data((*s).block_start as crate::stdlib::uInt, block_len)
+                } else {
+                    None
+                };
+                crate::src::trees::tr_flush_block_impl(
+                    s,
+                    Some(strm),
+                    block.as_deref(),
+                    block_len,
+                    0,
                 );
                 (*s).block_start = (*s).strstart as ::core::ffi::c_long;
-                flush_pending((*s).strm);
-                if (*(*s).strm).avail_out == 0 as crate::stdlib::uInt {
+                flush_pending(strm);
+                if strm.avail_out == 0 as crate::stdlib::uInt {
                     return (if false {
                         finish_started as ::core::ffi::c_int
                     } else {
@@ -3489,30 +3487,27 @@ unsafe fn deflate_slow(
             (*s).dyn_ltree[cc as usize].fc = (*s).dyn_ltree[cc as usize].fc.wrapping_add(1);
             bflush = ((*s).sym_next == (*s).sym_end) as ::core::ffi::c_int;
             if bflush != 0 {
-                crate::src::trees::_tr_flush_block(
-                    s as *mut crate::src::deflate::internal_state,
-                    if (*s).block_start >= 0 as ::core::ffi::c_long {
-                        (*s).window
-                            .as_deref()
-                            .and_then(|window| window.get((*s).block_start as usize))
-                            .map_or(::core::ptr::null_mut(), |byte| {
-                                core::ptr::from_ref(byte)
-                                    .cast_mut()
-                                    .cast::<crate::stdlib::charf>()
-                            })
-                    } else {
-                        ::core::ptr::null_mut::<crate::stdlib::charf>()
-                    },
+                let block_len =
                     ((*s).strstart as ::core::ffi::c_long - (*s).block_start)
-                        as crate::zutil_h::ulg,
-                    0 as ::core::ffi::c_int,
+                        as crate::zutil_h::ulg;
+                let block = if (*s).block_start >= 0 {
+                    (*s).block_data((*s).block_start as crate::stdlib::uInt, block_len)
+                } else {
+                    None
+                };
+                crate::src::trees::tr_flush_block_impl(
+                    s,
+                    Some(strm),
+                    block.as_deref(),
+                    block_len,
+                    0,
                 );
                 (*s).block_start = (*s).strstart as ::core::ffi::c_long;
-                flush_pending((*s).strm);
+                flush_pending(strm);
             }
             (*s).strstart = (*s).strstart.wrapping_add(1);
             (*s).lookahead = (*s).lookahead.wrapping_sub(1);
-            if (*(*s).strm).avail_out == 0 as crate::stdlib::uInt {
+            if strm.avail_out == 0 as crate::stdlib::uInt {
                 return need_more;
             }
         } else {
@@ -3538,26 +3533,23 @@ unsafe fn deflate_slow(
         (crate::zutil_h::MIN_MATCH - 1 as ::core::ffi::c_int) as crate::stdlib::uInt
     };
     if flush == crate::zlib_h::Z_FINISH {
-        crate::src::trees::_tr_flush_block(
-            s as *mut crate::src::deflate::internal_state,
-            if (*s).block_start >= 0 as ::core::ffi::c_long {
-                (*s).window
-                    .as_deref()
-                    .and_then(|window| window.get((*s).block_start as usize))
-                    .map_or(::core::ptr::null_mut(), |byte| {
-                        core::ptr::from_ref(byte)
-                            .cast_mut()
-                            .cast::<crate::stdlib::charf>()
-                    })
-            } else {
-                ::core::ptr::null_mut::<crate::stdlib::charf>()
-            },
-            ((*s).strstart as ::core::ffi::c_long - (*s).block_start) as crate::zutil_h::ulg,
-            1 as ::core::ffi::c_int,
+        let block_len = ((*s).strstart as ::core::ffi::c_long - (*s).block_start)
+            as crate::zutil_h::ulg;
+        let block = if (*s).block_start >= 0 {
+            (*s).block_data((*s).block_start as crate::stdlib::uInt, block_len)
+        } else {
+            None
+        };
+        crate::src::trees::tr_flush_block_impl(
+            s,
+            Some(strm),
+            block.as_deref(),
+            block_len,
+            1,
         );
         (*s).block_start = (*s).strstart as ::core::ffi::c_long;
-        flush_pending((*s).strm);
-        if (*(*s).strm).avail_out == 0 as crate::stdlib::uInt {
+        flush_pending(strm);
+        if strm.avail_out == 0 as crate::stdlib::uInt {
             return (if true {
                 finish_started as ::core::ffi::c_int
             } else {
@@ -3567,26 +3559,23 @@ unsafe fn deflate_slow(
         return finish_done;
     }
     if (*s).sym_next != 0 {
-        crate::src::trees::_tr_flush_block(
-            s as *mut crate::src::deflate::internal_state,
-            if (*s).block_start >= 0 as ::core::ffi::c_long {
-                (*s).window
-                    .as_deref()
-                    .and_then(|window| window.get((*s).block_start as usize))
-                    .map_or(::core::ptr::null_mut(), |byte| {
-                        core::ptr::from_ref(byte)
-                            .cast_mut()
-                            .cast::<crate::stdlib::charf>()
-                    })
-            } else {
-                ::core::ptr::null_mut::<crate::stdlib::charf>()
-            },
-            ((*s).strstart as ::core::ffi::c_long - (*s).block_start) as crate::zutil_h::ulg,
-            0 as ::core::ffi::c_int,
+        let block_len = ((*s).strstart as ::core::ffi::c_long - (*s).block_start)
+            as crate::zutil_h::ulg;
+        let block = if (*s).block_start >= 0 {
+            (*s).block_data((*s).block_start as crate::stdlib::uInt, block_len)
+        } else {
+            None
+        };
+        crate::src::trees::tr_flush_block_impl(
+            s,
+            Some(strm),
+            block.as_deref(),
+            block_len,
+            0,
         );
         (*s).block_start = (*s).strstart as ::core::ffi::c_long;
-        flush_pending((*s).strm);
-        if (*(*s).strm).avail_out == 0 as crate::stdlib::uInt {
+        flush_pending(strm);
+        if strm.avail_out == 0 as crate::stdlib::uInt {
             return (if false {
                 finish_started as ::core::ffi::c_int
             } else {

@@ -3465,32 +3465,6 @@ fn detect_data_type_impl(s: &crate::src::deflate::deflate_state) -> ::core::ffi:
     }
     return crate::zlib_h::Z_BINARY;
 }
-/// View a stored-block source only when it is wholly contained in the
-/// deflate window that owns it.  `_tr_flush_block` is called with a window
-/// cursor by the deflate engines, so this both records the actual allocation
-/// bound and keeps the FFI wrapper from manufacturing an unbounded slice.
-unsafe fn flush_block_data(
-    s: &crate::src::deflate::deflate_state,
-    buf: *mut crate::stdlib::charf,
-    stored_len: crate::zutil_h::ulg,
-) -> Option<Vec<u8>> {
-    if buf.is_null() {
-        return None;
-    }
-    let len = usize::try_from(stored_len).ok()?;
-    if len == 0 {
-        return Some(Vec::new());
-    }
-    let window_len = usize::try_from(s.window_size).ok()?;
-    let window = s.window.as_deref()?;
-    let offset = buf.addr().checked_sub(window.as_ptr().addr())?;
-    let end = offset.checked_add(len)?;
-    if end > window_len || end > window.len() {
-        return None;
-    }
-    Some(window[offset..end].to_vec())
-}
-
 pub(crate) unsafe fn tr_flush_block_impl(
     s: &mut crate::src::deflate::deflate_state,
     strm: Option<&mut crate::zlib_h::z_stream_s>,
@@ -3600,7 +3574,7 @@ pub(crate) unsafe fn tr_flush_block_impl(
     }
 }
 
-pub unsafe extern "C" fn _tr_flush_block(
+pub unsafe fn tr_flush_block_from_raw(
     s: *mut crate::src::deflate::deflate_state,
     buf: *mut crate::stdlib::charf,
     stored_len: crate::zutil_h::ulg,
@@ -3609,10 +3583,37 @@ pub unsafe extern "C" fn _tr_flush_block(
     let Some(s) = (unsafe { s.as_mut() }) else {
         return;
     };
-    let buf = unsafe { flush_block_data(s, buf, stored_len) };
+    let buf = if buf.is_null() {
+        None
+    } else {
+        let Some(len) = usize::try_from(stored_len).ok() else {
+            return;
+        };
+        if len == 0 {
+            Some(Vec::new())
+        } else {
+        let Some(window) = s.window.as_deref() else {
+            return;
+        };
+        let Some(offset) = buf.addr().checked_sub(window.as_ptr().addr()) else {
+            return;
+        };
+        let Some(end) = offset.checked_add(len) else {
+            return;
+        };
+        let Ok(window_len) = usize::try_from(s.window_size) else {
+            return;
+        };
+        if end > window_len || end > window.len() {
+            return;
+        }
+        Some(window[offset..end].to_vec())
+        }
+    };
     let strm = unsafe { s.strm.as_mut() };
     unsafe { tr_flush_block_impl(s, strm, buf.as_deref(), stored_len, last) };
 }
+
 #[export_name = "_tr_flush_block"]
 
 pub unsafe extern "C" fn _tr_flush_block_ffi(
@@ -3621,7 +3622,7 @@ pub unsafe extern "C" fn _tr_flush_block_ffi(
     stored_len: crate::zutil_h::ulg,
     last: ::core::ffi::c_int,
 ) {
-    unsafe { _tr_flush_block(s, buf, stored_len, last) };
+    unsafe { tr_flush_block_from_raw(s, buf, stored_len, last) };
 }
 pub unsafe fn _tr_tally(
     s: &mut crate::src::deflate::deflate_state,
