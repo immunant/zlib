@@ -1388,18 +1388,45 @@ pub unsafe extern "C" fn deflateBound_ffi(
     };
     deflate_bound(sourceLen as crate::stdlib::z_size_t, state) as crate::stdlib::uLong
 }
+fn put_short_msb_state(
+    pending_buf: &mut [crate::stdlib::Byte],
+    pending: &mut crate::zutil_h::ulg,
+    b: crate::stdlib::uInt,
+) -> bool {
+    let Ok(start) = usize::try_from(*pending) else {
+        return false;
+    };
+    let Some(end) = start.checked_add(2) else {
+        return false;
+    };
+    let Some(bytes) = pending_buf.get_mut(start..end) else {
+        return false;
+    };
+    bytes[0] = (b >> 8) as crate::stdlib::Byte;
+    bytes[1] = b as crate::stdlib::Byte;
+    *pending = pending.wrapping_add(2);
+    true
+}
+
 unsafe extern "C" fn putShortMSB(
     mut s: *mut crate::src::deflate::deflate_state,
     mut b: crate::stdlib::uInt,
 ) {
-    let c2rust_fresh33 = (*s).pending;
-    (*s).pending = (*s).pending.wrapping_add(1);
-    *(*s).pending_buf.offset(c2rust_fresh33 as isize) =
-        (b >> 8 as ::core::ffi::c_int) as crate::stdlib::Byte;
-    let c2rust_fresh34 = (*s).pending;
-    (*s).pending = (*s).pending.wrapping_add(1);
-    *(*s).pending_buf.offset(c2rust_fresh34 as isize) =
-        (b & 0xff as crate::stdlib::uInt) as crate::stdlib::Byte;
+    if s.is_null() {
+        return;
+    }
+    let Ok(pending_len) = usize::try_from((*s).pending_buf_size) else {
+        return;
+    };
+    if pending_len != 0 && (*s).pending_buf.is_null() {
+        return;
+    }
+    let pending_buf = if pending_len == 0 {
+        &mut []
+    } else {
+        ::core::slice::from_raw_parts_mut((*s).pending_buf, pending_len)
+    };
+    let _ = put_short_msb_state(pending_buf, &mut (*s).pending, b);
 }
 
 unsafe extern "C" fn flush_pending(mut strm: crate::zlib_h::z_streamp) {
