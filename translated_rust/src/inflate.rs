@@ -396,6 +396,16 @@ fn initial_window_metadata(wbits: ::core::ffi::c_uint) -> WindowMetadata {
     }
 }
 
+fn reset_window_history(
+    wsize: &mut ::core::ffi::c_uint,
+    whave: &mut ::core::ffi::c_uint,
+    wnext: &mut ::core::ffi::c_uint,
+) {
+    *wsize = 0;
+    *whave = 0;
+    *wnext = 0;
+}
+
 fn window_needs_allocation(has_window: bool) -> bool {
     !has_window
 }
@@ -615,9 +625,11 @@ pub unsafe extern "C" fn inflateReset(mut strm: crate::zlib_h::z_streamp) -> ::c
         return crate::zlib_h::Z_STREAM_ERROR;
     }
     state = (*strm).state as *mut crate::src::inflate::inflate_state;
-    (*state).wsize = 0 as ::core::ffi::c_uint;
-    (*state).whave = 0 as ::core::ffi::c_uint;
-    (*state).wnext = 0 as ::core::ffi::c_uint;
+    reset_window_history(
+        &mut (*state).wsize,
+        &mut (*state).whave,
+        &mut (*state).wnext,
+    );
     return inflateResetKeep(strm);
 }
 #[export_name = "inflateReset"]
@@ -2867,11 +2879,11 @@ mod tests {
         inflate_sync_normalized_wrap, inflate_sync_point_value, inflate_sync_remaining_input,
         inflate_sync_search_core, inflate_undermine_core, inflate_validate_core,
         inflate_validate_wrap, inflate_zlib_header_error, inflate_zlib_window_params,
-        initial_window_metadata, stored_block_length, syncsearch_safe, window_needs_allocation,
-        window_update_plan, InflateBlockKind, InflateCopyProgress, InflateMatchPlan,
-        InflateMatchSource, InflatePrimeUpdate, InflateSyncSearch, InflateZlibHeaderError,
-        InflateZlibWindowParams, BAD, CHECK, CODE_LENGTH_ORDER, COPY_, COPY_1, DICT, DICTID, HEAD,
-        LEN_, MATCH, STORED, SYNC, TYPE,
+        initial_window_metadata, reset_window_history, stored_block_length, syncsearch_safe,
+        window_needs_allocation, window_update_plan, InflateBlockKind, InflateCopyProgress,
+        InflateMatchPlan, InflateMatchSource, InflatePrimeUpdate, InflateSyncSearch,
+        InflateZlibHeaderError, InflateZlibWindowParams, BAD, CHECK, CODE_LENGTH_ORDER, COPY_,
+        COPY_1, DICT, DICTID, HEAD, LEN_, MATCH, STORED, SYNC, TYPE,
     };
 
     #[test]
@@ -3605,6 +3617,19 @@ mod tests {
                 whave: 0,
             }
         );
+    }
+
+    #[test]
+    fn reset_window_history_clears_all_history_metadata() {
+        let mut wsize = 32_768;
+        let mut whave = 16_384;
+        let mut wnext = 8_192;
+
+        reset_window_history(&mut wsize, &mut whave, &mut wnext);
+
+        assert_eq!(wsize, 0);
+        assert_eq!(whave, 0);
+        assert_eq!(wnext, 0);
     }
 
     #[test]

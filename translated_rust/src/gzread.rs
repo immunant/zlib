@@ -994,6 +994,20 @@ fn gz_skip_progress(
     ::core::ffi::c_uint,
 ) {
     let n = gz_skip_len(have, skip, intmax);
+    gz_skip_consume_progress(have, pos, skip, n)
+}
+
+fn gz_skip_consume_progress(
+    have: ::core::ffi::c_uint,
+    pos: crate::stdlib::off64_t,
+    skip: crate::stdlib::off64_t,
+    n: ::core::ffi::c_uint,
+) -> (
+    ::core::ffi::c_uint,
+    crate::stdlib::off64_t,
+    crate::stdlib::off64_t,
+    ::core::ffi::c_uint,
+) {
     (
         have.wrapping_sub(n),
         gz_cursor_advance(pos, n),
@@ -1040,6 +1054,15 @@ fn gz_skip_action(
 
 fn gz_skip_should_continue(skip: crate::stdlib::off64_t) -> bool {
     skip != 0
+}
+
+fn gz_skip_consume_buffered(state: &mut crate::gzguts_h::gz_state, n: ::core::ffi::c_uint) {
+    let (have, pos, skip, consumed) =
+        gz_skip_consume_progress(state.x.have, state.x.pos, state.skip, n);
+    state.x.have = have;
+    state.x.pos = pos;
+    state.skip = skip;
+    state.x.next = state.x.next.wrapping_add(consumed as usize);
 }
 
 fn gzgets_copy_len(
@@ -1095,22 +1118,19 @@ unsafe extern "C" fn gz_skip(mut state: crate::gzguts_h::gz_statep) -> ::core::f
     loop {
         let action = {
             let state_ref = &mut *state;
-            gz_skip_action(state_ref.x.have, state_ref.eof, state_ref.strm.avail_in)
-        };
-        match action {
-            GzSkipAction::ConsumeBuffered => {
-                let state_ref = &mut *state;
-                let (have, pos, skip, n) = gz_skip_progress(
+            let action = gz_skip_action(state_ref.x.have, state_ref.eof, state_ref.strm.avail_in);
+            if matches!(action, GzSkipAction::ConsumeBuffered) {
+                let n = gz_skip_len(
                     state_ref.x.have,
-                    state_ref.x.pos,
                     state_ref.skip,
                     crate::src::gzlib::gz_intmax(),
                 );
-                state_ref.x.have = have;
-                state_ref.x.pos = pos;
-                state_ref.skip = skip;
-                state_ref.x.next = state_ref.x.next.wrapping_add(n as usize);
+                gz_skip_consume_buffered(state_ref, n);
             }
+            action
+        };
+        match action {
+            GzSkipAction::ConsumeBuffered => {}
             GzSkipAction::StopAtEof => break,
             GzSkipAction::Fetch => {
                 if gz_fetch(state) == -1 as ::core::ffi::c_int {
@@ -1118,11 +1138,7 @@ unsafe extern "C" fn gz_skip(mut state: crate::gzguts_h::gz_statep) -> ::core::f
                 }
             }
         }
-        let should_continue = {
-            let state_ref = &*state;
-            gz_skip_should_continue(state_ref.skip)
-        };
-        if !should_continue {
+        if !gz_skip_should_continue((*state).skip) {
             break;
         }
     }
