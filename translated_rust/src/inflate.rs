@@ -1060,8 +1060,11 @@ pub unsafe extern "C" fn inflateInit2_(
     mut version: *const ::core::ffi::c_char,
     mut stream_size: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
+    // This seam observes just the leading version byte. After the null
+    // check, direct dereference expresses that one-byte ABI read without
+    // constructing an offset cursor.
     if version.is_null()
-        || *version.offset(0 as isize) as ::core::ffi::c_int
+        || *version as ::core::ffi::c_int
             != crate::zlib_h::ZLIB_VERSION[0 as usize] as ::core::ffi::c_int
         || stream_size != ::core::mem::size_of::<crate::zlib_h::z_stream>() as ::core::ffi::c_int
     {
