@@ -143,6 +143,9 @@ pub struct inflate_state {
     pub whave: ::core::ffi::c_uint,
     pub wnext: ::core::ffi::c_uint,
     pub window: *mut ::core::ffi::c_uchar,
+    // This state is opaque behind z_stream::state.  Keep ownership explicit so
+    // normal inflate never frees an inflateBack caller window.
+    pub window_ownership: ::core::ffi::c_int,
     pub hold: ::core::ffi::c_ulong,
     pub bits: ::core::ffi::c_uint,
     pub length: ::core::ffi::c_uint,
@@ -818,24 +821,67 @@ fn reset_window_history(
 /// safe allocation plan keeps the eventual owner conversion from conflating a
 /// borrowed window with a callback-owned one.
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
-enum WindowOwnership {
+pub(crate) enum WindowOwnership {
     Missing,
     CallbackOwned,
     CallerBorrowed,
 }
 
 impl WindowOwnership {
-    fn normal_inflate(has_window: bool) -> Self {
-        if has_window {
-            Self::CallbackOwned
-        } else {
-            Self::Missing
+    const MISSING: ::core::ffi::c_int = 0;
+    const CALLBACK_OWNED: ::core::ffi::c_int = 1;
+    const CALLER_BORROWED: ::core::ffi::c_int = 2;
+
+    fn from_raw(raw: ::core::ffi::c_int) -> Option<Self> {
+        match raw {
+            Self::MISSING => Some(Self::Missing),
+            Self::CALLBACK_OWNED => Some(Self::CallbackOwned),
+            Self::CALLER_BORROWED => Some(Self::CallerBorrowed),
+            _ => None,
+        }
+    }
+
+    pub(crate) fn raw(self) -> ::core::ffi::c_int {
+        match self {
+            Self::Missing => Self::MISSING,
+            Self::CallbackOwned => Self::CALLBACK_OWNED,
+            Self::CallerBorrowed => Self::CALLER_BORROWED,
         }
     }
 
     fn needs_callback_allocation(self) -> bool {
         matches!(self, Self::Missing)
     }
+}
+
+fn window_ownership_for_state(
+    window_is_null: bool,
+    raw_ownership: ::core::ffi::c_int,
+) -> Option<WindowOwnership> {
+    let ownership = WindowOwnership::from_raw(raw_ownership)?;
+    match ownership {
+        WindowOwnership::Missing if window_is_null => Some(ownership),
+        WindowOwnership::CallbackOwned | WindowOwnership::CallerBorrowed if !window_is_null => {
+            Some(ownership)
+        }
+        _ => None,
+    }
+}
+
+fn state_window_ownership(state: &inflate_state) -> Option<WindowOwnership> {
+    window_ownership_for_state(state.window.is_null(), state.window_ownership)
+}
+
+fn window_should_discard_for_reset(
+    ownership: WindowOwnership,
+    current_wbits: ::core::ffi::c_uint,
+    requested_wbits: ::core::ffi::c_uint,
+) -> bool {
+    !matches!(ownership, WindowOwnership::Missing) && current_wbits != requested_wbits
+}
+
+fn window_should_release(ownership: WindowOwnership) -> bool {
+    matches!(ownership, WindowOwnership::CallbackOwned)
 }
 
 fn window_needs_allocation(ownership: WindowOwnership) -> bool {
@@ -1023,11 +1069,11 @@ fn inflate_reset2_params(
 }
 
 fn inflate_reset2_discards_window(
-    has_window: bool,
+    ownership: WindowOwnership,
     current_wbits: ::core::ffi::c_uint,
     requested_wbits: ::core::ffi::c_uint,
 ) -> bool {
-    has_window && current_wbits != requested_wbits
+    window_should_discard_for_reset(ownership, current_wbits, requested_wbits)
 }
 
 fn inflate_state_check_impl(
@@ -1182,12 +1228,18 @@ pub unsafe extern "C" fn inflateReset2_ffi(
     let Some((wrap, window_bits)) = inflate_reset2_params(windowBits) else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
-    if inflate_reset2_discards_window(!(*state).window.is_null(), (*state).wbits, window_bits) {
-        Some((*strm).zfree.expect("non-null function pointer")).expect("non-null function pointer")(
-            (*strm).opaque,
-            (*state).window as crate::stdlib::voidpf,
-        );
+    let Some(window_ownership) = state_window_ownership(&*state) else {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    };
+    if inflate_reset2_discards_window(window_ownership, (*state).wbits, window_bits) {
+        if window_should_release(window_ownership) {
+            Some((*strm).zfree.expect("non-null function pointer")).expect("non-null function pointer")(
+                (*strm).opaque,
+                (*state).window as crate::stdlib::voidpf,
+            );
+        }
         (*state).window = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
+        (*state).window_ownership = WindowOwnership::Missing.raw();
     }
     (*state).wrap = wrap;
     (*state).wbits = window_bits;
@@ -1250,6 +1302,7 @@ pub unsafe extern "C" fn inflateInit2__ffi(
     (*strm).state = state as *mut crate::src::deflate::internal_state;
     (*state).strm = strm;
     (*state).window = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
+    (*state).window_ownership = WindowOwnership::Missing.raw();
     (*state).mode = crate::src::inflate::HEAD;
     ret = inflateReset2(strm, windowBits);
     if ret != crate::zlib_h::Z_OK {
@@ -1430,7 +1483,7 @@ fn update_window_state_plan(
     copy: ::core::ffi::c_uint,
 ) -> Option<UpdateWindowPlan> {
     update_window_plan(
-        WindowOwnership::normal_inflate(!state.window.is_null()),
+        state_window_ownership(state)?,
         state.wsize,
         state.wbits,
         copy,
@@ -1484,10 +1537,16 @@ fn updatewindow(
                 .expect("non-null function pointer")(
                 (*strm).opaque, items, size
             ) as *mut crate::stdlib::Byte;
+            if !state.window.is_null() {
+                state.window_ownership = WindowOwnership::CallbackOwned.raw();
+            }
         }
+        let Some(ownership) = state_window_ownership(state) else {
+            return 1;
+        };
         let slices = match update_window_slices_after_allocation(
             plan,
-            WindowOwnership::normal_inflate(!state.window.is_null()),
+            ownership,
         ) {
             Ok(slices) => slices,
             Err(status) => return status,
@@ -2842,7 +2901,10 @@ pub unsafe extern "C" fn inflateEnd_ffi(mut strm: crate::zlib_h::z_streamp) -> :
         return crate::zlib_h::Z_STREAM_ERROR;
     }
     state = (*strm).state as *mut crate::src::inflate::inflate_state;
-    if !(*state).window.is_null() {
+    let Some(window_ownership) = state_window_ownership(&*state) else {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    };
+    if window_should_release(window_ownership) {
         Some((*strm).zfree.expect("non-null function pointer")).expect("non-null function pointer")(
             (*strm).opaque,
             (*state).window as crate::stdlib::voidpf,
@@ -3517,8 +3579,9 @@ pub unsafe extern "C" fn inflateCopy(
         ::core::mem::size_of::<crate::src::inflate::inflate_state>()
             as crate::__stddef_size_t_h::size_t,
     );
-    (*copy).strm = dest;
-    (*copy).next = (*state).next;
+    let copy = &mut *copy;
+    copy.strm = dest;
+    copy.next = (*state).next;
     if !window.is_null() {
         crate::stdlib::memcpy(
             window as *mut ::core::ffi::c_void,
@@ -3526,8 +3589,14 @@ pub unsafe extern "C" fn inflateCopy(
             (*state).whave as crate::__stddef_size_t_h::size_t,
         );
     }
-    (*copy).window = window;
-    (*dest).state = copy as *mut crate::src::deflate::internal_state;
+    copy.window = window;
+    copy.window_ownership = if window.is_null() {
+        WindowOwnership::Missing.raw()
+    } else {
+        WindowOwnership::CallbackOwned.raw()
+    };
+    (*dest).state = copy as *mut crate::src::inflate::inflate_state
+        as *mut crate::src::deflate::internal_state;
     return crate::zlib_h::Z_OK;
 }
 #[export_name = "inflateCopy"]
@@ -3657,7 +3726,8 @@ mod tests {
         update_window_history, update_window_slice_plan, update_window_slices_after_allocation,
         window_allocation_failed, window_allocation_plan, window_allocation_request,
         window_allocation_request_for_plan, window_metadata_update_plan, window_needs_allocation,
-        window_update_plan, DynamicCodeLengthRepeat, InflateBlockKind, InflateCallProgress,
+        window_ownership_for_state, window_should_release, window_update_plan,
+        DynamicCodeLengthRepeat, InflateBlockKind, InflateCallProgress,
         InflateCopyProgress, InflateGzipExtraProgress, InflateGzipFlags, InflateGzipFlagsError,
         InflateGzipHeaderCompletion, InflateMatchPlan, InflateMatchSource, InflateOutputChecksum,
         InflatePrimeUpdate, InflateSyncSearch, InflateZlibHeaderError, InflateZlibHeaderTransition,
@@ -3752,9 +3822,58 @@ mod tests {
 
     #[test]
     fn inflate_reset2_discards_only_existing_mismatched_windows() {
-        assert!(!inflate_reset2_discards_window(false, 15, 14));
-        assert!(!inflate_reset2_discards_window(true, 15, 15));
-        assert!(inflate_reset2_discards_window(true, 15, 14));
+        assert!(!inflate_reset2_discards_window(
+            WindowOwnership::Missing,
+            15,
+            14
+        ));
+        assert!(!inflate_reset2_discards_window(
+            WindowOwnership::CallbackOwned,
+            15,
+            15
+        ));
+        assert!(inflate_reset2_discards_window(
+            WindowOwnership::CallbackOwned,
+            15,
+            14
+        ));
+        assert!(inflate_reset2_discards_window(
+            WindowOwnership::CallerBorrowed,
+            15,
+            14
+        ));
+    }
+
+    #[test]
+    fn window_ownership_requires_pointer_and_marker_to_agree() {
+        assert_eq!(
+            window_ownership_for_state(true, WindowOwnership::Missing.raw()),
+            Some(WindowOwnership::Missing)
+        );
+        assert_eq!(
+            window_ownership_for_state(false, WindowOwnership::CallbackOwned.raw()),
+            Some(WindowOwnership::CallbackOwned)
+        );
+        assert_eq!(
+            window_ownership_for_state(false, WindowOwnership::CallerBorrowed.raw()),
+            Some(WindowOwnership::CallerBorrowed)
+        );
+        assert_eq!(
+            window_ownership_for_state(false, WindowOwnership::Missing.raw()),
+            None
+        );
+        assert_eq!(
+            window_ownership_for_state(true, WindowOwnership::CallerBorrowed.raw()),
+            None
+        );
+        assert_eq!(window_ownership_for_state(false, -1), None);
+    }
+
+    #[test]
+    fn only_callback_owned_windows_are_released() {
+        assert!(!window_should_release(WindowOwnership::Missing));
+        assert!(window_should_release(WindowOwnership::CallbackOwned));
+        assert!(!window_should_release(WindowOwnership::CallerBorrowed));
     }
 
     #[test]
@@ -5429,6 +5548,7 @@ mod tests {
             whave: 0,
             wnext: 0,
             window: ::core::ptr::null_mut(),
+            window_ownership: super::WindowOwnership::Missing.raw(),
             hold: 0,
             bits: 0,
             length: 0,

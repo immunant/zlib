@@ -446,6 +446,7 @@ fn inflate_back_initialize_state(
     state.wbits = window_bits as crate::stdlib::uInt as ::core::ffi::c_uint;
     state.wsize = window.len() as ::core::ffi::c_uint;
     state.window = window.as_mut_ptr();
+    state.window_ownership = crate::src::inflate::WindowOwnership::CallerBorrowed.raw();
     state.wnext = 0;
     state.whave = 0;
     state.sane = 1;
