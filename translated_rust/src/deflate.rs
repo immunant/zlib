@@ -1504,7 +1504,7 @@ pub unsafe extern "C" fn deflatePrime_ffi(
         };
         (*s).bi_buf = step.bi_buf;
         (*s).bi_valid = step.bi_valid;
-        crate::src::trees::_tr_flush_bits(s as *mut crate::src::deflate::internal_state);
+        crate::src::trees::bi_flush(s as *mut crate::src::deflate::internal_state);
         value = step.value;
         bits = step.bits;
         if bits == 0 {
@@ -2128,7 +2128,7 @@ fn set_stored_block_length_state(
 unsafe extern "C" fn flush_pending(mut strm: crate::zlib_h::z_streamp) {
     let mut s: *mut crate::src::deflate::deflate_state =
         (*strm).state as *mut crate::src::deflate::deflate_state;
-    crate::src::trees::_tr_flush_bits(s as *mut crate::src::deflate::internal_state);
+    crate::src::trees::bi_flush(s as *mut crate::src::deflate::internal_state);
     let Some((len, reset_pending_out)) =
         flush_pending_state((*s).pending_buf_size, &mut (*s).pending, (*strm).avail_out)
     else {
@@ -4514,4 +4514,3 @@ unsafe extern "C" fn deflate_huff(
     }
     return block_done;
 }
-pub use crate::src::trees::_tr_flush_bits;
