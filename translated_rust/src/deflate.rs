@@ -4619,8 +4619,11 @@ pub unsafe fn deflate_dispatch_from_abi_stream(
     let Some(flush) = DeflateFlush::parse(flush) else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
-    let Some((strm, state, _storage)) =
-        deflate_stream_and_state(strm, DeflateStorageProjection::None)
+    // Dispatch needs the same three bounded history views as dictionary
+    // handling. Reuse that single callback-storage projection instead of
+    // rebuilding window, prev, and head slices at this boundary.
+    let Some((strm, state, storage)) =
+        deflate_stream_and_state(strm, DeflateStorageProjection::Dictionary)
     else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
@@ -4645,18 +4648,9 @@ pub unsafe fn deflate_dispatch_from_abi_stream(
             .as_ptr(),
         state.pending_buf_size as usize,
     );
-    let window = ::core::slice::from_raw_parts_mut(
-        state.window.expect("initialized window").as_ptr(),
-        state.window_size as usize,
-    );
-    let prev = ::core::slice::from_raw_parts_mut(
-        state.prev.expect("initialized prev table").as_ptr(),
-        state.w_size as usize,
-    );
-    let head = ::core::slice::from_raw_parts_mut(
-        state.head.expect("initialized head table").as_ptr(),
-        state.hash_size as usize,
-    );
+    let window = storage.window.expect("dispatch window projection");
+    let prev = storage.prev.expect("dispatch prev-table projection");
+    let head = storage.head.expect("dispatch hash-table projection");
     let dispatch = DeflateDispatch {
         flush,
         stream: DeflateDispatchStream {
