@@ -554,17 +554,32 @@ pub unsafe extern "C" fn inflateInit__ffi(
     let version = unsafe { version.as_ref() };
     inflateInit_(strm, version, stream_size)
 }
-#[export_name = "inflatePrime"]
+// Priming an already-bound stream only updates inflater state. Keep the
+// state validation and transition here so internal callers do not need the
+// raw C-ABI entry point.
+pub fn inflatePrime(
+    strm: &mut crate::zlib_h::z_stream,
+    bits: ::core::ffi::c_int,
+    value: ::core::ffi::c_int,
+) -> ::core::ffi::c_int {
+    let Some((_strm, state)) = inflateStateCheck(strm as crate::zlib_h::z_streamp) else {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    };
+    inflate_prime(state, bits, value)
+}
 
+#[export_name = "inflatePrime"]
 pub unsafe extern "C" fn inflatePrime_ffi(
     mut strm: crate::zlib_h::z_streamp,
     mut bits: ::core::ffi::c_int,
     mut value: ::core::ffi::c_int,
 ) -> ::core::ffi::c_int {
-    let Some((_strm, state)) = inflateStateCheck(strm) else {
+    // SAFETY: the C ABI supplies the optional foreign stream pointer; the
+    // named dispatcher owns all inflater-state validation and updates.
+    let Some(strm) = (unsafe { strm.as_mut() }) else {
         return crate::zlib_h::Z_STREAM_ERROR;
     };
-    inflate_prime(state, bits, value)
+    inflatePrime(strm, bits, value)
 }
 
 fn inflate_prime(
