@@ -855,6 +855,22 @@ fn gz_comp_direct_write_result(
     }
 }
 
+/// Returns the errno captured immediately after a failed write.
+///
+/// POSIX specifies errno only for a failed `write`.  Keeping that condition
+/// explicit avoids both reading stale errno after a successful short write and
+/// accessing the platform thread-local errno pointer directly.
+fn gz_comp_write_errno(
+    written: ::core::ffi::c_int,
+    os_error: Option<::core::ffi::c_int>,
+) -> ::core::ffi::c_int {
+    if written < 0 {
+        os_error.unwrap_or(0)
+    } else {
+        0
+    }
+}
+
 #[derive(Debug, Eq, PartialEq)]
 struct GzCompOutputWriteProgress {
     remaining_pending: crate::stdlib::uInt,
@@ -1170,9 +1186,6 @@ fn gz_comp(
             gz_comp_direct_loop_action(state.strm.avail_in),
             GzCompDirectLoopAction::Write
         ) {
-            unsafe {
-                *crate::stdlib::__errno_location() = 0 as ::core::ffi::c_int;
-            }
             state.again = 0 as ::core::ffi::c_int;
             put = gz_comp_write_chunk_len(state.strm.avail_in as usize, max);
             writ = unsafe {
@@ -1182,7 +1195,10 @@ fn gz_comp(
                     put as crate::__stddef_size_t_h::size_t,
                 ) as ::core::ffi::c_int
             };
-            let errno = unsafe { *crate::stdlib::__errno_location() };
+            let errno = gz_comp_write_errno(
+                writ,
+                std::io::Error::last_os_error().raw_os_error(),
+            );
             match gz_comp_direct_write_result(state.strm.avail_in, writ, errno) {
                 GzCompDirectWriteResult::Error { again } => {
                     state.again = again;
@@ -1228,9 +1244,6 @@ fn gz_comp(
                     max,
                 ) {
                     GzCompOutputFlushStep::Write { len } => {
-                        unsafe {
-                            *crate::stdlib::__errno_location() = 0 as ::core::ffi::c_int;
-                        }
                         state.again = 0 as ::core::ffi::c_int;
                         put = len;
                         writ = unsafe {
@@ -1240,7 +1253,10 @@ fn gz_comp(
                                 put as crate::__stddef_size_t_h::size_t,
                             ) as ::core::ffi::c_int
                         };
-                        let errno = unsafe { *crate::stdlib::__errno_location() };
+                        let errno = gz_comp_write_errno(
+                            writ,
+                            std::io::Error::last_os_error().raw_os_error(),
+                        );
                         match gz_comp_output_write_result(state.out_pending, writ, errno) {
                             GzCompOutputWriteResult::Error { again } => {
                                 state.again = again;
@@ -2031,7 +2047,7 @@ mod tests {
         gz_comp_output_write_progress, gz_comp_output_write_result, gz_comp_pending_after_write,
         gz_comp_reset_action, gz_comp_reset_after_flush, gz_comp_reset_transition,
         gz_comp_reset_value, gz_comp_skips_empty_flush, gz_comp_write_again,
-        gz_comp_write_chunk_len, gz_comp_write_failed, gz_comp_write_failure,
+        gz_comp_write_chunk_len, gz_comp_write_errno, gz_comp_write_failed, gz_comp_write_failure,
         gz_comp_write_progress, gz_comp_write_result, gz_has_pending_input, gz_has_pending_skip,
         gz_init_deflate_failed, gz_init_failed, gz_init_mode, gz_init_stream_defaults,
         gz_write_advanced_pos, gz_write_apply_buffered_copy_plan, gz_write_apply_buffered_progress,
@@ -2949,6 +2965,14 @@ mod tests {
                 cursor_advance: 0,
             })
         );
+    }
+
+    #[test]
+    fn gz_comp_write_errno_only_observes_failed_writes() {
+        assert_eq!(gz_comp_write_errno(-1, Some(crate::stdlib::EAGAIN)), crate::stdlib::EAGAIN);
+        assert_eq!(gz_comp_write_errno(-1, None), 0);
+        assert_eq!(gz_comp_write_errno(0, Some(crate::stdlib::EAGAIN)), 0);
+        assert_eq!(gz_comp_write_errno(24, Some(crate::stdlib::EAGAIN)), 0);
     }
 
     #[test]
