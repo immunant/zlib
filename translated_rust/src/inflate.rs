@@ -732,6 +732,38 @@ pub(crate) fn inflate_fast_tables(
     Some((lcode?, dcode?))
 }
 
+/// A checked, pointer-free commit plan for one bounded fast-decode call.
+/// The transitional decoder keeps compatibility cursors at its boundary, but
+/// it can validate all scalar progress before publishing any of them.
+struct InflateFastCommit {
+    input_used: ::core::ffi::c_uint,
+    output_used: ::core::ffi::c_uint,
+    hold: crate::stdlib::uLong,
+    bits: ::core::ffi::c_uint,
+    mode: Option<inflate_mode>,
+    error: Option<usize>,
+}
+
+fn inflate_fast_commit(
+    progress: crate::src::inffast::InflateFastProgress,
+    available_input: ::core::ffi::c_uint,
+    available_output: ::core::ffi::c_uint,
+) -> Option<InflateFastCommit> {
+    let input_used = ::core::ffi::c_uint::try_from(progress.input_used).ok()?;
+    let output_used = ::core::ffi::c_uint::try_from(progress.output_used).ok()?;
+    if input_used > available_input || output_used > available_output {
+        return None;
+    }
+    Some(InflateFastCommit {
+        input_used,
+        output_used,
+        hold: crate::stdlib::uLong::try_from(progress.hold).ok()?,
+        bits: ::core::ffi::c_uint::try_from(progress.bits).ok()?,
+        mode: progress.mode,
+        error: progress.error,
+    })
+}
+
 unsafe fn updatewindow(
     strm: &mut crate::zlib_h::z_stream,
     state: &mut crate::src::inflate::inflate_state,
@@ -2098,26 +2130,15 @@ pub unsafe fn inflate(
                                             None
                                         };
                                         if let Some(fast) = fast {
-                                            let Ok(input_used) =
-                                                ::core::ffi::c_uint::try_from(fast.input_used)
+                                            let Some(fast) = inflate_fast_commit(fast, have, left)
                                             else {
                                                 ret = crate::zlib_h::Z_DATA_ERROR;
                                                 break '_inf_leave;
                                             };
-                                            let Ok(output_used) =
-                                                ::core::ffi::c_uint::try_from(fast.output_used)
-                                            else {
-                                                ret = crate::zlib_h::Z_DATA_ERROR;
-                                                break '_inf_leave;
-                                            };
-                                            if input_used > have || output_used > left {
-                                                ret = crate::zlib_h::Z_DATA_ERROR;
-                                                break '_inf_leave;
-                                            }
-                                            next = next.wrapping_add(fast.input_used);
-                                            have = have.wrapping_sub(input_used);
-                                            put = put.wrapping_add(fast.output_used);
-                                            left = left.wrapping_sub(output_used);
+                                            next = next.wrapping_add(fast.input_used as usize);
+                                            have = have.wrapping_sub(fast.input_used);
+                                            put = put.wrapping_add(fast.output_used as usize);
+                                            left = left.wrapping_sub(fast.output_used);
                                             hold = fast.hold;
                                             bits = fast.bits;
                                             if let Some(mode) = fast.mode {
