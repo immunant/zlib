@@ -4819,47 +4819,33 @@ fn tree_bit_emissions(
     Some(emission_count)
 }
 
-struct PendingBitWriter<'a> {
-    pending_buffer: &'a mut [crate::stdlib::Bytef],
-    pending: &'a mut crate::zutil_h::ulg,
-    bi_buf: &'a mut crate::zutil_h::ush,
-    bi_valid: &'a mut ::core::ffi::c_int,
+struct PendingBitWriter<'storage, 'bytes, 'state> {
+    storage: &'storage mut crate::src::deflate::PendingStorageView<'bytes>,
+    pending: &'state mut crate::zutil_h::ulg,
+    bi_buf: &'state mut crate::zutil_h::ush,
+    bi_valid: &'state mut ::core::ffi::c_int,
 }
 
-impl PendingBitWriter<'_> {
+impl PendingBitWriter<'_, '_, '_> {
     fn symbol_triplet(&self, first: usize) -> Option<[crate::zutil_h::uch; 3]> {
-        let second = first.checked_add(1)?;
-        let third = first.checked_add(2)?;
-        Some([
-            *self.pending_buffer.get(first)?,
-            *self.pending_buffer.get(second)?,
-            *self.pending_buffer.get(third)?,
-        ])
+        self.storage.pending_triplet(first)
     }
 
     fn write_bits(&mut self, value: ::core::ffi::c_int, bit_count: ::core::ffi::c_int) -> bool {
         if bit_buffer_would_overflow(*self.bi_valid, bit_count) {
-            let Some(first) = usize::try_from(*self.pending).ok() else {
-                return false;
-            };
-            let Some(second) = first.checked_add(1) else {
-                return false;
-            };
-            if second >= self.pending_buffer.len() {
+            let next_bi_buf = (*self.bi_buf as ::core::ffi::c_int
+                | (value as crate::zutil_h::ush as ::core::ffi::c_int) << *self.bi_valid)
+                as crate::zutil_h::ush;
+            let bytes = [
+                (next_bi_buf as ::core::ffi::c_int & 0xff as ::core::ffi::c_int)
+                    as crate::zutil_h::uch,
+                (next_bi_buf as ::core::ffi::c_int >> 8 as ::core::ffi::c_int)
+                    as crate::zutil_h::uch,
+            ];
+            if !self.storage.append_pending(self.pending, &bytes) {
                 return false;
             }
 
-            *self.bi_buf = (*self.bi_buf as ::core::ffi::c_int
-                | (value as crate::zutil_h::ush as ::core::ffi::c_int) << *self.bi_valid)
-                as crate::zutil_h::ush;
-            self.pending_buffer[first] = (*self.bi_buf as ::core::ffi::c_int
-                & 0xff as ::core::ffi::c_int)
-                as crate::zutil_h::uch;
-            *self.pending = self.pending.wrapping_add(1);
-            self.pending_buffer[second] = (*self.bi_buf as ::core::ffi::c_int
-                >> 8 as ::core::ffi::c_int)
-                as crate::zutil_h::uch;
-            *self.pending = self.pending.wrapping_add(1);
             *self.bi_buf = (value as crate::zutil_h::ush as ::core::ffi::c_int
                 >> crate::src::deflate::Buf_size - *self.bi_valid)
                 as crate::zutil_h::ush;
@@ -4950,7 +4936,7 @@ fn scan_tree(
 }
 
 fn send_tree(
-    writer: &mut PendingBitWriter<'_>,
+    writer: &mut PendingBitWriter<'_, '_, '_>,
     tree: &[crate::src::deflate::ct_data],
     bl_tree: &[crate::src::deflate::ct_data],
     max_code: ::core::ffi::c_int,
@@ -5014,7 +5000,7 @@ fn build_bl_tree(state: &mut crate::src::deflate::deflate_state) -> ::core::ffi:
 }
 
 fn send_all_trees(
-    writer: &mut PendingBitWriter<'_>,
+    writer: &mut PendingBitWriter<'_, '_, '_>,
     bl_tree: &[crate::src::deflate::ct_data],
     dyn_ltree: &[crate::src::deflate::ct_data],
     dyn_dtree: &[crate::src::deflate::ct_data],
@@ -5138,7 +5124,7 @@ fn tr_align_core(
     bi_valid: &mut ::core::ffi::c_int,
 ) -> bool {
     let mut writer = PendingBitWriter {
-        pending_buffer: storage.pending_bytes(),
+        storage,
         pending,
         bi_buf,
         bi_valid,
@@ -5154,18 +5140,9 @@ fn tr_align_core(
     }
 
     let (count, bytes) = bi_flush_core(writer.bi_buf, writer.bi_valid);
-    let Ok(start) = usize::try_from(*writer.pending) else {
-        return false;
-    };
-    let Some(end) = start.checked_add(count) else {
-        return false;
-    };
-    let Some(output) = writer.pending_buffer.get_mut(start..end) else {
-        return false;
-    };
-    output.copy_from_slice(&bytes[..count]);
-    *writer.pending = pending_cursor_after_bytes(*writer.pending, count);
-    true
+    writer
+        .storage
+        .append_pending(writer.pending, &bytes[..count])
 }
 #[export_name = "_tr_align"]
 
@@ -5190,7 +5167,7 @@ fn compress_block(
     symbol_count: crate::stdlib::uInt,
     ltree: &[crate::src::deflate::ct_data],
     dtree: &[crate::src::deflate::ct_data],
-    writer: &mut PendingBitWriter<'_>,
+    writer: &mut PendingBitWriter<'_, '_, '_>,
 ) {
     let mut sx: ::core::ffi::c_uint = 0;
     if symbol_buffer_has_entries(symbol_count) {
@@ -5324,7 +5301,7 @@ fn tr_flush_block_core(
         );
     } else {
         let mut writer = PendingBitWriter {
-            pending_buffer: storage.pending_bytes(),
+            storage,
             pending: &mut state.pending,
             bi_buf: &mut state.bi_buf,
             bi_valid: &mut state.bi_valid,
@@ -5346,7 +5323,7 @@ fn tr_flush_block_core(
         drop(writer);
         let symbol_start = state.lit_bufsize as usize;
         let mut writer = PendingBitWriter {
-            pending_buffer: storage.pending_bytes(),
+            storage,
             pending: &mut state.pending,
             bi_buf: &mut state.bi_buf,
             bi_valid: &mut state.bi_valid,
@@ -5510,19 +5487,22 @@ mod tests {
 
     #[test]
     fn pending_bit_writer_flushes_full_words_lsb_first() {
-        let mut pending_buffer = [0; 2];
+        let layout = crate::src::deflate::pending_storage_layout(1);
+        let mut pending_buffer = [0; 4];
+        let mut storage =
+            crate::src::deflate::PendingStorageView::new(&mut pending_buffer, layout).unwrap();
         let mut pending = 0;
         let mut bi_buf = 0x7fff;
         let mut bi_valid = 15;
         let mut writer = PendingBitWriter {
-            pending_buffer: &mut pending_buffer,
+            storage: &mut storage,
             pending: &mut pending,
             bi_buf: &mut bi_buf,
             bi_valid: &mut bi_valid,
         };
 
         assert!(writer.write_bits(3, 2));
-        assert_eq!(pending_buffer, [0xff, 0xff]);
+        assert_eq!(storage.pending_bytes()[..2], [0xff, 0xff]);
         assert_eq!(pending, 2);
         assert_eq!(bi_buf, 1);
         assert_eq!(bi_valid, 1);

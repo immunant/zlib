@@ -204,6 +204,16 @@ impl<'a> PendingStorageView<'a> {
         self.pending_bytes().get_mut(start..end)
     }
 
+    pub(crate) fn pending_triplet(&self, first: usize) -> Option<[crate::stdlib::Bytef; 3]> {
+        let second = first.checked_add(1)?;
+        let third = first.checked_add(2)?;
+        Some([
+            *self.bytes.get(first)?,
+            *self.bytes.get(second)?,
+            *self.bytes.get(third)?,
+        ])
+    }
+
     pub(crate) fn append_pending(
         &mut self,
         pending: &mut crate::zutil_h::ulg,
