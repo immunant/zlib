@@ -3803,12 +3803,14 @@ pub(crate) fn tally_symbol(
     }
     (*sym_next == sym_end) as ::core::ffi::c_int
 }
-pub unsafe extern "C" fn _tr_tally(
-    mut s: *mut crate::src::deflate::deflate_state,
+// The ABI wrapper establishes the opaque-state borrow.  This adapter keeps
+// the callback-backed pending-storage projection with the tree operation, so
+// the export itself remains a conversion-and-dispatch boundary.
+pub unsafe fn _tr_tally(
+    state: &mut crate::src::deflate::deflate_state,
     mut dist: ::core::ffi::c_uint,
     mut lc: ::core::ffi::c_uint,
 ) -> ::core::ffi::c_int {
-    let state = &mut *s;
     // The symbol region starts after the literal portion of `pending_buf`.
     // Its remaining capacity is three bytes per literal slot.
     let pending_buf = ::core::slice::from_raw_parts_mut(
@@ -3837,5 +3839,8 @@ pub unsafe extern "C" fn _tr_tally_ffi(
     mut dist: ::core::ffi::c_uint,
     mut lc: ::core::ffi::c_uint,
 ) -> ::core::ffi::c_int {
-    _tr_tally(s, dist, lc)
+    let Some(state) = s.as_mut() else {
+        return 0;
+    };
+    _tr_tally(state, dist, lc)
 }
