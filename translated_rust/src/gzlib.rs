@@ -246,7 +246,7 @@ fn gzseek_apply_read_buffer_plan(
 ) {
     state.x.have = state.x.have.wrapping_sub(plan.consumed);
     state.x.next = state.x.next.wrapping_add(plan.consumed as usize);
-    state.x.pos += plan.consumed as crate::stdlib::off64_t;
+    state.x.pos = state.x.pos.wrapping_add(plan.consumed as crate::stdlib::off64_t);
 }
 
 fn gzseek_request_is_valid(
@@ -1604,6 +1604,66 @@ mod tests {
         assert_eq!(state.x.have, 4);
         assert_eq!(state.x.next, ::core::ptr::null_mut::<u8>().wrapping_add(3));
         assert_eq!(state.x.pos, 104);
+    }
+
+    #[test]
+    fn gzseek_read_buffer_plan_wraps_position_and_updates_buffered_cursor_state() {
+        let mut state = crate::gzguts_h::gz_state {
+            x: crate::zlib_h::gzFile_s {
+                have: 7,
+                next: ::core::ptr::null_mut(),
+                pos: crate::stdlib::off64_t::MAX,
+            },
+            mode: crate::gzguts_h::GZ_READ,
+            fd: 0,
+            path: ::core::ptr::null_mut(),
+            size: 0,
+            want: 0,
+            in_0: ::core::ptr::null_mut(),
+            out: ::core::ptr::null_mut(),
+            direct: 0,
+            junk: 0,
+            how: crate::gzguts_h::COPY,
+            again: 0,
+            start: 0,
+            eof: 0,
+            past: 0,
+            level: 0,
+            strategy: 0,
+            reset: 0,
+            skip: 0,
+            err: crate::zlib_h::Z_OK,
+            msg: ::core::ptr::null_mut(),
+            strm: crate::zlib_h::z_stream_s {
+                next_in: ::core::ptr::null_mut(),
+                avail_in: 0,
+                total_in: 0,
+                next_out: ::core::ptr::null_mut(),
+                avail_out: 0,
+                total_out: 0,
+                msg: ::core::ptr::null_mut(),
+                state: ::core::ptr::null_mut(),
+                zalloc: None,
+                zfree: None,
+                opaque: ::core::ptr::null_mut(),
+                data_type: 0,
+                adler: 0,
+                reserved: 0,
+            },
+            out_pending: 0,
+        };
+
+        super::gzseek_apply_read_buffer_plan(
+            &mut state,
+            GzSeekReadBufferPlan {
+                consumed: 3,
+                remaining_offset: 4,
+            },
+        );
+
+        assert_eq!(state.x.have, 4);
+        assert_eq!(state.x.next, ::core::ptr::null_mut::<u8>().wrapping_add(3));
+        assert_eq!(state.x.pos, crate::stdlib::off64_t::MIN.wrapping_add(2));
     }
 
     #[test]

@@ -460,7 +460,7 @@ fn gz_ungetc_progress(
     crate::stdlib::off64_t,
     ::core::ffi::c_int,
 ) {
-    (gz_ungetc_next_have(have), pos - 1, 0)
+    (gz_ungetc_next_have(have), pos.wrapping_sub(1), 0)
 }
 
 unsafe fn gz_load(
@@ -1727,6 +1727,17 @@ mod tests {
     fn gz_ungetc_progress_updates_buffer_position_and_past() {
         assert_eq!(gz_ungetc_progress(4, 42), (5, 41, 0));
         assert_eq!(gz_ungetc_progress(::core::ffi::c_uint::MAX, 0), (0, -1, 0));
+    }
+
+    #[test]
+    fn gz_ungetc_progress_wraps_minimum_position_and_buffered_count() {
+        assert_eq!(
+            gz_ungetc_progress(
+                ::core::ffi::c_uint::MAX,
+                crate::stdlib::off64_t::MIN,
+            ),
+            (0, crate::stdlib::off64_t::MAX, 0)
+        );
     }
 
     #[test]

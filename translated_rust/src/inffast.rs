@@ -275,12 +275,12 @@ pub unsafe extern "C" fn inflate_fast(
                         input_remaining = input_remaining_after_read(input_remaining);
                         (hold, bits) = append_input_byte(hold, bits, *c2rust_fresh5);
                     }
-                    here = dcode.offset((hold & dmask as ::core::ffi::c_ulong) as isize);
+                    here = dcode.wrapping_add((hold & dmask as ::core::ffi::c_ulong) as usize);
                     c2rust_current_block_141 = 3217834059723038609;
                     break;
                 }
                 FastLitLenAction::Subtable => {
-                    here = lcode.offset(subtable_offset(*here, hold));
+                    here = lcode.wrapping_add(subtable_offset(*here, hold) as usize);
                 }
                 FastLitLenAction::End => {
                     c2rust_current_block_141 = 13505557363059842426;
@@ -325,7 +325,7 @@ pub unsafe extern "C" fn inflate_fast(
                             }
                         }
                         FastDistAction::Subtable => {
-                            here = dcode.offset(subtable_offset(*here, hold));
+                            here = dcode.wrapping_add(subtable_offset(*here, hold) as usize);
                         }
                         FastDistAction::Invalid => {
                             (*strm).msg = b"invalid distance code\0".as_ptr()
