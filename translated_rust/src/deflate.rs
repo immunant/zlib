@@ -2450,16 +2450,6 @@ pub unsafe extern "C" fn deflateCopy_ffi(
 ) -> ::core::ffi::c_int {
     deflateCopy(dest, source)
 }
-unsafe fn longest_match(
-    mut s: *mut crate::src::deflate::deflate_state,
-    mut cur_match: crate::src::deflate::IPos,
-) -> crate::stdlib::uInt {
-    let state = &mut *s;
-    let window = ::core::slice::from_raw_parts(state.window, state.window_size as usize);
-    let prev = ::core::slice::from_raw_parts(state.prev, state.w_size as usize);
-    longest_match_bytes(state, window, prev, cur_match)
-}
-
 fn longest_match_bytes(
     state: &mut crate::src::deflate::deflate_state,
     window: &[crate::stdlib::Bytef],
@@ -2922,14 +2912,14 @@ unsafe fn deflate_fast(
             let head = ::core::slice::from_raw_parts_mut(state.head, state.hash_size as usize);
             let prev = ::core::slice::from_raw_parts_mut(state.prev, state.w_size as usize);
             hash_head = insert_hash_entry(state, window, head, prev);
-        }
-        if hash_head != NIL as crate::src::deflate::IPos
-            && (state.strstart as crate::src::deflate::IPos).wrapping_sub(hash_head)
-                <= state
-                    .w_size
-                    .wrapping_sub(crate::src::deflate::MIN_LOOKAHEAD as crate::stdlib::uInt)
-        {
-            state.match_length = longest_match(s, hash_head);
+            if hash_head != NIL as crate::src::deflate::IPos
+                && (state.strstart as crate::src::deflate::IPos).wrapping_sub(hash_head)
+                    <= state
+                        .w_size
+                        .wrapping_sub(crate::src::deflate::MIN_LOOKAHEAD as crate::stdlib::uInt)
+            {
+                state.match_length = longest_match_bytes(state, window, prev, hash_head);
+            }
         }
         if state.match_length >= crate::zutil_h::MIN_MATCH as crate::stdlib::uInt {
             bflush = crate::src::trees::_tr_tally(
@@ -3067,28 +3057,33 @@ unsafe fn deflate_slow(
             let head = ::core::slice::from_raw_parts_mut(state.head, state.hash_size as usize);
             let prev = ::core::slice::from_raw_parts_mut(state.prev, state.w_size as usize);
             hash_head = insert_hash_entry(state, window, head, prev);
-        }
-        state.prev_length = state.match_length;
-        state.prev_match = state.match_start as crate::src::deflate::IPos;
-        state.match_length =
-            (crate::zutil_h::MIN_MATCH - 1 as ::core::ffi::c_int) as crate::stdlib::uInt;
-        if hash_head != NIL as crate::src::deflate::IPos
-            && state.prev_length < state.max_lazy_match
-            && (state.strstart as crate::src::deflate::IPos).wrapping_sub(hash_head)
-                <= state
-                    .w_size
-                    .wrapping_sub(crate::src::deflate::MIN_LOOKAHEAD as crate::stdlib::uInt)
-        {
-            state.match_length = longest_match(s, hash_head);
-            if state.match_length <= 5 as crate::stdlib::uInt
-                && (state.strategy == crate::zlib_h::Z_FILTERED
-                    || state.match_length == crate::zutil_h::MIN_MATCH as crate::stdlib::uInt
-                        && state.strstart.wrapping_sub(state.match_start)
-                            > TOO_FAR as crate::stdlib::uInt)
+            state.prev_length = state.match_length;
+            state.prev_match = state.match_start as crate::src::deflate::IPos;
+            state.match_length =
+                (crate::zutil_h::MIN_MATCH - 1 as ::core::ffi::c_int) as crate::stdlib::uInt;
+            if hash_head != NIL as crate::src::deflate::IPos
+                && state.prev_length < state.max_lazy_match
+                && (state.strstart as crate::src::deflate::IPos).wrapping_sub(hash_head)
+                    <= state
+                        .w_size
+                        .wrapping_sub(crate::src::deflate::MIN_LOOKAHEAD as crate::stdlib::uInt)
             {
-                state.match_length =
-                    (crate::zutil_h::MIN_MATCH - 1 as ::core::ffi::c_int) as crate::stdlib::uInt;
+                state.match_length = longest_match_bytes(state, window, prev, hash_head);
+                if state.match_length <= 5 as crate::stdlib::uInt
+                    && (state.strategy == crate::zlib_h::Z_FILTERED
+                        || state.match_length == crate::zutil_h::MIN_MATCH as crate::stdlib::uInt
+                            && state.strstart.wrapping_sub(state.match_start)
+                                > TOO_FAR as crate::stdlib::uInt)
+                {
+                    state.match_length =
+                        (crate::zutil_h::MIN_MATCH - 1 as ::core::ffi::c_int) as crate::stdlib::uInt;
+                }
             }
+        } else {
+            state.prev_length = state.match_length;
+            state.prev_match = state.match_start as crate::src::deflate::IPos;
+            state.match_length =
+                (crate::zutil_h::MIN_MATCH - 1 as ::core::ffi::c_int) as crate::stdlib::uInt;
         }
         if state.prev_length >= crate::zutil_h::MIN_MATCH as crate::stdlib::uInt
             && state.match_length <= state.prev_length
