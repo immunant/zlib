@@ -782,40 +782,24 @@ pub unsafe extern "C" fn inflateBack_ffi(
                     let output_start = (put as usize)
                         .checked_sub(state_ref.window as usize)
                         .filter(|offset| *offset <= wsize);
-                    let code_size = ::core::mem::size_of::<crate::src::inftrees::code>();
-                    let code_start = state_ref.codes.as_ptr() as usize;
-                    let code_end =
-                        code_start.checked_add(::core::mem::size_of_val(&state_ref.codes));
                     let lcode =
                         if state_ref.lencode == crate::src::inftrees::inffixed_h::lenfix.as_ptr() {
                             Some(&crate::src::inftrees::inffixed_h::lenfix[..])
                         } else {
-                            let offset = (state_ref.lencode as usize)
-                                .checked_sub(code_start)
-                                .filter(|offset| {
-                                    code_size != 0
-                                        && *offset % code_size == 0
-                                        && code_end
-                                            .is_some_and(|end| (state_ref.lencode as usize) <= end)
-                                })
-                                .and_then(|offset| state_ref.codes.get(offset / code_size..));
-                            offset
+                            crate::src::inflate::inflate_fast_dynamic_table(
+                                &state_ref.codes,
+                                state_ref.lencode as usize,
+                            )
                         };
                     let dcode = if state_ref.distcode
                         == crate::src::inftrees::inffixed_h::distfix.as_ptr()
                     {
                         Some(&crate::src::inftrees::inffixed_h::distfix[..])
                     } else {
-                        let offset = (state_ref.distcode as usize)
-                            .checked_sub(code_start)
-                            .filter(|offset| {
-                                code_size != 0
-                                    && *offset % code_size == 0
-                                    && code_end
-                                        .is_some_and(|end| (state_ref.distcode as usize) <= end)
-                            })
-                            .and_then(|offset| state_ref.codes.get(offset / code_size..));
-                        offset
+                        crate::src::inflate::inflate_fast_dynamic_table(
+                            &state_ref.codes,
+                            state_ref.distcode as usize,
+                        )
                     };
                     match (output_start, lcode, dcode) {
                         (Some(output_start), Some(lcode), Some(dcode))

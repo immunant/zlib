@@ -663,17 +663,17 @@ fn inflate_window_update(
 
 /// Resolve a dynamic decode-table cursor to a bounded tail of `codes`.
 /// `cursor` is only an address token here; no implementation dereferences it.
-fn inflate_fast_dynamic_table(
-    state: &inflate_state,
+pub(crate) fn inflate_fast_dynamic_table(
+    codes: &[crate::src::inftrees::code],
     cursor: usize,
 ) -> Option<&[crate::src::inftrees::code]> {
     let code_size = ::core::mem::size_of::<crate::src::inftrees::code>();
-    let code_start = state.codes.as_ptr() as usize;
-    let code_end = code_start.checked_add(::core::mem::size_of_val(&state.codes))?;
+    let code_start = codes.as_ptr() as usize;
+    let code_end = code_start.checked_add(::core::mem::size_of_val(codes))?;
     cursor
         .checked_sub(code_start)
         .filter(|offset| code_size != 0 && *offset % code_size == 0 && cursor <= code_end)
-        .and_then(|offset| state.codes.get(offset / code_size..))
+        .and_then(|offset| codes.get(offset / code_size..))
 }
 
 /// Turn a compatibility table cursor into an index without relying on raw
@@ -701,12 +701,12 @@ fn inflate_fast_tables(
     let lcode = if state.lencode == crate::src::inftrees::inffixed_h::lenfix.as_ptr() {
         Some(&crate::src::inftrees::inffixed_h::lenfix[..])
     } else {
-        inflate_fast_dynamic_table(state, state.lencode as usize)
+        inflate_fast_dynamic_table(&state.codes, state.lencode as usize)
     };
     let dcode = if state.distcode == crate::src::inftrees::inffixed_h::distfix.as_ptr() {
         Some(&crate::src::inftrees::inffixed_h::distfix[..])
     } else {
-        inflate_fast_dynamic_table(state, state.distcode as usize)
+        inflate_fast_dynamic_table(&state.codes, state.distcode as usize)
     };
     Some((lcode?, dcode?))
 }
