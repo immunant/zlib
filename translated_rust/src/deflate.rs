@@ -2672,44 +2672,27 @@ pub unsafe fn deflate(
     if flush != crate::zlib_h::Z_FINISH {
         return crate::zlib_h::Z_OK;
     }
-    if (*s).wrap <= 0 as ::core::ffi::c_int {
+    // The legacy engine owns this final raw storage conversion.  The wrapper
+    // calculation, trailer emission, flush, and wrap transition stay in the
+    // safe named helper above.
+    let state = &mut *s;
+    if state.wrap <= 0 {
         return crate::zlib_h::Z_STREAM_END;
     }
-    if (*s).wrap == 2 as ::core::ffi::c_int {
-        let state = &mut *s;
-        let pending_buf =
-            ::core::slice::from_raw_parts_mut(state.pending_buf, state.pending_buf_size as usize);
-        if !write_gzip_trailer(state, pending_buf, strm.adler, strm.total_in) {
-            return crate::zlib_h::Z_STREAM_ERROR;
-        }
-    } else {
-        let state = &mut *s;
-        let pending_buf =
-            ::core::slice::from_raw_parts_mut(state.pending_buf, state.pending_buf_size as usize);
-        if !put_short_msb(
-            state,
-            pending_buf,
-            (strm.adler >> 16 as ::core::ffi::c_int) as crate::stdlib::uInt,
-        ) {
-            return crate::zlib_h::Z_STREAM_ERROR;
-        }
-        if !put_short_msb(
-            state,
-            pending_buf,
-            (strm.adler & 0xffff as crate::stdlib::uLong) as crate::stdlib::uInt,
-        ) {
-            return crate::zlib_h::Z_STREAM_ERROR;
-        }
+    if state.pending_buf.is_null()
+        || state.pending_out.is_null()
+        || strm.avail_out != 0 && strm.next_out.is_null()
+    {
+        return crate::zlib_h::Z_STREAM_ERROR;
     }
-    flush_pending(strm);
-    if (*s).wrap > 0 as ::core::ffi::c_int {
-        (*s).wrap = -(*s).wrap;
-    }
-    return if (*s).pending != 0 as crate::zutil_h::ulg {
-        crate::zlib_h::Z_OK
+    let pending_buf =
+        ::core::slice::from_raw_parts_mut(state.pending_buf, state.pending_buf_size as usize);
+    let output = if strm.avail_out == 0 {
+        &mut []
     } else {
-        crate::zlib_h::Z_STREAM_END
+        ::core::slice::from_raw_parts_mut(strm.next_out, strm.avail_out as usize)
     };
+    finish_deflate_stream(strm, state, pending_buf, output)
 }
 #[export_name = "deflate"]
 
@@ -4031,6 +4014,43 @@ fn flush_strategy_pending(
         return false;
     };
     flush_pending_impl(strm, state, pending_buf, pending_start, output)
+}
+
+fn finish_deflate_stream(
+    strm: &mut crate::zlib_h::z_stream,
+    state: &mut crate::src::deflate::deflate_state,
+    pending_buf: &mut [crate::stdlib::Bytef],
+    output: &mut [crate::stdlib::Bytef],
+) -> ::core::ffi::c_int {
+    if state.wrap <= 0 {
+        return crate::zlib_h::Z_STREAM_END;
+    }
+    if state.wrap == 2 {
+        if !write_gzip_trailer(state, pending_buf, strm.adler, strm.total_in) {
+            return crate::zlib_h::Z_STREAM_ERROR;
+        }
+    } else if !put_short_msb(
+        state,
+        pending_buf,
+        (strm.adler >> 16 as ::core::ffi::c_int) as crate::stdlib::uInt,
+    ) || !put_short_msb(
+        state,
+        pending_buf,
+        (strm.adler & 0xffff as crate::stdlib::uLong) as crate::stdlib::uInt,
+    ) {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    }
+    if !flush_strategy_pending(state, strm, pending_buf, output) {
+        return crate::zlib_h::Z_STREAM_ERROR;
+    }
+    if state.wrap > 0 {
+        state.wrap = -state.wrap;
+    }
+    if state.pending != 0 {
+        crate::zlib_h::Z_OK
+    } else {
+        crate::zlib_h::Z_STREAM_END
+    }
 }
 
 fn deflate_huff(
