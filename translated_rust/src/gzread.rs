@@ -50,6 +50,14 @@ fn compact_buffered_input(buffer: &mut [crate::stdlib::Bytef], source_start: usi
     buffer.copy_within(source_start..source_start + len, 0);
 }
 
+fn is_gzip_header(input: &[u8]) -> bool {
+    input.len() >= 4 && input[0] == 31 && input[1] == 139 && input[2] == 8 && input[3] < 32
+}
+
+fn copy_buffered_input(input: &[u8], output: &mut [u8]) {
+    output[..input.len()].copy_from_slice(input);
+}
+
 unsafe extern "C" fn gz_load(
     mut state: crate::gzguts_h::gz_statep,
     mut buf: *mut ::core::ffi::c_uchar,
@@ -207,12 +215,13 @@ unsafe extern "C" fn gz_look(mut state: crate::gzguts_h::gz_statep) -> ::core::f
     {
         return 0 as ::core::ffi::c_int;
     }
-    if (*strm).avail_in > 3 as crate::stdlib::uInt
-        && *(*strm).next_in.offset(0 as isize) as ::core::ffi::c_int == 31 as ::core::ffi::c_int
-        && *(*strm).next_in.offset(1 as isize) as ::core::ffi::c_int == 139 as ::core::ffi::c_int
-        && *(*strm).next_in.offset(2 as isize) as ::core::ffi::c_int == 8 as ::core::ffi::c_int
-        && (*(*strm).next_in.offset(3 as isize) as ::core::ffi::c_int) < 32 as ::core::ffi::c_int
-    {
+    let avail_in = (*strm).avail_in as usize;
+    let input = if avail_in > 3 {
+        Some(::core::slice::from_raw_parts((*strm).next_in, avail_in))
+    } else {
+        None
+    };
+    if input.is_some_and(is_gzip_header) {
         crate::src::inflate::inflateReset(strm as *mut crate::zlib_h::z_stream_s);
         (*state).how = crate::gzguts_h::GZIP;
         (*state).junk = 1 as ::core::ffi::c_int;
@@ -220,12 +229,14 @@ unsafe extern "C" fn gz_look(mut state: crate::gzguts_h::gz_statep) -> ::core::f
         return 0 as ::core::ffi::c_int;
     }
     (*state).x.next = (*state).out;
-    crate::stdlib::memcpy(
-        (*state).x.next as *mut ::core::ffi::c_void,
-        (*strm).next_in as *const ::core::ffi::c_void,
-        (*strm).avail_in as crate::__stddef_size_t_h::size_t,
-    );
-    (*state).x.have = (*strm).avail_in as ::core::ffi::c_uint;
+    if avail_in != 0 {
+        let input = input.unwrap_or_else(|| {
+            ::core::slice::from_raw_parts((*strm).next_in, avail_in)
+        });
+        let output = ::core::slice::from_raw_parts_mut((*state).x.next, input.len());
+        copy_buffered_input(input, output);
+    }
+    (*state).x.have = avail_in as ::core::ffi::c_uint;
     (*strm).avail_in = 0 as crate::stdlib::uInt;
     (*state).how = crate::gzguts_h::COPY;
     return 0 as ::core::ffi::c_int;
