@@ -340,7 +340,7 @@ unsafe extern "C" fn gz_fetch(mut state: crate::gzguts_h::gz_statep) -> ::core::
             crate::gzguts_h::GZIP => {
                 (*strm).avail_out =
                     ((*state).size << 1 as ::core::ffi::c_int) as crate::stdlib::uInt;
-                (*strm).next_out = (*state).out_buf.as_mut_ptr();
+                (*strm).next_out = crate::output_cursor!((*state).out_buf.as_mut_ptr());
                 if gz_decomp(state) == -1 as ::core::ffi::c_int {
                     return -1 as ::core::ffi::c_int;
                 }
@@ -451,8 +451,7 @@ unsafe extern "C" fn gz_read(
                     err = gz_load(state, buf as *mut ::core::ffi::c_uchar, n, &raw mut n);
                 } else {
                     (*state).strm.avail_out = n as crate::stdlib::uInt;
-                    (*state).strm.next_out =
-                        buf as *mut ::core::ffi::c_uchar as *mut crate::stdlib::Bytef;
+                    (*state).strm.next_out = crate::output_cursor!(buf);
                     err = gz_decomp(state);
                     n = (*state).x.have;
                     (*state).x.have = 0 as ::core::ffi::c_uint;

@@ -681,7 +681,7 @@ pub unsafe extern "C" fn inflateBack(
             }
         }
         if have >= 6 as ::core::ffi::c_uint && left >= 258 as ::core::ffi::c_uint {
-            (*strm).next_out = put as *mut crate::stdlib::Bytef;
+            (*strm).next_out = crate::output_cursor!(put);
             (*strm).avail_out = left as crate::stdlib::uInt;
             (*strm).next_in = crate::input_cursor!(next);
             (*strm).avail_in = have as crate::stdlib::uInt;
@@ -693,7 +693,7 @@ pub unsafe extern "C" fn inflateBack(
                 &mut *state,
                 wsize,
             );
-            put = (*strm).next_out as *mut ::core::ffi::c_uchar;
+            put = crate::output_pointer!((*strm).next_out) as *mut ::core::ffi::c_uchar;
             left = (*strm).avail_out as ::core::ffi::c_uint;
             let input_cursor = (*strm).next_in;
             next = match input_cursor.0 {

@@ -35,7 +35,7 @@ pub unsafe extern "C" fn compress2_z(
         next_in: crate::zlib_h::InputBuffer::default(),
         avail_in: 0,
         total_in: 0,
-        next_out: ::core::ptr::null_mut::<crate::stdlib::Bytef>(),
+        next_out: crate::zlib_h::OutputBuffer::default(),
         avail_out: 0,
         total_out: 0,
         msg: None,
@@ -65,7 +65,7 @@ pub unsafe extern "C" fn compress2_z(
     if err != crate::zlib_h::Z_OK {
         return err;
     }
-    stream.next_out = dest;
+    stream.next_out = crate::output_cursor!(dest);
     stream.avail_out = 0 as crate::stdlib::uInt;
     stream.next_in = crate::input_cursor!(source);
     stream.avail_in = 0 as crate::stdlib::uInt;
@@ -98,7 +98,7 @@ pub unsafe extern "C" fn compress2_z(
             break;
         }
     }
-    *destLen = stream.next_out.offset_from(dest) as crate::stdlib::z_size_t;
+    *destLen = stream.next_out.bytes_from(dest.addr()) as crate::stdlib::z_size_t;
     crate::src::deflate::deflateEnd(&mut stream);
     return if err == crate::zlib_h::Z_STREAM_END {
         crate::zlib_h::Z_OK

@@ -127,6 +127,22 @@ macro_rules! input_pointer {
     };
 }
 
+#[macro_export]
+macro_rules! output_cursor {
+    ($pointer:expr) => {
+        crate::zlib_h::OutputBuffer(::core::num::NonZeroUsize::new(($pointer).addr()))
+    };
+}
+
+#[macro_export]
+macro_rules! output_pointer {
+    ($cursor:expr) => {
+        ::core::ptr::with_exposed_provenance_mut::<crate::stdlib::Bytef>(
+            ($cursor).0.expect("non-null output cursor").get(),
+        )
+    };
+}
+
 /// Own a copy of a fixed zlib diagnostic while keeping `z_stream_s::msg`
 /// pointer-sized for the C ABI.
 #[macro_export]
@@ -156,6 +172,30 @@ pub mod zlib_h {
     #[derive(Copy, Clone, Default)]
     pub struct InputBuffer(pub Option<::core::num::NonZeroUsize>);
 
+    /// A nullable cursor into the caller-owned output range.  zlib's stream
+    /// API does not own this memory, so an address cursor preserves that API
+    /// while keeping the stream itself free of raw pointer fields.
+    #[repr(transparent)]
+    #[derive(Copy, Clone, Default)]
+    pub struct OutputBuffer(pub Option<::core::num::NonZeroUsize>);
+
+    impl OutputBuffer {
+        pub fn is_null(self) -> bool {
+            self.0.is_none()
+        }
+
+        pub fn advance(self, bytes: usize) -> Self {
+            Self(self.0.and_then(|address| {
+                ::core::num::NonZeroUsize::new(address.get().wrapping_add(bytes))
+            }))
+        }
+
+        pub fn bytes_from(self, start_address: usize) -> usize {
+            self.0
+                .map_or(0, |address| address.get().wrapping_sub(start_address))
+        }
+    }
+
     /// A nullable, ABI-compatible allocator context.  C can still store its
     /// `void *` context in this pointer-sized field, while Rust allocator
     /// calls carry an explicit non-pointer value.
@@ -184,7 +224,7 @@ pub mod zlib_h {
         pub next_in: InputBuffer,
         pub avail_in: crate::stdlib::uInt,
         pub total_in: crate::stdlib::uLong,
-        pub next_out: *mut crate::stdlib::Bytef,
+        pub next_out: OutputBuffer,
         pub avail_out: crate::stdlib::uInt,
         pub total_out: crate::stdlib::uLong,
         // `Rc<CString>` owns a fixed diagnostic without a raw pointer while the

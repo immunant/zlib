@@ -1849,14 +1849,17 @@ pub fn deflate(
         // The ABI output range is converted once at this boundary.  All
         // pending-buffer work below is slice based, including repeated
         // header flushes in a single deflate call.
-        let output = ::core::slice::from_raw_parts_mut(strm.next_out, strm.avail_out as usize);
+        let output = ::core::slice::from_raw_parts_mut(
+            crate::output_pointer!(strm.next_out),
+            strm.avail_out as usize,
+        );
         let mut output_pos = 0usize;
         macro_rules! flush_stream_pending {
             ($state:expr) => {{
                 strm.data_type = $state.data_type;
                 let written = flush_pending($state, &mut output[output_pos..]);
                 output_pos += written;
-                strm.next_out = strm.next_out.add(written);
+                strm.next_out = strm.next_out.advance(written);
                 strm.total_out = strm.total_out.wrapping_add(written as crate::stdlib::uLong);
                 strm.avail_out = strm.avail_out.wrapping_sub(written as crate::stdlib::uInt);
             }};
@@ -2313,7 +2316,7 @@ pub fn deflate(
             (*strm).total_in = (*strm)
                 .total_in
                 .wrapping_add(io.input_pos as crate::stdlib::uLong);
-            (*strm).next_out = (*strm).next_out.offset(io.output.len() as isize);
+            (*strm).next_out = (*strm).next_out.advance(io.output.len());
             (*strm).avail_out = io.avail_out();
             (*strm).total_out = (*strm)
                 .total_out

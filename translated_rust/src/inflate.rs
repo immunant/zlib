@@ -558,7 +558,7 @@ pub unsafe extern "C" fn inflate(
     {
         (*state).mode = crate::src::inflate::TYPEDO;
     }
-    put = (*strm).next_out as *mut ::core::ffi::c_uchar;
+    put = crate::output_pointer!((*strm).next_out) as *mut ::core::ffi::c_uchar;
     left = (*strm).avail_out as ::core::ffi::c_uint;
     let input_cursor = (*strm).next_in;
     next = match input_cursor.0 {
@@ -1116,7 +1116,7 @@ pub unsafe extern "C" fn inflate(
                                                                                         }
                                                                                     }
                                                                                     if (*state).havedict == 0 as ::core::ffi::c_int {
-                                                                                        (*strm).next_out = put as *mut crate::stdlib::Bytef;
+                                                                                        (*strm).next_out = crate::output_cursor!(put);
                                                                                         (*strm).avail_out = left as crate::stdlib::uInt;
                                                                                         (*strm).next_in = crate::input_cursor!(next);
                                                                                         (*strm).avail_in = have as crate::stdlib::uInt;
@@ -1652,7 +1652,7 @@ pub unsafe extern "C" fn inflate(
                                         if have >= 6 as ::core::ffi::c_uint
                                             && left >= 258 as ::core::ffi::c_uint
                                         {
-                                            (*strm).next_out = put as *mut crate::stdlib::Bytef;
+                                            (*strm).next_out = crate::output_cursor!(put);
                                             (*strm).avail_out = left as crate::stdlib::uInt;
                                             (*strm).next_in = crate::input_cursor!(next);
                                             (*strm).avail_in = have as crate::stdlib::uInt;
@@ -1663,7 +1663,7 @@ pub unsafe extern "C" fn inflate(
                                                 &mut *state,
                                                 out,
                                             );
-                                            put = (*strm).next_out as *mut ::core::ffi::c_uchar;
+                                            put = crate::output_pointer!((*strm).next_out) as *mut ::core::ffi::c_uchar;
                                             left = (*strm).avail_out as ::core::ffi::c_uint;
                                             let input_cursor = (*strm).next_in;
                                             next = match input_cursor.0 {
@@ -2142,7 +2142,7 @@ pub unsafe extern "C" fn inflate(
             (*state).mode = crate::src::inflate::LEN;
         }
     }
-    (*strm).next_out = put as *mut crate::stdlib::Bytef;
+    (*strm).next_out = crate::output_cursor!(put);
     (*strm).avail_out = left as crate::stdlib::uInt;
     (*strm).next_in = crate::input_cursor!(next);
     (*strm).avail_in = have as crate::stdlib::uInt;
@@ -2159,7 +2159,7 @@ pub unsafe extern "C" fn inflate(
         if updatewindow(
             strm,
             &mut *state,
-            (*strm).next_out,
+            crate::output_pointer!((*strm).next_out),
             out.wrapping_sub((*strm).avail_out as ::core::ffi::c_uint),
         ) != 0
         {
@@ -2176,14 +2176,14 @@ pub unsafe extern "C" fn inflate(
         (*state).check = (if (*state).flags != 0 {
             crate::src::crc32::crc32(
                 (*state).check as crate::stdlib::uLong,
-                (*strm).next_out.offset(-(out as isize)),
+                crate::output_pointer!((*strm).next_out).sub(out as usize),
                 out as crate::stdlib::uInt,
             )
         } else {
             crate::src::adler32::adler32(
                 (*state).check as crate::stdlib::uLong,
                 ::core::slice::from_raw_parts(
-                    (*strm).next_out.offset(-(out as isize)),
+                    crate::output_pointer!((*strm).next_out).sub(out as usize),
                     out as usize,
                 ),
             )
