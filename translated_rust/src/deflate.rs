@@ -1848,17 +1848,17 @@ macro_rules! deflate_params_at_boundary {
             }
             let s = (*strm).state as *mut crate::src::deflate::deflate_state;
             let Some(plan) = ({
-                let state = &*s;
-                crate::src::deflate::deflate_params_plan(
-                    level,
-                    strategy,
-                    state.level,
-                    state.strategy,
-                    state.last_flush,
-                )
-            }) else {
-                break 'deflate_params_result crate::zlib_h::Z_STREAM_ERROR;
-            };
+                    let state = &*s;
+                    crate::src::deflate::deflate_params_plan(
+                        level,
+                        strategy,
+                        state.level,
+                        state.strategy,
+                        state.last_flush,
+                    )
+                }) else {
+                    break 'deflate_params_result crate::zlib_h::Z_STREAM_ERROR;
+                };
             if plan.needs_block_flush {
                 let err = crate::src::deflate::deflate(strm, crate::zlib_h::Z_BLOCK);
                 if err == crate::zlib_h::Z_STREAM_ERROR {
@@ -1888,11 +1888,11 @@ macro_rules! deflate_params_at_boundary {
                 {
                     if state.matches == 1 as crate::stdlib::uInt {
                         let Ok(head_len) = usize::try_from(state.hash_size) else {
-                            break 'deflate_params_result crate::zlib_h::Z_STREAM_ERROR;
-                        };
+                                break 'deflate_params_result crate::zlib_h::Z_STREAM_ERROR;
+                            };
                         let Ok(prev_len) = usize::try_from(state.w_size) else {
-                            break 'deflate_params_result crate::zlib_h::Z_STREAM_ERROR;
-                        };
+                                break 'deflate_params_result crate::zlib_h::Z_STREAM_ERROR;
+                            };
                         if (head_len != 0 && state.head.is_null())
                             || (prev_len != 0 && state.prev.is_null())
                         {
@@ -1912,8 +1912,8 @@ macro_rules! deflate_params_at_boundary {
                         state.slid = 1;
                     } else {
                         let Ok(head_len) = usize::try_from(state.hash_size) else {
-                            break 'deflate_params_result crate::zlib_h::Z_STREAM_ERROR;
-                        };
+                                break 'deflate_params_result crate::zlib_h::Z_STREAM_ERROR;
+                            };
                         if head_len != 0 && state.head.is_null() {
                             break 'deflate_params_result crate::zlib_h::Z_STREAM_ERROR;
                         }
@@ -2906,32 +2906,39 @@ pub fn deflate(
                 }
             }
         }
-        let gzip_extra_pending = {
+        // Keep the retained-header address with the status snapshot.  The
+        // EXTRA transition only needs that token after the check, so this
+        // avoids re-adopting the raw state record solely to retrieve it.
+        let (gzip_extra_pending, gzip_extra_header) = {
             let state = &*s;
-            state.status == crate::src::deflate::EXTRA_STATE
+            (
+                state.status == crate::src::deflate::EXTRA_STATE,
+                state.gzhead,
+            )
         };
         if gzip_extra_pending {
             // Keep the gzip-header compatibility pointer at this codec boundary,
             // but use ordinary state and stream borrows for every chunk commit.
-            let header = &*(&*s).gzhead;
-            if !header.extra.is_null() {
-                let extra_len = (header.extra_len & 0xffff as crate::stdlib::uInt) as usize;
-                let extra = ::core::slice::from_raw_parts(header.extra, extra_len);
-                loop {
-                    let state = &mut *s;
-                    let stream = &mut *strm;
-                    let Ok(pending_len) = usize::try_from(state.pending_buf_size) else {
+            if !gzip_extra_header.is_null() {
+                let header = &*gzip_extra_header;
+                if !header.extra.is_null() {
+                    let extra_len = (header.extra_len & 0xffff as crate::stdlib::uInt) as usize;
+                    let extra = ::core::slice::from_raw_parts(header.extra, extra_len);
+                    loop {
+                        let state = &mut *s;
+                        let stream = &mut *strm;
+                        let Ok(pending_len) = usize::try_from(state.pending_buf_size) else {
                         return crate::zlib_h::Z_STREAM_ERROR;
                     };
-                    if pending_len != 0 && state.pending_buf.is_null() {
-                        return crate::zlib_h::Z_STREAM_ERROR;
-                    }
-                    let pending_buf = if pending_len == 0 {
-                        &mut []
-                    } else {
-                        ::core::slice::from_raw_parts_mut(state.pending_buf, pending_len)
-                    };
-                    let Some(done) = append_gzip_extra_chunk_state(
+                        if pending_len != 0 && state.pending_buf.is_null() {
+                            return crate::zlib_h::Z_STREAM_ERROR;
+                        }
+                        let pending_buf = if pending_len == 0 {
+                            &mut []
+                        } else {
+                            ::core::slice::from_raw_parts_mut(state.pending_buf, pending_len)
+                        };
+                        let Some(done) = append_gzip_extra_chunk_state(
                         pending_buf,
                         &mut state.pending,
                         &mut state.gzindex,
@@ -2941,47 +2948,55 @@ pub fn deflate(
                     ) else {
                         return crate::zlib_h::Z_STREAM_ERROR;
                     };
-                    if done {
-                        state.gzindex = 0 as crate::zutil_h::ulg;
-                        break;
-                    }
-                    if state.pending != state.pending_buf_size {
-                        return crate::zlib_h::Z_STREAM_ERROR;
-                    }
-                    flush_pending(strm);
-                    let state = &mut *s;
-                    if state.pending != 0 as crate::zutil_h::ulg {
-                        state.last_flush = -1 as ::core::ffi::c_int;
-                        return crate::zlib_h::Z_OK;
+                        if done {
+                            state.gzindex = 0 as crate::zutil_h::ulg;
+                            break;
+                        }
+                        if state.pending != state.pending_buf_size {
+                            return crate::zlib_h::Z_STREAM_ERROR;
+                        }
+                        flush_pending(strm);
+                        let state = &mut *s;
+                        if state.pending != 0 as crate::zutil_h::ulg {
+                            state.last_flush = -1 as ::core::ffi::c_int;
+                            return crate::zlib_h::Z_OK;
+                        }
                     }
                 }
             }
             let state = &mut *s;
             state.status = crate::src::deflate::NAME_STATE;
         }
-        let gzip_name_pending = {
+        // NAME follows the same status/header pairing as EXTRA.  Keep only a
+        // raw token here; the temporary C string view remains at the actual
+        // compatibility boundary below.
+        let (gzip_name_pending, gzip_name_header) = {
             let state = &*s;
-            state.status == crate::src::deflate::NAME_STATE
+            (
+                state.status == crate::src::deflate::NAME_STATE,
+                state.gzhead,
+            )
         };
         if gzip_name_pending {
-            let header = &*(&*s).gzhead;
-            if !header.name.is_null() {
-                let name = ::std::ffi::CStr::from_ptr(header.name.cast()).to_bytes_with_nul();
-                loop {
-                    let state = &mut *s;
-                    let stream = &mut *strm;
-                    let Ok(pending_len) = usize::try_from(state.pending_buf_size) else {
+            if !gzip_name_header.is_null() {
+                let header = &*gzip_name_header;
+                if !header.name.is_null() {
+                    let name = ::std::ffi::CStr::from_ptr(header.name.cast()).to_bytes_with_nul();
+                    loop {
+                        let state = &mut *s;
+                        let stream = &mut *strm;
+                        let Ok(pending_len) = usize::try_from(state.pending_buf_size) else {
                         return crate::zlib_h::Z_STREAM_ERROR;
                     };
-                    if pending_len != 0 && state.pending_buf.is_null() {
-                        return crate::zlib_h::Z_STREAM_ERROR;
-                    }
-                    let pending_buf = if pending_len == 0 {
-                        &mut []
-                    } else {
-                        ::core::slice::from_raw_parts_mut(state.pending_buf, pending_len)
-                    };
-                    let Some(done) = append_gzip_cstring_chunk_state(
+                        if pending_len != 0 && state.pending_buf.is_null() {
+                            return crate::zlib_h::Z_STREAM_ERROR;
+                        }
+                        let pending_buf = if pending_len == 0 {
+                            &mut []
+                        } else {
+                            ::core::slice::from_raw_parts_mut(state.pending_buf, pending_len)
+                        };
+                        let Some(done) = append_gzip_cstring_chunk_state(
                         pending_buf,
                         &mut state.pending,
                         &mut state.gzindex,
@@ -2991,47 +3006,53 @@ pub fn deflate(
                     ) else {
                         return crate::zlib_h::Z_STREAM_ERROR;
                     };
-                    if done {
-                        state.gzindex = 0 as crate::zutil_h::ulg;
-                        break;
-                    }
-                    if state.pending != state.pending_buf_size {
-                        return crate::zlib_h::Z_STREAM_ERROR;
-                    }
-                    flush_pending(strm);
-                    let state = &mut *s;
-                    if state.pending != 0 as crate::zutil_h::ulg {
-                        state.last_flush = -1 as ::core::ffi::c_int;
-                        return crate::zlib_h::Z_OK;
+                        if done {
+                            state.gzindex = 0 as crate::zutil_h::ulg;
+                            break;
+                        }
+                        if state.pending != state.pending_buf_size {
+                            return crate::zlib_h::Z_STREAM_ERROR;
+                        }
+                        flush_pending(strm);
+                        let state = &mut *s;
+                        if state.pending != 0 as crate::zutil_h::ulg {
+                            state.last_flush = -1 as ::core::ffi::c_int;
+                            return crate::zlib_h::Z_OK;
+                        }
                     }
                 }
             }
             let state = &mut *s;
             state.status = crate::src::deflate::COMMENT_STATE;
         }
-        let gzip_comment_pending = {
+        let (gzip_comment_pending, gzip_comment_header) = {
             let state = &*s;
-            state.status == crate::src::deflate::COMMENT_STATE
+            (
+                state.status == crate::src::deflate::COMMENT_STATE,
+                state.gzhead,
+            )
         };
         if gzip_comment_pending {
-            let header = &*(&*s).gzhead;
-            if !header.comment.is_null() {
-                let comment = ::std::ffi::CStr::from_ptr(header.comment.cast()).to_bytes_with_nul();
-                loop {
-                    let state = &mut *s;
-                    let stream = &mut *strm;
-                    let Ok(pending_len) = usize::try_from(state.pending_buf_size) else {
+            if !gzip_comment_header.is_null() {
+                let header = &*gzip_comment_header;
+                if !header.comment.is_null() {
+                    let comment =
+                        ::std::ffi::CStr::from_ptr(header.comment.cast()).to_bytes_with_nul();
+                    loop {
+                        let state = &mut *s;
+                        let stream = &mut *strm;
+                        let Ok(pending_len) = usize::try_from(state.pending_buf_size) else {
                         return crate::zlib_h::Z_STREAM_ERROR;
                     };
-                    if pending_len != 0 && state.pending_buf.is_null() {
-                        return crate::zlib_h::Z_STREAM_ERROR;
-                    }
-                    let pending_buf = if pending_len == 0 {
-                        &mut []
-                    } else {
-                        ::core::slice::from_raw_parts_mut(state.pending_buf, pending_len)
-                    };
-                    let Some(done) = append_gzip_cstring_chunk_state(
+                        if pending_len != 0 && state.pending_buf.is_null() {
+                            return crate::zlib_h::Z_STREAM_ERROR;
+                        }
+                        let pending_buf = if pending_len == 0 {
+                            &mut []
+                        } else {
+                            ::core::slice::from_raw_parts_mut(state.pending_buf, pending_len)
+                        };
+                        let Some(done) = append_gzip_cstring_chunk_state(
                         pending_buf,
                         &mut state.pending,
                         &mut state.gzindex,
@@ -3041,47 +3062,50 @@ pub fn deflate(
                     ) else {
                         return crate::zlib_h::Z_STREAM_ERROR;
                     };
-                    if done {
-                        state.gzindex = 0 as crate::zutil_h::ulg;
-                        break;
-                    }
-                    if state.pending != state.pending_buf_size {
-                        return crate::zlib_h::Z_STREAM_ERROR;
-                    }
-                    flush_pending(strm);
-                    let state = &mut *s;
-                    if state.pending != 0 as crate::zutil_h::ulg {
-                        state.last_flush = -1 as ::core::ffi::c_int;
-                        return crate::zlib_h::Z_OK;
+                        if done {
+                            state.gzindex = 0 as crate::zutil_h::ulg;
+                            break;
+                        }
+                        if state.pending != state.pending_buf_size {
+                            return crate::zlib_h::Z_STREAM_ERROR;
+                        }
+                        flush_pending(strm);
+                        let state = &mut *s;
+                        if state.pending != 0 as crate::zutil_h::ulg {
+                            state.last_flush = -1 as ::core::ffi::c_int;
+                            return crate::zlib_h::Z_OK;
+                        }
                     }
                 }
             }
             let state = &mut *s;
             state.status = crate::src::deflate::HCRC_STATE;
         }
-        let gzip_hcrc_pending = {
+        let (gzip_hcrc_pending, gzip_hcrc_header, hcrc_pending, hcrc_pending_buf_size) = {
             let state = &*s;
-            state.status == crate::src::deflate::HCRC_STATE
+            (
+                state.status == crate::src::deflate::HCRC_STATE,
+                state.gzhead,
+                state.pending,
+                state.pending_buf_size,
+            )
         };
         if gzip_hcrc_pending {
             // Snapshot the only header-derived flag and the pending capacity
             // together.  The scalar planner then owns the two-byte admission
             // check, avoiding a second raw state adoption before a possible
             // flush.
-            let hcrc_plan = {
-                let state = &*s;
-                if state.gzhead.is_null() {
-                    GzipHcrcPlan {
-                        emit: false,
-                        flush_before_emit: false,
-                    }
-                } else {
-                    gzip_hcrc_plan(
-                        (&*state.gzhead).hcrc != 0,
-                        state.pending,
-                        state.pending_buf_size,
-                    )
+            let hcrc_plan = if gzip_hcrc_header.is_null() {
+                GzipHcrcPlan {
+                    emit: false,
+                    flush_before_emit: false,
                 }
+            } else {
+                gzip_hcrc_plan(
+                    (&*gzip_hcrc_header).hcrc != 0,
+                    hcrc_pending,
+                    hcrc_pending_buf_size,
+                )
             };
             if hcrc_plan.emit {
                 if hcrc_plan.flush_before_emit {
