@@ -78,15 +78,19 @@ fn gz_reset_fields(state: &mut crate::gzguts_h::gz_state) {
     state.skip = 0;
 }
 
-unsafe extern "C" fn gz_reset(mut state: crate::gzguts_h::gz_statep) {
-    gz_reset_fields(&mut *state);
+fn gz_reset_core(state: &mut crate::gzguts_h::gz_state) {
+    gz_reset_fields(state);
+    state.x.pos = 0;
+    state.strm.avail_in = 0;
+}
+
+unsafe extern "C" fn gz_reset(state: crate::gzguts_h::gz_statep) {
+    gz_reset_core(&mut *state);
     gz_error(
         state,
         crate::zlib_h::Z_OK,
         ::core::ptr::null::<::core::ffi::c_char>(),
     );
-    (*state).x.pos = 0;
-    (*state).strm.avail_in = 0;
 }
 
 fn gz_open_defaults(state: &mut crate::gzguts_h::gz_state) {

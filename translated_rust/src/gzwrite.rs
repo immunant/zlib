@@ -48,13 +48,21 @@ pub use crate::zlib_h::Z_OK;
 pub use crate::zlib_h::Z_STREAM_END;
 pub use crate::zlib_h::Z_STREAM_ERROR;
 
+fn gz_init_core(state: &mut crate::gzguts_h::gz_state) {
+    state.size = state.want;
+    if state.direct == 0 {
+        state.strm.avail_out = state.size as crate::stdlib::uInt;
+        state.strm.next_out = state.out as *mut crate::stdlib::Bytef;
+        state.x.next = state.strm.next_out as *mut ::core::ffi::c_uchar;
+    }
+}
+
 unsafe extern "C" fn gz_init(mut state: crate::gzguts_h::gz_statep) -> ::core::ffi::c_int {
-    let mut ret: ::core::ffi::c_int = 0;
-    let mut strm: crate::zlib_h::z_streamp = &raw mut (*state).strm;
-    (*state).in_0 = crate::stdlib::malloc(
-        ((*state).want << 1 as ::core::ffi::c_int) as crate::__stddef_size_t_h::size_t,
+    let state = &mut *state;
+    state.in_0 = crate::stdlib::malloc(
+        (state.want << 1 as ::core::ffi::c_int) as crate::__stddef_size_t_h::size_t,
     ) as *mut ::core::ffi::c_uchar;
-    if (*state).in_0.is_null() {
+    if state.in_0.is_null() {
         crate::src::gzlib::gz_error(
             state as *mut crate::gzguts_h::gz_state,
             crate::zlib_h::Z_MEM_ERROR,
@@ -62,11 +70,11 @@ unsafe extern "C" fn gz_init(mut state: crate::gzguts_h::gz_statep) -> ::core::f
         );
         return -1 as ::core::ffi::c_int;
     }
-    if (*state).direct == 0 {
-        (*state).out = crate::stdlib::malloc((*state).want as crate::__stddef_size_t_h::size_t)
+    if state.direct == 0 {
+        state.out = crate::stdlib::malloc(state.want as crate::__stddef_size_t_h::size_t)
             as *mut ::core::ffi::c_uchar;
-        if (*state).out.is_null() {
-            crate::stdlib::free((*state).in_0 as *mut ::core::ffi::c_void);
+        if state.out.is_null() {
+            crate::stdlib::free(state.in_0 as *mut ::core::ffi::c_void);
             crate::src::gzlib::gz_error(
                 state as *mut crate::gzguts_h::gz_state,
                 crate::zlib_h::Z_MEM_ERROR,
@@ -74,22 +82,22 @@ unsafe extern "C" fn gz_init(mut state: crate::gzguts_h::gz_statep) -> ::core::f
             );
             return -1 as ::core::ffi::c_int;
         }
-        (*strm).zalloc = None;
-        (*strm).zfree = None;
-        (*strm).opaque = ::core::ptr::null_mut::<::core::ffi::c_void>();
-        ret = crate::src::deflate::deflateInit2_(
-            strm as *mut crate::zlib_h::z_stream_s,
-            (*state).level,
+        state.strm.zalloc = None;
+        state.strm.zfree = None;
+        state.strm.opaque = ::core::ptr::null_mut::<::core::ffi::c_void>();
+        if crate::src::deflate::deflateInit2_(
+            &mut state.strm as *mut crate::zlib_h::z_stream_s,
+            state.level,
             8 as ::core::ffi::c_int,
             15 as ::core::ffi::c_int + 16 as ::core::ffi::c_int,
             8 as ::core::ffi::c_int,
-            (*state).strategy,
+            state.strategy,
             crate::zlib_h::ZLIB_VERSION.as_ptr(),
             ::core::mem::size_of::<crate::zlib_h::z_stream>() as ::core::ffi::c_int,
-        );
-        if ret != crate::zlib_h::Z_OK {
-            crate::stdlib::free((*state).out as *mut ::core::ffi::c_void);
-            crate::stdlib::free((*state).in_0 as *mut ::core::ffi::c_void);
+        ) != crate::zlib_h::Z_OK
+        {
+            crate::stdlib::free(state.out as *mut ::core::ffi::c_void);
+            crate::stdlib::free(state.in_0 as *mut ::core::ffi::c_void);
             crate::src::gzlib::gz_error(
                 state as *mut crate::gzguts_h::gz_state,
                 crate::zlib_h::Z_MEM_ERROR,
@@ -97,15 +105,10 @@ unsafe extern "C" fn gz_init(mut state: crate::gzguts_h::gz_statep) -> ::core::f
             );
             return -1 as ::core::ffi::c_int;
         }
-        (*strm).next_in = ::core::ptr::null_mut::<crate::stdlib::Bytef>();
+        state.strm.next_in = ::core::ptr::null_mut::<crate::stdlib::Bytef>();
     }
-    (*state).size = (*state).want;
-    if (*state).direct == 0 {
-        (*strm).avail_out = (*state).size as crate::stdlib::uInt;
-        (*strm).next_out = (*state).out as *mut crate::stdlib::Bytef;
-        (*state).x.next = (*strm).next_out as *mut ::core::ffi::c_uchar;
-    }
-    return 0 as ::core::ffi::c_int;
+    gz_init_core(state);
+    0 as ::core::ffi::c_int
 }
 
 unsafe extern "C" fn gz_comp(

@@ -252,8 +252,7 @@ pub const NIL: ::core::ffi::c_int = 0 as ::core::ffi::c_int;
 
 pub const TOO_FAR: ::core::ffi::c_int = 4096 as ::core::ffi::c_int;
 
-static mut configuration_table: [config; 10] = unsafe {
-    [
+static configuration_table: [config; 10] = [
         config_s {
             good_length: 0 as crate::zutil_h::ush,
             max_lazy: 0 as crate::zutil_h::ush,
@@ -384,8 +383,7 @@ static mut configuration_table: [config; 10] = unsafe {
                     ) -> block_state,
             ),
         },
-    ]
-};
+];
 
 unsafe extern "C" fn slide_hash(mut s: *mut crate::src::deflate::deflate_state) {
     let mut n: ::core::ffi::c_uint = 0;
