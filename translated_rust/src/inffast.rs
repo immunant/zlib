@@ -373,7 +373,6 @@ fn inflate_fast_core(
     }
 }
 pub unsafe extern "C" fn inflate_fast(mut strm: z_streamp, mut start: ::core::ffi::c_uint) {
-    let mut state: *mut inflate_state = ::core::ptr::null_mut::<inflate_state>();
     let mut input_remaining: uInt = 0;
     let mut output_remaining: uInt = 0;
     let mut in_0: *mut ::core::ffi::c_uchar = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
@@ -393,22 +392,25 @@ pub unsafe extern "C" fn inflate_fast(mut strm: z_streamp, mut start: ::core::ff
     let mut len: ::core::ffi::c_uint = 0;
     let mut dist: ::core::ffi::c_uint = 0;
     let mut from: *mut ::core::ffi::c_uchar = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
-    state = (*strm).state as *mut inflate_state;
-    in_0 = (*strm).next_in as *mut ::core::ffi::c_uchar;
-    input_remaining = (*strm).avail_in;
-    out = (*strm).next_out as *mut ::core::ffi::c_uchar;
-    output_remaining = (*strm).avail_out;
-    wsize = (*state).wsize;
-    whave = (*state).whave;
-    wnext = (*state).wnext;
-    window = (*state).window;
-    hold = (*state).hold;
-    bits = (*state).bits;
-    lcode = (*state).lencode;
-    dcode = (*state).distcode;
-    lmask = ((1 as ::core::ffi::c_uint) << (*state).lenbits).wrapping_sub(1 as ::core::ffi::c_uint);
-    dmask =
-        ((1 as ::core::ffi::c_uint) << (*state).distbits).wrapping_sub(1 as ::core::ffi::c_uint);
+    // The decoder's raw cursors remain transitional, but borrow the two
+    // validated ABI records once rather than repeatedly dereferencing their
+    // raw handles throughout the loop.
+    let strm = &mut *strm;
+    let state = &mut *(strm.state as *mut inflate_state);
+    in_0 = strm.next_in as *mut ::core::ffi::c_uchar;
+    input_remaining = strm.avail_in;
+    out = strm.next_out as *mut ::core::ffi::c_uchar;
+    output_remaining = strm.avail_out;
+    wsize = state.wsize;
+    whave = state.whave;
+    wnext = state.wnext;
+    window = state.window;
+    hold = state.hold;
+    bits = state.bits;
+    lcode = state.lencode;
+    dcode = state.distcode;
+    lmask = ((1 as ::core::ffi::c_uint) << state.lenbits).wrapping_sub(1 as ::core::ffi::c_uint);
+    dmask = ((1 as ::core::ffi::c_uint) << state.distbits).wrapping_sub(1 as ::core::ffi::c_uint);
     's_627: loop {
         if bits < 15 as ::core::ffi::c_uint {
             let c2rust_fresh0 = in_0;
@@ -501,11 +503,11 @@ pub unsafe extern "C" fn inflate_fast(mut strm: z_streamp, mut start: ::core::ff
                         if dist > op {
                             op = dist.wrapping_sub(op);
                             if op > whave {
-                                if (*state).sane != 0 {
-                                    (*strm).msg = b"invalid distance too far back\0".as_ptr()
+                                if state.sane != 0 {
+                                    strm.msg = b"invalid distance too far back\0".as_ptr()
                                         as *const ::core::ffi::c_char
                                         as *mut ::core::ffi::c_char;
-                                    (*state).mode = BAD;
+                                    state.mode = BAD;
                                     break 's_627;
                                 }
                             }
@@ -678,10 +680,10 @@ pub unsafe extern "C" fn inflate_fast(mut strm: z_streamp, mut start: ::core::ff
                                     as usize,
                             );
                     } else {
-                        (*strm).msg = b"invalid distance code\0".as_ptr()
+                        strm.msg = b"invalid distance code\0".as_ptr()
                             as *const ::core::ffi::c_char
                             as *mut ::core::ffi::c_char;
-                        (*state).mode = BAD;
+                        state.mode = BAD;
                         break 's_627;
                     }
                 }
@@ -695,13 +697,13 @@ pub unsafe extern "C" fn inflate_fast(mut strm: z_streamp, mut start: ::core::ff
                                 as ::core::ffi::c_ulong) as usize,
                     );
             } else if op & 32 as ::core::ffi::c_uint != 0 {
-                (*state).mode = TYPE;
+                state.mode = TYPE;
                 break 's_627;
             } else {
-                (*strm).msg = b"invalid literal/length code\0".as_ptr()
+                strm.msg = b"invalid literal/length code\0".as_ptr()
                     as *const ::core::ffi::c_char
                     as *mut ::core::ffi::c_char;
-                (*state).mode = BAD;
+                state.mode = BAD;
                 break 's_627;
             }
         }
@@ -715,10 +717,10 @@ pub unsafe extern "C" fn inflate_fast(mut strm: z_streamp, mut start: ::core::ff
     bits = bits.wrapping_sub(len << 3 as ::core::ffi::c_int);
     hold &= ((1 as ::core::ffi::c_uint) << bits).wrapping_sub(1 as ::core::ffi::c_uint)
         as ::core::ffi::c_ulong;
-    (*strm).next_in = in_0 as *mut Bytef;
-    (*strm).next_out = out as *mut Bytef;
-    (*strm).avail_in = input_remaining;
-    (*strm).avail_out = output_remaining;
-    (*state).hold = hold;
-    (*state).bits = bits;
+    strm.next_in = in_0 as *mut Bytef;
+    strm.next_out = out as *mut Bytef;
+    strm.avail_in = input_remaining;
+    strm.avail_out = output_remaining;
+    state.hold = hold;
+    state.bits = bits;
 }
