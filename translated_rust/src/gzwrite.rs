@@ -55,18 +55,6 @@ enum GzCompInput<'a> {
     External(&'a [u8]),
 }
 
-/// The only operations in gzip writing that still need access to the legacy
-/// deflate stream.  Keeping initialization and a single compression step here
-/// means the buffered I/O loop can remain concerned only with its safe
-/// `Vec`-backed input and output buffers.
-enum GzDeflateOperation {
-    Initialize,
-    Run {
-        flush: ::core::ffi::c_int,
-        reset: bool,
-    },
-}
-
 enum GzWriteBufferError {
     Input,
     Output,
@@ -129,12 +117,11 @@ fn gz_save_direct_input(state: &mut crate::gzguts_h::gz_state, input: &[u8]) -> 
     true
 }
 
-unsafe fn gz_init(
-    state: &mut crate::gzguts_h::gz_state,
-    operation: GzDeflateOperation,
-) -> ::core::ffi::c_int {
-    let run = matches!(&operation, GzDeflateOperation::Run { .. });
-    let mut ret: ::core::ffi::c_int = 0;
+/// Set up gzip's owned staging buffers and synchronize their initial cursors
+/// to the legacy stream.  Deflate construction and stepping intentionally
+/// stay with `GzCompressor::compress`, the one place that crosses that legacy
+/// boundary.
+unsafe fn gz_init(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
     let strm: &mut crate::zlib_h::z_stream = &mut state.strm;
     if state.size == 0 {
         if let Err(error) = gz_prepare_write_buffers(
@@ -157,27 +144,6 @@ unsafe fn gz_init(
             strm.zalloc = None;
             strm.zfree = None;
             strm.opaque = ::core::ptr::null_mut::<::core::ffi::c_void>();
-            ret = crate::src::deflate::deflateInit2_(
-                Some(strm),
-                state.level,
-                8 as ::core::ffi::c_int,
-                15 as ::core::ffi::c_int + 16 as ::core::ffi::c_int,
-                8 as ::core::ffi::c_int,
-                state.strategy,
-                Some(crate::zlib_h::ZLIB_VERSION[0]),
-                ::core::mem::size_of::<crate::zlib_h::z_stream>() as ::core::ffi::c_int,
-            );
-            if ret != crate::zlib_h::Z_OK {
-                state.in_0.clear();
-                state.out.clear();
-                crate::src::gzlib::gz_error_state(
-                    state,
-                    crate::zlib_h::Z_MEM_ERROR,
-                    Some(c"out of memory"),
-                );
-                return -1 as ::core::ffi::c_int;
-            }
-            strm.next_in = ::core::ptr::null_mut::<crate::stdlib::Bytef>();
         }
         state.size = state.want;
         if state.direct == 0 {
@@ -186,21 +152,7 @@ unsafe fn gz_init(
             state.x.next = strm.next_out as *mut ::core::ffi::c_uchar;
         }
     }
-    if !run {
-        return 0;
-    }
-    if state.direct != 0 {
-        return crate::zlib_h::Z_OK;
-    }
-
-    let GzDeflateOperation::Run { flush, reset } = operation else {
-        unreachable!("the initialization operation returned above");
-    };
-    if reset {
-        crate::src::deflate::deflateReset(strm);
-        state.reset = 0;
-    }
-    crate::src::deflate::deflate(strm, flush)
+    0
 }
 
 impl GzCompressor<'_> {
@@ -338,6 +290,39 @@ impl GzCompressor<'_> {
             }
             return 0 as ::core::ffi::c_int;
         }
+        if state.size == 0 && unsafe { gz_init(state) } == -1 {
+            return -1;
+        }
+        if state.strm.state.is_null() {
+            let initialized = unsafe {
+                crate::src::deflate::deflateInit2_(
+                    Some(&mut state.strm),
+                    state.level,
+                    8 as ::core::ffi::c_int,
+                    15 as ::core::ffi::c_int + 16 as ::core::ffi::c_int,
+                    8 as ::core::ffi::c_int,
+                    state.strategy,
+                    Some(crate::zlib_h::ZLIB_VERSION[0]),
+                    ::core::mem::size_of::<crate::zlib_h::z_stream>() as ::core::ffi::c_int,
+                )
+            };
+            if initialized != crate::zlib_h::Z_OK {
+                state.in_0.clear();
+                state.out.clear();
+                state.size = 0;
+                state.strm.next_in = ::core::ptr::null_mut();
+                state.strm.avail_in = 0;
+                state.strm.next_out = ::core::ptr::null_mut();
+                state.strm.avail_out = 0;
+                state.x.next = ::core::ptr::null_mut();
+                crate::src::gzlib::gz_error_state(
+                    state,
+                    crate::zlib_h::Z_MEM_ERROR,
+                    Some(c"out of memory"),
+                );
+                return -1;
+            }
+        }
         let mut reset = state.reset != 0;
         if reset {
             if state.strm.avail_in == 0 as crate::stdlib::uInt && flush == crate::zlib_h::Z_NO_FLUSH
@@ -407,7 +392,11 @@ impl GzCompressor<'_> {
                 }
             }
             have = state.strm.avail_out as ::core::ffi::c_uint;
-            ret = unsafe { gz_init(state, GzDeflateOperation::Run { flush, reset }) };
+            if reset {
+                unsafe { crate::src::deflate::deflateReset(&mut state.strm) };
+                state.reset = 0;
+            }
+            ret = unsafe { crate::src::deflate::deflate(&mut state.strm, flush) };
             buffers_ready = true;
             reset = false;
             if ret == -1 {
@@ -494,7 +483,7 @@ unsafe fn gz_write(state: &mut crate::gzguts_h::gz_state, input: &[u8]) -> crate
         return 0 as crate::stdlib::z_size_t;
     }
     if state.size == 0 as ::core::ffi::c_uint
-        && gz_init(state, GzDeflateOperation::Initialize) == -1 as ::core::ffi::c_int
+        && gz_init(state) == -1 as ::core::ffi::c_int
     {
         return 0 as crate::stdlib::z_size_t;
     }
