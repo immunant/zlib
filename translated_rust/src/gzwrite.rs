@@ -524,7 +524,7 @@ unsafe fn gz_write(state: &mut crate::gzguts_h::gz_state, input: &[u8]) -> crate
     {
         return 0 as crate::stdlib::z_size_t;
     }
-    if state.skip != 0 && gz_zero(state) == -1 as ::core::ffi::c_int {
+    if state.skip != 0 && gz_zero_impl(&mut GzCompressor { state }) == -1 as ::core::ffi::c_int {
         return 0 as crate::stdlib::z_size_t;
     }
     let Ok(capacity) = usize::try_from(state.size) else {
