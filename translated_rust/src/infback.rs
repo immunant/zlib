@@ -996,6 +996,11 @@ fn inflate_back_init_state(
     state.wnext = 0;
     state.whave = 0;
     state.sane = 1;
+    // Keep the same reciprocal stream/state relationship as the regular
+    // inflater.  `inflateBack()` can then use the established checked binder
+    // instead of reopening this raw state pointer itself.
+    state.strm = strm as *mut crate::zlib_h::z_stream;
+    state.mode = crate::src::inflate::TYPE;
 }
 
 // This is deliberately the private implementation target for the exported
@@ -1085,13 +1090,14 @@ pub unsafe extern "C" fn inflateBack(
         val: 0,
     };
     let mut ret: ::core::ffi::c_int = 0;
-    if strm.state.is_null() {
+    // `inflateBackInit_()` establishes the reciprocal stream/state binding
+    // above. Reuse the shared checked binder so this decoder's state setup is
+    // reference-bound; the raw callback and window cursors remain below.
+    let Some((strm, state_ref)) =
+        crate::src::inflate::inflateStateCheck(strm as *mut crate::zlib_h::z_stream)
+    else {
         return crate::zlib_h::Z_STREAM_ERROR;
-    }
-    // The stream owns this initialized allocation for the whole decode. Bind
-    // it once after the null check so decoder bookkeeping stays reference-based.
-    let state = strm.state as *mut crate::src::inflate::inflate_state;
-    let state_ref = &mut *state;
+    };
     left = inflate_back_begin_decode(strm, state_ref);
     next = strm.next_in as *mut ::core::ffi::c_uchar;
     have = (if !next.is_null() {
