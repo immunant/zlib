@@ -146,6 +146,25 @@ fn gz_read_needs_fetch(
     how == crate::gzguts_h::LOOK || chunk_len < size << 1 as ::core::ffi::c_int
 }
 
+enum GzUngetcBufferState {
+    Empty,
+    Full,
+    Pushable,
+}
+
+fn gz_ungetc_buffer_state(
+    have: ::core::ffi::c_uint,
+    size: ::core::ffi::c_uint,
+) -> GzUngetcBufferState {
+    if have == 0 {
+        GzUngetcBufferState::Empty
+    } else if have == size << 1 as ::core::ffi::c_int {
+        GzUngetcBufferState::Full
+    } else {
+        GzUngetcBufferState::Pushable
+    }
+}
+
 unsafe extern "C" fn gz_load(
     state: crate::gzguts_h::gz_statep,
     buf: *mut ::core::ffi::c_uchar,
@@ -622,6 +641,30 @@ mod tests {
     }
 
     #[test]
+    fn gz_ungetc_buffer_state_prioritizes_empty_buffer() {
+        assert!(matches!(
+            gz_ungetc_buffer_state(0, 8),
+            GzUngetcBufferState::Empty
+        ));
+    }
+
+    #[test]
+    fn gz_ungetc_buffer_state_requires_exact_double_size_to_be_full() {
+        assert!(matches!(
+            gz_ungetc_buffer_state(15, 8),
+            GzUngetcBufferState::Pushable
+        ));
+        assert!(matches!(
+            gz_ungetc_buffer_state(16, 8),
+            GzUngetcBufferState::Full
+        ));
+        assert!(matches!(
+            gz_ungetc_buffer_state(17, 8),
+            GzUngetcBufferState::Pushable
+        ));
+    }
+
+    #[test]
     fn gz_is_gzip_header_accepts_valid_header() {
         assert!(gz_is_gzip_header(31, 139, 8, 31));
     }
@@ -927,24 +970,27 @@ pub unsafe extern "C" fn gzungetc(
     if c < 0 as ::core::ffi::c_int {
         return -1 as ::core::ffi::c_int;
     }
-    if (*state).x.have == 0 as ::core::ffi::c_uint {
-        (*state).x.have = 1 as ::core::ffi::c_uint;
-        (*state).x.next = (*state)
-            .out
-            .offset(((*state).size << 1 as ::core::ffi::c_int) as isize)
-            .offset(-(1 as ::core::ffi::c_int as isize));
-        *(*state).x.next.offset(0 as ::core::ffi::c_int as isize) = c as ::core::ffi::c_uchar;
-        (*state).x.pos -= 1;
-        (*state).past = 0 as ::core::ffi::c_int;
-        return c;
-    }
-    if (*state).x.have == (*state).size << 1 as ::core::ffi::c_int {
-        crate::src::gzlib::gz_error(
-            state as *mut crate::gzguts_h::gz_state,
-            crate::zlib_h::Z_DATA_ERROR,
-            b"out of room to push characters\0".as_ptr() as *const ::core::ffi::c_char,
-        );
-        return -1 as ::core::ffi::c_int;
+    match gz_ungetc_buffer_state((*state).x.have, (*state).size) {
+        GzUngetcBufferState::Empty => {
+            (*state).x.have = 1 as ::core::ffi::c_uint;
+            (*state).x.next = (*state)
+                .out
+                .offset(((*state).size << 1 as ::core::ffi::c_int) as isize)
+                .offset(-(1 as ::core::ffi::c_int as isize));
+            *(*state).x.next.offset(0 as ::core::ffi::c_int as isize) = c as ::core::ffi::c_uchar;
+            (*state).x.pos -= 1;
+            (*state).past = 0 as ::core::ffi::c_int;
+            return c;
+        }
+        GzUngetcBufferState::Full => {
+            crate::src::gzlib::gz_error(
+                state as *mut crate::gzguts_h::gz_state,
+                crate::zlib_h::Z_DATA_ERROR,
+                b"out of room to push characters\0".as_ptr() as *const ::core::ffi::c_char,
+            );
+            return -1 as ::core::ffi::c_int;
+        }
+        GzUngetcBufferState::Pushable => {}
     }
     if (*state).x.next == (*state).out {
         let mut src: *mut ::core::ffi::c_uchar = (*state).out.offset((*state).x.have as isize);

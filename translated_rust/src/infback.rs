@@ -72,6 +72,10 @@ fn inflate_back_window_bits_are_valid(window_bits: ::core::ffi::c_int) -> bool {
     window_bits >= 8 as ::core::ffi::c_int && window_bits <= 15 as ::core::ffi::c_int
 }
 
+fn inflate_back_window_size(window_bits: ::core::ffi::c_int) -> ::core::ffi::c_uint {
+    (1 as ::core::ffi::c_uint) << window_bits
+}
+
 fn inflate_back_init_metadata_is_valid(
     version_first_byte: ::core::ffi::c_int,
     stream_size: ::core::ffi::c_int,
@@ -130,7 +134,7 @@ pub unsafe extern "C" fn inflateBackInit_(
     (*strm).state = state as *mut crate::src::deflate::internal_state;
     (*state).dmax = 32768 as ::core::ffi::c_uint;
     (*state).wbits = windowBits as crate::stdlib::uInt as ::core::ffi::c_uint;
-    (*state).wsize = (1 as ::core::ffi::c_uint) << windowBits;
+    (*state).wsize = inflate_back_window_size(windowBits);
     (*state).window = window;
     (*state).wnext = 0 as ::core::ffi::c_uint;
     (*state).whave = 0 as ::core::ffi::c_uint;
@@ -1051,7 +1055,10 @@ pub unsafe extern "C" fn inflateBackEnd_ffi(
 
 #[cfg(test)]
 mod tests {
-    use super::{inflate_back_init_metadata_is_valid, inflate_back_window_bits_are_valid};
+    use super::{
+        inflate_back_init_metadata_is_valid, inflate_back_window_bits_are_valid,
+        inflate_back_window_size,
+    };
 
     #[test]
     fn inflate_back_window_bits_validation_accepts_only_supported_range() {
@@ -1060,6 +1067,13 @@ mod tests {
         }
         assert!(!inflate_back_window_bits_are_valid(7));
         assert!(!inflate_back_window_bits_are_valid(16));
+    }
+
+    #[test]
+    fn inflate_back_window_size_matches_each_supported_bit_width() {
+        for window_bits in 8..=15 {
+            assert_eq!(inflate_back_window_size(window_bits), 1 << window_bits);
+        }
     }
 
     #[test]

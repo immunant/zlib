@@ -113,6 +113,17 @@ fn gz_write_chunk_len(remaining: crate::stdlib::z_size_t) -> ::core::ffi::c_uint
     }
 }
 
+fn gzputs_result(
+    requested: crate::stdlib::z_size_t,
+    written: crate::stdlib::z_size_t,
+) -> ::core::ffi::c_int {
+    if requested != 0 && written == 0 {
+        -1
+    } else {
+        written as ::core::ffi::c_int
+    }
+}
+
 unsafe extern "C" fn gz_init(mut state: crate::gzguts_h::gz_statep) -> ::core::ffi::c_int {
     let state = &mut *state;
     state.in_0 = crate::stdlib::malloc(
@@ -582,11 +593,7 @@ pub unsafe extern "C" fn gzputs(
         return -1 as ::core::ffi::c_int;
     }
     put = gz_write(state, s as crate::stdlib::voidpc, len);
-    return if len != 0 && put == 0 as crate::stdlib::z_size_t {
-        -1 as ::core::ffi::c_int
-    } else {
-        put as ::core::ffi::c_int
-    };
+    return gzputs_result(len, put);
 }
 #[export_name = "gzputs"]
 
@@ -732,7 +739,8 @@ pub unsafe extern "C" fn gzclose_w_ffi(mut file: crate::zlib_h::gzFile) -> ::cor
 mod tests {
     use super::{
         gz_write_chunk_len, gz_write_error_result, gz_write_uses_buffered_path, gz_zero_chunk_len,
-        gzflush_mode_is_valid, gzfwrite_len, gzputs_len_fits_int, gzwrite_len_fits_int,
+        gzflush_mode_is_valid, gzfwrite_len, gzputs_len_fits_int, gzputs_result,
+        gzwrite_len_fits_int,
     };
 
     #[test]
@@ -770,6 +778,22 @@ mod tests {
         assert!(!gzputs_len_fits_int(
             (::core::ffi::c_int::MAX as crate::stdlib::z_size_t) + 1
         ));
+    }
+
+    #[test]
+    fn gzputs_result_allows_empty_writes() {
+        assert_eq!(gzputs_result(0, 0), 0);
+    }
+
+    #[test]
+    fn gzputs_result_reports_nonempty_write_failures() {
+        assert_eq!(gzputs_result(1, 0), -1);
+    }
+
+    #[test]
+    fn gzputs_result_returns_written_count() {
+        assert_eq!(gzputs_result(5, 5), 5);
+        assert_eq!(gzputs_result(5, 3), 3);
     }
 
     #[test]
