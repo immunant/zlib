@@ -2619,13 +2619,13 @@ pub fn deflate(
     {
         // This is the last raw stream/storage bridge. The named safe update
         // below owns level and strategy selection.
-        let bstate = unsafe {
+        let (bstate, mut head) = unsafe {
             if state.window.is_null() || state.pending_buf.is_null() {
                 return crate::zlib_h::Z_STREAM_ERROR;
             }
             let window =
                 ::core::slice::from_raw_parts_mut(state.window, state.window_size as usize);
-            let head = if state.head.is_null() {
+            let mut head = if state.head.is_null() {
                 None
             } else {
                 Some(::core::slice::from_raw_parts_mut(
@@ -2653,7 +2653,7 @@ pub fn deflate(
                 state,
                 strm,
                 window,
-                head,
+                head.as_deref_mut(),
                 prev,
                 input,
                 &mut pending_buffer,
@@ -2662,7 +2662,7 @@ pub fn deflate(
             ) else {
                 return crate::zlib_h::Z_STREAM_ERROR;
             };
-            bstate
+            (bstate, head)
         };
         if bstate as ::core::ffi::c_uint
             == finish_started as ::core::ffi::c_int as ::core::ffi::c_uint
@@ -2693,11 +2693,8 @@ pub fn deflate(
                     0 as ::core::ffi::c_int,
                 );
                 if flush == crate::zlib_h::Z_FULL_FLUSH {
-                    if state.head.is_null() {
+                    let Some(head) = head.as_deref_mut() else {
                         return crate::zlib_h::Z_STREAM_ERROR;
-                    }
-                    let head = unsafe {
-                        ::core::slice::from_raw_parts_mut(state.head, state.hash_size as usize)
                     };
                     if !clear_full_flush_hash(state, head) {
                         return crate::zlib_h::Z_STREAM_ERROR;
