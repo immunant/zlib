@@ -493,6 +493,17 @@ fn copy_history_window(
     }
 }
 
+fn copy_history_dictionary(
+    output: &mut [u8],
+    window: &[u8],
+    wnext: usize,
+    whave: usize,
+) {
+    let first = whave - wnext;
+    output[..first].copy_from_slice(&window[wnext..wnext + first]);
+    output[first..whave].copy_from_slice(&window[..wnext]);
+}
+
 unsafe extern "C" fn updatewindow(
     mut strm: crate::zlib_h::z_streamp,
     mut end: *const crate::stdlib::Bytef,
@@ -2360,19 +2371,16 @@ pub unsafe extern "C" fn inflateGetDictionary(
     }
     state = (*strm).state as *mut crate::src::inflate::inflate_state;
     if (*state).whave != 0 && !dictionary.is_null() {
-        let window = (*state).window.expect("history exists").as_ptr();
         // The caller dictionary buffer and internal history allocation are
-        // distinct, as required by the translated C memcpy operations.
-        ::core::ptr::copy_nonoverlapping(
-            window.add((*state).wnext as usize),
-            dictionary,
-            (*state).whave.wrapping_sub((*state).wnext) as usize,
+        // distinct, as required by the translated C memcpy operations. Form
+        // bounded views once, then keep the ring-order copy pointer-free.
+        let whave = (*state).whave as usize;
+        let window = ::core::slice::from_raw_parts(
+            (*state).window.expect("history exists").as_ptr(),
+            (*state).wsize as usize,
         );
-        ::core::ptr::copy_nonoverlapping(
-            window,
-            dictionary.add((*state).whave.wrapping_sub((*state).wnext) as usize),
-            (*state).wnext as usize,
-        );
+        let output = ::core::slice::from_raw_parts_mut(dictionary, whave);
+        copy_history_dictionary(output, window, (*state).wnext as usize, whave);
     }
     if !dictLength.is_null() {
         *dictLength = (*state).whave as crate::stdlib::uInt;
