@@ -1438,6 +1438,29 @@ unsafe extern "C" fn putShortMSB(
         (b & 0xff as crate::stdlib::uInt) as crate::stdlib::Byte;
 }
 
+fn flush_pending_bytes(
+    output: &mut [crate::stdlib::Bytef],
+    pending_buf: &[crate::stdlib::Bytef],
+    pending_out: &mut usize,
+    pending_len: &mut crate::zutil_h::ulg,
+) -> crate::stdlib::uInt {
+    let len = if *pending_len > output.len() as crate::zutil_h::ulg {
+        output.len()
+    } else {
+        *pending_len as usize
+    };
+    if len == 0 {
+        return 0;
+    }
+    output[..len].copy_from_slice(&pending_buf[*pending_out..*pending_out + len]);
+    *pending_out += len;
+    *pending_len = pending_len.wrapping_sub(len as crate::zutil_h::ulg);
+    if *pending_len == 0 {
+        *pending_out = 0;
+    }
+    len as crate::stdlib::uInt
+}
+
 unsafe extern "C" fn flush_pending(mut strm: crate::zlib_h::z_streamp) {
     let mut len: ::core::ffi::c_uint = 0;
     let mut s: *mut crate::src::deflate::deflate_state =
@@ -1451,19 +1474,20 @@ unsafe extern "C" fn flush_pending(mut strm: crate::zlib_h::z_streamp) {
     if len == 0 as ::core::ffi::c_uint {
         return;
     }
-    crate::stdlib::memcpy(
-        (*strm).next_out as *mut ::core::ffi::c_void,
-        (*s).pending_buf.offset((*s).pending_out as isize) as *const ::core::ffi::c_void,
-        len as crate::__stddef_size_t_h::size_t,
+    let output = ::core::slice::from_raw_parts_mut((*strm).next_out, len as usize);
+    let pending_buf = ::core::slice::from_raw_parts(
+        (*s).pending_buf,
+        (*s).pending_buf_size as usize,
+    );
+    let len = flush_pending_bytes(
+        output,
+        pending_buf,
+        &mut (*s).pending_out,
+        &mut (*s).pending,
     );
     (*strm).next_out = (*strm).next_out.offset(len as isize);
-    (*s).pending_out = (*s).pending_out.wrapping_add(len as usize);
     (*strm).total_out = (*strm).total_out.wrapping_add(len as crate::stdlib::uLong);
     (*strm).avail_out = (*strm).avail_out.wrapping_sub(len);
-    (*s).pending = (*s).pending.wrapping_sub(len as crate::zutil_h::ulg);
-    if (*s).pending == 0 as crate::zutil_h::ulg {
-        (*s).pending_out = 0;
-    }
 }
 pub unsafe extern "C" fn deflate(
     mut strm: crate::zlib_h::z_streamp,
