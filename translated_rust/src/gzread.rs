@@ -1075,8 +1075,13 @@ fn gz_avail(
     }
 
     // The gzip handle owns this allocation for the duration of the read
-    // operation.  Keep the raw-to-slice conversion at this one storage
+    // operation. Keep the raw-to-slice conversion at this one storage
     // boundary; the cursor and refill logic below only sees GzInputStorage.
+    // A null pointer is never valid for Rust slice construction, including
+    // for a zero-sized corrupt external state.
+    if state.in_0.is_null() {
+        return -1 as ::core::ffi::c_int;
+    }
     let input = unsafe { core::slice::from_raw_parts_mut(state.in_0, state.size as usize) };
     let input_start = input.as_mut_ptr();
     let q = state.strm.next_in;
