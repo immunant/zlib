@@ -315,7 +315,7 @@ pub unsafe extern "C" fn inflateReset2(
         Err(error) => return error,
     };
     if inflate_reset2_releases_window(state, window_bits) {
-        Some((*strm).zfree.expect("non-null function pointer")).expect("non-null function pointer")(
+        Some(strm.zfree.expect("non-null function pointer")).expect("non-null function pointer")(
             strm.opaque,
             state.window as crate::stdlib::voidpf,
         );
