@@ -717,7 +717,7 @@ pub unsafe extern "C" fn inflate(
                                                                                                                 break '_inf_leave;
                                                                                                             }
                                                                                                             have = have.wrapping_sub(1);
-                                                                                                            next = next.offset(1);
+                                                                                                            next = next.wrapping_add(1);
                                                                                                             hold = hold
                                                                                                                 .wrapping_add(
                                                                                                                     (inflate_input_byte!(input, in_0, have) as ::core::ffi::c_ulong) << bits,
@@ -816,7 +816,7 @@ pub unsafe extern "C" fn inflate(
                                                                                                             break '_inf_leave;
                                                                                                         }
                                                                                                         have = have.wrapping_sub(1);
-                                                                                                        next = next.offset(1);
+                                                                                                        next = next.wrapping_add(1);
                                                                                                         hold = hold
                                                                                                             .wrapping_add(
                                                                                                                 (inflate_input_byte!(input, in_0, have) as ::core::ffi::c_ulong) << bits,
@@ -884,7 +884,7 @@ pub unsafe extern "C" fn inflate(
                                                                                                             break '_inf_leave;
                                                                                                         }
                                                                                                         have = have.wrapping_sub(1);
-                                                                                                        next = next.offset(1);
+                                                                                                        next = next.wrapping_add(1);
                                                                                                         hold = hold
                                                                                                             .wrapping_add(
                                                                                                                 (inflate_input_byte!(input, in_0, have) as ::core::ffi::c_ulong) << bits,
@@ -929,7 +929,7 @@ pub unsafe extern "C" fn inflate(
                                                                                                             break '_inf_leave;
                                                                                                         }
                                                                                                         have = have.wrapping_sub(1);
-                                                                                                        next = next.offset(1);
+                                                                                                        next = next.wrapping_add(1);
                                                                                                         hold = hold
                                                                                                             .wrapping_add(
                                                                                                                 (inflate_input_byte!(input, in_0, have) as ::core::ffi::c_ulong) << bits,
@@ -970,7 +970,7 @@ pub unsafe extern "C" fn inflate(
                                                                                                             break '_inf_leave;
                                                                                                         }
                                                                                                         have = have.wrapping_sub(1);
-                                                                                                        next = next.offset(1);
+                                                                                                        next = next.wrapping_add(1);
                                                                                                         hold = hold
                                                                                                             .wrapping_add(
                                                                                                                 (inflate_input_byte!(input, in_0, have) as ::core::ffi::c_ulong) << bits,
@@ -1064,7 +1064,7 @@ pub unsafe extern "C" fn inflate(
                                                                                                                 break '_inf_leave;
                                                                                                             }
                                                                                                             have = have.wrapping_sub(1);
-                                                                                                            next = next.offset(1);
+                                                                                                            next = next.wrapping_add(1);
                                                                                                             hold = hold
                                                                                                                 .wrapping_add(
                                                                                                                     (inflate_input_byte!(input, in_0, have) as ::core::ffi::c_ulong) << bits,
@@ -1151,7 +1151,7 @@ pub unsafe extern "C" fn inflate(
                                                                                                         break '_inf_leave;
                                                                                                     }
                                                                                                     have = have.wrapping_sub(1);
-                                                                                                    next = next.offset(1);
+                                                                                                    next = next.wrapping_add(1);
                                                                                                     hold = hold
                                                                                                         .wrapping_add(
                                                                                                             (inflate_input_byte!(input, in_0, have) as ::core::ffi::c_ulong) << bits,
@@ -1181,7 +1181,7 @@ pub unsafe extern "C" fn inflate(
                                                                                                     break '_inf_leave;
                                                                                                 }
                                                                                                 have = have.wrapping_sub(1);
-                                                                                                next = next.offset(1);
+                                                                                                next = next.wrapping_add(1);
                                                                                                 hold = hold
                                                                                                     .wrapping_add(
                                                                                                         (inflate_input_byte!(input, in_0, have) as ::core::ffi::c_ulong) << bits,
@@ -1259,7 +1259,7 @@ pub unsafe extern "C" fn inflate(
                                                                                         break '_inf_leave;
                                                                                     }
                                                                                     have = have.wrapping_sub(1);
-                                                                                    next = next.offset(1);
+                                                                                    next = next.wrapping_add(1);
                                                                                     hold = hold
                                                                                         .wrapping_add(
                                                                                             (inflate_input_byte!(input, in_0, have) as ::core::ffi::c_ulong) << bits,
@@ -1321,7 +1321,7 @@ pub unsafe extern "C" fn inflate(
                                                                                         1,
                                                                                     );
                                                                                 next =
-                                                                                    next.offset(1);
+                                                                                    next.wrapping_add(1);
                                                                                 hold = hold
                                                                                     .wrapping_add(
                                                                                         (inflate_input_byte!(input, in_0, have) as ::core::ffi::c_ulong) << bits,
@@ -1348,7 +1348,7 @@ pub unsafe extern "C" fn inflate(
                                                                                             break '_inf_leave;
                                                                                         }
                                                                                         have = have.wrapping_sub(1);
-                                                                                        next = next.offset(1);
+                                                                                        next = next.wrapping_add(1);
                                                                                         hold = hold
                                                                                             .wrapping_add(
                                                                                                 (inflate_input_byte!(input, in_0, have) as ::core::ffi::c_ulong) << bits,
@@ -1389,7 +1389,7 @@ pub unsafe extern "C" fn inflate(
                                                                                             break '_inf_leave;
                                                                                         }
                                                                                         have = have.wrapping_sub(1);
-                                                                                        next = next.offset(1);
+                                                                                        next = next.wrapping_add(1);
                                                                                         hold = hold
                                                                                             .wrapping_add(
                                                                                                 (inflate_input_byte!(input, in_0, have) as ::core::ffi::c_ulong) << bits,
@@ -1419,7 +1419,7 @@ pub unsafe extern "C" fn inflate(
                                                                                             break '_inf_leave;
                                                                                         }
                                                                                         have = have.wrapping_sub(1);
-                                                                                        next = next.offset(1);
+                                                                                        next = next.wrapping_add(1);
                                                                                         hold = hold
                                                                                             .wrapping_add(
                                                                                                 (inflate_input_byte!(input, in_0, have) as ::core::ffi::c_ulong) << bits,
@@ -1570,7 +1570,7 @@ pub unsafe extern "C" fn inflate(
                                                                         break '_inf_leave;
                                                                     }
                                                                     have = have.wrapping_sub(1);
-                                                                    next = next.offset(1);
+                                                                    next = next.wrapping_add(1);
                                                                     hold = hold.wrapping_add(
                                                                         (inflate_input_byte!(input, in_0, have)
                                                                             as ::core::ffi::c_ulong)
@@ -1638,7 +1638,7 @@ pub unsafe extern "C" fn inflate(
                                                                 break '_inf_leave;
                                                             }
                                                             have = have.wrapping_sub(1);
-                                                            next = next.offset(1);
+                                                            next = next.wrapping_add(1);
                                                             hold = hold.wrapping_add(
                                                                 (inflate_input_byte!(input, in_0, have)
                                                                     as ::core::ffi::c_ulong)
@@ -1714,7 +1714,7 @@ pub unsafe extern "C" fn inflate(
                                                             break '_inf_leave;
                                                         }
                                                         have = have.wrapping_sub(1);
-                                                        next = next.offset(1);
+                                                        next = next.wrapping_add(1);
                                                         hold = hold.wrapping_add(
                                                             (inflate_input_byte!(input, in_0, have)
                                                                 as ::core::ffi::c_ulong)
@@ -1798,7 +1798,7 @@ pub unsafe extern "C" fn inflate(
                                                     break '_inf_leave;
                                                 }
                                                 have = have.wrapping_sub(1);
-                                                next = next.offset(1);
+                                                next = next.wrapping_add(1);
                                                 hold = hold.wrapping_add(
                                                     (inflate_input_byte!(input, in_0, have) as ::core::ffi::c_ulong)
                                                         << bits,
@@ -1840,7 +1840,7 @@ pub unsafe extern "C" fn inflate(
                                                         break '_inf_leave;
                                                     }
                                                     have = have.wrapping_sub(1);
-                                                    next = next.offset(1);
+                                                    next = next.wrapping_add(1);
                                                     hold = hold.wrapping_add(
                                                         (inflate_input_byte!(input, in_0, have) as ::core::ffi::c_ulong)
                                                             << bits,
@@ -1928,7 +1928,7 @@ pub unsafe extern "C" fn inflate(
                                                 );
                                             }
                                             have = have.wrapping_sub(copy);
-                                            next = next.offset(copy as isize);
+                                            next = next.wrapping_add(copy as usize);
                                             (*state).length = (*state).length.wrapping_sub(copy);
                                         }
                                         if (*state).length != 0 {
@@ -1945,7 +1945,7 @@ pub unsafe extern "C" fn inflate(
                                             break '_inf_leave;
                                         }
                                         have = have.wrapping_sub(1);
-                                        next = next.offset(1);
+                                        next = next.wrapping_add(1);
                                         hold = hold.wrapping_add(
                                             (inflate_input_byte!(input, in_0, have) as ::core::ffi::c_ulong) << bits,
                                         );
@@ -2006,7 +2006,7 @@ pub unsafe extern "C" fn inflate(
                                     );
                                 }
                                 have = have.wrapping_sub(copy);
-                                next = next.offset(copy as isize);
+                                next = next.wrapping_add(copy as usize);
                                 if len != 0 {
                                     break '_inf_leave;
                                 }
@@ -2033,7 +2033,7 @@ pub unsafe extern "C" fn inflate(
                                 break '_inf_leave;
                             }
                             have = have.wrapping_sub(1);
-                            next = next.offset(1);
+                            next = next.wrapping_add(1);
                             hold = hold
                                 .wrapping_add((inflate_input_byte!(input, in_0, have) as ::core::ffi::c_ulong) << bits);
                             bits = bits.wrapping_add(8 as ::core::ffi::c_uint);
@@ -2065,7 +2065,7 @@ pub unsafe extern "C" fn inflate(
                                     break '_inf_leave;
                                 }
                                 have = have.wrapping_sub(1);
-                                next = next.offset(1);
+                                next = next.wrapping_add(1);
                                 hold = hold.wrapping_add(
                                     (inflate_input_byte!(input, in_0, have) as ::core::ffi::c_ulong) << bits,
                                 );
@@ -2132,7 +2132,7 @@ pub unsafe extern "C" fn inflate(
                             );
                         }
                         have = have.wrapping_sub(copy);
-                        next = next.offset(copy as isize);
+                        next = next.wrapping_add(copy as usize);
                         if len != 0 {
                             break '_inf_leave;
                         }
@@ -2148,7 +2148,7 @@ pub unsafe extern "C" fn inflate(
                             break '_inf_leave;
                         }
                         have = have.wrapping_sub(1);
-                        next = next.offset(1);
+                        next = next.wrapping_add(1);
                         hold = hold.wrapping_add((inflate_input_byte!(input, in_0, have) as ::core::ffi::c_ulong) << bits);
                         bits = bits.wrapping_add(8 as ::core::ffi::c_uint);
                     }
@@ -2172,7 +2172,7 @@ pub unsafe extern "C" fn inflate(
                         break '_inf_leave;
                     }
                     have = have.wrapping_sub(1);
-                    next = next.offset(1);
+                    next = next.wrapping_add(1);
                     hold = hold.wrapping_add((inflate_input_byte!(input, in_0, have) as ::core::ffi::c_ulong) << bits);
                     bits = bits.wrapping_add(8 as ::core::ffi::c_uint);
                 }
@@ -2230,7 +2230,7 @@ pub unsafe extern "C" fn inflate(
                 copy = (*state).length;
             }
         } else {
-            from = put.offset(-((*state).offset as isize));
+            from = put.wrapping_sub((*state).offset as usize);
             copy = (*state).length;
         }
         if copy > left {
