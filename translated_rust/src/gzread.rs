@@ -368,14 +368,31 @@ enum GzSkipStep {
 // cursor is rebuilt only while the adapter dispatches `gz_fetch()` and after
 // this facade has finished, so text reads themselves work entirely with
 // checked indices and owned buffers.
-struct GzGetsState {
+// The buffered byte APIs share this complete pointer-free read facade.  The
+// ABI state only lends it the buffer transaction and scalar snapshot around a
+// fetch or direct codec dispatch; copying, skipping, and caller-output
+// progress never need `gzFile_s::next` or the embedded `z_stream`.
+struct GzReadState {
     buffers: crate::gzguts_h::GzBuffers,
     have: crate::stdlib::uInt,
     pos: crate::stdlib::off64_t,
     skip: crate::stdlib::off64_t,
+    how: ::core::ffi::c_int,
     eof: ::core::ffi::c_int,
     past: ::core::ffi::c_int,
+    err: ::core::ffi::c_int,
     avail_in: crate::stdlib::uInt,
+}
+
+enum GzReadAction {
+    Fetch,
+    Copy,
+    Decompress,
+}
+
+struct GzReadStep {
+    count: crate::stdlib::uInt,
+    failed: bool,
 }
 
 fn gz_skip_step(state: &mut GzSkipState<'_>) -> Result<GzSkipStep, ()> {
@@ -1028,9 +1045,10 @@ unsafe fn gz_fetch(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int 
     }
 }
 
-unsafe fn gz_read(
-    state: &mut crate::gzguts_h::gz_state,
+fn gz_read_core(
+    state: &mut GzReadState,
     output: &mut [u8],
+    mut dispatch: impl FnMut(GzReadAction, &mut GzReadState, &mut [u8]) -> GzReadStep,
 ) -> crate::stdlib::z_size_t {
     let mut got: crate::stdlib::z_size_t = 0;
     let mut n: ::core::ffi::c_uint = 0;
@@ -1041,7 +1059,7 @@ unsafe fn gz_read(
     }
     if state.skip != 0 {
         loop {
-            let cursor = if state.x.have == 0 {
+            let cursor = if state.have == 0 {
                 0
             } else {
                 let Some(cursor) = state.buffers.output_cursor().map(|cursor| cursor.start())
@@ -1053,15 +1071,15 @@ unsafe fn gz_read(
             let mut skip = GzSkipState {
                 buffer: state.buffers.output.as_deref(),
                 cursor,
-                have: state.x.have,
-                pos: state.x.pos,
+                have: state.have,
+                pos: state.pos,
                 skip: state.skip,
                 eof: state.eof,
-                avail_in: state.strm.avail_in,
+                avail_in: state.avail_in,
             };
             match gz_skip_step(&mut skip) {
                 Ok(GzSkipStep::Fetch) => {
-                    if gz_fetch(state) == -1 as ::core::ffi::c_int {
+                    if dispatch(GzReadAction::Fetch, state, &mut []).failed {
                         return 0;
                     }
                 }
@@ -1084,13 +1102,12 @@ unsafe fn gz_read(
                         else {
                             return 0;
                         };
-                        state.x.next = buffer.as_ptr().wrapping_add(cursor_index).cast_mut();
                         state.buffers.set_output_cursor(cursor);
                     } else {
                         state.buffers.clear_output_cursor();
                     }
-                    state.x.have = have;
-                    state.x.pos = pos;
+                    state.have = have;
+                    state.pos = pos;
                     state.skip = skip_remaining;
                     if matches!(step, GzSkipStep::Done) {
                         break;
@@ -1107,89 +1124,69 @@ unsafe fn gz_read(
         if n as crate::stdlib::z_size_t > len {
             n = len as ::core::ffi::c_uint;
         }
-        's_28: {
-            if state.x.have != 0 {
-                if state.x.have < n {
-                    n = state.x.have;
+        if state.have != 0 {
+            if state.have < n {
+                n = state.have;
+            }
+            let Some(destination) = output.get_mut(got as usize..got as usize + n as usize) else {
+                return got;
+            };
+            // The output allocation retains the checked cursor created
+            // by LOOK/COPY/inflate. Consume that owner cursor rather
+            // than rebuilding a range from the ABI publication.
+            let Some(next_cursor) = (|| {
+                let buffer = state.buffers.output.as_deref()?;
+                let cursor = state.buffers.output_cursor()?;
+                let buffered = cursor.buffered(buffer)?;
+                buffered.copy_into(destination)?;
+                cursor.advance(n as usize)
+            })() else {
+                return got;
+            };
+            state.have = next_cursor.have();
+            state.buffers.set_output_cursor(next_cursor);
+            if state.err != crate::zlib_h::Z_OK {
+                err = -1 as ::core::ffi::c_int;
+            }
+        } else {
+            if state.eof != 0 && state.avail_in == 0 as crate::stdlib::uInt {
+                break 's_140;
+            }
+            if state.how == crate::gzguts_h::LOOK
+                || n < state.buffers.size << 1 as ::core::ffi::c_int
+            {
+                if dispatch(GzReadAction::Fetch, state, &mut []).failed
+                    && state.have == 0 as ::core::ffi::c_uint
+                {
+                    err = -1 as ::core::ffi::c_int;
                 }
+                if err != 0 {
+                    break 's_140;
+                }
+                continue 's_140;
+            } else if state.how == crate::gzguts_h::COPY {
                 let Some(destination) = output.get_mut(got as usize..got as usize + n as usize)
                 else {
                     return got;
                 };
-                // The output allocation retains the checked cursor created
-                // by LOOK/COPY/inflate. Consume that owner cursor rather
-                // than rebuilding a range from the ABI publication.
-                let Some(next_cursor) = (|| {
-                    let buffer = state.buffers.output.as_deref()?;
-                    let cursor = state.buffers.output_cursor()?;
-                    let buffered = cursor.buffered(buffer)?;
-                    buffered.copy_into(destination)?;
-                    cursor.advance(n as usize)
-                })() else {
-                    return got;
-                };
-                let Some(buffer) = state.buffers.output.as_deref() else {
-                    return got;
-                };
-                state.x.next = buffer.as_ptr().wrapping_add(next_cursor.start()).cast_mut();
-                state.x.have = next_cursor.have();
-                state.buffers.set_output_cursor(next_cursor);
-                if state.err != crate::zlib_h::Z_OK {
-                    err = -1 as ::core::ffi::c_int;
-                }
+                let step = dispatch(GzReadAction::Copy, state, destination);
+                n = step.count;
+                err = -(step.failed as ::core::ffi::c_int);
             } else {
-                if state.eof != 0 && state.strm.avail_in == 0 as crate::stdlib::uInt {
-                    break 's_140;
-                }
-                if state.how == crate::gzguts_h::LOOK
-                    || n < state.buffers.size << 1 as ::core::ffi::c_int
-                {
-                    if gz_fetch(state) == -1 as ::core::ffi::c_int
-                        && state.x.have == 0 as ::core::ffi::c_uint
-                    {
-                        err = -1 as ::core::ffi::c_int;
-                    }
-                    break 's_28;
-                } else if state.how == crate::gzguts_h::COPY {
-                    let Some(destination) = output.get_mut(got as usize..got as usize + n as usize)
-                    else {
-                        return got;
-                    };
-                    match gz_copy_load_into(
-                        state.fd.as_ref().unwrap(),
-                        destination,
-                        GzLoadTarget {
-                            again: &mut state.again,
-                            eof: &mut state.eof,
-                            message: &mut state.msg,
-                            error: &mut state.err,
-                            buffered: &mut state.x.have,
-                            path: state.path.as_deref(),
-                        },
-                    ) {
-                        Ok(have) => n = have,
-                        Err(have) => {
-                            n = have;
-                            err = -1;
-                        }
-                    }
-                } else {
-                    let Some(destination) = output.get_mut(got as usize..got as usize + n as usize)
-                    else {
-                        return got;
-                    };
-                    state.strm.avail_out = n as crate::stdlib::uInt;
-                    state.strm.next_out = destination.as_mut_ptr();
-                    err = gz_decomp(state);
-                    n = state.x.have;
-                    state.x.have = 0 as ::core::ffi::c_uint;
-                    state.buffers.clear_output_cursor();
-                }
+                let Some(destination) = output.get_mut(got as usize..got as usize + n as usize)
+                else {
+                    return got;
+                };
+                let step = dispatch(GzReadAction::Decompress, state, destination);
+                err = -(step.failed as ::core::ffi::c_int);
+                n = step.count;
+                state.have = 0 as ::core::ffi::c_uint;
+                state.buffers.clear_output_cursor();
             }
-            len = len.wrapping_sub(n as crate::stdlib::z_size_t);
-            got = got.wrapping_add(n as crate::stdlib::z_size_t);
-            state.x.pos += n as crate::stdlib::off64_t;
         }
+        len = len.wrapping_sub(n as crate::stdlib::z_size_t);
+        got = got.wrapping_add(n as crate::stdlib::z_size_t);
+        state.pos += n as crate::stdlib::off64_t;
         if !(len != 0 && err == 0) {
             break;
         }
@@ -1198,6 +1195,140 @@ unsafe fn gz_read(
         state.past = 1 as ::core::ffi::c_int;
     }
     return got;
+}
+
+// The facade is deliberately moved out of `gz_state` for every dispatched
+// operation.  That keeps checked buffer/cursor ownership with the safe read
+// loop, while LOOK/fetch and the temporary embedded-inflate ABI projection
+// remain together at this established state boundary.
+unsafe fn gz_read(
+    state: &mut crate::gzguts_h::gz_state,
+    output: &mut [u8],
+) -> crate::stdlib::z_size_t {
+    let mut read = GzReadState {
+        buffers: ::core::mem::replace(&mut state.buffers, crate::gzguts_h::GzBuffers::empty()),
+        have: state.x.have,
+        pos: state.x.pos,
+        skip: state.skip,
+        how: state.how,
+        eof: state.eof,
+        past: state.past,
+        err: state.err,
+        avail_in: state.strm.avail_in,
+    };
+    let result = gz_read_core(&mut read, output, |action, read, destination| {
+        state.buffers =
+            ::core::mem::replace(&mut read.buffers, crate::gzguts_h::GzBuffers::empty());
+        state.x.have = read.have;
+        state.x.pos = read.pos;
+        state.skip = read.skip;
+        state.how = read.how;
+        state.eof = read.eof;
+        state.past = read.past;
+        state.err = read.err;
+        state.strm.avail_in = read.avail_in;
+        let cursor = state
+            .buffers
+            .output_cursor()
+            .map(|cursor| (cursor.start(), cursor.have()));
+        let cursor_is_valid = match cursor {
+            Some((start, have)) if have == state.x.have => state
+                .buffers
+                .output
+                .as_deref_mut()
+                .and_then(|buffer| buffer.get_mut(start..))
+                .map(|buffer| {
+                    state.x.next = buffer.as_mut_ptr();
+                })
+                .is_some(),
+            None if state.x.have == 0 => {
+                state.x.next = ::core::ptr::null_mut();
+                true
+            }
+            _ => false,
+        };
+        let step = if !cursor_is_valid {
+            GzReadStep {
+                count: 0,
+                failed: true,
+            }
+        } else {
+            match action {
+                GzReadAction::Fetch => GzReadStep {
+                    count: 0,
+                    failed: gz_fetch(state) == -1,
+                },
+                GzReadAction::Copy => match gz_copy_load_into(
+                    state.fd.as_ref().expect("gzip state has an open file"),
+                    destination,
+                    GzLoadTarget {
+                        again: &mut state.again,
+                        eof: &mut state.eof,
+                        message: &mut state.msg,
+                        error: &mut state.err,
+                        buffered: &mut state.x.have,
+                        path: state.path.as_deref(),
+                    },
+                ) {
+                    Ok(count) => GzReadStep {
+                        count,
+                        failed: false,
+                    },
+                    Err(count) => GzReadStep {
+                        count,
+                        failed: true,
+                    },
+                },
+                GzReadAction::Decompress => {
+                    state.strm.avail_out = destination.len() as crate::stdlib::uInt;
+                    state.strm.next_out = destination.as_mut_ptr();
+                    let failed = gz_decomp(state) == -1;
+                    GzReadStep {
+                        count: state.x.have,
+                        failed,
+                    }
+                }
+            }
+        };
+        read.buffers =
+            ::core::mem::replace(&mut state.buffers, crate::gzguts_h::GzBuffers::empty());
+        read.have = state.x.have;
+        read.pos = state.x.pos;
+        read.skip = state.skip;
+        read.how = state.how;
+        read.eof = state.eof;
+        read.past = state.past;
+        read.err = state.err;
+        read.avail_in = state.strm.avail_in;
+        step
+    });
+    state.buffers = ::core::mem::replace(&mut read.buffers, crate::gzguts_h::GzBuffers::empty());
+    state.x.have = read.have;
+    state.x.pos = read.pos;
+    state.skip = read.skip;
+    state.how = read.how;
+    state.eof = read.eof;
+    state.past = read.past;
+    state.err = read.err;
+    state.strm.avail_in = read.avail_in;
+    let cursor = state
+        .buffers
+        .output_cursor()
+        .map(|cursor| (cursor.start(), cursor.have()));
+    match cursor {
+        Some((start, have)) if have == state.x.have => {
+            let Some(output) = state.buffers.output.as_deref_mut() else {
+                return 0;
+            };
+            let Some(output) = output.get_mut(start..) else {
+                return 0;
+            };
+            state.x.next = output.as_mut_ptr();
+        }
+        None if state.x.have == 0 => state.x.next = ::core::ptr::null_mut(),
+        _ => return 0,
+    }
+    result
 }
 unsafe fn gzread(state: &mut crate::gzguts_h::gz_state, output: &mut [u8]) -> ::core::ffi::c_int {
     let request = GzReadRequest::new(state.mode, state.err, state.again);
@@ -1504,9 +1635,9 @@ pub unsafe extern "C" fn gzungetc_ffi(
     gzungetc(c, state)
 }
 fn gzgets(
-    state: &mut GzGetsState,
+    state: &mut GzReadState,
     output: &mut [u8],
-    mut fetch: impl FnMut(&mut GzGetsState) -> Result<(), ()>,
+    mut fetch: impl FnMut(&mut GzReadState) -> Result<(), ()>,
 ) -> bool {
     if output.is_empty() {
         return false;
@@ -1639,13 +1770,15 @@ unsafe fn gzgets_from_state(
         return ::core::ptr::null_mut();
     }
     drop(error);
-    let mut read = GzGetsState {
+    let mut read = GzReadState {
         buffers: ::core::mem::replace(&mut state.buffers, crate::gzguts_h::GzBuffers::empty()),
         have: state.x.have,
         pos: state.x.pos,
         skip: state.skip,
+        how: state.how,
         eof: state.eof,
         past: state.past,
+        err: state.err,
         avail_in: state.strm.avail_in,
     };
     let result = gzgets(&mut read, output, |read| {
@@ -1654,8 +1787,10 @@ unsafe fn gzgets_from_state(
         state.x.have = read.have;
         state.x.pos = read.pos;
         state.skip = read.skip;
+        state.how = read.how;
         state.eof = read.eof;
         state.past = read.past;
+        state.err = read.err;
         state.strm.avail_in = read.avail_in;
         let cursor = state
             .buffers
@@ -1692,8 +1827,10 @@ unsafe fn gzgets_from_state(
         read.have = state.x.have;
         read.pos = state.x.pos;
         read.skip = state.skip;
+        read.how = state.how;
         read.eof = state.eof;
         read.past = state.past;
+        read.err = state.err;
         read.avail_in = state.strm.avail_in;
         if fetched == -1 {
             Err(())
@@ -1705,8 +1842,10 @@ unsafe fn gzgets_from_state(
     state.x.have = read.have;
     state.x.pos = read.pos;
     state.skip = read.skip;
+    state.how = read.how;
     state.eof = read.eof;
     state.past = read.past;
+    state.err = read.err;
     state.strm.avail_in = read.avail_in;
     let cursor = state
         .buffers
