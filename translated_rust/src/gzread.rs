@@ -3975,18 +3975,17 @@ mod tests {
 }
 
 unsafe fn gz_read(
-    state: crate::gzguts_h::gz_statep,
+    state: &mut crate::gzguts_h::gz_state,
     mut buf: crate::stdlib::voidp,
     mut len: crate::stdlib::z_size_t,
 ) -> crate::stdlib::z_size_t {
-    let state_ref = &mut *state;
     let mut got: crate::stdlib::z_size_t = 0;
     let mut n: ::core::ffi::c_uint = 0;
     let mut err: ::core::ffi::c_int = 0;
-    match gz_read_setup(len, state_ref.skip) {
+    match gz_read_setup(len, state.skip) {
         GzReadSetup::ReturnEmpty => return 0 as crate::stdlib::z_size_t,
         GzReadSetup::Skip => {
-            if gz_skip!(state_ref) {
+            if gz_skip!(state) {
                 return 0 as crate::stdlib::z_size_t;
             }
         }
@@ -3997,53 +3996,53 @@ unsafe fn gz_read(
     loop {
         let step = gz_read_step(
             len,
-            state_ref.x.have,
-            state_ref.eof,
-            state_ref.strm.avail_in,
-            state_ref.how,
-            state_ref.size,
+            state.x.have,
+            state.eof,
+            state.strm.avail_in,
+            state.how,
+            state.size,
         );
         n = step.chunk_len;
         let advance = gz_read_action_advances_output(&step.action);
         match step.action {
             GzReadAction::DrainBuffered => {
-                let next = state_ref.x.next;
-                let have = state_ref.x.have;
-                let state_err = state_ref.err;
+                let next = state.x.next;
+                let have = state.x.have;
+                let state_err = state.err;
                 let plan = gz_read_drain_plan(have, state_err, n);
                 crate::stdlib::memcpy(
                     buf as *mut ::core::ffi::c_void,
                     next as *const ::core::ffi::c_void,
                     n as crate::__stddef_size_t_h::size_t,
                 );
-                state_ref.x.next = state_ref.x.next.wrapping_add(plan.next_advance);
-                gz_read_apply_drain_plan(&mut state_ref.x.have, &mut err, &plan);
+                state.x.next = state.x.next.wrapping_add(plan.next_advance);
+                gz_read_apply_drain_plan(&mut state.x.have, &mut err, &plan);
             }
             GzReadAction::StopAtEof => break,
             GzReadAction::Fetch => {
                 if let Some(fetch_error) =
-                    gz_read_fetch_error(gz_fetch(state_ref), state_ref.x.have)
+                    gz_read_fetch_error(gz_fetch(state), state.x.have)
                 {
                     err = fetch_error;
                 }
             }
             GzReadAction::Load => {
-                let load = gz_load(state_ref, buf as *mut ::core::ffi::c_uchar, n);
+                let load = gz_load(state, buf as *mut ::core::ffi::c_uchar, n);
                 n = load.have;
                 err = gz_read_load_status(load.failed);
             }
             GzReadAction::Decompress => {
-                state_ref.strm.avail_out = n as crate::stdlib::uInt;
-                state_ref.strm.next_out =
+                state.strm.avail_out = n as crate::stdlib::uInt;
+                state.strm.next_out =
                     buf as *mut ::core::ffi::c_uchar as *mut crate::stdlib::Bytef;
-                err = gz_decomp(state_ref);
-                (n, state_ref.x.have) = gz_read_take_decompressed(state_ref.x.have);
+                err = gz_decomp(state);
+                (n, state.x.have) = gz_read_take_decompressed(state.x.have);
             }
         }
-        let progress = gz_read_loop_progress(advance, len, got, state_ref.x.pos, n, err);
+        let progress = gz_read_loop_progress(advance, len, got, state.x.pos, n, err);
         len = progress.len;
         got = progress.got;
-        state_ref.x.pos = progress.pos;
+        state.x.pos = progress.pos;
         if advance {
             buf =
                 (buf as *mut ::core::ffi::c_char).wrapping_add(n as usize) as crate::stdlib::voidp;
@@ -4052,7 +4051,7 @@ unsafe fn gz_read(
             break;
         }
     }
-    gz_read_note_past_eof(&mut state_ref.past, len, state_ref.eof);
+    gz_read_note_past_eof(&mut state.past, len, state.eof);
     return got;
 }
 
@@ -4084,7 +4083,7 @@ pub unsafe extern "C" fn gzread_ffi(
         );
         return -1 as ::core::ffi::c_int;
     };
-    len = gz_read(state, buf, request_len) as ::core::ffi::c_uint;
+    len = gz_read(&mut *state, buf, request_len) as ::core::ffi::c_uint;
     match gzread_outcome(len, (*state).err, (*state).again) {
         GzreadOutcome::Read(read) => read,
         GzreadOutcome::Error => -1 as ::core::ffi::c_int,
@@ -4131,7 +4130,7 @@ pub unsafe extern "C" fn gzfread_ffi(
     len = request_len;
     return match gz_fread_action(len) {
         GzFreadAction::ReturnZero => 0 as crate::stdlib::z_size_t,
-        GzFreadAction::Read => gz_fread_items_read(size, gz_read(state, buf, len)),
+        GzFreadAction::Read => gz_fread_items_read(size, gz_read(&mut *state, buf, len)),
     };
 }
 #[export_name = "gzgetc"]
