@@ -197,6 +197,9 @@ gzread.o: $(SRCDIR)gzread.c
 gzwrite.o: $(SRCDIR)gzwrite.c
 	$(CC) $(CFLAGS) $(ZINC) -c -o $@ $(SRCDIR)gzwrite.c
 
+zpipe.o: $(SRCDIR)examples/zpipe.c $(SRCDIR)zlib.h zconf.h
+	$(CC) $(CFLAGS) $(ZINCOUT) -c -o $@ $(SRCDIR)examples/zpipe.c
+
 
 adler32.lo: $(SRCDIR)adler32.c
 	-@mkdir objs 2>/dev/null || test -d objs
@@ -298,6 +301,11 @@ example64$(EXE): example64.o $(STATICLIB)
 
 minigzip64$(EXE): minigzip64.o $(STATICLIB)
 	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ minigzip64.o $(TEST_LIBS)
+
+# NOTE: We specify a custom `RPATH` to force the executable to load the local
+# version of `libz.so` rather than using the system version.
+zpipesh$(EXE): zpipe.o $(SHAREDLIBV)
+	$(CC) $(CFLAGS) -o $@ zpipe.o $(LDFLAGS) -L. $(SHAREDLIBV) -Wl,-rpath,\$$ORIGIN
 
 install-libs: $(LIBS)
 	-@if [ ! -d $(DESTDIR)$(exec_prefix)  ]; then mkdir -p $(DESTDIR)$(exec_prefix); fi
