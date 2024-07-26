@@ -16,6 +16,7 @@
 /example
 /example64
 /examplesh
+/zpipesh
 **/libz.so*
 /minigzip
 /minigzip64
@@ -35,3 +36,5 @@ contrib/vstudio/vc143/arm64
 contrib/nuget/bin
 contrib/nuget/obj
 *.included
+
+compile_commands.json
