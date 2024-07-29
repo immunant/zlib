@@ -198,7 +198,7 @@ gzwrite.o: $(SRCDIR)gzwrite.c
 	$(CC) $(CFLAGS) $(ZINC) -c -o $@ $(SRCDIR)gzwrite.c
 
 zpipe.o: $(SRCDIR)examples/zpipe.c $(SRCDIR)zlib.h zconf.h
-	$(CC) $(CFLAGS) $(ZINCOUT) -c -o $@ $(SRCDIR)examples/zpipe.c
+	$(CC) -DPKEY=1 $(CFLAGS) $(ZINCOUT) -c -o $@ $(SRCDIR)examples/zpipe.c
 
 
 adler32.lo: $(SRCDIR)adler32.c
@@ -277,7 +277,12 @@ gzwrite.lo: $(SRCDIR)gzwrite.c
 	-@mv objs/gzwrite.o $@
 
 
-placebo $(SHAREDLIBV): $(PIC_OBJS) libz.a
+# NOTE: Removed dependency on `libz.a` so that source files are only compiled
+# once. The IA2 source rewriter currently doesn't support multiple compile
+# commands for the same file, so building both the static and shared versions of
+# zlib causes it to get tripped up. We only need the shared lib for IA2, so this
+# is fine for our purposes.
+placebo $(SHAREDLIBV): $(PIC_OBJS)
 	$(LDSHARED) $(SFLAGS) -o $@ $(PIC_OBJS) $(LDSHAREDLIBC) $(LDFLAGS)
 	rm -f $(SHAREDLIB) $(SHAREDLIBM)
 	ln -s $@ $(SHAREDLIB)
@@ -377,13 +382,14 @@ mostlyclean: clean
 clean: minizip-clean
 	rm -f *.o *.lo *~ \
 	   example$(EXE) minigzip$(EXE) examplesh$(EXE) minigzipsh$(EXE) \
-	   example64$(EXE) minigzip64$(EXE) \
+	   example64$(EXE) minigzip64$(EXE) zpipesh$(EXE) \
 	   infcover \
 	   libz.* foo.gz so_locations \
 	   _match.s maketree contrib/infback9/*.o
 	rm -rf objs
 	rm -f *.gcda *.gcno *.gcov
 	rm -f contrib/infback9/*.gcda contrib/infback9/*.gcno contrib/infback9/*.gcov
+	rm -f compile_commands.json
 
 maintainer-clean: distclean
 distclean: clean zconf zconf.h.cmakein

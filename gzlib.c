@@ -3,6 +3,11 @@
  * For conditions of distribution and use, see copyright notice in zlib.h
  */
 
+#include <ia2.h>
+
+#define IA2_COMPARTMENT 2
+#include <ia2_compartment_init.inc>
+
 #include "gzguts.h"
 
 #if defined(__DJGPP__)

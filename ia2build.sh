@@ -1,8 +1,22 @@
-# TODO: Fix 
+# TODO: Fix error that causes rewriter to fail to create build dir:
+#
+# ```
+# Failed to create dir /home/legare/zlib/build/zlib/.: File exists
+# ```
+#
+# The issue is likely the `/.` at the end, i.e. it's trying to create
+# `build/zlib` twice.
+
+# TODO: Don't hard code IA2 path.
+#
+# TODO: Specify PKEY in a less hacky way. This approach will define `PKEY=2` for
+# all modules, including zpipesh which should instead have `PKEY=1`. We probably
+# need to customize the Makefile futher to more direcdtly support IA2 flags.
+CFLAGS="-I /home/legare/IA2-Phase2/runtime/libia2/include -DPKEY=2" ./configure
 
 BUILD_DIR=${PWD}/build
 
-mkdir $BUILD_DIR
+mkdir -p $BUILD_DIR
 
 # Generate `compile_commands.json` from the make build.
 if [ ! -f compile_commands.json ]; then

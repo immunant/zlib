@@ -16,6 +16,13 @@
 #  define _CRT_NONSTDC_NO_DEPRECATE
 #endif
 
+#include <ia2.h>
+
+INIT_RUNTIME(2);
+
+#define IA2_COMPARTMENT 1
+#include <ia2_compartment_init.inc>
+
 #include <stdio.h>
 #include <string.h>
 #include <assert.h>
