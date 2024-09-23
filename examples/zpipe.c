@@ -214,3 +214,9 @@ int main(int argc, char **argv)
         return 1;
     }
 }
+
+void call_fns(z_stream *strm)
+{
+    (*strm->zalloc)(strm->opaque, 1, 1);
+    (*strm->zfree)(strm->opaque, 0);
+}
