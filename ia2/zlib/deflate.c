@@ -390,7 +390,7 @@ int ZEXPORT deflateInit2_(z_streamp strm, int level, int method,
     if (strm == Z_NULL) return Z_STREAM_ERROR;
 
     strm->msg = Z_NULL;
-    if (IA2_ADDR(strm->zalloc) == IA2_ADDR((alloc_func)0)) {
+    if (IA2_ADDR(strm->zalloc) == 0) {
 #ifdef Z_SOLO
         return Z_STREAM_ERROR;
 #else
@@ -398,7 +398,7 @@ int ZEXPORT deflateInit2_(z_streamp strm, int level, int method,
         strm->opaque = (voidpf)0;
 #endif
     }
-    if (IA2_ADDR(strm->zfree) == IA2_ADDR((free_func)0))
+    if (IA2_ADDR(strm->zfree) == 0)
 #ifdef Z_SOLO
         return Z_STREAM_ERROR;
 #else
@@ -529,7 +529,7 @@ int ZEXPORT deflateInit2_(z_streamp strm, int level, int method,
 local int deflateStateCheck(z_streamp strm) {
     deflate_state *s;
     if (strm == Z_NULL ||
-        IA2_ADDR(strm->zalloc) == IA2_ADDR((alloc_func)0) || IA2_ADDR(strm->zfree) == IA2_ADDR((free_func)0))
+        IA2_ADDR(strm->zalloc) == 0 || IA2_ADDR(strm->zfree) == 0)
         return 1;
     s = strm->state;
     if (s == Z_NULL || s->strm != strm || (s->status != INIT_STATE &&
@@ -1190,7 +1190,7 @@ int ZEXPORT deflate(z_streamp strm, int flush) {
         bstate = s->level == 0 ? deflate_stored(s, flush) :
                  s->strategy == Z_HUFFMAN_ONLY ? deflate_huff(s, flush) :
                  s->strategy == Z_RLE ? deflate_rle(s, flush) :
-                 IA2_CALL((*(configuration_table[s->level].func)), _ZTSPF11block_stateP14internal_stateiE)(s, flush);
+                 IA2_CALL((configuration_table[s->level].func), _ZTSPF11block_stateP14internal_stateiE)(s, flush);
 
         if (bstate == finish_started || bstate == finish_done) {
             s->status = FINISH_STATE;

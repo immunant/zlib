@@ -90,8 +90,8 @@ local int gz_look(gz_statep state) {
         state->size = state->want;
 
         /* allocate inflate memory */
-        state->strm.zalloc = Z_NULL;
-        state->strm.zfree = Z_NULL;
+        state->strm.zalloc.ptr = Z_NULL;
+        state->strm.zfree.ptr = Z_NULL;
         state->strm.opaque = Z_NULL;
         state->strm.avail_in = 0;
         state->strm.next_in = Z_NULL;

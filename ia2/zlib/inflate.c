@@ -94,7 +94,7 @@
 local int inflateStateCheck(z_streamp strm) {
     struct inflate_state FAR *state;
     if (strm == Z_NULL ||
-        IA2_ADDR(strm->zalloc) == IA2_ADDR((alloc_func)0) || IA2_ADDR(strm->zfree) == IA2_ADDR((free_func)0))
+        IA2_ADDR(strm->zalloc) == 0 || IA2_ADDR(strm->zfree) == 0)
         return 1;
     state = (struct inflate_state FAR *)strm->state;
     if (state == Z_NULL || state->strm != strm ||
@@ -185,7 +185,7 @@ int ZEXPORT inflateInit2_(z_streamp strm, int windowBits,
         return Z_VERSION_ERROR;
     if (strm == Z_NULL) return Z_STREAM_ERROR;
     strm->msg = Z_NULL;                 /* in case we return an error */
-    if (IA2_ADDR(strm->zalloc) == IA2_ADDR((alloc_func)0)) {
+    if (IA2_ADDR(strm->zalloc) == 0) {
 #ifdef Z_SOLO
         return Z_STREAM_ERROR;
 #else
@@ -193,7 +193,7 @@ int ZEXPORT inflateInit2_(z_streamp strm, int windowBits,
         strm->opaque = (voidpf)0;
 #endif
     }
-    if (IA2_ADDR(strm->zfree) == IA2_ADDR((free_func)0))
+    if (IA2_ADDR(strm->zfree) == 0)
 #ifdef Z_SOLO
         return Z_STREAM_ERROR;
 #else

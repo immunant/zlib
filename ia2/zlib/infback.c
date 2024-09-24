@@ -34,7 +34,7 @@ int ZEXPORT inflateBackInit_(z_streamp strm, int windowBits,
         windowBits < 8 || windowBits > 15)
         return Z_STREAM_ERROR;
     strm->msg = Z_NULL;                 /* in case we return an error */
-    if (IA2_ADDR(strm->zalloc) == IA2_ADDR((alloc_func)0)) {
+    if (IA2_ADDR(strm->zalloc) == 0) {
 #ifdef Z_SOLO
         return Z_STREAM_ERROR;
 #else
@@ -42,7 +42,7 @@ int ZEXPORT inflateBackInit_(z_streamp strm, int windowBits,
         strm->opaque = (voidpf)0;
 #endif
     }
-    if (IA2_ADDR(strm->zfree) == IA2_ADDR((free_func)0))
+    if (IA2_ADDR(strm->zfree) == 0)
 #ifdef Z_SOLO
         return Z_STREAM_ERROR;
 #else
@@ -150,7 +150,7 @@ local void fixedtables(struct inflate_state FAR *state) {
 #define PULL() \
     do { \
         if (have == 0) { \
-            have = in(in_desc, &next); \
+            have = IA2_CALL(in, _ZTSPFjPvPPhE)(in_desc, &next); \
             if (have == 0) { \
                 next = Z_NULL; \
                 ret = Z_BUF_ERROR; \
@@ -205,7 +205,7 @@ local void fixedtables(struct inflate_state FAR *state) {
             put = state->window; \
             left = state->wsize; \
             state->whave = left; \
-            if (out(out_desc, put, left)) { \
+            if (IA2_CALL(out, _ZTSPFiPvPhjE)(out_desc, put, left)) { \
                 ret = Z_BUF_ERROR; \
                 goto inf_leave; \
             } \
@@ -619,10 +619,16 @@ int ZEXPORT inflateBack(z_streamp strm, in_func in, void FAR *in_desc,
 }
 
 int ZEXPORT inflateBackEnd(z_streamp strm) {
-    if (strm == Z_NULL || strm->state == Z_NULL || IA2_ADDR(strm->zfree) == IA2_ADDR((free_func)0))
+    if (strm == Z_NULL || strm->state == Z_NULL || IA2_ADDR(strm->zfree) == 0)
         return Z_STREAM_ERROR;
     ZFREE(strm, strm->state);
     strm->state = Z_NULL;
     Tracev((stderr, "inflate: end\n"));
     return Z_OK;
+}
+
+
+void call_inflateBack_fns(in_func in, out_func out) {
+    IA2_CALL(in, _ZTSPFjPvPPhE)(0, 0);
+    IA2_CALL(out, _ZTSPFiPvPhjE)(0, 0, 0);
 }

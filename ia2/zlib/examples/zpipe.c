@@ -53,8 +53,8 @@ int def(FILE *source, FILE *dest, int level)
     unsigned char out[CHUNK];
 
     /* allocate deflate state */
-    strm.zalloc = Z_NULL;
-    strm.zfree = Z_NULL;
+    strm.zalloc.ptr = Z_NULL;
+    strm.zfree.ptr = Z_NULL;
     strm.opaque = Z_NULL;
     ret = deflateInit(&strm, level);
     if (ret != Z_OK)
@@ -109,8 +109,8 @@ int inf(FILE *source, FILE *dest)
     unsigned char out[CHUNK];
 
     /* allocate inflate state */
-    strm.zalloc = Z_NULL;
-    strm.zfree = Z_NULL;
+    strm.zalloc.ptr = Z_NULL;
+    strm.zfree.ptr = Z_NULL;
     strm.opaque = Z_NULL;
     strm.avail_in = 0;
     strm.next_in = Z_NULL;
@@ -217,6 +217,6 @@ int main(int argc, char **argv)
 
 void call_fns(z_stream *strm)
 {
-    IA2_CALL((*strm->zalloc), _ZTSPFPvS_jjE)(strm->opaque, 1, 1);
-    IA2_CALL((*strm->zfree), _ZTSPFvPvS_E)(strm->opaque, 0);
+    IA2_CALL(strm->zalloc, _ZTSPFPvS_jjE)(strm->opaque, 1, 1);
+    IA2_CALL(strm->zfree, _ZTSPFvPvS_E)(strm->opaque, 0);
 }
