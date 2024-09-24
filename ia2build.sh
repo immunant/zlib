@@ -21,15 +21,13 @@ sed < Makefile "
 /^IA2FLAGS *=/s#=.*#=$IA2FLAGS#
 " > Makefile.tmp && mv Makefile.tmp Makefile
 
-BUILD_DIR=${PWD}/build
-
-mkdir -p $BUILD_DIR
 
 # Generate `compile_commands.json` from the make build.
 if [ ! -f compile_commands.json ]; then
     make clean
     bear -- make zpipesh
-    cp compile_commands.json $BUILD_DIR/
+else
+    echo "compile_commands.json already exists, skipping initial build"
 fi
 
 ZLIB_ROOT=`realpath .`
@@ -45,47 +43,54 @@ ZLIB_ROOT=`realpath .`
 # confused.
 ZLIB_PARENT=`realpath $ZLIB_ROOT/..`
 
-pushd $BUILD_DIR/
+BUILD_DIR=${PWD}/ia2
 
-$IA2_PATH/build/tools/rewriter/ia2-rewriter \
-    --output-prefix=wrapper \
-    --root-directory=$ZLIB_PARENT \
-    --output-directory=$BUILD_DIR \
-    $ZLIB_ROOT/examples/zpipe.c \
-    $ZLIB_ROOT/adler32.c \
-    $ZLIB_ROOT/crc32.c \
-    $ZLIB_ROOT/deflate.c \
-    $ZLIB_ROOT/infback.c \
-    $ZLIB_ROOT/inffast.c \
-    $ZLIB_ROOT/inflate.c \
-    $ZLIB_ROOT/inftrees.c \
-    $ZLIB_ROOT/trees.c \
-    $ZLIB_ROOT/zutil.c \
-    $ZLIB_ROOT/compress.c \
-    $ZLIB_ROOT/uncompr.c \
-    $ZLIB_ROOT/gzclose.c \
-    $ZLIB_ROOT/gzlib.c \
-    $ZLIB_ROOT/gzread.c \
-    $ZLIB_ROOT/gzwrite.c \
-    $ZLIB_ROOT/adler32.c \
-    $ZLIB_ROOT/crc32.c \
-    $ZLIB_ROOT/deflate.c \
-    $ZLIB_ROOT/infback.c \
-    $ZLIB_ROOT/inffast.c \
-    $ZLIB_ROOT/inflate.c \
-    $ZLIB_ROOT/inftrees.c \
-    $ZLIB_ROOT/trees.c \
-    $ZLIB_ROOT/zutil.c \
-    $ZLIB_ROOT/compress.c \
-    $ZLIB_ROOT/uncompr.c \
-    $ZLIB_ROOT/gzclose.c \
-    $ZLIB_ROOT/gzlib.c \
-    $ZLIB_ROOT/gzread.c \
-    $ZLIB_ROOT/gzwrite.c
-popd
+# Run the rewriter if the build dir is not already present.
+if [ ! -d "$BUILD_DIR" ]; then
+    mkdir -p $BUILD_DIR
+    pushd $BUILD_DIR
+    $IA2_PATH/build/tools/rewriter/ia2-rewriter \
+        --output-prefix=wrapper \
+        --root-directory=$ZLIB_PARENT \
+        --output-directory=$BUILD_DIR \
+        $ZLIB_ROOT/examples/zpipe.c \
+        $ZLIB_ROOT/adler32.c \
+        $ZLIB_ROOT/crc32.c \
+        $ZLIB_ROOT/deflate.c \
+        $ZLIB_ROOT/infback.c \
+        $ZLIB_ROOT/inffast.c \
+        $ZLIB_ROOT/inflate.c \
+        $ZLIB_ROOT/inftrees.c \
+        $ZLIB_ROOT/trees.c \
+        $ZLIB_ROOT/zutil.c \
+        $ZLIB_ROOT/compress.c \
+        $ZLIB_ROOT/uncompr.c \
+        $ZLIB_ROOT/gzclose.c \
+        $ZLIB_ROOT/gzlib.c \
+        $ZLIB_ROOT/gzread.c \
+        $ZLIB_ROOT/gzwrite.c \
+        $ZLIB_ROOT/adler32.c \
+        $ZLIB_ROOT/crc32.c \
+        $ZLIB_ROOT/deflate.c \
+        $ZLIB_ROOT/infback.c \
+        $ZLIB_ROOT/inffast.c \
+        $ZLIB_ROOT/inflate.c \
+        $ZLIB_ROOT/inftrees.c \
+        $ZLIB_ROOT/trees.c \
+        $ZLIB_ROOT/zutil.c \
+        $ZLIB_ROOT/compress.c \
+        $ZLIB_ROOT/uncompr.c \
+        $ZLIB_ROOT/gzclose.c \
+        $ZLIB_ROOT/gzlib.c \
+        $ZLIB_ROOT/gzread.c \
+        $ZLIB_ROOT/gzwrite.c
+    popd
+else
+    echo "Build dir ($BUILD_DIR) already exists, skipping rewriter"
+fi
 
 # Copy additional files needed by the build.
-cp -t build/zlib Makefile
+cp -t $BUILD_DIR/zlib Makefile
 
 pushd $BUILD_DIR/zlib
 
