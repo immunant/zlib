@@ -7,12 +7,19 @@
 # The issue is likely the `/.` at the end, i.e. it's trying to create
 # `build/zlib` twice.
 
-# TODO: Don't hard code IA2 path.
-#
+# TODO: Don't assume IA2 is located next to the zlib checkout.
+IA2_PATH=`realpath ../IA2-Phase2`
+
 # TODO: Specify PKEY in a less hacky way. This approach will define `PKEY=2` for
 # all modules, including zpipesh which should instead have `PKEY=1`. We probably
-# need to customize the Makefile futher to more direcdtly support IA2 flags.
-CFLAGS="-I /home/legare/IA2-Phase2/runtime/libia2/include -DPKEY=2" ./configure
+# need to customize the Makefile futher to more directly support IA2 flags.
+./configure
+
+# Inject IA2 compiler flags for the initial (IA2-disabled) build.
+IA2FLAGS="-I $IA2_PATH/runtime/libia2/include -DPKEY=2"
+sed < Makefile "
+/^IA2FLAGS *=/s#=.*#=$IA2FLAGS#
+" > Makefile.tmp && mv Makefile.tmp Makefile
 
 BUILD_DIR=${PWD}/build
 
@@ -40,8 +47,7 @@ ZLIB_PARENT=`realpath $ZLIB_ROOT/..`
 
 pushd $BUILD_DIR/
 
-# TODO: Don't assume location of IA2 build dir.
-~/IA2-Phase2/build/tools/rewriter/ia2-rewriter \
+$IA2_PATH/build/tools/rewriter/ia2-rewriter \
     --output-prefix=wrapper \
     --root-directory=$ZLIB_PARENT \
     --output-directory=$BUILD_DIR \
@@ -76,4 +82,33 @@ pushd $BUILD_DIR/
     $ZLIB_ROOT/gzlib.c \
     $ZLIB_ROOT/gzread.c \
     $ZLIB_ROOT/gzwrite.c
+popd
+
+# Copy additional files needed by the build.
+cp -t build/zlib Makefile
+
+pushd $BUILD_DIR/zlib
+
+# Re-run `configure` with additional flags for compiling the compartment.
+# -Werror=incompatible-pointer-types \
+IA2FLAGS="$IA2FLAGS \
+    -fPIC \
+    -DIA2_ENABLE=1 \
+    -include ../wrapper.h \
+    -Wl,--wrap=pthread_create \
+    -pthread \
+    -Wl,-z,now \
+    -Wl,-z,relro \
+    -Wl,-T$IA2_PATH/runtime/libia2/padding.ld"
+
+IA2MAINFLAGS="\
+    -Wl,--wrap=main \
+    -Wl,--dynamic-list=$IA2_PATH/runtime/libia2/dynsym.syms \
+    -Wl,--export-dynamic"
+
+sed < Makefile "
+/^IA2FLAGS *=/s#=.*#=$IA2FLAGS#
+/^IA2MAINFLAGS *=/s#=.*#=$IA2MAINFLAGS#
+" > Makefile.tmp && mv Makefile.tmp Makefile
+
 popd
