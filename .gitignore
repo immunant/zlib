@@ -38,3 +38,4 @@ contrib/nuget/obj
 *.included
 
 compile_commands.json
+ia2/zlib/Makefile

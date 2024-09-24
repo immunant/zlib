@@ -1,0 +1,1 @@
+--wrap=ia2_compartment_destructor_2
