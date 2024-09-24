@@ -126,3 +126,5 @@ popd
 #   operation.
 # - `IA2_ADDR` for null checks is incorrect and needed to be manually rewritten
 #   to check against 0.
+# - Assignments to fn ptr fields break, e.g. `foo.field = 0;` where `field` is a
+#   fn ptr.
