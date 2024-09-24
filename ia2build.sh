@@ -117,3 +117,12 @@ sed < Makefile "
 " > Makefile.tmp && mv Makefile.tmp Makefile
 
 popd
+
+# Manual rewriting notes
+#
+# - Function pointer calls where the pointer was being dereferenced before the
+#   call (i.e. `(*fn_ptr)(args)`) fail to compile once the pointer has been
+#   replaced with a struct. I had to manually remove the extra dereference
+#   operation.
+# - `IA2_ADDR` for null checks is incorrect and needed to be manually rewritten
+#   to check against 0.

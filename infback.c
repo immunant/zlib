@@ -626,3 +626,9 @@ int ZEXPORT inflateBackEnd(z_streamp strm) {
     Tracev((stderr, "inflate: end\n"));
     return Z_OK;
 }
+
+
+void call_inflateBack_fns(in_func in, out_func out) {
+    in(0, 0);
+    out(0, 0, 0);
+}
