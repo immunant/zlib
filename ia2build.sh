@@ -10,12 +10,13 @@
 # TODO: Don't assume IA2 is located next to the zlib checkout.
 IA2_PATH=`realpath ../IA2-Phase2`
 
-# TODO: Specify PKEY in a less hacky way. This approach will define `PKEY=2` for
-# all modules, including zpipesh which should instead have `PKEY=1`. We probably
-# need to customize the Makefile futher to more directly support IA2 flags.
 ./configure
 
 # Inject IA2 compiler flags for the initial (IA2-disabled) build.
+#
+# TODO: Specify PKEY in a less hacky way. This approach will define `PKEY=2` for
+# all modules, including zpipesh which should instead have `PKEY=1`. We probably
+# need to customize the Makefile futher to more directly support IA2 flags.
 IA2FLAGS="-I $IA2_PATH/runtime/libia2/include -DPKEY=2"
 sed < Makefile "
 /^IA2FLAGS *=/s#=.*#=$IA2FLAGS#
@@ -126,5 +127,4 @@ popd
 #   operation.
 # - `IA2_ADDR` for null checks is incorrect and needed to be manually rewritten
 #   to check against 0.
-# - Assignments to fn ptr fields break, e.g. `foo.field = 0;` where `field` is a
-#   fn ptr.
+# - Assignments to fn ptr fields break, e.g. `foo.field = 0;` where `field` is a fn ptr.
