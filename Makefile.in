@@ -24,6 +24,7 @@ SFLAGS=-O
 LDFLAGS=
 IA2FLAGS=
 IA2MAINFLAGS=
+IA2PATH=
 TEST_LIBS=-L. libz.a
 LDSHARED=$(CC)
 CPP=$(CC) -E
@@ -315,7 +316,9 @@ zpipesh$(EXE): zpipe.o $(SHAREDLIBV)
 	$(CC) $(CFLAGS) -o $@ zpipe.o $(LDFLAGS) -L. $(SHAREDLIBV) -Wl,-rpath,\$$ORIGIN
 
 libcallgates.so:
-	$CC -shared -fPIC -Wl,-z,now callgate_wrapper.c -I /path/to/ia2/runtime/libia2/include -o libcallgates.so
+	$(CC) -shared -fPIC -Wl,-z,now ../wrapper.c -I $(IA2PATH)/runtime/libia2/include -o libcallgates.so
+
+zpipec$(EXE): zpipesh$(EXE) libcallgates.so
 
 install-libs: $(LIBS)
 	-@if [ ! -d $(DESTDIR)$(exec_prefix)  ]; then mkdir -p $(DESTDIR)$(exec_prefix); fi

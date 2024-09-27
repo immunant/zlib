@@ -39,3 +39,4 @@ contrib/nuget/obj
 
 compile_commands.json
 ia2/zlib/Makefile
+ia2/zlib/libcallgates.so

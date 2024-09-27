@@ -115,6 +115,7 @@ IA2MAINFLAGS="\
 sed < Makefile "
 /^IA2FLAGS *=/s#=.*#=$IA2FLAGS#
 /^IA2MAINFLAGS *=/s#=.*#=$IA2MAINFLAGS#
+/^IA2PATH *=/s#=.*#=$IA2_PATH#
 " > Makefile.tmp && mv Makefile.tmp Makefile
 
 popd
