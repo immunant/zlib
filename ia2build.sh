@@ -91,7 +91,7 @@ else
 fi
 
 # Copy additional files needed by the build.
-cp -t $BUILD_DIR/zlib Makefile
+cp -t $BUILD_DIR/zlib Makefile zlib.map
 
 pushd $BUILD_DIR/zlib
 
