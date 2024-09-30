@@ -91,7 +91,7 @@ else
 fi
 
 # Copy additional files needed by the build.
-cp -t $BUILD_DIR/zlib Makefile zlib.map
+cp -t $BUILD_DIR/zlib Makefile
 
 pushd $BUILD_DIR/zlib
 
@@ -138,6 +138,9 @@ popd
 #   to check against 0.
 # - Assignments to fn ptr fields break, e.g. `foo.field = 0;` where `field` is a
 #   fn ptr.
+# - Removed `zlib.map` version script from the build in order to make `zcalloc`
+#   and `zcfree` publicly exported in order to fix linker errors publicly
+#   exported in order to fix linker errors.
 #
 # Build notes
 #
