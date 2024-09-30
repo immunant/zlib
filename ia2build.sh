@@ -96,21 +96,29 @@ cp -t $BUILD_DIR/zlib Makefile zlib.map
 pushd $BUILD_DIR/zlib
 
 # Re-run `configure` with additional flags for compiling the compartment.
+#
+# TODO: Currently we're hard coding the `LIBIA2_X86_64` define. We should probably
+# detecing the current platform to determine what define should be set. This
+# might need to be done in `configure`.
+#
 # -Werror=incompatible-pointer-types \
 IA2FLAGS="$IA2FLAGS \
     -fPIC \
     -DIA2_ENABLE=1 \
+    -DLIBIA2_X86_64=1 \
     -include ../wrapper.h \
     -Wl,--wrap=pthread_create \
     -pthread \
     -Wl,-z,now \
     -Wl,-z,relro \
-    -Wl,-T$IA2_PATH/runtime/libia2/padding.ld"
+    -Wl,-T$IA2_PATH/runtime/libia2/padding.ld \
+    -Wl,@../wrapper_2.ld"
 
 IA2MAINFLAGS="\
     -Wl,--wrap=main \
     -Wl,--dynamic-list=$IA2_PATH/runtime/libia2/dynsym.syms \
-    -Wl,--export-dynamic"
+    -Wl,--export-dynamic \
+    -Wl,@../wrapper_1.ld"
 
 sed < Makefile "
 /^IA2FLAGS *=/s#=.*#=$IA2FLAGS#
@@ -128,4 +136,21 @@ popd
 #   operation.
 # - `IA2_ADDR` for null checks is incorrect and needed to be manually rewritten
 #   to check against 0.
-# - Assignments to fn ptr fields break, e.g. `foo.field = 0;` where `field` is a fn ptr.
+# - Assignments to fn ptr fields break, e.g. `foo.field = 0;` where `field` is a
+#   fn ptr.
+#
+# Build notes
+#
+# - Linking in `liblibia2.a` is not mentioned in the usage docs.
+# - Need to also set `LIBIA2_X86_64=1` via CLI flag.
+# - Rewriter-generated wrapper for `static` fn is broken, we get a linker error
+#   in e.g. `deflate_fast` when using version symbols (defined in `zlib.map`).
+# - Rewriter doesn't need to wrap fn pointers if they never escape the
+#   compartment, but can't detect that at compile time. Would be useful to have
+#   a configuration option to say "don't tranlate this fn pointer". Maybe
+#   `IA2_IGNORE` is sufficient for that?
+# - `zlib.map` is marking `zcfree` and `zcalloc` local, which effectively makes
+#   them `static` as well, but we can't see that in the source code. This leads
+#   to linker errors when the generated wrappers in `libcallgates.so` try to
+#   link against the symbols in `zlib.so`, and can't find them because they're
+#   internal.

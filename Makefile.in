@@ -286,7 +286,7 @@ gzwrite.lo: $(SRCDIR)gzwrite.c
 # zlib causes it to get tripped up. We only need the shared lib for IA2, so this
 # is fine for our purposes.
 placebo $(SHAREDLIBV): $(PIC_OBJS)
-	$(LDSHARED) $(SFLAGS) -o $@ $(PIC_OBJS) $(LDSHAREDLIBC) $(LDFLAGS)
+	$(LDSHARED) $(SFLAGS) $(IA2FLAGS) -o $@ $(PIC_OBJS) $(LDSHAREDLIBC) $(LDFLAGS)
 	rm -f $(SHAREDLIB) $(SHAREDLIBM)
 	ln -s $@ $(SHAREDLIB)
 	ln -s $@ $(SHAREDLIBM)
@@ -313,12 +313,16 @@ minigzip64$(EXE): minigzip64.o $(STATICLIB)
 # NOTE: We specify a custom `RPATH` to force the executable to load the local
 # version of `libz.so` rather than using the system version.
 zpipesh$(EXE): zpipe.o $(SHAREDLIBV)
-	$(CC) $(CFLAGS) -o $@ zpipe.o $(LDFLAGS) -L. $(SHAREDLIBV) -Wl,-rpath,\$$ORIGIN
+	$(CC) $(CFLAGS) $(IA2FLAGS) $(IA2MAINFLAGS) -o $@ zpipe.o $(LDFLAGS) -L. $(SHAREDLIBV) -Wl,-rpath,\$$ORIGIN
 
+zpipec$(EXE): zpipe.o $(SHAREDLIBV) libcallgates.so
+	$(CC) $(CFLAGS) $(IA2FLAGS) $(IA2MAINFLAGS) -o $@ zpipe.o $(LDFLAGS) -L. $(SHAREDLIBV) -Wl,-rpath,\$$ORIGIN libcallgates.so $(IA2PATH)/build/runtime/libia2/liblibia2.a
+
+# TODO: Currently we're hard coding the `LIBIA2_X86_64` define. We should
+# probably be detecing the current platform to determine what define should be
+# set. This might need to be done in `configure`.
 libcallgates.so:
-	$(CC) -shared -fPIC -Wl,-z,now ../wrapper.c -I $(IA2PATH)/runtime/libia2/include -o libcallgates.so
-
-zpipec$(EXE): zpipesh$(EXE) libcallgates.so
+	$(CC) -shared -fPIC -DLIBIA2_X86_64=1 -Wl,-z,now ../wrapper.c -I $(IA2PATH)/runtime/libia2/include -o libcallgates.so
 
 install-libs: $(LIBS)
 	-@if [ ! -d $(DESTDIR)$(exec_prefix)  ]; then mkdir -p $(DESTDIR)$(exec_prefix); fi
@@ -387,12 +391,12 @@ minizip-clean:
 	cd contrib/minizip && { $(MAKE) clean ; cd ../.. ; }
 
 mostlyclean: clean
-clean: minizip-clean
+clean:
 	rm -f *.o *.lo *~ \
 	   example$(EXE) minigzip$(EXE) examplesh$(EXE) minigzipsh$(EXE) \
 	   example64$(EXE) minigzip64$(EXE) zpipesh$(EXE) \
 	   infcover \
-	   libz.* foo.gz so_locations \
+	   libz.* libcallgates.so foo.gz so_locations \
 	   _match.s maketree contrib/infback9/*.o
 	rm -rf objs
 	rm -f *.gcda *.gcno *.gcov
