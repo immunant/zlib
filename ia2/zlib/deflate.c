@@ -51,6 +51,8 @@
 
 #include "deflate.h"
 
+#include <ia2.h>
+
 const char deflate_copyright[] =
    " deflate 1.3.1.1 Copyright 1995-2024 Jean-loup Gailly and Mark Adler ";
 /*
@@ -67,7 +69,7 @@ typedef enum {
     finish_done     /* finish done, accept no more input or output */
 } block_state;
 
-typedef struct IA2_fnptr__ZTSF11block_stateP14internal_stateiE compress_func;
+typedef block_state (*compress_func)(deflate_state *s, int flush);
 /* Compression function. Returns the block state after the call. */
 
 local block_state deflate_stored(deflate_state *s, int flush);
@@ -106,22 +108,22 @@ typedef struct config_s {
 #ifdef FASTEST
 local const config configuration_table[2] = {
 /*      good lazy nice chain */
-/* 0 */ {0,    0,  0,    0, deflate_stored},  /* store only */
-/* 1 */ {4,    4,  8,    4, deflate_fast}}; /* max speed, no lazy matches */
+/* 0 */ {0,    0,  0,    0, IA2_IGNORE(deflate_stored)},  /* store only */
+/* 1 */ {4,    4,  8,    4, IA2_IGNORE(deflate_fast)}}; /* max speed, no lazy matches */
 #else
 local const config configuration_table[10] = {
 /*      good lazy nice chain */
-/* 0 */ {0,    0,  0,    0, IA2_FN(deflate_stored)},  /* store only */
-/* 1 */ {4,    4,  8,    4, IA2_FN(deflate_fast)}, /* max speed, no lazy matches */
-/* 2 */ {4,    5, 16,    8, IA2_FN(deflate_fast)},
-/* 3 */ {4,    6, 32,   32, IA2_FN(deflate_fast)},
+/* 0 */ {0,    0,  0,    0, IA2_IGNORE(deflate_stored)},  /* store only */
+/* 1 */ {4,    4,  8,    4, IA2_IGNORE(deflate_fast)}, /* max speed, no lazy matches */
+/* 2 */ {4,    5, 16,    8, IA2_IGNORE(deflate_fast)},
+/* 3 */ {4,    6, 32,   32, IA2_IGNORE(deflate_fast)},
 
-/* 4 */ {4,    4, 16,   16, IA2_FN(deflate_slow)},  /* lazy matches */
-/* 5 */ {8,   16, 32,   32, IA2_FN(deflate_slow)},
-/* 6 */ {8,   16, 128, 128, IA2_FN(deflate_slow)},
-/* 7 */ {8,   32, 128, 256, IA2_FN(deflate_slow)},
-/* 8 */ {32, 128, 258, 1024, IA2_FN(deflate_slow)},
-/* 9 */ {32, 258, 258, 4096, IA2_FN(deflate_slow)}}; /* max compression */
+/* 4 */ {4,    4, 16,   16, IA2_IGNORE(deflate_slow)},  /* lazy matches */
+/* 5 */ {8,   16, 32,   32, IA2_IGNORE(deflate_slow)},
+/* 6 */ {8,   16, 128, 128, IA2_IGNORE(deflate_slow)},
+/* 7 */ {8,   32, 128, 256, IA2_IGNORE(deflate_slow)},
+/* 8 */ {32, 128, 258, 1024, IA2_IGNORE(deflate_slow)},
+/* 9 */ {32, 258, 258, 4096, IA2_IGNORE(deflate_slow)}}; /* max compression */
 #endif
 
 /* Note: the deflate() code requires max_lazy >= MIN_MATCH and max_chain >= 4
@@ -774,7 +776,7 @@ int ZEXPORT deflateParams(z_streamp strm, int level, int strategy) {
     }
     func = configuration_table[s->level].func;
 
-    if ((strategy != s->strategy || IA2_ADDR(func) != IA2_ADDR(configuration_table[level].func)) &&
+    if ((strategy != s->strategy || func != configuration_table[level].func) &&
         s->last_flush != -2) {
         /* Flush the last buffer: */
         int err = deflate(strm, Z_BLOCK);
@@ -1190,7 +1192,7 @@ int ZEXPORT deflate(z_streamp strm, int flush) {
         bstate = s->level == 0 ? deflate_stored(s, flush) :
                  s->strategy == Z_HUFFMAN_ONLY ? deflate_huff(s, flush) :
                  s->strategy == Z_RLE ? deflate_rle(s, flush) :
-                 IA2_CALL((configuration_table[s->level].func), _ZTSPF11block_stateP14internal_stateiE)(s, flush);
+                 configuration_table[s->level].func(s, flush);
 
         if (bstate == finish_started || bstate == finish_done) {
             s->status = FINISH_STATE;

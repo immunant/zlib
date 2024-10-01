@@ -51,6 +51,8 @@
 
 #include "deflate.h"
 
+#include <ia2.h>
+
 const char deflate_copyright[] =
    " deflate 1.3.1.1 Copyright 1995-2024 Jean-loup Gailly and Mark Adler ";
 /*
@@ -106,22 +108,22 @@ typedef struct config_s {
 #ifdef FASTEST
 local const config configuration_table[2] = {
 /*      good lazy nice chain */
-/* 0 */ {0,    0,  0,    0, deflate_stored},  /* store only */
-/* 1 */ {4,    4,  8,    4, deflate_fast}}; /* max speed, no lazy matches */
+/* 0 */ {0,    0,  0,    0, IA2_IGNORE(deflate_stored)},  /* store only */
+/* 1 */ {4,    4,  8,    4, IA2_IGNORE(deflate_fast)}}; /* max speed, no lazy matches */
 #else
 local const config configuration_table[10] = {
 /*      good lazy nice chain */
-/* 0 */ {0,    0,  0,    0, deflate_stored},  /* store only */
-/* 1 */ {4,    4,  8,    4, deflate_fast}, /* max speed, no lazy matches */
-/* 2 */ {4,    5, 16,    8, deflate_fast},
-/* 3 */ {4,    6, 32,   32, deflate_fast},
+/* 0 */ {0,    0,  0,    0, IA2_IGNORE(deflate_stored)},  /* store only */
+/* 1 */ {4,    4,  8,    4, IA2_IGNORE(deflate_fast)}, /* max speed, no lazy matches */
+/* 2 */ {4,    5, 16,    8, IA2_IGNORE(deflate_fast)},
+/* 3 */ {4,    6, 32,   32, IA2_IGNORE(deflate_fast)},
 
-/* 4 */ {4,    4, 16,   16, deflate_slow},  /* lazy matches */
-/* 5 */ {8,   16, 32,   32, deflate_slow},
-/* 6 */ {8,   16, 128, 128, deflate_slow},
-/* 7 */ {8,   32, 128, 256, deflate_slow},
-/* 8 */ {32, 128, 258, 1024, deflate_slow},
-/* 9 */ {32, 258, 258, 4096, deflate_slow}}; /* max compression */
+/* 4 */ {4,    4, 16,   16, IA2_IGNORE(deflate_slow)},  /* lazy matches */
+/* 5 */ {8,   16, 32,   32, IA2_IGNORE(deflate_slow)},
+/* 6 */ {8,   16, 128, 128, IA2_IGNORE(deflate_slow)},
+/* 7 */ {8,   32, 128, 256, IA2_IGNORE(deflate_slow)},
+/* 8 */ {32, 128, 258, 1024, IA2_IGNORE(deflate_slow)},
+/* 9 */ {32, 258, 258, 4096, IA2_IGNORE(deflate_slow)}}; /* max compression */
 #endif
 
 /* Note: the deflate() code requires max_lazy >= MIN_MATCH and max_chain >= 4
