@@ -50,8 +50,8 @@ int def(FILE *source, FILE *dest, int level)
     int ret, flush;
     unsigned have;
     z_stream *strm = malloc(sizeof(z_stream));
-    unsigned char in[CHUNK];
-    unsigned char out[CHUNK];
+    unsigned char *in = malloc(CHUNK);
+    unsigned char *out = malloc(CHUNK);
 
     /* allocate deflate state */
     strm->zalloc = Z_NULL;
@@ -107,8 +107,8 @@ int inf(FILE *source, FILE *dest)
     int ret;
     unsigned have;
     z_stream *strm = malloc(sizeof(z_stream));
-    unsigned char in[CHUNK];
-    unsigned char out[CHUNK];
+    unsigned char *in = malloc(CHUNK);
+    unsigned char *out = malloc(CHUNK);
 
     /* allocate inflate state */
     strm->zalloc = Z_NULL;

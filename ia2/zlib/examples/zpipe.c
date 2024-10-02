@@ -51,8 +51,8 @@ int def(FILE *source, FILE *dest, int level)
     int ret, flush;
     unsigned have;
     z_stream *strm = shared_malloc(sizeof(z_stream));
-    unsigned char in[CHUNK];
-    unsigned char out[CHUNK];
+    unsigned char *in = shared_malloc(CHUNK);
+    unsigned char *out = shared_malloc(CHUNK);
 
     /* allocate deflate state */
     strm->zalloc.ptr = Z_NULL;
@@ -108,8 +108,8 @@ int inf(FILE *source, FILE *dest)
     int ret;
     unsigned have;
     z_stream *strm = shared_malloc(sizeof(z_stream));
-    unsigned char in[CHUNK];
-    unsigned char out[CHUNK];
+    unsigned char *in = shared_malloc(CHUNK);
+    unsigned char *out = shared_malloc(CHUNK);
 
     /* allocate inflate state */
     strm->zalloc.ptr = Z_NULL;
