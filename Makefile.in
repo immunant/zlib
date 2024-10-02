@@ -315,8 +315,10 @@ minigzip64$(EXE): minigzip64.o $(STATICLIB)
 zpipesh$(EXE): zpipe.o $(SHAREDLIBV)
 	$(CC) $(CFLAGS) $(IA2FLAGS) $(IA2MAINFLAGS) -o $@ zpipe.o $(LDFLAGS) -L. $(SHAREDLIBV) -Wl,-rpath,\$$ORIGIN
 
+# NOTE: We specify a second `RPATH` so that the dynamic linker can find
+# `libpartion-alloc.so` at runtime.
 zpipec$(EXE): zpipe.o $(SHAREDLIBV) libcallgates.so
-	$(CC) $(CFLAGS) $(IA2FLAGS) $(IA2MAINFLAGS) -o $@ zpipe.o $(LDFLAGS) -L. $(SHAREDLIBV) -Wl,-rpath,\$$ORIGIN libcallgates.so $(IA2PATH)/build/runtime/libia2/liblibia2.a
+	$(CC) $(CFLAGS) $(IA2FLAGS) $(IA2MAINFLAGS) -o $@ zpipe.o $(LDFLAGS) -L. $(SHAREDLIBV) -Wl,-rpath,\$$ORIGIN,-rpath,$(IA2PATH)/build/runtime/partition-alloc libcallgates.so -L$(IA2PATH)/build/runtime/libia2 -L$(IA2PATH)/build/runtime/partition-alloc -llibia2 -lpartition-alloc
 
 # TODO: Currently we're hard coding the `LIBIA2_X86_64` define. We should
 # probably be detecing the current platform to determine what define should be
@@ -396,7 +398,7 @@ clean:
 	   example$(EXE) minigzip$(EXE) examplesh$(EXE) minigzipsh$(EXE) \
 	   example64$(EXE) minigzip64$(EXE) zpipesh$(EXE) \
 	   infcover \
-	   libz.* libcallgates.so foo.gz so_locations \
+	   libz.* libcallgates.so zpipe* foo.gz so_locations \
 	   _match.s maketree contrib/infback9/*.o
 	rm -rf objs
 	rm -f *.gcda *.gcno *.gcov

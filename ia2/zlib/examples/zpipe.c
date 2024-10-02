@@ -17,6 +17,7 @@
 #endif
 
 #include <ia2.h>
+#include <ia2_allocator.h>
 
 INIT_RUNTIME(2);
 
@@ -49,7 +50,7 @@ int def(FILE *source, FILE *dest, int level)
 {
     int ret, flush;
     unsigned have;
-    z_stream *strm = malloc(sizeof(z_stream));
+    z_stream *strm = shared_malloc(sizeof(z_stream));
     unsigned char in[CHUNK];
     unsigned char out[CHUNK];
 
@@ -92,7 +93,7 @@ int def(FILE *source, FILE *dest, int level)
 
     /* clean up and return */
     (void)deflateEnd(strm);
-    free(strm);
+    shared_free(strm);
     return Z_OK;
 }
 
@@ -106,7 +107,7 @@ int inf(FILE *source, FILE *dest)
 {
     int ret;
     unsigned have;
-    z_stream *strm = malloc(sizeof(z_stream));
+    z_stream *strm = shared_malloc(sizeof(z_stream));
     unsigned char in[CHUNK];
     unsigned char out[CHUNK];
 
@@ -157,7 +158,7 @@ int inf(FILE *source, FILE *dest)
 
     /* clean up and return */
     (void)inflateEnd(strm);
-    free(strm);
+    shared_free(strm);
     return ret == Z_STREAM_END ? Z_OK : Z_DATA_ERROR;
 }
 

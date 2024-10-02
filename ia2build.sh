@@ -17,7 +17,7 @@ IA2_PATH=`realpath ../IA2-Phase2`
 # TODO: Specify PKEY in a less hacky way. This approach will define `PKEY=2` for
 # all modules, including zpipesh which should instead have `PKEY=1`. We probably
 # need to customize the Makefile futher to more directly support IA2 flags.
-IA2FLAGS="-I $IA2_PATH/runtime/libia2/include -DPKEY=2"
+IA2FLAGS="-I $IA2_PATH/runtime/libia2/include -I $IA2_PATH/runtime/partition-alloc/include -DPKEY=2"
 sed < Makefile "
 /^IA2FLAGS *=/s#=.*#=$IA2FLAGS#
 " > Makefile.tmp && mv Makefile.tmp Makefile
@@ -116,6 +116,10 @@ IA2FLAGS="$IA2FLAGS \
 
 IA2MAINFLAGS="\
     -Wl,--wrap=main \
+    -Wl,--wrap=calloc  \
+    -Wl,--wrap=malloc  \
+    -Wl,--wrap=realloc \
+    -Wl,--wrap=free \
     -Wl,--dynamic-list=$IA2_PATH/runtime/libia2/dynsym.syms \
     -Wl,--export-dynamic \
     -Wl,@../wrapper_1.ld"
@@ -147,6 +151,8 @@ popd
 #   that only applies to direct function calls that should not be rewritten.
 #   We'll need to update the rewriter to correctly handle this case. For zlib I
 #   manually edited the rewritten file to remove the rewritten pointer type.
+# - Need to change `zpipe.c` to allocate `strm` on the shared heap since IA2
+#   can't handle shared memory on the stack.
 #
 # Build notes
 #
@@ -163,3 +169,5 @@ popd
 #   to linker errors when the generated wrappers in `libcallgates.so` try to
 #   link against the symbols in `zlib.so`, and can't find them because they're
 #   internal.
+# - Need to include partion-alloc and wrap `malloc` and friends. Not documented
+#   anywhere.
