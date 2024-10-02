@@ -130,6 +130,12 @@ sed < Makefile "
 /^IA2PATH *=/s#=.*#=$IA2_PATH#
 " > Makefile.tmp && mv Makefile.tmp Makefile
 
+# Copy libc.so and run pad-tls on it.
+#
+# TODO: Don't assume path to `libc.so`. I'm not sure how to properly detect that.
+cp /lib/x86_64-linux-gnu/libc.so.6 .
+$IA2_PATH/build/tools/pad-tls/pad-tls libc.so.6
+
 popd
 
 # Manual rewriting notes
@@ -171,3 +177,5 @@ popd
 #   internal.
 # - Need to include partion-alloc and wrap `malloc` and friends. Not documented
 #   anywhere.
+# - Need to run `pad-tls` on `libc.so` and `libz.so` since they use TLS. Not
+#   documented anywhere.

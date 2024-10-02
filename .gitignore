@@ -41,3 +41,4 @@ compile_commands.json
 ia2/zlib/Makefile
 ia2/zlib/libcallgates.so
 ia2/zlib/zpipec
+ia2/zlib/libc.so.6

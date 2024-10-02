@@ -319,6 +319,7 @@ zpipesh$(EXE): zpipe.o $(SHAREDLIBV)
 # `libpartion-alloc.so` at runtime.
 zpipec$(EXE): zpipe.o $(SHAREDLIBV) libcallgates.so
 	$(CC) $(CFLAGS) $(IA2FLAGS) $(IA2MAINFLAGS) -o $@ zpipe.o $(LDFLAGS) -L. $(SHAREDLIBV) -Wl,-rpath,\$$ORIGIN,-rpath,$(IA2PATH)/build/runtime/partition-alloc libcallgates.so -L$(IA2PATH)/build/runtime/libia2 -L$(IA2PATH)/build/runtime/partition-alloc -llibia2 -lpartition-alloc
+	$(IA2PATH)/build/tools/pad-tls/pad-tls $(SHAREDLIBV)
 
 # TODO: Currently we're hard coding the `LIBIA2_X86_64` define. We should
 # probably be detecing the current platform to determine what define should be
