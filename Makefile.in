@@ -325,7 +325,7 @@ zpipec$(EXE): zpipe.o $(SHAREDLIBV) libcallgates.so
 # probably be detecing the current platform to determine what define should be
 # set. This might need to be done in `configure`.
 libcallgates.so:
-	$(CC) -shared -fPIC -DLIBIA2_X86_64=1 -Wl,-z,now ../wrapper.c -I $(IA2PATH)/runtime/libia2/include -o libcallgates.so
+	$(CC) -shared -fPIC -DLIBIA2_X86_64=1 -Wl,-z,now wrapper.c -I $(IA2PATH)/runtime/libia2/include -o libcallgates.so
 
 install-libs: $(LIBS)
 	-@if [ ! -d $(DESTDIR)$(exec_prefix)  ]; then mkdir -p $(DESTDIR)$(exec_prefix); fi

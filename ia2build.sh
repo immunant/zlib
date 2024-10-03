@@ -1,12 +1,6 @@
-# TODO: Fix error that causes rewriter to fail to create build dir:
-#
-# ```
-# Failed to create dir /home/legare/zlib/build/zlib/.: File exists
-# ```
-#
-# The issue is likely the `/.` at the end, i.e. it's trying to create
-# `build/zlib` twice.
-
+# Get the path to is IA2-Phase2 checkout. Currently assumed to be next to the
+# zlib checkout.
+# 
 # TODO: Don't assume IA2 is located next to the zlib checkout.
 IA2_PATH=`realpath ../IA2-Phase2`
 
@@ -17,7 +11,10 @@ IA2_PATH=`realpath ../IA2-Phase2`
 # TODO: Specify PKEY in a less hacky way. This approach will define `PKEY=2` for
 # all modules, including zpipesh which should instead have `PKEY=1`. We probably
 # need to customize the Makefile futher to more directly support IA2 flags.
-IA2FLAGS="-I $IA2_PATH/runtime/libia2/include -I $IA2_PATH/runtime/partition-alloc/include -DPKEY=2"
+IA2FLAGS="\
+    -I $IA2_PATH/runtime/libia2/include \
+    -I $IA2_PATH/runtime/partition-alloc/include \
+    -DPKEY=2"
 sed < Makefile "
 /^IA2FLAGS *=/s#=.*#=$IA2FLAGS#
 " > Makefile.tmp && mv Makefile.tmp Makefile
@@ -32,27 +29,21 @@ else
 fi
 
 ZLIB_ROOT=`realpath .`
-
-# TODO: Allow `--root-directory` to directly contain the source files. Currently
-# the rewriter appears to expect that the root dir contains a directory that in
-# turn contains the source files, and recreates this directory structure in the
-# output dir. This makes things slighly weird for zlib, which puts all of its
-# source files in the root dir.
-#
-# TODO: Allow `--root-directory` to be a relative path. At least from my testing
-# it seems like it needs to be an absolute paths otherwise the rewriter gets
-# confused.
-ZLIB_PARENT=`realpath $ZLIB_ROOT/..`
-
 BUILD_DIR=${PWD}/ia2
 
 # Run the rewriter if the build dir is not already present.
 if [ ! -d "$BUILD_DIR" ]; then
     mkdir -p $BUILD_DIR
     pushd $BUILD_DIR
+    # TODO: Allow `--root-directory` to be a relative path. At least from my testing
+    # it seems like it needs to be an absolute paths otherwise the rewriter gets
+    # confused.
+    #
+    # TODO: Why do we need to specify the source files manually? Isn't that info
+    # in `compile_commands.json`?
     $IA2_PATH/build/tools/rewriter/ia2-rewriter \
         --output-prefix=wrapper \
-        --root-directory=$ZLIB_PARENT \
+        --root-directory=$ZLIB_ROOT \
         --output-directory=$BUILD_DIR \
         $ZLIB_ROOT/examples/zpipe.c \
         $ZLIB_ROOT/adler32.c \
@@ -91,9 +82,9 @@ else
 fi
 
 # Copy additional files needed by the build.
-cp -t $BUILD_DIR/zlib Makefile
+cp -t $BUILD_DIR Makefile
 
-pushd $BUILD_DIR/zlib
+pushd $BUILD_DIR
 
 # Re-run `configure` with additional flags for compiling the compartment.
 #
@@ -106,13 +97,13 @@ IA2FLAGS="$IA2FLAGS \
     -fPIC \
     -DIA2_ENABLE=1 \
     -DLIBIA2_X86_64=1 \
-    -include ../wrapper.h \
+    -include wrapper.h \
     -Wl,--wrap=pthread_create \
     -pthread \
     -Wl,-z,now \
     -Wl,-z,relro \
     -Wl,-T$IA2_PATH/runtime/libia2/padding.ld \
-    -Wl,@../wrapper_2.ld"
+    -Wl,@wrapper_2.ld"
 
 IA2MAINFLAGS="\
     -Wl,--wrap=main \
@@ -122,7 +113,7 @@ IA2MAINFLAGS="\
     -Wl,--wrap=free \
     -Wl,--dynamic-list=$IA2_PATH/runtime/libia2/dynsym.syms \
     -Wl,--export-dynamic \
-    -Wl,@../wrapper_1.ld"
+    -Wl,@wrapper_1.ld"
 
 sed < Makefile "
 /^IA2FLAGS *=/s#=.*#=$IA2FLAGS#
