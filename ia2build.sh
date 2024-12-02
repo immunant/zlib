@@ -140,8 +140,7 @@ popd
 # - Assignments to fn ptr fields break, e.g. `foo.field = 0;` where `field` is a
 #   fn ptr.
 # - Removed `zlib.map` version script from the build in order to make `zcalloc`
-#   and `zcfree` publicly exported in order to fix linker errors publicly
-#   exported in order to fix linker errors.
+#   and `zcfree` publicly exported in order to fix linker errors.
 # - Currently no way to mark a function pointer type that shouldn't be rewritten
 #   (e.g. a function pointer like `deflate_fast` that is entirely internal and
 #   will never cross compartments). We have `IA2_BEGIN_NO_WRAP` but currently
@@ -157,10 +156,6 @@ popd
 # - Need to also set `LIBIA2_X86_64=1` via CLI flag.
 # - Rewriter-generated wrapper for `static` fn is broken, we get a linker error
 #   in e.g. `deflate_fast` when using version symbols (defined in `zlib.map`).
-# - Rewriter doesn't need to wrap fn pointers if they never escape the
-#   compartment, but can't detect that at compile time. Would be useful to have
-#   a configuration option to say "don't tranlate this fn pointer". Maybe
-#   `IA2_IGNORE` is sufficient for that?
 # - `zlib.map` is marking `zcfree` and `zcalloc` local, which effectively makes
 #   them `static` as well, but we can't see that in the source code. This leads
 #   to linker errors when the generated wrappers in `libcallgates.so` try to
