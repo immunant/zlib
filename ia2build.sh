@@ -82,7 +82,7 @@ else
 fi
 
 # Copy additional files needed by the build.
-cp -t $BUILD_DIR Makefile
+cp -t $BUILD_DIR Makefile $IA2_PATH/build/runtime/partition-alloc/libpartition-alloc.so
 
 pushd $BUILD_DIR
 

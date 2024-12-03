@@ -43,3 +43,4 @@ ia2/libcallgates.so
 ia2/zpipec
 ia2/libc.so.6
 libc.so.6
+ia2/libpartition-alloc.so

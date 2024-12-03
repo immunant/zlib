@@ -315,17 +315,15 @@ minigzip64$(EXE): minigzip64.o $(STATICLIB)
 zpipesh$(EXE): zpipe.o $(SHAREDLIBV)
 	$(CC) $(CFLAGS) $(IA2FLAGS) $(IA2MAINFLAGS) -o $@ zpipe.o $(LDFLAGS) -L. $(SHAREDLIBV) -Wl,-rpath,\$$ORIGIN
 
-# NOTE: We specify a second `RPATH` so that the dynamic linker can find
-# `libpartion-alloc.so` at runtime.
 zpipec$(EXE): zpipe.o $(SHAREDLIBV) libcallgates.so
-	$(CC) $(CFLAGS) $(IA2FLAGS) $(IA2MAINFLAGS) -o $@ zpipe.o $(LDFLAGS) -L. $(SHAREDLIBV) -Wl,-rpath,\$$ORIGIN,-rpath,$(IA2PATH)/build/runtime/partition-alloc libcallgates.so -L$(IA2PATH)/build/runtime/libia2 -L$(IA2PATH)/build/runtime/partition-alloc -llibia2 -lpartition-alloc
+	$(CC) $(CFLAGS) $(IA2FLAGS) $(IA2MAINFLAGS) -o $@ zpipe.o $(LDFLAGS) -L. $(SHAREDLIBV) -Wl,-rpath,\$$ORIGIN -L$(IA2PATH)/build/runtime/libia2 -L$(IA2PATH)/build/runtime/partition-alloc -llibia2 -lpartition-alloc -lcallgates
 	$(IA2PATH)/build/tools/pad-tls/pad-tls $(SHAREDLIBV)
 
 # TODO: Currently we're hard coding the `LIBIA2_X86_64` define. We should
 # probably be detecing the current platform to determine what define should be
 # set. This might need to be done in `configure`.
 libcallgates.so:
-	$(CC) -shared -fPIC -DLIBIA2_X86_64=1 -Wl,-z,now wrapper.c -I $(IA2PATH)/runtime/libia2/include -o libcallgates.so
+	$(CC) -shared -fPIC -DLIBIA2_X86_64=1 -Wl,-z,now wrapper.c -I $(IA2PATH)/runtime/libia2/include -o $@
 
 install-libs: $(LIBS)
 	-@if [ ! -d $(DESTDIR)$(exec_prefix)  ]; then mkdir -p $(DESTDIR)$(exec_prefix); fi
@@ -400,7 +398,7 @@ clean:
 	   example64$(EXE) minigzip64$(EXE) zpipesh$(EXE) \
 	   infcover \
 	   libz.* libcallgates.so zpipe* foo.gz so_locations \
-	   _match.s maketree contrib/infback9/*.o
+	   _match.s maketree contrib/infback9/*.o libpartition-alloc.so libc.so.6
 	rm -rf objs
 	rm -f *.gcda *.gcno *.gcov
 	rm -f contrib/infback9/*.gcda contrib/infback9/*.gcno contrib/infback9/*.gcov
