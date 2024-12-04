@@ -314,10 +314,10 @@ minigzip64$(EXE): minigzip64.o $(STATICLIB)
 # NOTE: We specify a custom `RPATH` to force the executable to load the local
 # version of `libz.so` rather than using the system version.
 zpipesh$(EXE): zpipe.o $(SHAREDLIBV)
-	$(CC) $(CFLAGS) $(IA2FLAGS) $(IA2MAINFLAGS) -o $@ zpipe.o $(LDFLAGS) -L. $(SHAREDLIBV) -Wl,-rpath,\$$ORIGIN
+	$(CC) $(CFLAGS) -o $@ zpipe.o $(LDFLAGS) -L. $(SHAREDLIBV) $(IA2FLAGS) $(IA2MAINFLAGS) -Wl,-rpath,\$$ORIGIN
 
 zpipec$(EXE): zpipe.o $(SHAREDLIBV) libcallgates.so
-	$(CC) $(CFLAGS) $(IA2FLAGS) $(IA2MAINFLAGS) -o $@ zpipe.o $(LDFLAGS) -L. $(SHAREDLIBV) -Wl,-rpath,\$$ORIGIN -L$(IA2PATH)/build/runtime/libia2 -L$(IA2PATH)/build/runtime/partition-alloc -llibia2 -lpartition-alloc -lcallgates
+	$(CC) $(CFLAGS) -o $@ zpipe.o $(LDFLAGS) -L. $(SHAREDLIBV) $(IA2FLAGS) $(IA2MAINFLAGS) -Wl,-rpath,\$$ORIGIN
 
 # TODO: Currently we're hard coding the `LIBIA2_X86_64` define. We should
 # probably be detecing the current platform to determine what define should be

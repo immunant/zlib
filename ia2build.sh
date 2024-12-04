@@ -102,6 +102,10 @@ IA2FLAGS="$IA2FLAGS \
     -DLIBIA2_X86_64=1 \
     -include wrapper.h \
     -Wl,--wrap=pthread_create \
+    -Wl,--wrap=calloc  \
+    -Wl,--wrap=malloc  \
+    -Wl,--wrap=realloc \
+    -Wl,--wrap=free \
     -pthread \
     -Wl,-z,now \
     -Wl,-z,relro \
@@ -110,12 +114,13 @@ IA2FLAGS="$IA2FLAGS \
 
 IA2MAINFLAGS="\
     -Wl,--wrap=main \
-    -Wl,--wrap=calloc  \
-    -Wl,--wrap=malloc  \
-    -Wl,--wrap=realloc \
-    -Wl,--wrap=free \
     -Wl,--dynamic-list=$IA2_PATH/runtime/libia2/dynsym.syms \
     -Wl,--export-dynamic \
+    -L$IA2_PATH/build/runtime/libia2 \
+    -L$IA2_PATH/build/runtime/partition-alloc \
+    -llibia2 \
+    -lpartition-alloc \
+    -lcallgates \
     -Wl,@wrapper_1.ld"
 
 sed < Makefile "
