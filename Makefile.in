@@ -287,6 +287,7 @@ gzwrite.lo: $(SRCDIR)gzwrite.c
 # is fine for our purposes.
 placebo $(SHAREDLIBV): $(PIC_OBJS)
 	$(LDSHARED) $(SFLAGS) $(IA2FLAGS) -o $@ $(PIC_OBJS) $(LDSHAREDLIBC) $(LDFLAGS)
+	$(IA2PATH)/build/tools/pad-tls/pad-tls $@
 	rm -f $(SHAREDLIB) $(SHAREDLIBM)
 	ln -s $@ $(SHAREDLIB)
 	ln -s $@ $(SHAREDLIBM)
@@ -317,7 +318,6 @@ zpipesh$(EXE): zpipe.o $(SHAREDLIBV)
 
 zpipec$(EXE): zpipe.o $(SHAREDLIBV) libcallgates.so
 	$(CC) $(CFLAGS) $(IA2FLAGS) $(IA2MAINFLAGS) -o $@ zpipe.o $(LDFLAGS) -L. $(SHAREDLIBV) -Wl,-rpath,\$$ORIGIN -L$(IA2PATH)/build/runtime/libia2 -L$(IA2PATH)/build/runtime/partition-alloc -llibia2 -lpartition-alloc -lcallgates
-	$(IA2PATH)/build/tools/pad-tls/pad-tls $(SHAREDLIBV)
 
 # TODO: Currently we're hard coding the `LIBIA2_X86_64` define. We should
 # probably be detecing the current platform to determine what define should be

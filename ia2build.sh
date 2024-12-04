@@ -82,7 +82,10 @@ else
 fi
 
 # Copy additional files needed by the build.
-cp -t $BUILD_DIR Makefile $IA2_PATH/build/runtime/partition-alloc/libpartition-alloc.so
+cp -t $BUILD_DIR \
+    Makefile \
+    $IA2_PATH/build/runtime/partition-alloc/libpartition-alloc.so \
+    $IA2_PATH/build/runtime/libia2/libc.so.6
 
 pushd $BUILD_DIR
 
@@ -120,12 +123,6 @@ sed < Makefile "
 /^IA2MAINFLAGS *=/s#=.*#=$IA2MAINFLAGS#
 /^IA2PATH *=/s#=.*#=$IA2_PATH#
 " > Makefile.tmp && mv Makefile.tmp Makefile
-
-# Copy libc.so and run pad-tls on it.
-#
-# TODO: Don't assume path to `libc.so`. I'm not sure how to properly detect that.
-cp /lib/x86_64-linux-gnu/libc.so.6 .
-$IA2_PATH/build/tools/pad-tls/pad-tls libc.so.6
 
 popd
 
