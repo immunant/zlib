@@ -95,12 +95,12 @@ pushd $BUILD_DIR
 # detecing the current platform to determine what define should be set. This
 # might need to be done in `configure`.
 #
-# -Werror=incompatible-pointer-types \
 IA2FLAGS="$IA2FLAGS \
     -fPIC \
     -DIA2_ENABLE=1 \
     -DLIBIA2_X86_64=1 \
     -include wrapper.h \
+    -Werror=incompatible-pointer-types \
     -Wl,--wrap=pthread_create \
     -Wl,--wrap=calloc  \
     -Wl,--wrap=malloc  \
