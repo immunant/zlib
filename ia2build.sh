@@ -101,11 +101,21 @@ IA2FLAGS="$IA2FLAGS \
     -DLIBIA2_X86_64=1 \
     -include wrapper.h \
     -Werror=incompatible-pointer-types \
-    -Wl,--wrap=pthread_create \
-    -Wl,--wrap=calloc  \
-    -Wl,--wrap=malloc  \
-    -Wl,--wrap=realloc \
-    -Wl,--wrap=free \
+    "-Wl,-wrap,calloc" \
+    "-Wl,-wrap,free" \
+    "-Wl,-wrap,malloc" \
+    "-Wl,-wrap,memalign" \
+    "-Wl,-wrap,posix_memalign" \
+    "-Wl,-wrap,pvalloc" \
+    "-Wl,-wrap,realloc" \
+    "-Wl,-wrap,valloc" \
+    "-Wl,-wrap,malloc_usable_size" \
+    "-Wl,-wrap,realpath" \
+    "-Wl,-wrap,strdup" \
+    "-Wl,-wrap,strndup" \
+    "-Wl,-wrap,getcwd" \
+    "-Wl,-wrap,asprintf" \
+    "-Wl,-wrap,vasprintf" \
     -pthread \
     -Wl,-z,now \
     -Wl,-z,relro \
