@@ -150,7 +150,7 @@ local void fixedtables(struct inflate_state FAR *state) {
 #define PULL() \
     do { \
         if (have == 0) { \
-            have = IA2_CALL(in, _ZTSPFjPvPPhE)(in_desc, &next); \
+            have = IA2_CALL(in, _ZTSPFjPvPPhE, in_desc, &next); \
             if (have == 0) { \
                 next = Z_NULL; \
                 ret = Z_BUF_ERROR; \
@@ -205,7 +205,7 @@ local void fixedtables(struct inflate_state FAR *state) {
             put = state->window; \
             left = state->wsize; \
             state->whave = left; \
-            if (IA2_CALL(out, _ZTSPFiPvPhjE)(out_desc, put, left)) { \
+            if (IA2_CALL(out, _ZTSPFiPvPhjE, out_desc, put, left)) { \
                 ret = Z_BUF_ERROR; \
                 goto inf_leave; \
             } \
@@ -609,7 +609,7 @@ int ZEXPORT inflateBack(z_streamp strm, in_func in, void FAR *in_desc,
     /* Write leftover output and return unused input */
   inf_leave:
     if (left < state->wsize) {
-        if (IA2_CALL(out, _ZTSPFiPvPhjE)(out_desc, state->window, state->wsize - left) &&
+        if (IA2_CALL(out, _ZTSPFiPvPhjE, out_desc, state->window, state->wsize - left) &&
             ret == Z_STREAM_END)
             ret = Z_BUF_ERROR;
     }
@@ -629,6 +629,6 @@ int ZEXPORT inflateBackEnd(z_streamp strm) {
 
 
 void call_inflateBack_fns(in_func in, out_func out) {
-    IA2_CALL(in, _ZTSPFjPvPPhE)(0, 0);
-    IA2_CALL(out, _ZTSPFiPvPhjE)(0, 0, 0);
+    IA2_CALL(in, _ZTSPFjPvPPhE, 0, 0);
+    IA2_CALL(out, _ZTSPFiPvPhjE, 0, 0, 0);
 }

@@ -236,14 +236,14 @@ extern z_const char * const z_errmsg[10]; /* indexed by 2-zlib_error */
 #endif
 
 #ifndef Z_SOLO
-   voidpf zcalloc(voidpf opaque, unsigned items,
+   voidpf ZLIB_INTERNAL zcalloc(voidpf opaque, unsigned items,
                                 unsigned size);
-   void zcfree(voidpf opaque, voidpf ptr);
+   void ZLIB_INTERNAL zcfree(voidpf opaque, voidpf ptr);
 #endif
 
 #define ZALLOC(strm, items, size) \
-           IA2_CALL((strm)->zalloc, _ZTSPFPvS_jjE)((strm)->opaque, (items), (size))
-#define ZFREE(strm, addr)  IA2_CALL((strm)->zfree, _ZTSPFvPvS_E)((strm)->opaque, (voidpf)(addr))
+           IA2_CALL((strm)->zalloc, _ZTSPFPvS_jjE, (strm)->opaque, (items), (size))
+#define ZFREE(strm, addr)  IA2_CALL((strm)->zfree, _ZTSPFvPvS_E, (strm)->opaque, (voidpf)(addr))
 #define TRY_FREE(s, p) {if (p) ZFREE(s, p);}
 
 /* Reverse the bytes in a 32-bit value */

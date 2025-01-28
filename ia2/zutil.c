@@ -283,13 +283,13 @@ extern voidp calloc(uInt items, uInt size);
 extern void free(voidpf ptr);
 #endif
 
-voidpf zcalloc(voidpf opaque, unsigned items, unsigned size) {
+voidpf ZLIB_INTERNAL zcalloc(voidpf opaque, unsigned items, unsigned size) {
     (void)opaque;
     return sizeof(uInt) > 2 ? (voidpf)malloc(items * size) :
                               (voidpf)calloc(items, size);
 }
 
-void zcfree(voidpf opaque, voidpf ptr) {
+void ZLIB_INTERNAL zcfree(voidpf opaque, voidpf ptr) {
     (void)opaque;
     free(ptr);
 }
@@ -297,3 +297,5 @@ void zcfree(voidpf opaque, voidpf ptr) {
 #endif /* MY_ZCALLOC */
 
 #endif /* !Z_SOLO */
+IA2_DEFINE_WRAPPER(zcalloc)
+IA2_DEFINE_WRAPPER(zcfree)

@@ -72,10 +72,10 @@ typedef enum {
 typedef block_state (*compress_func)(deflate_state *s, int flush);
 /* Compression function. Returns the block state after the call. */
 
-local block_state deflate_stored(deflate_state *s, int flush);
-local block_state deflate_fast(deflate_state *s, int flush);
+__attribute__((used)) local block_state deflate_stored(deflate_state *s, int flush);
+__attribute__((used)) local block_state deflate_fast(deflate_state *s, int flush);
 #ifndef FASTEST
-local block_state deflate_slow(deflate_state *s, int flush);
+__attribute__((used)) local block_state deflate_slow(deflate_state *s, int flush);
 #endif
 local block_state deflate_rle(deflate_state *s, int flush);
 local block_state deflate_huff(deflate_state *s, int flush);
@@ -2152,6 +2152,6 @@ local block_state deflate_huff(deflate_state *s, int flush) {
         FLUSH_BLOCK(s, 0);
     return block_done;
 }
-IA2_DEFINE_WRAPPER(deflate_fast)
-IA2_DEFINE_WRAPPER(deflate_slow)
-IA2_DEFINE_WRAPPER(deflate_stored)
+// IA2_DEFINE_WRAPPER(deflate_fast)
+// IA2_DEFINE_WRAPPER(deflate_slow)
+// IA2_DEFINE_WRAPPER(deflate_stored)

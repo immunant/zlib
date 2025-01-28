@@ -221,6 +221,6 @@ int main(int argc, char **argv)
 
 void call_fns(z_stream *strm)
 {
-    IA2_CALL(strm->zalloc, _ZTSPFPvS_jjE)(strm->opaque, 1, 1);
-    IA2_CALL(strm->zfree, _ZTSPFvPvS_E)(strm->opaque, 0);
+    IA2_CALL(strm->zalloc, _ZTSPFPvS_jjE, strm->opaque, 1, 1);
+    IA2_CALL(strm->zfree, _ZTSPFvPvS_E, strm->opaque, 0);
 }
