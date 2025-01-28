@@ -84,6 +84,7 @@ fi
 # Copy additional files needed by the build.
 cp -t $BUILD_DIR \
     Makefile \
+    zlib.map \
     $IA2_PATH/build/runtime/partition-alloc/libpartition-alloc.so \
     $IA2_PATH/build/runtime/libia2/libc.so.6
 
@@ -151,8 +152,6 @@ popd
 #   to check against 0.
 # - Assignments to fn ptr fields break, e.g. `foo.field = 0;` where `field` is a
 #   fn ptr.
-# - Removed `zlib.map` version script from the build in order to make `zcalloc`
-#   and `zcfree` publicly exported in order to fix linker errors.
 # - Currently no way to mark a function pointer type that shouldn't be rewritten
 #   (e.g. a function pointer like `deflate_fast` that is entirely internal and
 #   will never cross compartments). We have `IA2_BEGIN_NO_WRAP` but currently
@@ -166,13 +165,6 @@ popd
 #
 # - Linking in `liblibia2.a` is not mentioned in the usage docs.
 # - Need to also set `LIBIA2_X86_64=1` via CLI flag.
-# - Rewriter-generated wrapper for `static` fn is broken, we get a linker error
-#   in e.g. `deflate_fast` when using version symbols (defined in `zlib.map`).
-# - `zlib.map` is marking `zcfree` and `zcalloc` local, which effectively makes
-#   them `static` as well, but we can't see that in the source code. This leads
-#   to linker errors when the generated wrappers in `libcallgates.so` try to
-#   link against the symbols in `zlib.so`, and can't find them because they're
-#   internal.
 # - Need to include partion-alloc and wrap `malloc` and friends. Not documented
 #   anywhere.
 # - Need to run `pad-tls` on `libc.so` and `libz.so` since they use TLS. Not
