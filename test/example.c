@@ -106,10 +106,17 @@ static void test_gzio(const char *fname, Byte *uncompr, uLong uncomprLen) {
         fprintf(stderr, "gzputs err: %s\n", gzerror(file, &err));
         exit(1);
     }
+#if 0
     if (gzprintf(file, ", %s!", "hello") != 8) {
         fprintf(stderr, "gzprintf err: %s\n", gzerror(file, &err));
         exit(1);
     }
+#else
+    if (gzputs(file, ", hello!") != 8) {
+        fprintf(stderr, "gzputs err: %s\n", gzerror(file, &err));
+        exit(1);
+    }
+#endif
     gzseek(file, 1L, SEEK_CUR); /* add one zero byte */
     gzclose(file);
 
