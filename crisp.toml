@@ -1,0 +1,34 @@
+base_dir = "."
+project_name = "zlib"
+src_globs = [
+    "translated_rust/src/*.rs",
+    "translated_rust/src/*/*.rs",
+    "translated_rust/src/*/*/*.rs",
+    "translated_rust/src/*/*/*/*.rs",
+]
+test_command = """
+set -e
+(cd translated_rust && cargo build)
+LIBZLIB_SO=$(readlink -f translated_rust/target/debug/libzlib.so)
+
+mkdir -p build/test
+cd build/test
+sh ../../configure
+make -j `nproc` shared
+echo "Replacing libz.so with $LIBZLIB_SO"
+cp $LIBZLIB_SO libz.so.1.3.2.1-motley
+make testshared
+# Validate that the tests used our library
+cmp $LIBZLIB_SO libz.so.1.3.2.1-motley
+"""
+
+[transpile]
+output_dir = "translated_rust"
+
+[[transpile.artifacts]]
+name = "zlib"
+configure_cmds = [
+  "mkdir -p build/transpile",
+  "cd build/transpile && sh ../../configure",
+]
+build_cmds = ["make -C build/transpile libz.so.1.3.2.1-motley"]
