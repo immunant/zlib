@@ -1,0 +1,3 @@
+[submodule "zlib-cross-matrix/canterbury-corpus"]
+	path = zlib-cross-matrix/canterbury-corpus
+	url = git@github.com:pfalcon/canterbury-corpus.git
