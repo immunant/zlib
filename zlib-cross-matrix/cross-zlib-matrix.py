@@ -11,6 +11,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Iterable, Sequence
@@ -56,6 +57,13 @@ class DecompressionConfig:
 class Counts:
     passed: int = 0
     failed: int = 0
+
+
+@dataclass
+class CaseResult:
+    producer: str
+    counts: dict[str, Counts]
+    messages: list[tuple[str, bool]]
 
 
 def csv_strings(text: str) -> list[str]:
@@ -271,7 +279,14 @@ def preserve_failure(
     reason: str,
 ) -> None:
     digest = hashlib.sha256(
-        (str(source) + producer.name + str(consumer) + config.name + reason).encode()
+        (
+            str(source)
+            + producer.name
+            + str(consumer)
+            + config.name
+            + str(decompression)
+            + reason
+        ).encode()
     ).hexdigest()[:16]
     destination = root / digest
     destination.mkdir(parents=True, exist_ok=True)
@@ -292,6 +307,108 @@ def preserve_failure(
         json.dumps(metadata, indent=2, sort_keys=True) + "\n",
         encoding="utf-8",
     )
+
+
+def run_case(
+    source: Path,
+    expected_size: int,
+    expected_hash: bytes,
+    config: CompressionConfig,
+    producer: Implementation,
+    consumers: Sequence[Implementation],
+    decompression_configs: Sequence[DecompressionConfig],
+    dictionary: Path,
+    temporary: Path,
+    timeout: float,
+    keep_failures: Path | None,
+    verbose: bool,
+) -> CaseResult:
+    counts = {consumer.name: Counts() for consumer in consumers}
+    messages: list[tuple[str, bool]] = []
+
+    with tempfile.TemporaryDirectory(prefix="case-", dir=temporary) as case_temporary:
+        case_temp = Path(case_temporary)
+        compressed = case_temp / "compressed.bin"
+        error = run_filter(
+            compression_command(producer, config, dictionary),
+            source,
+            compressed,
+            timeout,
+        )
+        if error is not None:
+            messages.append(
+                (f"FAIL compress {producer.name} {config.name}: {error}", True)
+            )
+            if keep_failures is not None:
+                preserve_failure(
+                    keep_failures,
+                    source,
+                    producer,
+                    None,
+                    config,
+                    None,
+                    compressed,
+                    None,
+                    error,
+                )
+            for consumer in consumers:
+                counts[consumer.name].failed += len(decompression_configs)
+            return CaseResult(producer.name, counts, messages)
+
+        for consumer in consumers:
+            for decompression in decompression_configs:
+                output = case_temp / "output.bin"
+                error = run_filter(
+                    decompression_command(consumer, config, decompression, dictionary),
+                    compressed,
+                    output,
+                    timeout,
+                )
+                if error is None and (
+                    output.stat().st_size != expected_size
+                    or hash_file(output) != expected_hash
+                ):
+                    error = (
+                        f"output mismatch: expected {expected_size} bytes, "
+                        f"got {output.stat().st_size}"
+                    )
+
+                bucket = counts[consumer.name]
+                if error is None:
+                    bucket.passed += 1
+                    if verbose:
+                        messages.append(
+                            (
+                                f"PASS {producer.name}->{consumer.name} "
+                                f"{config.name} di{decompression.input_chunk} "
+                                f"do{decompression.output_chunk}",
+                                False,
+                            )
+                        )
+                else:
+                    bucket.failed += 1
+                    messages.append(
+                        (
+                            f"FAIL {producer.name}->{consumer.name} "
+                            f"{config.name} di{decompression.input_chunk} "
+                            f"do{decompression.output_chunk}: {error}",
+                            True,
+                        )
+                    )
+                    if keep_failures is not None:
+                        preserve_failure(
+                            keep_failures,
+                            source,
+                            producer,
+                            consumer,
+                            config,
+                            decompression,
+                            compressed,
+                            output,
+                            error,
+                        )
+
+    return CaseResult(producer.name, counts, messages)
 
 
 def main() -> int:
@@ -359,9 +476,18 @@ def main() -> int:
     )
     parser.add_argument("--seed", type=int, default=1)
     parser.add_argument("--timeout", type=float, default=120.0)
+    parser.add_argument(
+        "--jobs",
+        type=int,
+        default=os.cpu_count() or 1,
+        help="number of parallel test jobs (default: number of CPUs)",
+    )
     parser.add_argument("--keep-failures", type=Path)
     parser.add_argument("--verbose", action="store_true")
     args = parser.parse_args()
+
+    if args.jobs <= 0:
+        parser.error("--jobs must be positive")
 
     corpus = args.corpus.resolve()
     if not corpus.is_dir():
@@ -406,6 +532,7 @@ def main() -> int:
     print(f"compression configs:   {len(configs)}")
     print(f"compression runs:      {compression_runs}")
     print(f"decompression runs:    {decompression_runs}")
+    print(f"parallel jobs:         {args.jobs}")
 
     if args.keep_failures is not None:
         args.keep_failures.mkdir(parents=True, exist_ok=True)
@@ -421,92 +548,40 @@ def main() -> int:
         dictionary = temp / "dictionary.bin"
         make_dictionary(files, dictionary)
 
-        for file_number, source in enumerate(files, 1):
-            expected_size = source.stat().st_size
-            expected_hash = hash_file(source)
-            print(f"[{file_number}/{len(files)}] {source.relative_to(corpus)}")
+        with ThreadPoolExecutor(max_workers=args.jobs) as executor:
+            for file_number, source in enumerate(files, 1):
+                expected_size = source.stat().st_size
+                expected_hash = hash_file(source)
+                print(f"[{file_number}/{len(files)}] {source.relative_to(corpus)}")
 
-            for config_number, config in enumerate(configs, 1):
-                for producer in implementations:
-                    compressed = temp / "compressed.bin"
-                    error = run_filter(
-                        compression_command(producer, config, dictionary),
+                futures = [
+                    executor.submit(
+                        run_case,
                         source,
-                        compressed,
+                        expected_size,
+                        expected_hash,
+                        config,
+                        producer,
+                        implementations,
+                        decompression_configs,
+                        dictionary,
+                        temp,
                         args.timeout,
+                        args.keep_failures,
+                        args.verbose,
                     )
-                    if error is not None:
-                        print(
-                            f"FAIL compress {producer.name} {config.name}: {error}",
-                            file=sys.stderr,
-                        )
-                        if args.keep_failures is not None:
-                            preserve_failure(
-                                args.keep_failures,
-                                source,
-                                producer,
-                                None,
-                                config,
-                                None,
-                                compressed,
-                                None,
-                                error,
-                            )
-                        for consumer in implementations:
-                            counts[(producer.name, consumer.name)].failed += len(
-                                decompression_configs
-                            )
-                        continue
+                    for config in configs
+                    for producer in implementations
+                ]
 
-                    for consumer in implementations:
-                        for decompression in decompression_configs:
-                            output = temp / "output.bin"
-                            error = run_filter(
-                                decompression_command(
-                                    consumer, config, decompression, dictionary
-                                ),
-                                compressed,
-                                output,
-                                args.timeout,
-                            )
-                            if error is None and (
-                                output.stat().st_size != expected_size
-                                or hash_file(output) != expected_hash
-                            ):
-                                error = (
-                                    f"output mismatch: expected {expected_size} bytes, "
-                                    f"got {output.stat().st_size}"
-                                )
-
-                            bucket = counts[(producer.name, consumer.name)]
-                            if error is None:
-                                bucket.passed += 1
-                                if args.verbose:
-                                    print(
-                                        f"PASS {producer.name}->{consumer.name} "
-                                        f"{config.name} di{decompression.input_chunk} "
-                                        f"do{decompression.output_chunk}"
-                                    )
-                            else:
-                                bucket.failed += 1
-                                print(
-                                    f"FAIL {producer.name}->{consumer.name} "
-                                    f"{config.name} di{decompression.input_chunk} "
-                                    f"do{decompression.output_chunk}: {error}",
-                                    file=sys.stderr,
-                                )
-                                if args.keep_failures is not None:
-                                    preserve_failure(
-                                        args.keep_failures,
-                                        source,
-                                        producer,
-                                        consumer,
-                                        config,
-                                        decompression,
-                                        compressed,
-                                        output,
-                                        error,
-                                    )
+                for future in as_completed(futures):
+                    result = future.result()
+                    for consumer_name, case_counts in result.counts.items():
+                        bucket = counts[(result.producer, consumer_name)]
+                        bucket.passed += case_counts.passed
+                        bucket.failed += case_counts.failed
+                    for message, is_error in result.messages:
+                        print(message, file=sys.stderr if is_error else sys.stdout)
 
     print("\nproducer -> consumer        passed     failed")
     total_failed = 0
