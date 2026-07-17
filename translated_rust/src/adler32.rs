@@ -1,0 +1,202 @@
+pub use crate::__stddef_size_t_h::size_t;
+
+pub use crate::stdlib::__off64_t;
+pub use crate::stdlib::__off_t;
+pub use crate::stdlib::off64_t;
+pub use crate::stdlib::off_t;
+pub use crate::stdlib::uInt;
+pub use crate::stdlib::uLong;
+pub use crate::stdlib::z_size_t;
+pub use crate::stdlib::Byte;
+pub use crate::stdlib::Bytef;
+pub use crate::zlib_h::Z_NULL;
+
+pub const BASE: ::core::ffi::c_uint = 65521 as ::core::ffi::c_uint;
+
+pub const NMAX: ::core::ffi::c_int = 5552 as ::core::ffi::c_int;
+
+pub fn adler32_initial() -> crate::stdlib::uLong {
+    1 as crate::stdlib::uLong
+}
+
+fn adler32_slice(
+    mut adler: crate::stdlib::uLong,
+    buf: &[crate::stdlib::Bytef],
+) -> crate::stdlib::uLong {
+    let mut sum2: ::core::ffi::c_ulong = ((adler >> 16 as ::core::ffi::c_int)
+        & 0xffff as crate::stdlib::uLong)
+        as ::core::ffi::c_ulong;
+    adler &= 0xffff as crate::stdlib::uLong;
+
+    if buf.len() == 1 {
+        adler = adler.wrapping_add(buf[0] as crate::stdlib::uLong);
+        if adler >= BASE as crate::stdlib::uLong {
+            adler = adler.wrapping_sub(BASE as crate::stdlib::uLong);
+        }
+        sum2 = sum2.wrapping_add(adler as ::core::ffi::c_ulong);
+        if sum2 >= BASE as ::core::ffi::c_ulong {
+            sum2 = sum2.wrapping_sub(BASE as ::core::ffi::c_ulong);
+        }
+        return adler | (sum2 as crate::stdlib::uLong) << 16 as ::core::ffi::c_int;
+    }
+
+    if buf.len() < 16 {
+        for &byte in buf {
+            adler = adler.wrapping_add(byte as crate::stdlib::uLong);
+            sum2 = sum2.wrapping_add(adler as ::core::ffi::c_ulong);
+        }
+        if adler >= BASE as crate::stdlib::uLong {
+            adler = adler.wrapping_sub(BASE as crate::stdlib::uLong);
+        }
+        sum2 = sum2.wrapping_rem(BASE as ::core::ffi::c_ulong);
+        return adler | (sum2 as crate::stdlib::uLong) << 16 as ::core::ffi::c_int;
+    }
+
+    let mut remaining = buf;
+    while remaining.len() >= NMAX as usize {
+        let (block, rest) = remaining.split_at(NMAX as usize);
+        remaining = rest;
+        for &byte in block {
+            adler = adler.wrapping_add(byte as crate::stdlib::uLong);
+            sum2 = sum2.wrapping_add(adler as ::core::ffi::c_ulong);
+        }
+        adler = adler.wrapping_rem(BASE as crate::stdlib::uLong);
+        sum2 = sum2.wrapping_rem(BASE as ::core::ffi::c_ulong);
+    }
+
+    if !remaining.is_empty() {
+        for &byte in remaining {
+            adler = adler.wrapping_add(byte as crate::stdlib::uLong);
+            sum2 = sum2.wrapping_add(adler as ::core::ffi::c_ulong);
+        }
+        adler = adler.wrapping_rem(BASE as crate::stdlib::uLong);
+        sum2 = sum2.wrapping_rem(BASE as ::core::ffi::c_ulong);
+    }
+
+    return adler | (sum2 as crate::stdlib::uLong) << 16 as ::core::ffi::c_int;
+}
+
+pub fn adler32_update(
+    adler: crate::stdlib::uLong,
+    buf: &[crate::stdlib::Bytef],
+) -> crate::stdlib::uLong {
+    adler32_slice(adler, buf)
+}
+
+enum Adler32InputPlan {
+    Initial,
+    Slice { len: usize },
+}
+
+fn adler32_input_plan(buf_is_null: bool, len: crate::stdlib::z_size_t) -> Adler32InputPlan {
+    if len == 1 as crate::stdlib::z_size_t {
+        Adler32InputPlan::Slice { len: 1 }
+    } else if buf_is_null {
+        Adler32InputPlan::Initial
+    } else {
+        Adler32InputPlan::Slice { len: len as usize }
+    }
+}
+
+#[export_name = "adler32_z"]
+
+pub unsafe extern "C" fn adler32_z_ffi(
+    mut adler: crate::stdlib::uLong,
+    mut buf: *const crate::stdlib::Bytef,
+    mut len: crate::stdlib::z_size_t,
+) -> crate::stdlib::uLong {
+    match adler32_input_plan(buf.is_null(), len) {
+        Adler32InputPlan::Initial => adler32_initial(),
+        Adler32InputPlan::Slice { len } => {
+            adler32_update(adler, ::core::slice::from_raw_parts(buf, len))
+        }
+    }
+}
+#[export_name = "adler32"]
+
+pub unsafe extern "C" fn adler32_ffi(
+    mut adler: crate::stdlib::uLong,
+    mut buf: *const crate::stdlib::Bytef,
+    mut len: crate::stdlib::uInt,
+) -> crate::stdlib::uLong {
+    match adler32_input_plan(buf.is_null(), len as crate::stdlib::z_size_t) {
+        Adler32InputPlan::Initial => adler32_initial(),
+        Adler32InputPlan::Slice { len } => {
+            adler32_update(adler, ::core::slice::from_raw_parts(buf, len))
+        }
+    }
+}
+fn adler32_combine_(
+    adler1: crate::stdlib::uLong,
+    adler2: crate::stdlib::uLong,
+    mut len2: crate::stdlib::off64_t,
+) -> crate::stdlib::uLong {
+    let mut sum1: ::core::ffi::c_ulong = 0;
+    let mut sum2: ::core::ffi::c_ulong = 0;
+    let mut rem: ::core::ffi::c_uint = 0;
+    if len2 < 0 as crate::stdlib::off64_t {
+        return 0xffffffff as crate::stdlib::uLong;
+    }
+    len2 %= BASE as crate::stdlib::off64_t;
+    rem = len2 as ::core::ffi::c_uint;
+    sum1 = (adler1 & 0xffff as crate::stdlib::uLong) as ::core::ffi::c_ulong;
+    sum2 = (rem as ::core::ffi::c_ulong).wrapping_mul(sum1);
+    sum2 = sum2.wrapping_rem(BASE as ::core::ffi::c_ulong);
+    sum1 = sum1.wrapping_add(
+        (adler2 & 0xffff as crate::stdlib::uLong)
+            .wrapping_add(BASE as crate::stdlib::uLong)
+            .wrapping_sub(1 as crate::stdlib::uLong) as ::core::ffi::c_ulong,
+    );
+    sum2 = sum2.wrapping_add(
+        (adler1 >> 16 as ::core::ffi::c_int & 0xffff as crate::stdlib::uLong)
+            .wrapping_add(adler2 >> 16 as ::core::ffi::c_int & 0xffff as crate::stdlib::uLong)
+            .wrapping_add(BASE as crate::stdlib::uLong)
+            .wrapping_sub(rem as crate::stdlib::uLong) as ::core::ffi::c_ulong,
+    );
+    if sum1 >= BASE as ::core::ffi::c_ulong {
+        sum1 = sum1.wrapping_sub(BASE as ::core::ffi::c_ulong);
+    }
+    if sum1 >= BASE as ::core::ffi::c_ulong {
+        sum1 = sum1.wrapping_sub(BASE as ::core::ffi::c_ulong);
+    }
+    if sum2 >= (BASE as ::core::ffi::c_ulong) << 1 as ::core::ffi::c_int {
+        sum2 = sum2.wrapping_sub((BASE as ::core::ffi::c_ulong) << 1 as ::core::ffi::c_int);
+    }
+    if sum2 >= BASE as ::core::ffi::c_ulong {
+        sum2 = sum2.wrapping_sub(BASE as ::core::ffi::c_ulong);
+    }
+    return sum1 as crate::stdlib::uLong
+        | (sum2 as crate::stdlib::uLong) << 16 as ::core::ffi::c_int;
+}
+pub fn adler32_combine(
+    adler1: crate::stdlib::uLong,
+    adler2: crate::stdlib::uLong,
+    len2: crate::stdlib::off_t,
+) -> crate::stdlib::uLong {
+    return adler32_combine_(adler1, adler2, len2 as crate::stdlib::off64_t);
+}
+#[export_name = "adler32_combine"]
+
+pub extern "C" fn adler32_combine_ffi(
+    mut adler1: crate::stdlib::uLong,
+    mut adler2: crate::stdlib::uLong,
+    mut len2: crate::stdlib::off_t,
+) -> crate::stdlib::uLong {
+    adler32_combine(adler1, adler2, len2)
+}
+pub fn adler32_combine64(
+    adler1: crate::stdlib::uLong,
+    adler2: crate::stdlib::uLong,
+    len2: crate::stdlib::off64_t,
+) -> crate::stdlib::uLong {
+    return adler32_combine_(adler1, adler2, len2);
+}
+#[export_name = "adler32_combine64"]
+
+pub extern "C" fn adler32_combine64_ffi(
+    mut adler1: crate::stdlib::uLong,
+    mut adler2: crate::stdlib::uLong,
+    mut len2: crate::stdlib::off64_t,
+) -> crate::stdlib::uLong {
+    adler32_combine64(adler1, adler2, len2)
+}
