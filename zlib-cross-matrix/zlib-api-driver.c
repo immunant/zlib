@@ -247,25 +247,39 @@ static int compress_stream(const struct options *o) {
             action = Z_NO_FLUSH;
         }
 
-        do {
-            size_t produced;
-            stream.next_out = output;
-            stream.avail_out = (uInt)o->output_chunk;
-            ret = deflate(&stream, action);
-            if (ret != Z_OK && ret != Z_STREAM_END) {
-                fprintf(stderr, "deflate failed: %d (%s)\n", ret,
-                        stream.msg != NULL ? stream.msg : "no message");
-                ret = 1;
-                goto done;
-            }
-            produced = o->output_chunk - stream.avail_out;
-            if (write_all(output, produced) != 0) {
-                fprintf(stderr, "output write failed\n");
-                ret = 1;
-                goto done;
-            }
-        } while ((action == Z_FINISH && ret != Z_STREAM_END) ||
-                 stream.avail_in != 0 || stream.avail_out == 0);
+        {
+            int call_action = action;
+            do {
+                size_t produced;
+                stream.next_out = output;
+                stream.avail_out = (uInt)o->output_chunk;
+                ret = deflate(&stream, call_action);
+                if (ret != Z_OK && ret != Z_STREAM_END) {
+                    fprintf(stderr, "deflate failed: %d (%s)\n", ret,
+                            stream.msg != NULL ? stream.msg : "no message");
+                    ret = 1;
+                    goto done;
+                }
+                produced = o->output_chunk - stream.avail_out;
+                if (write_all(output, produced) != 0) {
+                    fprintf(stderr, "output write failed\n");
+                    ret = 1;
+                    goto done;
+                }
+                /* A periodic flush only needs to be requested once: it
+                 * queues its bytes internally regardless of how much
+                 * output space is available. Further calls forced by a
+                 * small output buffer should just drain that queue, not
+                 * re-request the same flush, since with a tiny avail_out
+                 * that can make deflate() manufacture a fresh (empty)
+                 * flush block forever instead of ever reporting the
+                 * flush complete. */
+                if (call_action != Z_NO_FLUSH && call_action != Z_FINISH) {
+                    call_action = Z_NO_FLUSH;
+                }
+            } while ((action == Z_FINISH && ret != Z_STREAM_END) ||
+                     stream.avail_in != 0 || stream.avail_out == 0);
+        }
 
         if (action == o->flush_mode && action != Z_NO_FLUSH) {
             since_boundary = 0;
