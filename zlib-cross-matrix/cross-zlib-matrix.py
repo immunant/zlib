@@ -11,7 +11,9 @@ import shutil
 import subprocess
 import sys
 import tempfile
-from concurrent.futures import ThreadPoolExecutor, as_completed
+import threading
+import time
+from concurrent.futures import CancelledError, ThreadPoolExecutor, as_completed
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Iterable, Sequence
@@ -193,27 +195,51 @@ def run_filter(
     input_path: Path,
     output_path: Path,
     timeout: float,
+    stop: threading.Event,
 ) -> str | None:
+    if stop.is_set():
+        raise CancelledError
+
     try:
         with input_path.open("rb") as stdin, output_path.open("wb") as stdout:
-            completed = subprocess.run(
+            process = subprocess.Popen(
                 command,
                 stdin=stdin,
                 stdout=stdout,
                 stderr=subprocess.PIPE,
-                timeout=timeout,
-                check=False,
             )
-    except subprocess.TimeoutExpired:
-        return f"timeout after {timeout:g}s"
+            deadline = time.monotonic() + timeout
+            while True:
+                if stop.is_set():
+                    process.terminate()
+                    try:
+                        process.communicate(timeout=1.0)
+                    except subprocess.TimeoutExpired:
+                        process.kill()
+                        process.communicate()
+                    raise CancelledError
+
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    process.kill()
+                    process.communicate()
+                    return f"timeout after {timeout:g}s"
+
+                try:
+                    _, stderr = process.communicate(timeout=min(remaining, 0.1))
+                    break
+                except subprocess.TimeoutExpired:
+                    pass
     except OSError as exc:
         return str(exc)
 
-    if completed.returncode == 0:
+    if process.returncode == 0:
         return None
 
-    stderr = completed.stderr.decode("utf-8", errors="replace").strip()
-    return f"exit {completed.returncode}" + (f": {stderr}" if stderr else "")
+    stderr_text = stderr.decode("utf-8", errors="replace").strip()
+    return f"exit {process.returncode}" + (
+        f": {stderr_text}" if stderr_text else ""
+    )
 
 
 def compression_command(
@@ -322,7 +348,11 @@ def run_case(
     timeout: float,
     keep_failures: Path | None,
     verbose: bool,
+    stop: threading.Event,
 ) -> CaseResult:
+    if stop.is_set():
+        raise CancelledError
+
     counts = {consumer.name: Counts() for consumer in consumers}
     messages: list[tuple[str, bool]] = []
 
@@ -334,6 +364,7 @@ def run_case(
             source,
             compressed,
             timeout,
+            stop,
         )
         if error is not None:
             messages.append(
@@ -363,6 +394,7 @@ def run_case(
                     compressed,
                     output,
                     timeout,
+                    stop,
                 )
                 if error is None and (
                     output.stat().st_size != expected_size
@@ -548,7 +580,9 @@ def main() -> int:
         dictionary = temp / "dictionary.bin"
         make_dictionary(files, dictionary)
 
-        with ThreadPoolExecutor(max_workers=args.jobs) as executor:
+        stop = threading.Event()
+        executor = ThreadPoolExecutor(max_workers=args.jobs)
+        try:
             for file_number, source in enumerate(files, 1):
                 expected_size = source.stat().st_size
                 expected_hash = hash_file(source)
@@ -569,6 +603,7 @@ def main() -> int:
                         args.timeout,
                         args.keep_failures,
                         args.verbose,
+                        stop,
                     )
                     for config in configs
                     for producer in implementations
@@ -582,6 +617,12 @@ def main() -> int:
                         bucket.failed += case_counts.failed
                     for message, is_error in result.messages:
                         print(message, file=sys.stderr if is_error else sys.stdout)
+        except BaseException:
+            stop.set()
+            executor.shutdown(wait=True, cancel_futures=True)
+            raise
+        else:
+            executor.shutdown(wait=True)
 
     print("\nproducer -> consumer        passed     failed")
     total_failed = 0
@@ -597,4 +638,8 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    try:
+        raise SystemExit(main())
+    except KeyboardInterrupt:
+        print("Interrupted.", file=sys.stderr)
+        raise SystemExit(130) from None
