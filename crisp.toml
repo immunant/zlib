@@ -11,15 +11,27 @@ set -e
 (cd translated_rust && cargo build)
 LIBZLIB_SO=$(readlink -f translated_rust/target/debug/libzlib.so)
 
+ZLIB_ROOT=$(pwd)
 mkdir -p build/test
 cd build/test
 sh ../../configure
 make -j `nproc` shared
 echo "Replacing libz.so with $LIBZLIB_SO"
 cp $LIBZLIB_SO libz.so.1.3.2.1-motley
-make testshared
+# run with timeout so we don't hang if code goes into infinite loop
+timeout -k 15s 30s make testshared
 # Validate that the tests used our library
 cmp $LIBZLIB_SO libz.so.1.3.2.1-motley
+# work around crisp file permission bug
+chmod +x $ZLIB_ROOT/zlib-cross-matrix/cross-zlib-matrix.py
+# run canterbury test corpus with larger timeout
+timeout -k 1m 5m sh -c "make -C $ZLIB_ROOT/zlib-cross-matrix && \
+    $ZLIB_ROOT/zlib-cross-matrix/cross-zlib-matrix.py \
+    $ZLIB_ROOT/zlib-cross-matrix/canterbury-corpus/canterbury \
+    --target-driver $ZLIB_ROOT/zlib-cross-matrix/zlib-rust \
+    --reference-driver $ZLIB_ROOT/zlib-cross-matrix/zlib-reference \
+    --sample-configs 200 \
+    --seed 42"
 """
 
 [transpile]
