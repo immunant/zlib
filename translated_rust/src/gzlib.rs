@@ -1,0 +1,2510 @@
+pub use crate::__stddef_null_h::NULL;
+pub use crate::__stddef_size_t_h::size_t;
+pub use crate::stdlib::__O_LARGEFILE;
+
+pub use crate::gzguts_h::gz_state;
+pub use crate::gzguts_h::gz_statep;
+pub use crate::gzguts_h::COPY;
+pub use crate::gzguts_h::GZBUFSIZE;
+pub use crate::gzguts_h::GZ_APPEND;
+pub use crate::gzguts_h::GZ_NONE;
+pub use crate::gzguts_h::GZ_READ;
+pub use crate::gzguts_h::GZ_WRITE;
+pub use crate::gzguts_h::LOOK;
+pub use crate::internal::__INT_MAX__;
+pub use crate::limits_h::INT_MAX;
+pub use crate::stdlib::open;
+pub use crate::stdlib::__O_CLOEXEC;
+pub use crate::stdlib::O_APPEND;
+pub use crate::stdlib::O_CLOEXEC;
+pub use crate::stdlib::O_CREAT;
+pub use crate::stdlib::O_EXCL;
+pub use crate::stdlib::O_LARGEFILE;
+pub use crate::stdlib::O_NONBLOCK;
+pub use crate::stdlib::O_RDONLY;
+pub use crate::stdlib::O_TRUNC;
+pub use crate::stdlib::O_WRONLY;
+pub use crate::stdlib::SEEK_CUR;
+pub use crate::stdlib::SEEK_END;
+pub use crate::stdlib::SEEK_SET;
+
+pub use crate::stdlib::__off64_t;
+pub use crate::stdlib::__off_t;
+pub use crate::stdlib::off64_t;
+pub use crate::stdlib::off_t;
+
+pub use crate::src::deflate::internal_state;
+pub use crate::stdlib::uInt;
+pub use crate::stdlib::uLong;
+pub use crate::stdlib::voidpf;
+pub use crate::stdlib::z_size_t;
+pub use crate::stdlib::Byte;
+pub use crate::stdlib::Bytef;
+pub use crate::zlib_h::alloc_func;
+pub use crate::zlib_h::free_func;
+pub use crate::zlib_h::gzFile;
+pub use crate::zlib_h::gzFile_s;
+pub use crate::zlib_h::z_stream;
+pub use crate::zlib_h::z_stream_s;
+pub use crate::zlib_h::Z_BUF_ERROR;
+pub use crate::zlib_h::Z_DEFAULT_COMPRESSION;
+pub use crate::zlib_h::Z_DEFAULT_STRATEGY;
+pub use crate::zlib_h::Z_FILTERED;
+pub use crate::zlib_h::Z_FIXED;
+pub use crate::zlib_h::Z_HUFFMAN_ONLY;
+pub use crate::zlib_h::Z_MEM_ERROR;
+pub use crate::zlib_h::Z_OK;
+pub use crate::zlib_h::Z_RLE;
+
+// Public gzip entry points bind their raw handle before reaching these
+// predicates.  Keep the repeated mode/error checks reference-bound so the
+// FFI wrappers retain only their caller-owned pointer boundary.
+pub(crate) fn gz_has_mode(state: &crate::gzguts_h::gz_state, mode: ::core::ffi::c_int) -> bool {
+    state.mode == mode
+}
+
+pub(crate) fn gz_read_state_is_usable(state: &crate::gzguts_h::gz_state) -> bool {
+    gz_has_mode(state, crate::gzguts_h::GZ_READ)
+        && (state.err == crate::zlib_h::Z_OK
+            || state.err == crate::zlib_h::Z_BUF_ERROR
+            || state.again != 0)
+}
+
+pub(crate) fn gz_write_state_is_usable(state: &crate::gzguts_h::gz_state) -> bool {
+    gz_has_mode(state, crate::gzguts_h::GZ_WRITE)
+        && (state.err == crate::zlib_h::Z_OK || state.again != 0)
+}
+
+// The ordinary write APIs all begin by rejecting an unusable state and then
+// clearing its previous error record. Keep that state-only transition shared
+// so their caller-buffer and string boundaries do not each reproduce it.
+pub(crate) fn gz_begin_write_operation(state: &mut crate::gzguts_h::gz_state) -> bool {
+    if !gz_write_state_is_usable(state) {
+        return false;
+    }
+    gzclearerr(state);
+    true
+}
+
+// Buffer configuration is valid only before either side of a gzip stream has
+// allocated its working buffers. Keep the mode, allocation, overflow, and
+// minimum-size decisions separate from the public handle adapter.
+pub(crate) fn gz_buffer_size(
+    state: &crate::gzguts_h::gz_state,
+    size: ::core::ffi::c_uint,
+) -> Option<::core::ffi::c_uint> {
+    if (!gz_has_mode(state, crate::gzguts_h::GZ_READ)
+        && !gz_has_mode(state, crate::gzguts_h::GZ_WRITE))
+        || state.size != 0
+        || (size << 1 as ::core::ffi::c_int) < size
+    {
+        None
+    } else if size < 8 {
+        Some(8)
+    } else {
+        Some(size)
+    }
+}
+
+// Rewind's descriptor operation only applies to a readable state without a
+// serious error. Keep that eligibility check independent of the descriptor
+// boundary.
+pub(crate) fn gz_rewind_is_usable(state: &crate::gzguts_h::gz_state) -> bool {
+    gz_has_mode(state, crate::gzguts_h::GZ_READ)
+        && (state.err == crate::zlib_h::Z_OK || state.err == crate::zlib_h::Z_BUF_ERROR)
+}
+
+// This is the state-only half of a successful rewind. `gz_reset` restores
+// read-side cursors before clearing the owned error record.
+pub(crate) fn gz_rewind_complete(state: &mut crate::gzguts_h::gz_state) {
+    gz_reset(state);
+    gzclearerr(state);
+}
+
+// Keep the descriptor result classification with the state transition it
+// enables. The caller remains responsible only for seeking the owned
+// descriptor; a successful seek is what makes resetting this read state
+// observable.
+pub(crate) fn gz_rewind_result(
+    state: &mut crate::gzguts_h::gz_state,
+    position: crate::stdlib::__off64_t,
+) -> ::core::ffi::c_int {
+    if position == -1 as crate::stdlib::__off64_t {
+        -1
+    } else {
+        gz_rewind_complete(state);
+        0
+    }
+}
+
+// A newly opened read handle has no transparent/gzip classification yet.
+// Leave the lookup itself at the allocation and descriptor boundary.
+pub(crate) fn gz_direct_needs_look(state: &crate::gzguts_h::gz_state) -> bool {
+    gz_has_mode(state, crate::gzguts_h::GZ_READ)
+        && state.how == crate::gzguts_h::LOOK
+        && state.x.have == 0
+}
+
+// `gzungetc()` needs the same initial lookahead condition, but it has already
+// checked that this is a read handle. Keep that state-only decision out of
+// the adapter that owns lookahead's allocation and descriptor boundaries.
+pub(crate) fn gz_ungetc_needs_look(state: &crate::gzguts_h::gz_state) -> bool {
+    state.how == crate::gzguts_h::LOOK && state.x.have == 0
+}
+
+// A descriptor offset includes unread compressed input only for a read
+// state. The descriptor query itself remains outside this scalar adjustment.
+pub(crate) fn gz_offset_after_descriptor(
+    state: &crate::gzguts_h::gz_state,
+    offset: crate::stdlib::off64_t,
+) -> crate::stdlib::off64_t {
+    if gz_has_mode(state, crate::gzguts_h::GZ_READ) {
+        offset - state.strm.avail_in as crate::stdlib::off64_t
+    } else {
+        offset
+    }
+}
+
+// Keep gzip I/O requests within the unsigned-int sizes used by zlib's stream
+// fields and the POSIX read/write adapters.
+pub fn gz_stream_chunk(len: crate::stdlib::z_size_t) -> ::core::ffi::c_uint {
+    let max = -1 as ::core::ffi::c_int as ::core::ffi::c_uint;
+    if max as crate::stdlib::z_size_t > len {
+        len as ::core::ffi::c_uint
+    } else {
+        max
+    }
+}
+
+pub fn gz_syscall_chunk(len: ::core::ffi::c_uint) -> ::core::ffi::c_uint {
+    let max = (-1 as ::core::ffi::c_int as ::core::ffi::c_uint >> 2)
+        .wrapping_add(1 as ::core::ffi::c_uint);
+    if len > max {
+        max
+    } else {
+        len
+    }
+}
+
+// Keep the public single-request limit independent of the caller buffer.
+// The cast deliberately matches zlib's C `int` range check.
+pub(crate) fn gz_uint_request_fits_int(len: ::core::ffi::c_uint) -> bool {
+    (len as ::core::ffi::c_int) >= 0
+}
+
+// Rust slices cannot describe a range larger than `isize::MAX`.  Classify
+// FFI request lengths before their caller pointers are bound to a slice.
+pub(crate) fn gz_rust_slice_len(len: crate::stdlib::z_size_t) -> Option<usize> {
+    let len = usize::try_from(len).ok()?;
+    (len <= isize::MAX as usize).then_some(len)
+}
+
+// `gzfread()` and `gzfwrite()` share C's wrapping item-count multiplication.
+// Classify it before either path reaches its raw caller-buffer adapter.
+pub(crate) enum GzItemRequest {
+    Empty,
+    TooLarge,
+    Bytes(crate::stdlib::z_size_t),
+}
+
+pub(crate) fn gz_item_request(
+    size: crate::stdlib::z_size_t,
+    nitems: crate::stdlib::z_size_t,
+) -> GzItemRequest {
+    let bytes = nitems.wrapping_mul(size);
+    if size != 0 && bytes.wrapping_div(size) != nitems {
+        GzItemRequest::TooLarge
+    } else if bytes == 0 {
+        GzItemRequest::Empty
+    } else {
+        GzItemRequest::Bytes(bytes)
+    }
+}
+
+// This is only the FFI buffer-binding size. The public operation still
+// classifies the request itself so it owns the C-visible error behavior.
+pub(crate) fn gz_item_slice_len(
+    size: crate::stdlib::z_size_t,
+    nitems: crate::stdlib::z_size_t,
+) -> Option<usize> {
+    match gz_item_request(size, nitems) {
+        GzItemRequest::Empty => Some(0),
+        GzItemRequest::TooLarge => None,
+        GzItemRequest::Bytes(len) => gz_rust_slice_len(len),
+    }
+}
+
+// Keep byte-count arithmetic out of the raw read/write adapters.  These use
+// wrapping operations to retain the translated C behavior for corrupt state.
+pub(crate) fn gz_load_request(
+    len: ::core::ffi::c_uint,
+    have: ::core::ffi::c_uint,
+) -> ::core::ffi::c_uint {
+    gz_syscall_chunk(len.wrapping_sub(have))
+}
+
+pub(crate) fn gz_add_received(
+    have: ::core::ffi::c_uint,
+    received: ::core::ffi::c_uint,
+) -> ::core::ffi::c_uint {
+    have.wrapping_add(received)
+}
+
+// The read and write adapters own the descriptor, errno, and raw buffer
+// pointers.  Keep their common state transitions here, where they can be
+// checked without expanding either raw I/O boundary.
+pub(crate) fn gz_begin_io(state: &mut crate::gzguts_h::gz_state) {
+    state.again = 0;
+}
+
+pub(crate) fn gz_io_result(
+    state: &mut crate::gzguts_h::gz_state,
+    result: ::core::ffi::c_int,
+    errno: ::core::ffi::c_int,
+) -> Result<::core::ffi::c_uint, ::core::ffi::c_int> {
+    match gz_syscall_result(result, errno) {
+        Ok(count) => Ok(count),
+        Err(again) => {
+            if again {
+                state.again = 1;
+            }
+            Err(errno)
+        }
+    }
+}
+
+pub(crate) fn gz_load_result(
+    state: &mut crate::gzguts_h::gz_state,
+    result: ::core::ffi::c_int,
+    have: ::core::ffi::c_uint,
+    errno: ::core::ffi::c_int,
+) -> Result<(), ::core::ffi::c_int> {
+    if result < 0 {
+        if let Err(errno) = gz_io_result(state, result, errno) {
+            if state.again != 0 && have != 0 {
+                return Ok(());
+            }
+            return Err(errno);
+        }
+    }
+    if result == 0 {
+        state.eof = 1;
+    }
+    Ok(())
+}
+
+pub(crate) enum GzAvailPlan {
+    Done,
+    Load { buffered: ::core::ffi::c_uint },
+}
+
+// Decide whether the raw gzip input adapter needs another read.  Pointer
+// compaction and the descriptor call remain in that adapter; this helper owns
+// the state checks and count arithmetic.
+pub(crate) fn gz_avail_plan(state: &crate::gzguts_h::gz_state) -> Result<GzAvailPlan, ()> {
+    if state.err != crate::zlib_h::Z_OK && state.err != crate::zlib_h::Z_BUF_ERROR {
+        return Err(());
+    }
+    if state.eof != 0 {
+        return Ok(GzAvailPlan::Done);
+    }
+    let buffered = state.strm.avail_in as ::core::ffi::c_uint;
+    // `avail_in` is a cursor count within gzip's fixed input allocation.
+    // Reject a corrupt count before its subtraction could wrap or before the
+    // read adapter turns it into a buffer offset.
+    if buffered > state.size {
+        return Err(());
+    }
+    Ok(GzAvailPlan::Load { buffered })
+}
+
+pub(crate) fn gz_avail_after_load(
+    state: &mut crate::gzguts_h::gz_state,
+    received: ::core::ffi::c_uint,
+) {
+    state.strm.avail_in = state.strm.avail_in.wrapping_add(received);
+    state.strm.next_in = state.in_0;
+}
+
+// The input-buffer adapter supplies whether its cursor is already at the
+// buffer start.  Keep the compaction decision scalar so the adapter alone
+// retains the raw pointers and overlapping copy.
+pub(crate) fn gz_avail_needs_compaction(
+    buffered: ::core::ffi::c_uint,
+    cursor_at_start: bool,
+) -> bool {
+    buffered != 0 && !cursor_at_start
+}
+
+pub(crate) fn gz_set_copy_input(
+    state: &mut crate::gzguts_h::gz_state,
+    copied: ::core::ffi::c_uint,
+) {
+    state.x.next = state.out;
+    state.x.have = copied;
+    state.strm.avail_in = 0;
+    state.how = crate::gzguts_h::COPY;
+}
+
+// `gz_fetch` owns the raw output pointer used by inflate and the raw buffer
+// passed to a transparent-copy read.  Keep its mode dispatch and scalar state
+// transitions here so that boundary only performs those raw operations.
+pub(crate) enum GzFetchPlan {
+    Look,
+    Copy { requested: ::core::ffi::c_uint },
+    Gzip { output: ::core::ffi::c_uint },
+    Corrupt,
+}
+
+pub(crate) fn gz_fetch_plan(state: &crate::gzguts_h::gz_state) -> GzFetchPlan {
+    match state.how {
+        crate::gzguts_h::LOOK => GzFetchPlan::Look,
+        crate::gzguts_h::COPY => GzFetchPlan::Copy {
+            requested: state.size << 1 as ::core::ffi::c_int,
+        },
+        crate::gzguts_h::GZIP => GzFetchPlan::Gzip {
+            output: state.size << 1 as ::core::ffi::c_int,
+        },
+        _ => GzFetchPlan::Corrupt,
+    }
+}
+
+pub(crate) fn gz_fetch_copy_loaded(
+    state: &mut crate::gzguts_h::gz_state,
+    received: ::core::ffi::c_uint,
+) {
+    state.x.have = received;
+    state.x.next = state.out;
+}
+
+// Set up the already-owned inflater output window before `gz_decomp()`
+// crosses its raw inflate boundary.
+pub(crate) fn gz_fetch_prepare_decompression(
+    state: &mut crate::gzguts_h::gz_state,
+    output: ::core::ffi::c_uint,
+) {
+    state.strm.avail_out = output as crate::stdlib::uInt;
+    state.strm.next_out = state.out;
+}
+
+pub(crate) fn gz_fetch_needs_more(state: &crate::gzguts_h::gz_state) -> bool {
+    state.x.have == 0 && (state.eof == 0 || state.strm.avail_in != 0)
+}
+
+// Once gzip input is available, the look adapter either waits for a complete
+// signature, starts a gzip member, or retains the input as a transparent
+// copy.  Signature access remains at the raw input-buffer adapter; this
+// helper only receives the scalar facts needed for classification.
+pub(crate) enum GzLookPlan {
+    NeedMore,
+    Gzip,
+    Copy { copied: ::core::ffi::c_uint },
+}
+
+pub(crate) fn gz_look_plan(
+    available: ::core::ffi::c_uint,
+    stalled: bool,
+    gzip_header: bool,
+) -> GzLookPlan {
+    if available == 0 || (stalled && available < 4) {
+        GzLookPlan::NeedMore
+    } else if gzip_header {
+        GzLookPlan::Gzip
+    } else {
+        GzLookPlan::Copy { copied: available }
+    }
+}
+
+pub(crate) fn gz_is_gzip_header(header: [::core::ffi::c_uchar; 4]) -> bool {
+    header == [31, 139, 8, header[3]] && header[3] < 32
+}
+
+// Classify the state transition after the raw inflate call.  The gzip read
+// adapter retains the call itself, the output-buffer rebasing, and the
+// optional inflater message pointer used for a data error.
+pub(crate) enum GzDecompStep {
+    Continue,
+    Stop(::core::ffi::c_int),
+    StreamError,
+    MemError,
+    DataError,
+}
+
+pub(crate) fn gz_decomp_after_inflate(
+    state: &mut crate::gzguts_h::gz_state,
+    available_before: ::core::ffi::c_uint,
+    ret: ::core::ffi::c_int,
+) -> GzDecompStep {
+    if state.strm.avail_out < available_before {
+        state.junk = 0;
+    }
+    if ret == crate::zlib_h::Z_STREAM_ERROR || ret == crate::zlib_h::Z_NEED_DICT {
+        GzDecompStep::StreamError
+    } else if ret == crate::zlib_h::Z_MEM_ERROR {
+        GzDecompStep::MemError
+    } else if ret == crate::zlib_h::Z_DATA_ERROR {
+        if state.junk == 1 {
+            state.strm.avail_in = 0;
+            state.eof = 1;
+            state.how = crate::gzguts_h::LOOK;
+            GzDecompStep::Stop(crate::zlib_h::Z_OK)
+        } else {
+            GzDecompStep::DataError
+        }
+    } else if state.strm.avail_out != 0 && ret != crate::zlib_h::Z_STREAM_END {
+        GzDecompStep::Continue
+    } else {
+        GzDecompStep::Stop(ret)
+    }
+}
+
+// Publish the output range produced by the inflater after its raw call has
+// completed. This only updates the already-bound gzip state; the inflater
+// invocation and its buffer validity remain in the read adapter.
+pub(crate) fn gz_decomp_publish_output(
+    state: &mut crate::gzguts_h::gz_state,
+    available_before: ::core::ffi::c_uint,
+) {
+    state.x.have = (available_before as crate::stdlib::uInt).wrapping_sub(state.strm.avail_out)
+        as ::core::ffi::c_uint;
+    state.x.next = state.strm.next_out.wrapping_sub(state.x.have as usize);
+}
+
+pub(crate) fn gz_decomp_finish(
+    state: &mut crate::gzguts_h::gz_state,
+    ret: ::core::ffi::c_int,
+) -> bool {
+    if ret == crate::zlib_h::Z_STREAM_END {
+        state.junk = 0;
+        state.how = crate::gzguts_h::LOOK;
+        true
+    } else {
+        ret == crate::zlib_h::Z_OK
+    }
+}
+
+pub(crate) fn gz_set_gzip_input(state: &mut crate::gzguts_h::gz_state, junk: bool) {
+    state.how = crate::gzguts_h::GZIP;
+    state.junk = junk as ::core::ffi::c_int;
+    state.direct = 0;
+}
+
+pub(crate) fn gz_reset_output_buffer(state: &mut crate::gzguts_h::gz_state) {
+    state.strm.avail_out = state.size;
+}
+
+pub(crate) fn gz_remaining_after_write(
+    available: crate::stdlib::uInt,
+    written: ::core::ffi::c_uint,
+) -> crate::stdlib::uInt {
+    available.wrapping_sub(written)
+}
+
+pub(crate) fn gz_produced(
+    available_before: ::core::ffi::c_uint,
+    available_after: crate::stdlib::uInt,
+) -> ::core::ffi::c_uint {
+    available_before.wrapping_sub(available_after as ::core::ffi::c_uint)
+}
+
+// Account for bytes appended to the gzip input buffer without involving its
+// raw buffer pointer.  The caller has already copied exactly `added` bytes.
+pub(crate) fn gz_append_input(state: &mut crate::gzguts_h::gz_state, added: ::core::ffi::c_uint) {
+    state.strm.avail_in = state.strm.avail_in.wrapping_add(added);
+    gz_advance_pos(state, added);
+}
+
+// Account for the portion of a stream input request consumed by deflate.
+// `avail_in` remains the source of truth for the raw stream adapter.
+pub(crate) fn gz_consume_stream_input(
+    state: &mut crate::gzguts_h::gz_state,
+    requested: ::core::ffi::c_uint,
+) -> ::core::ffi::c_uint {
+    let consumed = gz_produced(requested, state.strm.avail_in);
+    gz_advance_pos(state, consumed);
+    consumed
+}
+
+// Classify a POSIX I/O result without coupling the decision to the raw
+// descriptor and buffer adapters.  A non-negative result is a byte count;
+// a negative result preserves whether a non-blocking operation stalled.
+pub(crate) fn gz_syscall_result(
+    result: ::core::ffi::c_int,
+    errno: ::core::ffi::c_int,
+) -> Result<::core::ffi::c_uint, bool> {
+    if result < 0 {
+        Err(errno == crate::stdlib::EAGAIN || errno == crate::stdlib::EWOULDBLOCK)
+    } else {
+        Ok(result as ::core::ffi::c_uint)
+    }
+}
+
+// gz_comp writes a completed output buffer, or writes while flushing except
+// before Z_FINISH reaches the end of the stream.
+pub(crate) fn gz_comp_needs_write(
+    avail_out: ::core::ffi::c_uint,
+    flush: ::core::ffi::c_int,
+    ret: ::core::ffi::c_int,
+) -> bool {
+    avail_out == 0
+        || (flush != crate::zlib_h::Z_NO_FLUSH
+            && (flush != crate::zlib_h::Z_FINISH || ret == crate::zlib_h::Z_STREAM_END))
+}
+
+// Describe a compression-output drain before the raw write adapter touches
+// the descriptor or advances its buffer pointer.  Write-mode gzip does not
+// use `x.have` for read buffering, so it tracks the queued output count and
+// avoids recovering it by subtracting raw buffer addresses.
+pub(crate) struct GzCompOutputPlan {
+    pub reset: bool,
+}
+
+pub(crate) fn gz_comp_output_pending(state: &crate::gzguts_h::gz_state) -> ::core::ffi::c_uint {
+    state.x.have
+}
+
+// Keep the request sizing for the two gz_comp write adapters with the
+// associated state accounting.  The adapters retain their distinct raw input
+// pointers and descriptor calls.
+pub(crate) fn gz_comp_direct_write_request(
+    state: &crate::gzguts_h::gz_state,
+) -> ::core::ffi::c_uint {
+    gz_syscall_chunk(state.strm.avail_in)
+}
+
+pub(crate) fn gz_comp_output_write_request(
+    state: &crate::gzguts_h::gz_state,
+) -> ::core::ffi::c_uint {
+    gz_syscall_chunk(gz_comp_output_pending(state))
+}
+
+pub(crate) fn gz_comp_output_write_progress(
+    state: &mut crate::gzguts_h::gz_state,
+    written: ::core::ffi::c_uint,
+) {
+    state.x.next = state.x.next.wrapping_add(written as usize);
+    state.x.have = state.x.have.wrapping_sub(written);
+}
+
+// Record bytes produced by the deflater after the raw call has advanced its
+// output cursor.  The queue count remains the source of truth for later
+// descriptor writes, leaving that adapter free of pointer-difference logic.
+pub(crate) fn gz_comp_output_produced(
+    state: &mut crate::gzguts_h::gz_state,
+    produced: ::core::ffi::c_uint,
+) {
+    state.x.have = state.x.have.wrapping_add(produced);
+}
+
+pub(crate) fn gz_comp_output_plan(
+    state: &crate::gzguts_h::gz_state,
+    flush: ::core::ffi::c_int,
+    ret: ::core::ffi::c_int,
+) -> Option<GzCompOutputPlan> {
+    if !gz_comp_needs_write(state.strm.avail_out, flush, ret) {
+        return None;
+    }
+    Some(GzCompOutputPlan {
+        reset: state.strm.avail_out == 0,
+    })
+}
+
+pub(crate) fn gz_comp_reset_output(state: &mut crate::gzguts_h::gz_state) {
+    gz_reset_output_buffer(state);
+    state.strm.next_out = state.out;
+    state.x.next = state.out;
+    state.x.have = 0;
+}
+
+pub(crate) fn gz_comp_should_reset(flush: ::core::ffi::c_int) -> bool {
+    flush == crate::zlib_h::Z_FINISH
+}
+
+// Select the compression-path state transition before entering either the raw
+// direct-write adapter or deflate.  The adapter retains descriptor calls and
+// pointer rebasing; this helper owns the state-only decisions.
+pub(crate) enum GzCompMode {
+    Direct,
+    Idle,
+    Reset,
+    Deflate,
+}
+
+pub(crate) fn gz_comp_mode(
+    state: &crate::gzguts_h::gz_state,
+    flush: ::core::ffi::c_int,
+) -> GzCompMode {
+    if state.direct != 0 {
+        GzCompMode::Direct
+    } else if state.reset != 0 {
+        if state.strm.avail_in == 0 && flush == crate::zlib_h::Z_NO_FLUSH {
+            GzCompMode::Idle
+        } else {
+            GzCompMode::Reset
+        }
+    } else {
+        GzCompMode::Deflate
+    }
+}
+
+pub(crate) fn gz_comp_reset_complete(state: &mut crate::gzguts_h::gz_state) {
+    state.reset = 0;
+}
+
+pub(crate) fn gz_comp_finish(state: &mut crate::gzguts_h::gz_state, flush: ::core::ffi::c_int) {
+    if gz_comp_should_reset(flush) {
+        state.reset = 1;
+    }
+}
+
+// Advance only the count portion of a direct write.  The raw adapter advances
+// `next_in`, since it is the sole owner of that pointer.
+pub(crate) fn gz_direct_write_progress(
+    state: &mut crate::gzguts_h::gz_state,
+    written: ::core::ffi::c_uint,
+) {
+    state.strm.avail_in = gz_remaining_after_write(state.strm.avail_in, written);
+}
+
+// On a non-blocking write failure, gzip reports only the input consumed so
+// far.  Other write failures report no input consumed.
+pub(crate) fn gz_write_result(
+    requested: crate::stdlib::z_size_t,
+    remaining: crate::stdlib::z_size_t,
+    stalled: bool,
+) -> crate::stdlib::z_size_t {
+    if stalled {
+        requested.wrapping_sub(remaining)
+    } else {
+        0
+    }
+}
+
+// Keep the write-path choices and byte accounting independent of the raw
+// source and destination buffers.  The callers still own the actual copy and
+// stream-pointer rebasing at the FFI boundary.
+pub(crate) fn gz_write_needs_init(state: &crate::gzguts_h::gz_state) -> bool {
+    state.size == 0
+}
+
+// Parameter changes only enter the deflater after the bound gzip state is
+// writable and non-transparent. Keep that state-only selection separate from
+// the deflater call itself.
+pub(crate) enum GzSetParamsPlan {
+    Invalid,
+    Unchanged,
+    Update,
+}
+
+pub(crate) fn gz_set_params_plan(
+    state: &crate::gzguts_h::gz_state,
+    level: ::core::ffi::c_int,
+    strategy: ::core::ffi::c_int,
+) -> GzSetParamsPlan {
+    if !gz_write_state_is_usable(state) || state.direct != 0 {
+        GzSetParamsPlan::Invalid
+    } else if level == state.level && strategy == state.strategy {
+        GzSetParamsPlan::Unchanged
+    } else {
+        GzSetParamsPlan::Update
+    }
+}
+
+// Initialization either writes directly with only an input buffer, or needs
+// the output buffer and deflater configured from the current write settings.
+// Keep this state-only choice separate from the allocation boundary in
+// `gz_init()` so its resource ownership remains explicit there.
+#[derive(Clone, Copy)]
+pub(crate) enum GzInitPlan {
+    Direct {
+        input_len: crate::__stddef_size_t_h::size_t,
+    },
+    Deflate {
+        input_len: crate::__stddef_size_t_h::size_t,
+        output_len: crate::__stddef_size_t_h::size_t,
+        level: ::core::ffi::c_int,
+        strategy: ::core::ffi::c_int,
+    },
+}
+
+pub(crate) fn gz_init_plan(state: &crate::gzguts_h::gz_state) -> GzInitPlan {
+    let input_len = (state.want << 1) as crate::__stddef_size_t_h::size_t;
+    if state.direct != 0 {
+        GzInitPlan::Direct { input_len }
+    } else {
+        GzInitPlan::Deflate {
+            input_len,
+            output_len: state.want as crate::__stddef_size_t_h::size_t,
+            level: state.level,
+            strategy: state.strategy,
+        }
+    }
+}
+
+// Choose the next state-only step for gz_write().  Initialization and sparse
+// seek handling can change the state, so the raw buffer adapter asks again
+// after each succeeds before it selects a copy or stream operation.
+pub(crate) enum GzWritePlan {
+    Empty,
+    Initialize,
+    Zero,
+    Buffered,
+    Stream,
+}
+
+pub(crate) fn gz_write_plan(
+    state: &crate::gzguts_h::gz_state,
+    remaining: crate::stdlib::z_size_t,
+) -> GzWritePlan {
+    if remaining == 0 {
+        GzWritePlan::Empty
+    } else if gz_write_needs_init(state) {
+        GzWritePlan::Initialize
+    } else if state.skip != 0 {
+        GzWritePlan::Zero
+    } else if remaining < state.size as crate::stdlib::z_size_t {
+        GzWritePlan::Buffered
+    } else {
+        GzWritePlan::Stream
+    }
+}
+
+pub(crate) struct GzBufferedCopyPlan {
+    pub offset: ::core::ffi::c_uint,
+    pub len: ::core::ffi::c_uint,
+}
+
+// The gzip input buffer is contiguous.  Keep its cursor setup and byte count
+// out of the copy adapter, which is the only write-path code that needs the
+// raw source and destination pointers.
+pub(crate) fn gz_buffered_input_len(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_uint {
+    if state.strm.avail_in == 0 {
+        state.strm.next_in = state.in_0;
+    }
+    state
+        .strm
+        .next_in
+        .addr()
+        .wrapping_add(state.strm.avail_in as usize)
+        .wrapping_sub(state.in_0.addr()) as ::core::ffi::c_uint
+}
+
+// Select the destination offset and copy size before the raw copy adapter
+// touches either source or destination memory.
+pub(crate) fn gz_buffered_copy_plan(
+    state: &mut crate::gzguts_h::gz_state,
+    remaining: crate::stdlib::z_size_t,
+) -> GzBufferedCopyPlan {
+    let offset = gz_buffered_input_len(state);
+    GzBufferedCopyPlan {
+        offset,
+        len: gz_buffer_space(state.size, offset, remaining),
+    }
+}
+
+pub(crate) fn gz_buffered_copy_progress(
+    state: &mut crate::gzguts_h::gz_state,
+    remaining: &mut crate::stdlib::z_size_t,
+    copied: ::core::ffi::c_uint,
+) {
+    gz_append_input(state, copied);
+    *remaining = remaining.wrapping_sub(copied as crate::stdlib::z_size_t);
+}
+
+// `gzputs()` obtains the string length at its caller-pointer boundary.  Keep
+// C's representability check and its return-value convention scalar so that
+// boundary only needs to measure and pass the string through to `gz_write()`.
+pub(crate) fn gz_string_len_fits_int(len: crate::stdlib::z_size_t) -> bool {
+    (len as ::core::ffi::c_int) >= 0 && len as ::core::ffi::c_uint as crate::stdlib::z_size_t == len
+}
+
+pub(crate) fn gz_puts_result(
+    len: crate::stdlib::z_size_t,
+    written: crate::stdlib::z_size_t,
+) -> ::core::ffi::c_int {
+    if len != 0 && written == 0 {
+        -1
+    } else {
+        written as ::core::ffi::c_int
+    }
+}
+
+// `gzflush()` clears a usable state's error before validating the requested
+// flush.  Keep the remaining state-only branch selection separate from its
+// compression boundary so that ordering remains visible and testable.
+pub(crate) enum GzFlushPlan {
+    Invalid,
+    Zero,
+    Compress,
+}
+
+pub(crate) fn gz_flush_plan(
+    state: &crate::gzguts_h::gz_state,
+    flush: ::core::ffi::c_int,
+) -> GzFlushPlan {
+    if flush < 0 || flush > crate::zlib_h::Z_FINISH {
+        GzFlushPlan::Invalid
+    } else if state.skip != 0 {
+        GzFlushPlan::Zero
+    } else {
+        GzFlushPlan::Compress
+    }
+}
+
+pub(crate) fn gz_stream_write_progress(
+    state: &mut crate::gzguts_h::gz_state,
+    remaining: &mut crate::stdlib::z_size_t,
+    offered: ::core::ffi::c_uint,
+) -> ::core::ffi::c_uint {
+    let consumed = gz_consume_stream_input(state, offered);
+    *remaining = remaining.wrapping_sub(consumed as crate::stdlib::z_size_t);
+    consumed
+}
+
+pub(crate) fn gz_write_error_result(
+    state: &crate::gzguts_h::gz_state,
+    requested: crate::stdlib::z_size_t,
+    remaining: crate::stdlib::z_size_t,
+) -> crate::stdlib::z_size_t {
+    gz_write_result(requested, remaining, state.again != 0)
+}
+
+// Closing gzip streams has distinct raw cleanup operations, but choosing
+// which one applies depends only on fields in the already-bound state. Keep
+// that classification outside the allocator and deflater/inflater boundary.
+pub(crate) enum GzReadCloseCleanup {
+    None,
+    Inflater,
+}
+
+pub(crate) fn gz_read_close_cleanup(state: &crate::gzguts_h::gz_state) -> GzReadCloseCleanup {
+    if state.size == 0 {
+        GzReadCloseCleanup::None
+    } else {
+        GzReadCloseCleanup::Inflater
+    }
+}
+
+// Write-close cleanup has the same separation: state inspection chooses the
+// cleanup shape, while the matching deflater teardown and allocation release
+// stay at the raw boundary in `gzclose_w()`.
+pub(crate) enum GzWriteCloseCleanup {
+    None,
+    Input,
+    DeflaterAndBuffers,
+}
+
+pub(crate) fn gz_write_close_cleanup(state: &crate::gzguts_h::gz_state) -> GzWriteCloseCleanup {
+    if state.size == 0 {
+        GzWriteCloseCleanup::None
+    } else if state.direct != 0 {
+        GzWriteCloseCleanup::Input
+    } else {
+        GzWriteCloseCleanup::DeflaterAndBuffers
+    }
+}
+
+pub(crate) fn gz_zero_progress(
+    state: &mut crate::gzguts_h::gz_state,
+    offered: ::core::ffi::c_uint,
+) -> ::core::ffi::c_uint {
+    let consumed = gz_produced(offered, state.strm.avail_in);
+    gz_advance_pos(state, consumed);
+    state.skip -= consumed as crate::stdlib::off64_t;
+    consumed
+}
+
+// Choose the amount a bulk gzip operation may handle in one stream request.
+// `available` is only a bound when data is already buffered.
+pub(crate) fn gz_buffered_chunk(
+    len: crate::stdlib::z_size_t,
+    available: ::core::ffi::c_uint,
+) -> ::core::ffi::c_uint {
+    let chunk = gz_stream_chunk(len);
+    if chunk > available {
+        available
+    } else {
+        chunk
+    }
+}
+
+// Select the next read operation without touching either the caller's buffer
+// or gzip's raw output buffer.  The read adapter keeps those pointer-based
+// operations at its FFI boundary.
+pub(crate) enum GzReadPlan {
+    Buffered(::core::ffi::c_uint),
+    End,
+    Fetch,
+    Copy(::core::ffi::c_uint),
+    Decompress(::core::ffi::c_uint),
+}
+
+pub(crate) fn gz_read_plan(
+    state: &crate::gzguts_h::gz_state,
+    remaining: crate::stdlib::z_size_t,
+) -> GzReadPlan {
+    let chunk = gz_stream_chunk(remaining);
+    if state.x.have != 0 {
+        return GzReadPlan::Buffered(gz_buffered_chunk(remaining, state.x.have));
+    }
+    if state.eof != 0 && state.strm.avail_in == 0 {
+        return GzReadPlan::End;
+    }
+    if state.how == crate::gzguts_h::LOOK || chunk < state.size.wrapping_shl(1) {
+        return GzReadPlan::Fetch;
+    }
+    if state.how == crate::gzguts_h::COPY {
+        GzReadPlan::Copy(chunk)
+    } else {
+        GzReadPlan::Decompress(chunk)
+    }
+}
+
+// A buffered read already advances position in gz_consume().  Direct reads
+// need the same accounting, but must not update it twice.
+pub(crate) fn gz_read_progress(
+    state: &mut crate::gzguts_h::gz_state,
+    remaining: &mut crate::stdlib::z_size_t,
+    received: &mut crate::stdlib::z_size_t,
+    count: ::core::ffi::c_uint,
+    was_buffered: bool,
+) {
+    *remaining = remaining.wrapping_sub(count as crate::stdlib::z_size_t);
+    *received = received.wrapping_add(count as crate::stdlib::z_size_t);
+    if !was_buffered {
+        gz_advance_pos(state, count);
+    }
+}
+
+// A failed fetch can still have produced buffered output.  Classify that
+// state-only result before the read coordinator decides whether to retry the
+// buffer or return the failure to its caller-buffer boundary.
+pub(crate) enum GzReadFetchResult {
+    Retry,
+    Error,
+}
+
+pub(crate) fn gz_read_after_fetch(
+    fetch: ::core::ffi::c_int,
+    buffered: ::core::ffi::c_uint,
+) -> GzReadFetchResult {
+    if fetch == -1 && buffered == 0 {
+        GzReadFetchResult::Error
+    } else {
+        GzReadFetchResult::Retry
+    }
+}
+
+// `gz_decomp()` leaves its produced bytes in the bound output state.  Take
+// and clear that count without involving the caller buffer used for the
+// inflate call.
+pub(crate) fn gz_read_take_decompressed(
+    state: &mut crate::gzguts_h::gz_state,
+) -> ::core::ffi::c_uint {
+    let produced = state.x.have;
+    state.x.have = 0;
+    produced
+}
+
+// Keep the loop's scalar continuation condition separate from the raw caller
+// pointer advance performed by `gz_read()`.
+pub(crate) fn gz_read_should_continue(
+    remaining: crate::stdlib::z_size_t,
+    status: ::core::ffi::c_int,
+) -> bool {
+    remaining != 0 && status == 0
+}
+
+pub(crate) fn gz_read_mark_past(
+    state: &mut crate::gzguts_h::gz_state,
+    remaining: crate::stdlib::z_size_t,
+) {
+    if remaining != 0 && state.eof != 0 {
+        state.past = 1;
+    }
+}
+
+// Once a read has completed, only its scalar count and the bound state's
+// error flags determine whether the ABI wrapper returns the count, reports
+// the existing error, or records a would-block error.  Keep that choice out
+// of the wrapper's errno/C-string boundary.
+pub(crate) enum GzReadResult {
+    Count,
+    Error,
+    WouldBlock,
+}
+
+pub(crate) fn gz_read_result(
+    count: ::core::ffi::c_uint,
+    error: ::core::ffi::c_int,
+    again: ::core::ffi::c_int,
+) -> GzReadResult {
+    if count != 0 {
+        GzReadResult::Count
+    } else if error != crate::zlib_h::Z_OK && error != crate::zlib_h::Z_BUF_ERROR {
+        GzReadResult::Error
+    } else if again != 0 {
+        GzReadResult::WouldBlock
+    } else {
+        GzReadResult::Count
+    }
+}
+
+// A deferred seek needs another fetch only after its buffered output is
+// exhausted and the input has not reached EOF.  Keep this state-only decision
+// separate from `gz_fetch()`, which owns the descriptor and buffer work.
+pub(crate) fn gz_skip_needs_fetch(state: &crate::gzguts_h::gz_state) -> bool {
+    state.x.have == 0 && !(state.eof != 0 && state.strm.avail_in == 0 as crate::stdlib::uInt)
+}
+
+// Plan a pushed-back byte without touching the output buffer.  The read
+// adapter retains the pointer movement, overlapping copy, and byte store;
+// this keeps the corresponding gzip cursor/accounting transition local.
+pub(crate) enum GzUngetcPlan {
+    First { buffer_end: ::core::ffi::c_uint },
+    Full,
+    Prepend { move_to_end: Option<GzUngetcMove> },
+}
+
+// Moving pushed-back output only depends on the initialized buffer's scalar
+// bounds. Keep that arithmetic separate from the raw overlapping copy.
+pub(crate) struct GzUngetcMove {
+    pub source_len: ::core::ffi::c_uint,
+    pub destination_offset: ::core::ffi::c_uint,
+}
+
+pub(crate) fn gz_ungetc_plan(state: &crate::gzguts_h::gz_state) -> GzUngetcPlan {
+    let buffer_end = state.size << 1 as ::core::ffi::c_int;
+    if state.x.have == 0 {
+        GzUngetcPlan::First { buffer_end }
+    } else if state.x.have == buffer_end {
+        GzUngetcPlan::Full
+    } else {
+        GzUngetcPlan::Prepend {
+            move_to_end: (state.x.next == state.out).then_some(GzUngetcMove {
+                source_len: state.x.have,
+                // This is the end-exclusive destination used by the C
+                // backwards copy. The read adapter derives the start by
+                // subtracting `source_len`, so the moved bytes remain at
+                // the end of the output allocation.
+                destination_offset: buffer_end,
+            }),
+        }
+    }
+}
+
+pub(crate) fn gz_ungetc_progress(state: &mut crate::gzguts_h::gz_state, was_empty: bool) {
+    if was_empty {
+        state.x.have = 1;
+    } else {
+        state.x.have = state.x.have.wrapping_add(1);
+    }
+    state.x.pos -= 1;
+    state.past = 0;
+}
+
+// Return how much input fits in the gzip input buffer.  Valid gzip state has
+// `buffered <= size`; wrapping preserves the translated C arithmetic if a
+// corrupt state reaches this internal path.
+pub(crate) fn gz_buffer_space(
+    size: ::core::ffi::c_uint,
+    buffered: ::core::ffi::c_uint,
+    remaining: crate::stdlib::z_size_t,
+) -> ::core::ffi::c_uint {
+    let space = size.wrapping_sub(buffered);
+    if space as crate::stdlib::z_size_t > remaining {
+        remaining as ::core::ffi::c_uint
+    } else {
+        space
+    }
+}
+
+// Keep the logical gzip position update independent of the raw buffer
+// adapters used by the read and write paths.
+pub(crate) fn gz_advance_pos(state: &mut crate::gzguts_h::gz_state, count: crate::stdlib::uInt) {
+    state.x.pos += count as crate::stdlib::off64_t;
+}
+
+fn gz_reset(state: &mut crate::gzguts_h::gz_state) {
+    state.x.have = 0 as ::core::ffi::c_uint;
+    if state.mode == crate::gzguts_h::GZ_READ {
+        state.eof = 0 as ::core::ffi::c_int;
+        state.past = 0 as ::core::ffi::c_int;
+        state.how = crate::gzguts_h::LOOK;
+        state.junk = -1 as ::core::ffi::c_int;
+    } else {
+        state.reset = 0 as ::core::ffi::c_int;
+    }
+    state.again = 0 as ::core::ffi::c_int;
+    state.skip = 0 as crate::stdlib::off64_t;
+    state.x.pos = 0 as crate::stdlib::off64_t;
+    state.strm.avail_in = 0 as crate::stdlib::uInt;
+}
+
+struct GzOpenMode {
+    oflag: ::core::ffi::c_int,
+    exclusive: ::core::ffi::c_int,
+}
+
+// Keep the constructor's state-only setup separate from allocation and C
+// string traversal in gz_open().
+fn gz_open_init(state: &mut crate::gzguts_h::gz_state) {
+    state.size = 0;
+    state.want = crate::gzguts_h::GZBUFSIZE as ::core::ffi::c_uint;
+    state.path = ::core::ptr::null_mut();
+    state.path_len = 0;
+    state.err = crate::zlib_h::Z_OK;
+    state.msg = ::core::ptr::null_mut::<::core::ffi::c_char>();
+    state.mode = crate::gzguts_h::GZ_NONE;
+    state.level = crate::zlib_h::Z_DEFAULT_COMPRESSION;
+    state.strategy = crate::zlib_h::Z_DEFAULT_STRATEGY;
+    state.direct = 0;
+}
+
+// A gzip state is opaque to callers and is released only through the gzip
+// close APIs.  Constructing every field here lets the core open path retain
+// ordinary Rust ownership until the opaque handle is published.
+fn gz_open_state() -> crate::gzguts_h::gz_state {
+    crate::gzguts_h::gz_state {
+        x: crate::zlib_h::gzFile_s {
+            have: 0,
+            next: ::core::ptr::null_mut(),
+            pos: 0,
+        },
+        mode: crate::gzguts_h::GZ_NONE,
+        fd: -1,
+        path: ::core::ptr::null_mut(),
+        path_len: 0,
+        size: 0,
+        want: 0,
+        in_0: ::core::ptr::null_mut(),
+        out: ::core::ptr::null_mut(),
+        direct: 0,
+        junk: 0,
+        how: 0,
+        again: 0,
+        start: 0,
+        eof: 0,
+        past: 0,
+        level: 0,
+        strategy: 0,
+        reset: 0,
+        skip: 0,
+        err: crate::zlib_h::Z_OK,
+        msg: ::core::ptr::null_mut(),
+        strm: crate::zlib_h::z_stream {
+            next_in: ::core::ptr::null_mut(),
+            avail_in: 0,
+            total_in: 0,
+            next_out: ::core::ptr::null_mut(),
+            avail_out: 0,
+            total_out: 0,
+            msg: ::core::ptr::null_mut(),
+            state: ::core::ptr::null_mut(),
+            zalloc: None,
+            zfree: None,
+            opaque: ::core::ptr::null_mut(),
+            data_type: 0,
+            adler: 0,
+            reserved: 0,
+        },
+    }
+}
+
+// Apply one mode character without coupling interpretation to the raw mode
+// string cursor used by the public FFI constructor.
+fn gz_open_mode_byte(
+    state: &mut crate::gzguts_h::gz_state,
+    options: &mut GzOpenMode,
+    mode: ::core::ffi::c_uchar,
+) -> bool {
+    if mode >= b'0' && mode <= b'9' {
+        state.level = (mode - b'0') as ::core::ffi::c_int;
+        return true;
+    }
+    match mode {
+        b'r' => state.mode = crate::gzguts_h::GZ_READ,
+        b'w' => state.mode = crate::gzguts_h::GZ_WRITE,
+        b'a' => state.mode = crate::gzguts_h::GZ_APPEND,
+        b'+' => return false,
+        b'e' => options.oflag |= crate::stdlib::O_CLOEXEC,
+        b'x' => options.exclusive = 1,
+        b'f' => state.strategy = crate::zlib_h::Z_FILTERED,
+        b'h' => state.strategy = crate::zlib_h::Z_HUFFMAN_ONLY,
+        b'R' => state.strategy = crate::zlib_h::Z_RLE,
+        b'F' => state.strategy = crate::zlib_h::Z_FIXED,
+        b'G' => state.direct = -1,
+        b'N' => options.oflag |= crate::stdlib::O_NONBLOCK,
+        b'T' => state.direct = 1,
+        _ => {}
+    }
+    true
+}
+
+// Validate the parsed mode and apply the read-mode transparent default.
+fn gz_open_finish_mode(state: &mut crate::gzguts_h::gz_state) -> bool {
+    if state.mode == crate::gzguts_h::GZ_NONE {
+        return false;
+    }
+    if state.mode == crate::gzguts_h::GZ_READ {
+        if state.direct == 1 {
+            return false;
+        }
+        if state.direct == 0 {
+            state.direct = 1;
+        }
+    } else if state.direct == -1 {
+        return false;
+    }
+    true
+}
+
+fn gz_open_flags(state: &crate::gzguts_h::gz_state, options: &GzOpenMode) -> ::core::ffi::c_int {
+    options.oflag
+        | crate::stdlib::O_LARGEFILE
+        | if state.mode == crate::gzguts_h::GZ_READ {
+            crate::stdlib::O_RDONLY
+        } else {
+            crate::stdlib::O_WRONLY
+                | crate::stdlib::O_CREAT
+                | if options.exclusive != 0 {
+                    crate::stdlib::O_EXCL
+                } else {
+                    0
+                }
+                | if state.mode == crate::gzguts_h::GZ_WRITE {
+                    crate::stdlib::O_TRUNC
+                } else {
+                    crate::stdlib::O_APPEND
+                }
+        }
+}
+
+// Descriptor selection is purely a consequence of the supplied descriptor
+// and parsed mode flags.  Keep that choice separate from the raw descriptor
+// calls in `gz_open()`.
+enum GzOpenFdPlan {
+    Open,
+    Use {
+        nonblocking: bool,
+        close_on_exec: bool,
+    },
+}
+
+fn gz_open_fd_plan(fd: ::core::ffi::c_int, oflag: ::core::ffi::c_int) -> GzOpenFdPlan {
+    if fd == -1 as ::core::ffi::c_int {
+        GzOpenFdPlan::Open
+    } else {
+        GzOpenFdPlan::Use {
+            nonblocking: oflag & crate::stdlib::O_NONBLOCK != 0,
+            close_on_exec: oflag & crate::stdlib::O_CLOEXEC != 0,
+        }
+    }
+}
+
+// Positioning after a descriptor is opened only depends on the finalized
+// gzip mode.  The actual seek remains at the descriptor-I/O boundary.
+enum GzOpenPositionPlan {
+    None,
+    Append,
+    Read,
+}
+
+fn gz_open_position_plan(state: &crate::gzguts_h::gz_state) -> GzOpenPositionPlan {
+    if state.mode == crate::gzguts_h::GZ_APPEND {
+        GzOpenPositionPlan::Append
+    } else if state.mode == crate::gzguts_h::GZ_READ {
+        GzOpenPositionPlan::Read
+    } else {
+        GzOpenPositionPlan::None
+    }
+}
+
+fn gz_open_finish_append(state: &mut crate::gzguts_h::gz_state) {
+    state.mode = crate::gzguts_h::GZ_WRITE;
+}
+
+fn gz_open_set_read_start(state: &mut crate::gzguts_h::gz_state, start: crate::stdlib::off64_t) {
+    state.start = if start == -1 as crate::stdlib::off64_t {
+        0 as crate::stdlib::off64_t
+    } else {
+        start
+    };
+}
+
+// The exported callers bind their C strings before reaching this core open
+// operation.  Keeping that traversal at the ABI boundary makes the mode and
+// path ordinary immutable inputs here.
+fn gz_open(
+    path: &::core::ffi::CStr,
+    fd: ::core::ffi::c_int,
+    mode: &::core::ffi::CStr,
+) -> crate::zlib_h::gzFile {
+    // Reserve the registry slot before opening a descriptor. Holding the
+    // registry lock until publication guarantees this cannot fail after the
+    // descriptor has become this state’s responsibility.
+    let mut owned_states = gz_owned_states()
+        .lock()
+        .expect("gzip state registry poisoned");
+    if owned_states.try_reserve(1).is_err() {
+        return ::core::ptr::null_mut::<crate::zlib_h::gzFile_s>();
+    }
+    let mut state = Box::new(gz_open_state());
+    let len = path.to_bytes().len() as crate::stdlib::z_size_t;
+    let mut options = GzOpenMode {
+        oflag: 0,
+        exclusive: 0,
+    };
+    let state_ref = state.as_mut();
+    gz_open_init(state_ref);
+    for &mode in mode.to_bytes() {
+        if !gz_open_mode_byte(state_ref, &mut options, mode) {
+            return ::core::ptr::null_mut::<crate::zlib_h::gzFile_s>();
+        }
+    }
+    if !gz_open_finish_mode(state_ref) {
+        return ::core::ptr::null_mut::<crate::zlib_h::gzFile_s>();
+    }
+    state_ref.path_len = len;
+    // The registry owns the immutable C-compatible path and publishes its
+    // stable byte buffer through the opaque C state.
+    if !gz_register_owned_strings(state_ref, path) {
+        return ::core::ptr::null_mut::<crate::zlib_h::gzFile_s>();
+    }
+    let oflag = gz_open_flags(state_ref, &options);
+    match gz_open_fd_plan(fd, oflag) {
+        GzOpenFdPlan::Open => {
+            state_ref.fd = crate::stdlib::open(path.as_ptr(), oflag, 0o666 as ::core::ffi::c_int);
+        }
+        GzOpenFdPlan::Use {
+            nonblocking,
+            close_on_exec,
+        } => {
+            if nonblocking {
+                crate::stdlib::fcntl(
+                    fd,
+                    crate::stdlib::F_SETFL,
+                    crate::stdlib::fcntl(fd, crate::stdlib::F_GETFL) | crate::stdlib::O_NONBLOCK,
+                );
+            }
+            if close_on_exec {
+                crate::stdlib::fcntl(
+                    fd,
+                    crate::stdlib::F_SETFD,
+                    crate::stdlib::fcntl(fd, crate::stdlib::F_GETFD) | crate::stdlib::O_CLOEXEC,
+                );
+            }
+            state_ref.fd = fd;
+        }
+    }
+    if state_ref.fd == -1 as ::core::ffi::c_int {
+        // The registry entry must be dropped before releasing the state it
+        // is keyed by.
+        gz_release_owned_strings(state_ref);
+        return ::core::ptr::null_mut::<crate::zlib_h::gzFile_s>();
+    }
+    match gz_open_position_plan(state_ref) {
+        GzOpenPositionPlan::None => {}
+        GzOpenPositionPlan::Append => {
+            crate::stdlib::lseek64(
+                state_ref.fd,
+                0 as crate::stdlib::__off64_t,
+                crate::stdlib::SEEK_END,
+            );
+            gz_open_finish_append(state_ref);
+        }
+        GzOpenPositionPlan::Read => {
+            let start = crate::stdlib::lseek64(
+                state_ref.fd,
+                0 as crate::stdlib::__off64_t,
+                crate::stdlib::SEEK_CUR,
+            ) as crate::stdlib::off64_t;
+            gz_open_set_read_start(state_ref, start);
+        }
+    }
+    gz_reset(state_ref);
+    gz_error(state_ref, crate::zlib_h::Z_OK, None);
+    let state_ptr = ::core::ptr::from_mut(state.as_mut());
+    owned_states.push((
+        state_ptr.addr(),
+        GzOwnedState(send_wrapper::SendWrapper::new(state)),
+    ));
+    state_ptr as crate::zlib_h::gzFile
+}
+#[export_name = "gzopen"]
+
+pub unsafe extern "C" fn gzopen_ffi(
+    path: *const ::core::ffi::c_char,
+    mode: *const ::core::ffi::c_char,
+) -> crate::zlib_h::gzFile {
+    if path.is_null() || mode.is_null() {
+        return ::core::ptr::null_mut::<crate::zlib_h::gzFile_s>();
+    }
+    // SAFETY: the C ABI requires valid, NUL-terminated strings for both
+    // non-null arguments. The core implementation only receives the bound
+    // string views.
+    gz_open(
+        unsafe { ::core::ffi::CStr::from_ptr(path) },
+        -1 as ::core::ffi::c_int,
+        unsafe { ::core::ffi::CStr::from_ptr(mode) },
+    )
+}
+#[export_name = "gzopen64"]
+
+pub unsafe extern "C" fn gzopen64_ffi(
+    path: *const ::core::ffi::c_char,
+    mode: *const ::core::ffi::c_char,
+) -> crate::zlib_h::gzFile {
+    if path.is_null() || mode.is_null() {
+        return ::core::ptr::null_mut::<crate::zlib_h::gzFile_s>();
+    }
+    // SAFETY: as for `gzopen_ffi`, the ABI supplies valid C strings here.
+    gz_open(
+        unsafe { ::core::ffi::CStr::from_ptr(path) },
+        -1 as ::core::ffi::c_int,
+        unsafe { ::core::ffi::CStr::from_ptr(mode) },
+    )
+}
+fn gzdopen(fd: ::core::ffi::c_int, mode: Option<&::core::ffi::CStr>) -> crate::zlib_h::gzFile {
+    if fd == -1 as ::core::ffi::c_int {
+        return ::core::ptr::null_mut::<crate::zlib_h::gzFile_s>();
+    }
+    let mut path = [0_u8; 7 + 3 * ::core::mem::size_of::<::core::ffi::c_int>()];
+    let path = gz_fd_label(fd, &mut path);
+    match mode {
+        Some(mode) => gz_open(path, fd, mode),
+        None => ::core::ptr::null_mut::<crate::zlib_h::gzFile_s>(),
+    }
+}
+
+// `gzdopen()` needs only a transient copy of the descriptor label while
+// `gz_open()` copies the path into its owned state.  Construct the same
+// "<fd:%d>" C string on the stack so that this coordination remains safe and
+// does not need a temporary C allocation or raw C-string binding.
+fn gz_fd_label<'a>(fd: ::core::ffi::c_int, path: &'a mut [u8]) -> &'a ::core::ffi::CStr {
+    let mut value = fd.unsigned_abs();
+    let mut digits = [0_u8; 10];
+    let mut count = 0;
+    loop {
+        digits[count] = b'0' + (value % 10) as u8;
+        count += 1;
+        value /= 10;
+        if value == 0 {
+            break;
+        }
+    }
+
+    let mut used = 0;
+    path[used..used + 4].copy_from_slice(b"<fd:");
+    used += 4;
+    if fd < 0 {
+        path[used] = b'-';
+        used += 1;
+    }
+    for digit in digits[..count].iter().rev() {
+        path[used] = *digit;
+        used += 1;
+    }
+    path[used] = b'>';
+    path[used + 1] = 0;
+    ::core::ffi::CStr::from_bytes_with_nul(&path[..used + 2])
+        .expect("descriptor label is always a valid C string")
+}
+#[export_name = "gzdopen"]
+
+pub unsafe extern "C" fn gzdopen_ffi(
+    fd: ::core::ffi::c_int,
+    mode: *const ::core::ffi::c_char,
+) -> crate::zlib_h::gzFile {
+    // SAFETY: the C ABI requires a non-null `mode` to be a valid,
+    // NUL-terminated string. Descriptor handling and opening remain in
+    // `gzdopen`, including its original allocation behavior for null mode.
+    let mode = if mode.is_null() {
+        None
+    } else {
+        Some(unsafe { ::core::ffi::CStr::from_ptr(mode) })
+    };
+    gzdopen(fd, mode)
+}
+// Buffer configuration only needs an already-bound gzip state.  Leave handle
+// validation and binding in the exported entry point.
+fn gz_buffer(
+    state: &mut crate::gzguts_h::gz_state,
+    size: ::core::ffi::c_uint,
+) -> ::core::ffi::c_int {
+    let Some(size) = gz_buffer_size(state, size) else {
+        return -1;
+    };
+    state.want = size;
+    0
+}
+
+// Gzip file handles are opaque addresses. Resolve this one through the
+// owned-state registry so the exported ABI adapter need not recreate a
+// mutable reference from the foreign handle. Buffer configuration neither
+// removes the state nor calls through a user callback while the registry is
+// borrowed.
+fn gzbuffer_handle(file_key: usize, size: ::core::ffi::c_uint) -> ::core::ffi::c_int {
+    crate::src::gzlib::gz_with_owned_state(file_key, |state| gz_buffer(state, size)).unwrap_or(-1)
+}
+#[export_name = "gzbuffer"]
+
+pub unsafe extern "C" fn gzbuffer_ffi(
+    mut file: crate::zlib_h::gzFile,
+    mut size: ::core::ffi::c_uint,
+) -> ::core::ffi::c_int {
+    gzbuffer_handle(file.addr(), size)
+}
+// Rewind receives an already-bound state from its FFI entry point. Seeking a
+// descriptor has no memory precondition, so only error-record ownership below
+// remains a raw boundary.
+fn gzrewind(state: &mut crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
+    if !gz_rewind_is_usable(state) {
+        return -1 as ::core::ffi::c_int;
+    }
+    let position = crate::stdlib::lseek64(
+        state.fd,
+        state.start as crate::stdlib::off64_t,
+        crate::stdlib::SEEK_SET,
+    );
+    gz_rewind_result(state, position)
+}
+
+fn gzrewind_dispatch(state: Option<&mut crate::gzguts_h::gz_state>) -> ::core::ffi::c_int {
+    state.map_or(-1, gzrewind)
+}
+
+fn gzrewind_handle(file_key: usize) -> ::core::ffi::c_int {
+    gz_with_owned_state(file_key, |state| gzrewind_dispatch(Some(state))).unwrap_or(-1)
+}
+#[export_name = "gzrewind"]
+
+pub unsafe extern "C" fn gzrewind_ffi(mut file: crate::zlib_h::gzFile) -> ::core::ffi::c_int {
+    gzrewind_handle(file.addr())
+}
+
+// Keep seek arithmetic and all state transitions reference-bound.  Descriptor
+// positioning and error-record ownership stay in their narrow raw adapters.
+enum GzSeekPlan {
+    Invalid,
+    Copy {
+        offset: crate::stdlib::off64_t,
+        descriptor_offset: crate::stdlib::__off64_t,
+    },
+    Rewind {
+        offset: crate::stdlib::off64_t,
+    },
+    Finish {
+        offset: crate::stdlib::off64_t,
+    },
+}
+
+fn gz_seek_plan(
+    state: &mut crate::gzguts_h::gz_state,
+    mut offset: crate::stdlib::off64_t,
+    whence: ::core::ffi::c_int,
+) -> GzSeekPlan {
+    if (!gz_has_mode(state, crate::gzguts_h::GZ_READ)
+        && !gz_has_mode(state, crate::gzguts_h::GZ_WRITE))
+        || (state.err != crate::zlib_h::Z_OK && state.err != crate::zlib_h::Z_BUF_ERROR)
+        || (whence != crate::stdlib::SEEK_SET && whence != crate::stdlib::SEEK_CUR)
+    {
+        return GzSeekPlan::Invalid;
+    }
+    if whence == crate::stdlib::SEEK_SET {
+        offset -= state.x.pos;
+    } else {
+        offset += if state.past != 0 {
+            0 as crate::stdlib::off64_t
+        } else {
+            state.skip
+        };
+        state.skip = 0 as crate::stdlib::off64_t;
+    }
+    if state.mode == crate::gzguts_h::GZ_READ
+        && state.how == crate::gzguts_h::COPY
+        && state.x.pos + offset >= 0 as crate::stdlib::off64_t
+    {
+        return GzSeekPlan::Copy {
+            offset,
+            descriptor_offset: offset as crate::stdlib::__off64_t
+                - state.x.have as crate::stdlib::__off64_t,
+        };
+    }
+    if offset < 0 as crate::stdlib::off64_t {
+        if state.mode != crate::gzguts_h::GZ_READ {
+            return GzSeekPlan::Invalid;
+        }
+        offset += state.x.pos;
+        if offset < 0 as crate::stdlib::off64_t {
+            return GzSeekPlan::Invalid;
+        }
+        return GzSeekPlan::Rewind { offset };
+    }
+    GzSeekPlan::Finish { offset }
+}
+
+fn gz_seek_after_copy(
+    state: &mut crate::gzguts_h::gz_state,
+    offset: crate::stdlib::off64_t,
+) -> crate::stdlib::off64_t {
+    state.x.have = 0 as ::core::ffi::c_uint;
+    state.eof = 0 as ::core::ffi::c_int;
+    state.past = 0 as ::core::ffi::c_int;
+    state.skip = 0 as crate::stdlib::off64_t;
+    state.strm.avail_in = 0 as crate::stdlib::uInt;
+    state.x.pos += offset;
+    state.x.pos
+}
+
+fn gz_seek_finish(
+    state: &mut crate::gzguts_h::gz_state,
+    mut offset: crate::stdlib::off64_t,
+) -> crate::stdlib::off64_t {
+    if state.mode == crate::gzguts_h::GZ_READ {
+        let n = crate::src::gzread::gz_consume(state, offset);
+        offset -= n as crate::stdlib::off64_t;
+    }
+    state.skip = offset;
+    state.x.pos + offset
+}
+
+fn gzseek64(
+    state: &mut crate::gzguts_h::gz_state,
+    mut offset: crate::stdlib::off64_t,
+    mut whence: ::core::ffi::c_int,
+) -> crate::stdlib::off64_t {
+    let plan = gz_seek_plan(state, offset, whence);
+    match plan {
+        GzSeekPlan::Invalid => -1 as crate::stdlib::off64_t,
+        GzSeekPlan::Copy {
+            offset,
+            descriptor_offset,
+        } => {
+            if crate::stdlib::lseek64(state.fd, descriptor_offset, crate::stdlib::SEEK_CUR)
+                == -1 as crate::stdlib::__off64_t
+            {
+                return -1 as crate::stdlib::off64_t;
+            }
+            // This path immediately clears the same read-side flags below,
+            // so `gzclearerr` has the same observable state transition as
+            // the former Z_OK error-record update.
+            gzclearerr(state);
+            gz_seek_after_copy(state, offset)
+        }
+        GzSeekPlan::Rewind { offset } => {
+            if gzrewind(state) == -1 as ::core::ffi::c_int {
+                return -1 as crate::stdlib::off64_t;
+            }
+            gz_seek_finish(state, offset)
+        }
+        GzSeekPlan::Finish { offset } => gz_seek_finish(state, offset),
+    }
+}
+
+fn gzseek64_dispatch(
+    state: Option<&mut crate::gzguts_h::gz_state>,
+    offset: crate::stdlib::off64_t,
+    whence: ::core::ffi::c_int,
+) -> crate::stdlib::off64_t {
+    state.map_or(-1, |state| gzseek64(state, offset, whence))
+}
+
+fn gzseek64_handle(
+    file_key: usize,
+    offset: crate::stdlib::off64_t,
+    whence: ::core::ffi::c_int,
+) -> crate::stdlib::off64_t {
+    gz_with_owned_state(file_key, |state| {
+        gzseek64_dispatch(Some(state), offset, whence)
+    })
+    .unwrap_or(-1)
+}
+#[export_name = "gzseek64"]
+
+pub unsafe extern "C" fn gzseek64_ffi(
+    mut file: crate::zlib_h::gzFile,
+    mut offset: crate::stdlib::off64_t,
+    mut whence: ::core::ffi::c_int,
+) -> crate::stdlib::off64_t {
+    gzseek64_handle(file.addr(), offset, whence)
+}
+
+fn gzseek(
+    state: &mut crate::gzguts_h::gz_state,
+    offset: crate::stdlib::off_t,
+    whence: ::core::ffi::c_int,
+) -> crate::stdlib::off_t {
+    let ret = gzseek64(state, offset, whence);
+    if ret == ret {
+        ret
+    } else {
+        -1 as crate::stdlib::off_t
+    }
+}
+
+fn gzseek_dispatch(
+    state: Option<&mut crate::gzguts_h::gz_state>,
+    offset: crate::stdlib::off_t,
+    whence: ::core::ffi::c_int,
+) -> crate::stdlib::off_t {
+    state.map_or(-1, |state| gzseek(state, offset, whence))
+}
+
+fn gzseek_handle(
+    file_key: usize,
+    offset: crate::stdlib::off_t,
+    whence: ::core::ffi::c_int,
+) -> crate::stdlib::off_t {
+    gz_with_owned_state(file_key, |state| {
+        gzseek_dispatch(Some(state), offset, whence)
+    })
+    .unwrap_or(-1)
+}
+#[export_name = "gzseek"]
+
+pub unsafe extern "C" fn gzseek_ffi(
+    mut file: crate::zlib_h::gzFile,
+    mut offset: crate::stdlib::off_t,
+    mut whence: ::core::ffi::c_int,
+) -> crate::stdlib::off_t {
+    gzseek_handle(file.addr(), offset, whence)
+}
+fn gztell64(state: &crate::gzguts_h::gz_state) -> crate::stdlib::off64_t {
+    if !gz_has_mode(state, crate::gzguts_h::GZ_READ)
+        && !gz_has_mode(state, crate::gzguts_h::GZ_WRITE)
+    {
+        return -1 as crate::stdlib::off64_t;
+    }
+    state.x.pos
+        + (if state.past != 0 {
+            0 as crate::stdlib::off64_t
+        } else {
+            state.skip
+        })
+}
+
+fn gztell64_dispatch(state: Option<&crate::gzguts_h::gz_state>) -> crate::stdlib::off64_t {
+    state.map_or(-1, gztell64)
+}
+
+fn gztell64_handle(file_key: usize) -> crate::stdlib::off64_t {
+    gz_with_owned_state(file_key, |state| gztell64_dispatch(Some(state))).unwrap_or(-1)
+}
+#[export_name = "gztell64"]
+
+pub unsafe extern "C" fn gztell64_ffi(mut file: crate::zlib_h::gzFile) -> crate::stdlib::off64_t {
+    gztell64_handle(file.addr())
+}
+fn gztell(state: &crate::gzguts_h::gz_state) -> crate::stdlib::off_t {
+    let ret = gztell64(state);
+    if ret == ret {
+        ret
+    } else {
+        -1 as crate::stdlib::off_t
+    }
+}
+
+fn gztell_dispatch(state: Option<&crate::gzguts_h::gz_state>) -> crate::stdlib::off_t {
+    state.map_or(-1, gztell)
+}
+
+fn gztell_handle(file_key: usize) -> crate::stdlib::off_t {
+    gz_with_owned_state(file_key, |state| gztell_dispatch(Some(state))).unwrap_or(-1)
+}
+#[export_name = "gztell"]
+
+pub unsafe extern "C" fn gztell_ffi(mut file: crate::zlib_h::gzFile) -> crate::stdlib::off_t {
+    gztell_handle(file.addr())
+}
+// Offset queries observe gzip state while asking the descriptor for its
+// current position. The descriptor query itself has no memory precondition.
+fn gzoffset64(state: &crate::gzguts_h::gz_state) -> crate::stdlib::off64_t {
+    if !gz_has_mode(state, crate::gzguts_h::GZ_READ)
+        && !gz_has_mode(state, crate::gzguts_h::GZ_WRITE)
+    {
+        return -1 as crate::stdlib::off64_t;
+    }
+    let mut offset = crate::stdlib::lseek64(
+        state.fd,
+        0 as crate::stdlib::__off64_t,
+        crate::stdlib::SEEK_CUR,
+    ) as crate::stdlib::off64_t;
+    if offset == -1 as crate::stdlib::off64_t {
+        return -1 as crate::stdlib::off64_t;
+    }
+    gz_offset_after_descriptor(state, offset)
+}
+
+fn gzoffset64_dispatch(state: Option<&crate::gzguts_h::gz_state>) -> crate::stdlib::off64_t {
+    state.map_or(-1, gzoffset64)
+}
+
+fn gzoffset64_handle(file_key: usize) -> crate::stdlib::off64_t {
+    gz_with_owned_state(file_key, |state| gzoffset64_dispatch(Some(state))).unwrap_or(-1)
+}
+#[export_name = "gzoffset64"]
+
+pub unsafe extern "C" fn gzoffset64_ffi(mut file: crate::zlib_h::gzFile) -> crate::stdlib::off64_t {
+    gzoffset64_handle(file.addr())
+}
+fn gzoffset(state: &crate::gzguts_h::gz_state) -> crate::stdlib::off_t {
+    let ret = gzoffset64(state);
+    if ret == ret {
+        ret
+    } else {
+        -1 as crate::stdlib::off_t
+    }
+}
+
+fn gzoffset_dispatch(state: Option<&crate::gzguts_h::gz_state>) -> crate::stdlib::off_t {
+    state.map_or(-1, gzoffset)
+}
+
+fn gzoffset_handle(file_key: usize) -> crate::stdlib::off_t {
+    gz_with_owned_state(file_key, |state| gzoffset_dispatch(Some(state))).unwrap_or(-1)
+}
+#[export_name = "gzoffset"]
+
+pub unsafe extern "C" fn gzoffset_ffi(mut file: crate::zlib_h::gzFile) -> crate::stdlib::off_t {
+    gzoffset_handle(file.addr())
+}
+fn gzeof(state: &crate::gzguts_h::gz_state) -> ::core::ffi::c_int {
+    if !gz_has_mode(state, crate::gzguts_h::GZ_READ)
+        && !gz_has_mode(state, crate::gzguts_h::GZ_WRITE)
+    {
+        return 0 as ::core::ffi::c_int;
+    }
+    if state.mode == crate::gzguts_h::GZ_READ {
+        state.past
+    } else {
+        0 as ::core::ffi::c_int
+    }
+}
+
+fn gzeof_dispatch(state: Option<&crate::gzguts_h::gz_state>) -> ::core::ffi::c_int {
+    state.map_or(0, gzeof)
+}
+
+fn gzeof_handle(file_key: usize) -> ::core::ffi::c_int {
+    gz_with_owned_state(file_key, |state| gzeof_dispatch(Some(state))).unwrap_or(0)
+}
+#[export_name = "gzeof"]
+
+pub unsafe extern "C" fn gzeof_ffi(mut file: crate::zlib_h::gzFile) -> ::core::ffi::c_int {
+    gzeof_handle(file.addr())
+}
+// Error querying reads the bound gzip state and optionally writes only the
+// caller's separate error-number output. Keep the state side immutable.
+fn gzerror(
+    state: &crate::gzguts_h::gz_state,
+    errnum: Option<&mut ::core::ffi::c_int>,
+) -> *const ::core::ffi::c_char {
+    if !gz_has_mode(state, crate::gzguts_h::GZ_READ)
+        && !gz_has_mode(state, crate::gzguts_h::GZ_WRITE)
+    {
+        return ::core::ptr::null::<::core::ffi::c_char>();
+    }
+    if let Some(errnum) = errnum {
+        *errnum = state.err;
+    }
+    return if state.err == crate::zlib_h::Z_MEM_ERROR {
+        b"out of memory\0".as_ptr() as *const ::core::ffi::c_char
+    } else if state.msg.is_null() {
+        b"\0".as_ptr() as *const ::core::ffi::c_char
+    } else {
+        state.msg as *const ::core::ffi::c_char
+    };
+}
+
+// `gzFile` values published by this translation are opaque addresses into the
+// owned-state registry. Resolve that address before reading the state, so the
+// public ABI forwarder need not reconstruct a reference from the handle.
+// This mirrors the other gzip query adapters and keeps lookup lifetime-bound
+// to the registry lock for the complete error query.
+fn gzerror_handle(file_key: usize, errnum: Option<&mut ::core::ffi::c_int>) -> usize {
+    gz_with_owned_state(file_key, |state| gzerror(state, errnum).expose_provenance()).unwrap_or(0)
+}
+
+#[export_name = "gzerror"]
+
+pub unsafe extern "C" fn gzerror_ffi(
+    mut file: crate::zlib_h::gzFile,
+    mut errnum: *mut ::core::ffi::c_int,
+) -> *const ::core::ffi::c_char {
+    // SAFETY: the optional caller error-number output is bound at the ABI
+    // boundary. The opaque gzip handle itself is resolved by the registry
+    // coordinator, rather than being dereferenced here.
+    let errnum = unsafe { errnum.as_mut() };
+    ::core::ptr::with_exposed_provenance(gzerror_handle(file.addr(), errnum))
+}
+pub(crate) fn gzclearerr(state: &mut crate::gzguts_h::gz_state) {
+    if !gz_clear_error_state(state) {
+        return;
+    }
+    gz_error(state, crate::zlib_h::Z_OK, None);
+}
+
+fn gzclearerr_dispatch(state: Option<&mut crate::gzguts_h::gz_state>) {
+    if let Some(state) = state {
+        gzclearerr(state);
+    }
+}
+
+fn gzclearerr_handle(file_key: usize) {
+    let _ = gz_with_owned_state(file_key, |state| gzclearerr_dispatch(Some(state)));
+}
+
+// Ordinary read operations clear the owned error record, but unlike the
+// public `gzclearerr()` API they must retain EOF observation.  Reuse the
+// established error-record boundary and restore just the two read markers
+// that public clearing intentionally resets.
+pub(crate) fn gz_clear_read_error(state: &mut crate::gzguts_h::gz_state) {
+    let eof = state.eof;
+    let past = state.past;
+    gzclearerr(state);
+    state.eof = eof;
+    state.past = past;
+}
+
+#[export_name = "gzclearerr"]
+
+pub unsafe extern "C" fn gzclearerr_ffi(mut file: crate::zlib_h::gzFile) {
+    gzclearerr_handle(file.addr())
+}
+
+// Clearing a gzip error only changes already-bound state.  Keep the message
+// ownership work in `gz_error`, which remains the raw allocation boundary.
+fn gz_clear_error_state(state: &mut crate::gzguts_h::gz_state) -> bool {
+    if !gz_has_mode(state, crate::gzguts_h::GZ_READ)
+        && !gz_has_mode(state, crate::gzguts_h::GZ_WRITE)
+    {
+        return false;
+    }
+    if state.mode == crate::gzguts_h::GZ_READ {
+        state.eof = 0 as ::core::ffi::c_int;
+        state.past = 0 as ::core::ffi::c_int;
+    }
+    true
+}
+
+// `gz_error()` owns message allocation and release, but deciding which prior
+// message is released and which stream fields are reset needs only scalar
+// state. Keep those choices out of that raw ownership boundary.
+pub(crate) struct GzErrorPlan {
+    pub discard_message: bool,
+    pub clear_have: bool,
+}
+
+// Gzip handles are opaque outside this implementation, but their C-compatible
+// state still exposes `path` and `msg` pointers. Keep the backing bytes here
+// so internal error handling can retain those pointer values without manual
+// allocation, formatting, or release. Each entry is removed before its state
+// allocation is returned to C's allocator.
+struct GzOwnedStrings {
+    path: Vec<u8>,
+    message: Option<Vec<u8>>,
+}
+
+static GZ_OWNED_STRINGS: ::std::sync::OnceLock<::std::sync::Mutex<Vec<(usize, GzOwnedStrings)>>> =
+    ::std::sync::OnceLock::new();
+
+// The registry holds the allocation behind each opaque `gzFile` handle.  It
+// gives the core constructor an owned state without requiring a raw-pointer
+// bind; close removes the entry only after it has finished using the state.
+struct GzOwnedState(send_wrapper::SendWrapper<Box<crate::gzguts_h::gz_state>>);
+
+// The registry only moves ownership of the opaque allocation. Access to the
+// pointee remains governed by zlib's `gzFile` contract, and the mutex guards
+// only registry insertion/removal, never a gzip operation on the state.
+
+static GZ_OWNED_STATES: ::std::sync::OnceLock<::std::sync::Mutex<Vec<(usize, GzOwnedState)>>> =
+    ::std::sync::OnceLock::new();
+
+// Gzip's input and output arrays have the same opaque lifetime as the state,
+// but are initialized lazily on the first read.  Retaining their Vec backing
+// here makes the allocation explicit and lets read-side operations borrow an
+// owned buffer without reconstructing a slice from `state.out`.
+struct GzOwnedBuffers {
+    input: Vec<::core::ffi::c_uchar>,
+    output: Vec<::core::ffi::c_uchar>,
+}
+
+// Write-side buffers have the same lifetime as a gzip state, but unlike read
+// buffers they are allocated on the first write.  Keep their Vec backing
+// separate from the read registry: a direct write has no output buffer, and
+// write operations must not borrow either allocation while `gz_comp()` can
+// re-enter the deflater.
+struct GzOwnedWriteBuffers {
+    input: Vec<::core::ffi::c_uchar>,
+    output: Option<Vec<::core::ffi::c_uchar>>,
+}
+
+static GZ_OWNED_BUFFERS: ::std::sync::OnceLock<::std::sync::Mutex<Vec<(usize, GzOwnedBuffers)>>> =
+    ::std::sync::OnceLock::new();
+
+static GZ_OWNED_WRITE_BUFFERS: ::std::sync::OnceLock<
+    ::std::sync::Mutex<Vec<(usize, GzOwnedWriteBuffers)>>,
+> = ::std::sync::OnceLock::new();
+
+fn gz_state_key(state: &crate::gzguts_h::gz_state) -> usize {
+    ::core::ptr::from_ref(state).addr()
+}
+
+pub(crate) fn gz_owned_buffer_key(state: &crate::gzguts_h::gz_state) -> usize {
+    gz_state_key(state)
+}
+
+fn gz_owned_strings() -> &'static ::std::sync::Mutex<Vec<(usize, GzOwnedStrings)>> {
+    GZ_OWNED_STRINGS.get_or_init(|| ::std::sync::Mutex::new(Vec::new()))
+}
+
+fn gz_owned_states() -> &'static ::std::sync::Mutex<Vec<(usize, GzOwnedState)>> {
+    GZ_OWNED_STATES.get_or_init(|| ::std::sync::Mutex::new(Vec::new()))
+}
+
+// A gzip handle is an opaque pointer to one of the boxes retained in this
+// registry.  Public operations can identify that allocation by its address
+// without reconstructing a reference from the foreign handle.  Keep the
+// registry lock for the duration of the operation so a concurrent close
+// cannot remove the backing box while it is borrowed.
+pub(crate) fn gz_with_owned_state<R>(
+    state_key: usize,
+    operation: impl FnOnce(&mut crate::gzguts_h::gz_state) -> R,
+) -> Option<R> {
+    if state_key == 0 {
+        return None;
+    }
+    let mut states = gz_owned_states()
+        .lock()
+        .expect("gzip state registry poisoned");
+    let (_, state) = states.iter_mut().find(|(key, _)| *key == state_key)?;
+    Some(operation(state.0.as_mut()))
+}
+
+// Closing consumes the opaque handle's state allocation.  Remove its box
+// from the registry before cleanup so the close coordinators can operate on
+// an ordinary owned value without reconstructing a reference from the
+// foreign handle.  In-flight non-closing operations retain the registry lock
+// for their full borrow, so this can only take the box after they finish.
+pub(crate) fn gz_take_owned_state_with_mode(
+    state_key: usize,
+    mode: ::core::ffi::c_int,
+) -> Option<Box<crate::gzguts_h::gz_state>> {
+    if state_key == 0 {
+        return None;
+    }
+    let mut states = gz_owned_states()
+        .lock()
+        .expect("gzip state registry poisoned");
+    let index = states.iter().position(|(key, _)| *key == state_key)?;
+    if !gz_has_mode(states[index].1 .0.as_ref(), mode) {
+        return None;
+    }
+    Some(states.swap_remove(index).1 .0.take())
+}
+
+pub(crate) fn gz_take_owned_state(state_key: usize) -> Option<Box<crate::gzguts_h::gz_state>> {
+    if state_key == 0 {
+        return None;
+    }
+    let mut states = gz_owned_states()
+        .lock()
+        .expect("gzip state registry poisoned");
+    let index = states.iter().position(|(key, _)| *key == state_key)?;
+    let state = states[index].1 .0.as_ref();
+    let closes_as_read = state.mode == crate::gzguts_h::GZ_READ;
+    if !(if closes_as_read {
+        gz_has_mode(state, crate::gzguts_h::GZ_READ)
+    } else {
+        gz_has_mode(state, crate::gzguts_h::GZ_WRITE)
+    }) {
+        return None;
+    }
+    Some(states.swap_remove(index).1 .0.take())
+}
+
+fn gz_owned_buffers() -> &'static ::std::sync::Mutex<Vec<(usize, GzOwnedBuffers)>> {
+    GZ_OWNED_BUFFERS.get_or_init(|| ::std::sync::Mutex::new(Vec::new()))
+}
+
+fn gz_owned_write_buffers() -> &'static ::std::sync::Mutex<Vec<(usize, GzOwnedWriteBuffers)>> {
+    GZ_OWNED_WRITE_BUFFERS.get_or_init(|| ::std::sync::Mutex::new(Vec::new()))
+}
+
+// Allocate a zero-filled C-compatible buffer without publishing it through
+// the state until the paired input/output setup has succeeded.
+pub(crate) fn gz_owned_buffer(len: usize) -> Option<Vec<::core::ffi::c_uchar>> {
+    let mut buffer = Vec::new();
+    buffer.try_reserve_exact(len).ok()?;
+    buffer.resize(len, 0);
+    Some(buffer)
+}
+
+// Publish both lazy read buffers together. Their Vec allocations never grow
+// after publication, so the C cursor fields retain stable addresses.
+pub(crate) fn gz_register_owned_buffers(
+    state: &mut crate::gzguts_h::gz_state,
+    mut input: Vec<::core::ffi::c_uchar>,
+    mut output: Vec<::core::ffi::c_uchar>,
+) -> bool {
+    let mut buffers = gz_owned_buffers()
+        .lock()
+        .expect("gzip buffer registry poisoned");
+    if buffers.try_reserve(1).is_err() {
+        return false;
+    }
+    state.in_0 = input.as_mut_ptr();
+    state.out = output.as_mut_ptr();
+    buffers.push((gz_state_key(state), GzOwnedBuffers { input, output }));
+    true
+}
+
+// The closure receives the allocation's safe slice, while the caller keeps
+// responsibility for state/cursor transitions. This keeps owned-buffer
+// lookup out of exported ABI adapters.
+pub(crate) fn gz_with_owned_output_buffer<R>(
+    state_key: usize,
+    operation: impl FnOnce(&mut [::core::ffi::c_uchar]) -> R,
+) -> Option<R> {
+    let mut buffers = gz_owned_buffers()
+        .lock()
+        .expect("gzip buffer registry poisoned");
+    let (_, buffers) = buffers.iter_mut().find(|(key, _)| *key == state_key)?;
+    Some(operation(&mut buffers.output))
+}
+
+// Read-side refills use the same owned allocation.  Keeping that borrow in
+// the registry means the gzip state machine need not recreate a mutable slice
+// from its C cursor merely to compact and refill the input buffer.
+pub(crate) fn gz_with_owned_input_buffer<R>(
+    state_key: usize,
+    operation: impl FnOnce(&mut [::core::ffi::c_uchar]) -> R,
+) -> Option<R> {
+    let mut buffers = gz_owned_buffers()
+        .lock()
+        .expect("gzip buffer registry poisoned");
+    let (_, buffers) = buffers.iter_mut().find(|(key, _)| *key == state_key)?;
+    Some(operation(&mut buffers.input))
+}
+
+// Lookahead must inspect the owned input and, for a transparent stream, copy
+// it into the owned output buffer as one operation.  Borrow both fields of
+// the one registry entry together instead of reconstructing either slice from
+// the C-facing pointers.  The closure must not re-enter the buffer registry.
+pub(crate) fn gz_with_owned_read_buffers<R>(
+    state_key: usize,
+    operation: impl FnOnce(&mut [::core::ffi::c_uchar], &mut [::core::ffi::c_uchar]) -> R,
+) -> Option<R> {
+    let mut buffers = gz_owned_buffers()
+        .lock()
+        .expect("gzip buffer registry poisoned");
+    let (_, buffers) = buffers.iter_mut().find(|(key, _)| *key == state_key)?;
+    let GzOwnedBuffers { input, output } = buffers;
+    Some(operation(input, output))
+}
+
+// The close paths call this only after their last input/output use. Dropping
+// the registry entry releases both lazy arrays before the opaque state box.
+pub(crate) fn gz_release_owned_buffers(state: &crate::gzguts_h::gz_state) {
+    let mut buffers = gz_owned_buffers()
+        .lock()
+        .expect("gzip buffer registry poisoned");
+    if let Some(index) = buffers
+        .iter()
+        .position(|(key, _)| *key == gz_state_key(state))
+    {
+        buffers.swap_remove(index);
+    }
+}
+
+// Publish write buffers before the deflater starts using their C cursors.
+// The allocation remains owned by the registry until write close, and callers
+// borrow it only for short copy/fill operations outside deflater calls.
+pub(crate) fn gz_register_owned_write_buffers(
+    state: &mut crate::gzguts_h::gz_state,
+    mut input: Vec<::core::ffi::c_uchar>,
+    mut output: Option<Vec<::core::ffi::c_uchar>>,
+) -> bool {
+    let mut buffers = gz_owned_write_buffers()
+        .lock()
+        .expect("gzip write buffer registry poisoned");
+    if buffers.try_reserve(1).is_err() {
+        return false;
+    }
+    state.in_0 = input.as_mut_ptr();
+    state.out = match output.as_mut() {
+        Some(buffer) => buffer.as_mut_ptr(),
+        None => ::core::ptr::null_mut(),
+    };
+    buffers.push((gz_state_key(state), GzOwnedWriteBuffers { input, output }));
+    true
+}
+
+pub(crate) fn gz_with_owned_write_input_buffer<R>(
+    state_key: usize,
+    operation: impl FnOnce(&mut [::core::ffi::c_uchar]) -> R,
+) -> Option<R> {
+    let mut buffers = gz_owned_write_buffers()
+        .lock()
+        .expect("gzip write buffer registry poisoned");
+    let (_, buffers) = buffers.iter_mut().find(|(key, _)| *key == state_key)?;
+    Some(operation(&mut buffers.input))
+}
+
+pub(crate) fn gz_with_owned_write_output_buffer<R>(
+    state_key: usize,
+    operation: impl FnOnce(&mut [::core::ffi::c_uchar]) -> R,
+) -> Option<R> {
+    let mut buffers = gz_owned_write_buffers()
+        .lock()
+        .expect("gzip write buffer registry poisoned");
+    let (_, buffers) = buffers.iter_mut().find(|(key, _)| *key == state_key)?;
+    Some(operation(buffers.output.as_deref_mut()?))
+}
+
+pub(crate) fn gz_release_owned_write_buffers(state: &crate::gzguts_h::gz_state) {
+    let mut buffers = gz_owned_write_buffers()
+        .lock()
+        .expect("gzip write buffer registry poisoned");
+    if let Some(index) = buffers
+        .iter()
+        .position(|(key, _)| *key == gz_state_key(state))
+    {
+        buffers.swap_remove(index);
+    }
+}
+
+// Close has already completed all state access when it calls this function.
+// Removing the matching box returns the opaque handle's allocation to Rust.
+pub(crate) fn gz_release_owned_state(state: &mut crate::gzguts_h::gz_state) {
+    let state_key = ::core::ptr::from_mut(state).addr();
+    let mut states = gz_owned_states()
+        .lock()
+        .expect("gzip state registry poisoned");
+    if let Some(index) = states.iter().position(|(key, _)| *key == state_key) {
+        states.swap_remove(index);
+    }
+}
+
+fn gz_register_owned_strings(
+    state: &mut crate::gzguts_h::gz_state,
+    path: &::core::ffi::CStr,
+) -> bool {
+    let mut path_copy = Vec::new();
+    let path_bytes = path.to_bytes_with_nul();
+    if path_copy.try_reserve_exact(path_bytes.len()).is_err() {
+        return false;
+    }
+    path_copy.extend_from_slice(path_bytes);
+    let mut strings = gz_owned_strings()
+        .lock()
+        .expect("gzip string registry poisoned");
+    if let Some((_, strings)) = strings
+        .iter_mut()
+        .find(|(key, _)| *key == gz_state_key(state))
+    {
+        *strings = GzOwnedStrings {
+            path: path_copy,
+            message: None,
+        };
+        state.path = strings.path.as_mut_ptr() as *mut ::core::ffi::c_char;
+        return true;
+    }
+    if strings.try_reserve(1).is_err() {
+        return false;
+    }
+    strings.push((
+        gz_state_key(state),
+        GzOwnedStrings {
+            path: path_copy,
+            message: None,
+        },
+    ));
+    state.path = strings
+        .last_mut()
+        .expect("new gzip string entry")
+        .1
+        .path
+        .as_mut_ptr() as *mut ::core::ffi::c_char;
+    true
+}
+
+pub(crate) fn gz_release_owned_strings(state: &crate::gzguts_h::gz_state) {
+    let mut strings = gz_owned_strings()
+        .lock()
+        .expect("gzip string registry poisoned");
+    if let Some(index) = strings
+        .iter()
+        .position(|(key, _)| *key == gz_state_key(state))
+    {
+        strings.swap_remove(index);
+    }
+}
+
+fn gz_discard_owned_message(state: &mut crate::gzguts_h::gz_state) {
+    let mut strings = gz_owned_strings()
+        .lock()
+        .expect("gzip string registry poisoned");
+    if let Some((_, strings)) = strings
+        .iter_mut()
+        .find(|(key, _)| *key == gz_state_key(state))
+    {
+        strings.message = None;
+    }
+    state.msg = ::core::ptr::null_mut::<::core::ffi::c_char>();
+}
+
+fn gz_store_owned_message(state: &mut crate::gzguts_h::gz_state, msg: &[u8]) -> bool {
+    let mut strings = gz_owned_strings()
+        .lock()
+        .expect("gzip string registry poisoned");
+    let Some((_, strings)) = strings
+        .iter_mut()
+        .find(|(key, _)| *key == gz_state_key(state))
+    else {
+        return false;
+    };
+    let Some(path) = strings.path.strip_suffix(&[0]) else {
+        return false;
+    };
+    let Some(message_len) = path
+        .len()
+        .checked_add(2)
+        .and_then(|len| len.checked_add(msg.len()))
+    else {
+        return false;
+    };
+    let mut message = Vec::new();
+    if message.try_reserve_exact(message_len).is_err() {
+        return false;
+    }
+    message.extend_from_slice(path);
+    message.extend_from_slice(b": ");
+    message.extend_from_slice(msg);
+    state.msg = message.as_mut_ptr() as *mut ::core::ffi::c_char;
+    strings.message = Some(message);
+    true
+}
+
+pub(crate) fn gz_error_plan(
+    has_message: bool,
+    again: ::core::ffi::c_int,
+    err: ::core::ffi::c_int,
+) -> GzErrorPlan {
+    GzErrorPlan {
+        discard_message: has_message,
+        clear_have: err != crate::zlib_h::Z_OK && err != crate::zlib_h::Z_BUF_ERROR && again == 0,
+    }
+}
+
+pub(crate) fn gz_error_apply(
+    state: &mut crate::gzguts_h::gz_state,
+    err: ::core::ffi::c_int,
+    plan: &GzErrorPlan,
+) {
+    if plan.discard_message {
+        gz_discard_owned_message(state);
+    }
+    if plan.clear_have {
+        state.x.have = 0;
+    }
+    state.err = err;
+}
+
+pub(crate) fn gz_error_allocation_failed(state: &mut crate::gzguts_h::gz_state) {
+    state.err = crate::zlib_h::Z_MEM_ERROR;
+}
+
+pub(crate) fn gz_error_needs_message_allocation(
+    has_message: bool,
+    err: ::core::ffi::c_int,
+) -> bool {
+    has_message && err != crate::zlib_h::Z_MEM_ERROR
+}
+
+// `std::io::Error` obtains the platform's strerror text without exposing its
+// raw C-string pointer to the gzip state machine. Its display suffix is Rust
+// metadata, not part of zlib's `strerror()` message, so remove it before
+// adding the C-compatible terminator expected by `gz_error()`.
+pub(crate) fn gz_errno_message() -> Vec<u8> {
+    let error = ::std::io::Error::last_os_error();
+    let message = error.to_string();
+    let message = if let Some(errno) = error.raw_os_error() {
+        let mut suffix = String::from(" (os error ");
+        suffix.push_str(&errno.to_string());
+        suffix.push(')');
+        message.strip_suffix(&suffix).unwrap_or(&message)
+    } else {
+        &message
+    };
+    let mut bytes = Vec::with_capacity(message.len().saturating_add(1));
+    bytes.extend_from_slice(message.as_bytes());
+    bytes.push(0);
+    bytes
+}
+
+// This coordinator receives an already-bound state and either no message or
+// a nul-terminated byte slice. Its safe backing storage keeps the C-facing
+// message pointer valid until the next error transition or stream close.
+pub fn gz_error(
+    state: &mut crate::gzguts_h::gz_state,
+    err: ::core::ffi::c_int,
+    msg: Option<&[u8]>,
+) {
+    let plan = gz_error_plan(!state.msg.is_null(), state.again, err);
+    gz_error_apply(state, err, &plan);
+    let Some(msg) = msg else {
+        return;
+    };
+    if !gz_error_needs_message_allocation(true, err) {
+        return;
+    }
+    if !gz_store_owned_message(state, msg) {
+        gz_error_allocation_failed(state);
+    }
+}
+#[export_name = "gz_error"]
+
+pub unsafe extern "C" fn gz_error_ffi(
+    mut state: crate::gzguts_h::gz_statep,
+    mut err: ::core::ffi::c_int,
+    mut msg: *const ::core::ffi::c_char,
+) {
+    let msg = if msg.is_null() {
+        None
+    } else {
+        // SAFETY: this ABI entry retains the original C contract that `msg`
+        // points to a nul-terminated string for the duration of the call.
+        Some(unsafe { ::core::ffi::CStr::from_ptr(msg).to_bytes_with_nul() })
+    };
+    // Gzip states are registry-owned for their complete public lifetime.
+    // Resolve this internal ABI handle by address instead of reopening its
+    // raw pointer, keeping the message binding above as this entry point's
+    // only foreign-memory operation.
+    let _ = gz_with_owned_state(state.addr(), |state| gz_error(state, err, msg));
+}
+
+pub fn gz_skip_chunk(
+    available: ::core::ffi::c_uint,
+    skip: crate::stdlib::off64_t,
+) -> ::core::ffi::c_uint {
+    if (::core::mem::size_of::<::core::ffi::c_int>()
+        == ::core::mem::size_of::<crate::stdlib::off64_t>()
+        && available > gz_intmax())
+        || available as crate::stdlib::off64_t > skip
+    {
+        skip as ::core::ffi::c_uint
+    } else {
+        available
+    }
+}
+
+pub extern "C" fn gz_intmax() -> ::core::ffi::c_uint {
+    return crate::limits_h::INT_MAX as ::core::ffi::c_uint;
+}
+#[export_name = "gz_intmax"]
+
+pub unsafe extern "C" fn gz_intmax_ffi() -> ::core::ffi::c_uint {
+    gz_intmax()
+}

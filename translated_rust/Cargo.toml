@@ -1,0 +1,22 @@
+[package]
+name = "zlib"
+authors = [ "C2Rust",]
+version = "0.0.0"
+publish = false
+edition = "2021"
+autobins = false
+
+[lib]
+name = "zlib"
+path = "lib.rs"
+crate-type = [ "cdylib",]
+
+[dependencies]
+send_wrapper = "0.6"
+
+[workspace]
+members = []
+default-members = [ ".",]
+
+[profile.release]
+strip = "debuginfo"

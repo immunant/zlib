@@ -1,0 +1,4707 @@
+// =============== BEGIN trees_h ================
+#[no_mangle]
+pub static _dist_code: [crate::zutil_h::uch; 512] = [
+    0 as crate::zutil_h::uch,
+    1 as crate::zutil_h::uch,
+    2 as crate::zutil_h::uch,
+    3 as crate::zutil_h::uch,
+    4 as crate::zutil_h::uch,
+    4 as crate::zutil_h::uch,
+    5 as crate::zutil_h::uch,
+    5 as crate::zutil_h::uch,
+    6 as crate::zutil_h::uch,
+    6 as crate::zutil_h::uch,
+    6 as crate::zutil_h::uch,
+    6 as crate::zutil_h::uch,
+    7 as crate::zutil_h::uch,
+    7 as crate::zutil_h::uch,
+    7 as crate::zutil_h::uch,
+    7 as crate::zutil_h::uch,
+    8 as crate::zutil_h::uch,
+    8 as crate::zutil_h::uch,
+    8 as crate::zutil_h::uch,
+    8 as crate::zutil_h::uch,
+    8 as crate::zutil_h::uch,
+    8 as crate::zutil_h::uch,
+    8 as crate::zutil_h::uch,
+    8 as crate::zutil_h::uch,
+    9 as crate::zutil_h::uch,
+    9 as crate::zutil_h::uch,
+    9 as crate::zutil_h::uch,
+    9 as crate::zutil_h::uch,
+    9 as crate::zutil_h::uch,
+    9 as crate::zutil_h::uch,
+    9 as crate::zutil_h::uch,
+    9 as crate::zutil_h::uch,
+    10 as crate::zutil_h::uch,
+    10 as crate::zutil_h::uch,
+    10 as crate::zutil_h::uch,
+    10 as crate::zutil_h::uch,
+    10 as crate::zutil_h::uch,
+    10 as crate::zutil_h::uch,
+    10 as crate::zutil_h::uch,
+    10 as crate::zutil_h::uch,
+    10 as crate::zutil_h::uch,
+    10 as crate::zutil_h::uch,
+    10 as crate::zutil_h::uch,
+    10 as crate::zutil_h::uch,
+    10 as crate::zutil_h::uch,
+    10 as crate::zutil_h::uch,
+    10 as crate::zutil_h::uch,
+    10 as crate::zutil_h::uch,
+    11 as crate::zutil_h::uch,
+    11 as crate::zutil_h::uch,
+    11 as crate::zutil_h::uch,
+    11 as crate::zutil_h::uch,
+    11 as crate::zutil_h::uch,
+    11 as crate::zutil_h::uch,
+    11 as crate::zutil_h::uch,
+    11 as crate::zutil_h::uch,
+    11 as crate::zutil_h::uch,
+    11 as crate::zutil_h::uch,
+    11 as crate::zutil_h::uch,
+    11 as crate::zutil_h::uch,
+    11 as crate::zutil_h::uch,
+    11 as crate::zutil_h::uch,
+    11 as crate::zutil_h::uch,
+    11 as crate::zutil_h::uch,
+    12 as crate::zutil_h::uch,
+    12 as crate::zutil_h::uch,
+    12 as crate::zutil_h::uch,
+    12 as crate::zutil_h::uch,
+    12 as crate::zutil_h::uch,
+    12 as crate::zutil_h::uch,
+    12 as crate::zutil_h::uch,
+    12 as crate::zutil_h::uch,
+    12 as crate::zutil_h::uch,
+    12 as crate::zutil_h::uch,
+    12 as crate::zutil_h::uch,
+    12 as crate::zutil_h::uch,
+    12 as crate::zutil_h::uch,
+    12 as crate::zutil_h::uch,
+    12 as crate::zutil_h::uch,
+    12 as crate::zutil_h::uch,
+    12 as crate::zutil_h::uch,
+    12 as crate::zutil_h::uch,
+    12 as crate::zutil_h::uch,
+    12 as crate::zutil_h::uch,
+    12 as crate::zutil_h::uch,
+    12 as crate::zutil_h::uch,
+    12 as crate::zutil_h::uch,
+    12 as crate::zutil_h::uch,
+    12 as crate::zutil_h::uch,
+    12 as crate::zutil_h::uch,
+    12 as crate::zutil_h::uch,
+    12 as crate::zutil_h::uch,
+    12 as crate::zutil_h::uch,
+    12 as crate::zutil_h::uch,
+    12 as crate::zutil_h::uch,
+    12 as crate::zutil_h::uch,
+    13 as crate::zutil_h::uch,
+    13 as crate::zutil_h::uch,
+    13 as crate::zutil_h::uch,
+    13 as crate::zutil_h::uch,
+    13 as crate::zutil_h::uch,
+    13 as crate::zutil_h::uch,
+    13 as crate::zutil_h::uch,
+    13 as crate::zutil_h::uch,
+    13 as crate::zutil_h::uch,
+    13 as crate::zutil_h::uch,
+    13 as crate::zutil_h::uch,
+    13 as crate::zutil_h::uch,
+    13 as crate::zutil_h::uch,
+    13 as crate::zutil_h::uch,
+    13 as crate::zutil_h::uch,
+    13 as crate::zutil_h::uch,
+    13 as crate::zutil_h::uch,
+    13 as crate::zutil_h::uch,
+    13 as crate::zutil_h::uch,
+    13 as crate::zutil_h::uch,
+    13 as crate::zutil_h::uch,
+    13 as crate::zutil_h::uch,
+    13 as crate::zutil_h::uch,
+    13 as crate::zutil_h::uch,
+    13 as crate::zutil_h::uch,
+    13 as crate::zutil_h::uch,
+    13 as crate::zutil_h::uch,
+    13 as crate::zutil_h::uch,
+    13 as crate::zutil_h::uch,
+    13 as crate::zutil_h::uch,
+    13 as crate::zutil_h::uch,
+    13 as crate::zutil_h::uch,
+    14 as crate::zutil_h::uch,
+    14 as crate::zutil_h::uch,
+    14 as crate::zutil_h::uch,
+    14 as crate::zutil_h::uch,
+    14 as crate::zutil_h::uch,
+    14 as crate::zutil_h::uch,
+    14 as crate::zutil_h::uch,
+    14 as crate::zutil_h::uch,
+    14 as crate::zutil_h::uch,
+    14 as crate::zutil_h::uch,
+    14 as crate::zutil_h::uch,
+    14 as crate::zutil_h::uch,
+    14 as crate::zutil_h::uch,
+    14 as crate::zutil_h::uch,
+    14 as crate::zutil_h::uch,
+    14 as crate::zutil_h::uch,
+    14 as crate::zutil_h::uch,
+    14 as crate::zutil_h::uch,
+    14 as crate::zutil_h::uch,
+    14 as crate::zutil_h::uch,
+    14 as crate::zutil_h::uch,
+    14 as crate::zutil_h::uch,
+    14 as crate::zutil_h::uch,
+    14 as crate::zutil_h::uch,
+    14 as crate::zutil_h::uch,
+    14 as crate::zutil_h::uch,
+    14 as crate::zutil_h::uch,
+    14 as crate::zutil_h::uch,
+    14 as crate::zutil_h::uch,
+    14 as crate::zutil_h::uch,
+    14 as crate::zutil_h::uch,
+    14 as crate::zutil_h::uch,
+    14 as crate::zutil_h::uch,
+    14 as crate::zutil_h::uch,
+    14 as crate::zutil_h::uch,
+    14 as crate::zutil_h::uch,
+    14 as crate::zutil_h::uch,
+    14 as crate::zutil_h::uch,
+    14 as crate::zutil_h::uch,
+    14 as crate::zutil_h::uch,
+    14 as crate::zutil_h::uch,
+    14 as crate::zutil_h::uch,
+    14 as crate::zutil_h::uch,
+    14 as crate::zutil_h::uch,
+    14 as crate::zutil_h::uch,
+    14 as crate::zutil_h::uch,
+    14 as crate::zutil_h::uch,
+    14 as crate::zutil_h::uch,
+    14 as crate::zutil_h::uch,
+    14 as crate::zutil_h::uch,
+    14 as crate::zutil_h::uch,
+    14 as crate::zutil_h::uch,
+    14 as crate::zutil_h::uch,
+    14 as crate::zutil_h::uch,
+    14 as crate::zutil_h::uch,
+    14 as crate::zutil_h::uch,
+    14 as crate::zutil_h::uch,
+    14 as crate::zutil_h::uch,
+    14 as crate::zutil_h::uch,
+    14 as crate::zutil_h::uch,
+    14 as crate::zutil_h::uch,
+    14 as crate::zutil_h::uch,
+    14 as crate::zutil_h::uch,
+    14 as crate::zutil_h::uch,
+    15 as crate::zutil_h::uch,
+    15 as crate::zutil_h::uch,
+    15 as crate::zutil_h::uch,
+    15 as crate::zutil_h::uch,
+    15 as crate::zutil_h::uch,
+    15 as crate::zutil_h::uch,
+    15 as crate::zutil_h::uch,
+    15 as crate::zutil_h::uch,
+    15 as crate::zutil_h::uch,
+    15 as crate::zutil_h::uch,
+    15 as crate::zutil_h::uch,
+    15 as crate::zutil_h::uch,
+    15 as crate::zutil_h::uch,
+    15 as crate::zutil_h::uch,
+    15 as crate::zutil_h::uch,
+    15 as crate::zutil_h::uch,
+    15 as crate::zutil_h::uch,
+    15 as crate::zutil_h::uch,
+    15 as crate::zutil_h::uch,
+    15 as crate::zutil_h::uch,
+    15 as crate::zutil_h::uch,
+    15 as crate::zutil_h::uch,
+    15 as crate::zutil_h::uch,
+    15 as crate::zutil_h::uch,
+    15 as crate::zutil_h::uch,
+    15 as crate::zutil_h::uch,
+    15 as crate::zutil_h::uch,
+    15 as crate::zutil_h::uch,
+    15 as crate::zutil_h::uch,
+    15 as crate::zutil_h::uch,
+    15 as crate::zutil_h::uch,
+    15 as crate::zutil_h::uch,
+    15 as crate::zutil_h::uch,
+    15 as crate::zutil_h::uch,
+    15 as crate::zutil_h::uch,
+    15 as crate::zutil_h::uch,
+    15 as crate::zutil_h::uch,
+    15 as crate::zutil_h::uch,
+    15 as crate::zutil_h::uch,
+    15 as crate::zutil_h::uch,
+    15 as crate::zutil_h::uch,
+    15 as crate::zutil_h::uch,
+    15 as crate::zutil_h::uch,
+    15 as crate::zutil_h::uch,
+    15 as crate::zutil_h::uch,
+    15 as crate::zutil_h::uch,
+    15 as crate::zutil_h::uch,
+    15 as crate::zutil_h::uch,
+    15 as crate::zutil_h::uch,
+    15 as crate::zutil_h::uch,
+    15 as crate::zutil_h::uch,
+    15 as crate::zutil_h::uch,
+    15 as crate::zutil_h::uch,
+    15 as crate::zutil_h::uch,
+    15 as crate::zutil_h::uch,
+    15 as crate::zutil_h::uch,
+    15 as crate::zutil_h::uch,
+    15 as crate::zutil_h::uch,
+    15 as crate::zutil_h::uch,
+    15 as crate::zutil_h::uch,
+    15 as crate::zutil_h::uch,
+    15 as crate::zutil_h::uch,
+    15 as crate::zutil_h::uch,
+    15 as crate::zutil_h::uch,
+    0 as crate::zutil_h::uch,
+    0 as crate::zutil_h::uch,
+    16 as crate::zutil_h::uch,
+    17 as crate::zutil_h::uch,
+    18 as crate::zutil_h::uch,
+    18 as crate::zutil_h::uch,
+    19 as crate::zutil_h::uch,
+    19 as crate::zutil_h::uch,
+    20 as crate::zutil_h::uch,
+    20 as crate::zutil_h::uch,
+    20 as crate::zutil_h::uch,
+    20 as crate::zutil_h::uch,
+    21 as crate::zutil_h::uch,
+    21 as crate::zutil_h::uch,
+    21 as crate::zutil_h::uch,
+    21 as crate::zutil_h::uch,
+    22 as crate::zutil_h::uch,
+    22 as crate::zutil_h::uch,
+    22 as crate::zutil_h::uch,
+    22 as crate::zutil_h::uch,
+    22 as crate::zutil_h::uch,
+    22 as crate::zutil_h::uch,
+    22 as crate::zutil_h::uch,
+    22 as crate::zutil_h::uch,
+    23 as crate::zutil_h::uch,
+    23 as crate::zutil_h::uch,
+    23 as crate::zutil_h::uch,
+    23 as crate::zutil_h::uch,
+    23 as crate::zutil_h::uch,
+    23 as crate::zutil_h::uch,
+    23 as crate::zutil_h::uch,
+    23 as crate::zutil_h::uch,
+    24 as crate::zutil_h::uch,
+    24 as crate::zutil_h::uch,
+    24 as crate::zutil_h::uch,
+    24 as crate::zutil_h::uch,
+    24 as crate::zutil_h::uch,
+    24 as crate::zutil_h::uch,
+    24 as crate::zutil_h::uch,
+    24 as crate::zutil_h::uch,
+    24 as crate::zutil_h::uch,
+    24 as crate::zutil_h::uch,
+    24 as crate::zutil_h::uch,
+    24 as crate::zutil_h::uch,
+    24 as crate::zutil_h::uch,
+    24 as crate::zutil_h::uch,
+    24 as crate::zutil_h::uch,
+    24 as crate::zutil_h::uch,
+    25 as crate::zutil_h::uch,
+    25 as crate::zutil_h::uch,
+    25 as crate::zutil_h::uch,
+    25 as crate::zutil_h::uch,
+    25 as crate::zutil_h::uch,
+    25 as crate::zutil_h::uch,
+    25 as crate::zutil_h::uch,
+    25 as crate::zutil_h::uch,
+    25 as crate::zutil_h::uch,
+    25 as crate::zutil_h::uch,
+    25 as crate::zutil_h::uch,
+    25 as crate::zutil_h::uch,
+    25 as crate::zutil_h::uch,
+    25 as crate::zutil_h::uch,
+    25 as crate::zutil_h::uch,
+    25 as crate::zutil_h::uch,
+    26 as crate::zutil_h::uch,
+    26 as crate::zutil_h::uch,
+    26 as crate::zutil_h::uch,
+    26 as crate::zutil_h::uch,
+    26 as crate::zutil_h::uch,
+    26 as crate::zutil_h::uch,
+    26 as crate::zutil_h::uch,
+    26 as crate::zutil_h::uch,
+    26 as crate::zutil_h::uch,
+    26 as crate::zutil_h::uch,
+    26 as crate::zutil_h::uch,
+    26 as crate::zutil_h::uch,
+    26 as crate::zutil_h::uch,
+    26 as crate::zutil_h::uch,
+    26 as crate::zutil_h::uch,
+    26 as crate::zutil_h::uch,
+    26 as crate::zutil_h::uch,
+    26 as crate::zutil_h::uch,
+    26 as crate::zutil_h::uch,
+    26 as crate::zutil_h::uch,
+    26 as crate::zutil_h::uch,
+    26 as crate::zutil_h::uch,
+    26 as crate::zutil_h::uch,
+    26 as crate::zutil_h::uch,
+    26 as crate::zutil_h::uch,
+    26 as crate::zutil_h::uch,
+    26 as crate::zutil_h::uch,
+    26 as crate::zutil_h::uch,
+    26 as crate::zutil_h::uch,
+    26 as crate::zutil_h::uch,
+    26 as crate::zutil_h::uch,
+    26 as crate::zutil_h::uch,
+    27 as crate::zutil_h::uch,
+    27 as crate::zutil_h::uch,
+    27 as crate::zutil_h::uch,
+    27 as crate::zutil_h::uch,
+    27 as crate::zutil_h::uch,
+    27 as crate::zutil_h::uch,
+    27 as crate::zutil_h::uch,
+    27 as crate::zutil_h::uch,
+    27 as crate::zutil_h::uch,
+    27 as crate::zutil_h::uch,
+    27 as crate::zutil_h::uch,
+    27 as crate::zutil_h::uch,
+    27 as crate::zutil_h::uch,
+    27 as crate::zutil_h::uch,
+    27 as crate::zutil_h::uch,
+    27 as crate::zutil_h::uch,
+    27 as crate::zutil_h::uch,
+    27 as crate::zutil_h::uch,
+    27 as crate::zutil_h::uch,
+    27 as crate::zutil_h::uch,
+    27 as crate::zutil_h::uch,
+    27 as crate::zutil_h::uch,
+    27 as crate::zutil_h::uch,
+    27 as crate::zutil_h::uch,
+    27 as crate::zutil_h::uch,
+    27 as crate::zutil_h::uch,
+    27 as crate::zutil_h::uch,
+    27 as crate::zutil_h::uch,
+    27 as crate::zutil_h::uch,
+    27 as crate::zutil_h::uch,
+    27 as crate::zutil_h::uch,
+    27 as crate::zutil_h::uch,
+    28 as crate::zutil_h::uch,
+    28 as crate::zutil_h::uch,
+    28 as crate::zutil_h::uch,
+    28 as crate::zutil_h::uch,
+    28 as crate::zutil_h::uch,
+    28 as crate::zutil_h::uch,
+    28 as crate::zutil_h::uch,
+    28 as crate::zutil_h::uch,
+    28 as crate::zutil_h::uch,
+    28 as crate::zutil_h::uch,
+    28 as crate::zutil_h::uch,
+    28 as crate::zutil_h::uch,
+    28 as crate::zutil_h::uch,
+    28 as crate::zutil_h::uch,
+    28 as crate::zutil_h::uch,
+    28 as crate::zutil_h::uch,
+    28 as crate::zutil_h::uch,
+    28 as crate::zutil_h::uch,
+    28 as crate::zutil_h::uch,
+    28 as crate::zutil_h::uch,
+    28 as crate::zutil_h::uch,
+    28 as crate::zutil_h::uch,
+    28 as crate::zutil_h::uch,
+    28 as crate::zutil_h::uch,
+    28 as crate::zutil_h::uch,
+    28 as crate::zutil_h::uch,
+    28 as crate::zutil_h::uch,
+    28 as crate::zutil_h::uch,
+    28 as crate::zutil_h::uch,
+    28 as crate::zutil_h::uch,
+    28 as crate::zutil_h::uch,
+    28 as crate::zutil_h::uch,
+    28 as crate::zutil_h::uch,
+    28 as crate::zutil_h::uch,
+    28 as crate::zutil_h::uch,
+    28 as crate::zutil_h::uch,
+    28 as crate::zutil_h::uch,
+    28 as crate::zutil_h::uch,
+    28 as crate::zutil_h::uch,
+    28 as crate::zutil_h::uch,
+    28 as crate::zutil_h::uch,
+    28 as crate::zutil_h::uch,
+    28 as crate::zutil_h::uch,
+    28 as crate::zutil_h::uch,
+    28 as crate::zutil_h::uch,
+    28 as crate::zutil_h::uch,
+    28 as crate::zutil_h::uch,
+    28 as crate::zutil_h::uch,
+    28 as crate::zutil_h::uch,
+    28 as crate::zutil_h::uch,
+    28 as crate::zutil_h::uch,
+    28 as crate::zutil_h::uch,
+    28 as crate::zutil_h::uch,
+    28 as crate::zutil_h::uch,
+    28 as crate::zutil_h::uch,
+    28 as crate::zutil_h::uch,
+    28 as crate::zutil_h::uch,
+    28 as crate::zutil_h::uch,
+    28 as crate::zutil_h::uch,
+    28 as crate::zutil_h::uch,
+    28 as crate::zutil_h::uch,
+    28 as crate::zutil_h::uch,
+    28 as crate::zutil_h::uch,
+    28 as crate::zutil_h::uch,
+    29 as crate::zutil_h::uch,
+    29 as crate::zutil_h::uch,
+    29 as crate::zutil_h::uch,
+    29 as crate::zutil_h::uch,
+    29 as crate::zutil_h::uch,
+    29 as crate::zutil_h::uch,
+    29 as crate::zutil_h::uch,
+    29 as crate::zutil_h::uch,
+    29 as crate::zutil_h::uch,
+    29 as crate::zutil_h::uch,
+    29 as crate::zutil_h::uch,
+    29 as crate::zutil_h::uch,
+    29 as crate::zutil_h::uch,
+    29 as crate::zutil_h::uch,
+    29 as crate::zutil_h::uch,
+    29 as crate::zutil_h::uch,
+    29 as crate::zutil_h::uch,
+    29 as crate::zutil_h::uch,
+    29 as crate::zutil_h::uch,
+    29 as crate::zutil_h::uch,
+    29 as crate::zutil_h::uch,
+    29 as crate::zutil_h::uch,
+    29 as crate::zutil_h::uch,
+    29 as crate::zutil_h::uch,
+    29 as crate::zutil_h::uch,
+    29 as crate::zutil_h::uch,
+    29 as crate::zutil_h::uch,
+    29 as crate::zutil_h::uch,
+    29 as crate::zutil_h::uch,
+    29 as crate::zutil_h::uch,
+    29 as crate::zutil_h::uch,
+    29 as crate::zutil_h::uch,
+    29 as crate::zutil_h::uch,
+    29 as crate::zutil_h::uch,
+    29 as crate::zutil_h::uch,
+    29 as crate::zutil_h::uch,
+    29 as crate::zutil_h::uch,
+    29 as crate::zutil_h::uch,
+    29 as crate::zutil_h::uch,
+    29 as crate::zutil_h::uch,
+    29 as crate::zutil_h::uch,
+    29 as crate::zutil_h::uch,
+    29 as crate::zutil_h::uch,
+    29 as crate::zutil_h::uch,
+    29 as crate::zutil_h::uch,
+    29 as crate::zutil_h::uch,
+    29 as crate::zutil_h::uch,
+    29 as crate::zutil_h::uch,
+    29 as crate::zutil_h::uch,
+    29 as crate::zutil_h::uch,
+    29 as crate::zutil_h::uch,
+    29 as crate::zutil_h::uch,
+    29 as crate::zutil_h::uch,
+    29 as crate::zutil_h::uch,
+    29 as crate::zutil_h::uch,
+    29 as crate::zutil_h::uch,
+    29 as crate::zutil_h::uch,
+    29 as crate::zutil_h::uch,
+    29 as crate::zutil_h::uch,
+    29 as crate::zutil_h::uch,
+    29 as crate::zutil_h::uch,
+    29 as crate::zutil_h::uch,
+    29 as crate::zutil_h::uch,
+    29 as crate::zutil_h::uch,
+];
+#[no_mangle]
+
+pub static _length_code: [crate::zutil_h::uch; 256] = [
+    0 as crate::zutil_h::uch,
+    1 as crate::zutil_h::uch,
+    2 as crate::zutil_h::uch,
+    3 as crate::zutil_h::uch,
+    4 as crate::zutil_h::uch,
+    5 as crate::zutil_h::uch,
+    6 as crate::zutil_h::uch,
+    7 as crate::zutil_h::uch,
+    8 as crate::zutil_h::uch,
+    8 as crate::zutil_h::uch,
+    9 as crate::zutil_h::uch,
+    9 as crate::zutil_h::uch,
+    10 as crate::zutil_h::uch,
+    10 as crate::zutil_h::uch,
+    11 as crate::zutil_h::uch,
+    11 as crate::zutil_h::uch,
+    12 as crate::zutil_h::uch,
+    12 as crate::zutil_h::uch,
+    12 as crate::zutil_h::uch,
+    12 as crate::zutil_h::uch,
+    13 as crate::zutil_h::uch,
+    13 as crate::zutil_h::uch,
+    13 as crate::zutil_h::uch,
+    13 as crate::zutil_h::uch,
+    14 as crate::zutil_h::uch,
+    14 as crate::zutil_h::uch,
+    14 as crate::zutil_h::uch,
+    14 as crate::zutil_h::uch,
+    15 as crate::zutil_h::uch,
+    15 as crate::zutil_h::uch,
+    15 as crate::zutil_h::uch,
+    15 as crate::zutil_h::uch,
+    16 as crate::zutil_h::uch,
+    16 as crate::zutil_h::uch,
+    16 as crate::zutil_h::uch,
+    16 as crate::zutil_h::uch,
+    16 as crate::zutil_h::uch,
+    16 as crate::zutil_h::uch,
+    16 as crate::zutil_h::uch,
+    16 as crate::zutil_h::uch,
+    17 as crate::zutil_h::uch,
+    17 as crate::zutil_h::uch,
+    17 as crate::zutil_h::uch,
+    17 as crate::zutil_h::uch,
+    17 as crate::zutil_h::uch,
+    17 as crate::zutil_h::uch,
+    17 as crate::zutil_h::uch,
+    17 as crate::zutil_h::uch,
+    18 as crate::zutil_h::uch,
+    18 as crate::zutil_h::uch,
+    18 as crate::zutil_h::uch,
+    18 as crate::zutil_h::uch,
+    18 as crate::zutil_h::uch,
+    18 as crate::zutil_h::uch,
+    18 as crate::zutil_h::uch,
+    18 as crate::zutil_h::uch,
+    19 as crate::zutil_h::uch,
+    19 as crate::zutil_h::uch,
+    19 as crate::zutil_h::uch,
+    19 as crate::zutil_h::uch,
+    19 as crate::zutil_h::uch,
+    19 as crate::zutil_h::uch,
+    19 as crate::zutil_h::uch,
+    19 as crate::zutil_h::uch,
+    20 as crate::zutil_h::uch,
+    20 as crate::zutil_h::uch,
+    20 as crate::zutil_h::uch,
+    20 as crate::zutil_h::uch,
+    20 as crate::zutil_h::uch,
+    20 as crate::zutil_h::uch,
+    20 as crate::zutil_h::uch,
+    20 as crate::zutil_h::uch,
+    20 as crate::zutil_h::uch,
+    20 as crate::zutil_h::uch,
+    20 as crate::zutil_h::uch,
+    20 as crate::zutil_h::uch,
+    20 as crate::zutil_h::uch,
+    20 as crate::zutil_h::uch,
+    20 as crate::zutil_h::uch,
+    20 as crate::zutil_h::uch,
+    21 as crate::zutil_h::uch,
+    21 as crate::zutil_h::uch,
+    21 as crate::zutil_h::uch,
+    21 as crate::zutil_h::uch,
+    21 as crate::zutil_h::uch,
+    21 as crate::zutil_h::uch,
+    21 as crate::zutil_h::uch,
+    21 as crate::zutil_h::uch,
+    21 as crate::zutil_h::uch,
+    21 as crate::zutil_h::uch,
+    21 as crate::zutil_h::uch,
+    21 as crate::zutil_h::uch,
+    21 as crate::zutil_h::uch,
+    21 as crate::zutil_h::uch,
+    21 as crate::zutil_h::uch,
+    21 as crate::zutil_h::uch,
+    22 as crate::zutil_h::uch,
+    22 as crate::zutil_h::uch,
+    22 as crate::zutil_h::uch,
+    22 as crate::zutil_h::uch,
+    22 as crate::zutil_h::uch,
+    22 as crate::zutil_h::uch,
+    22 as crate::zutil_h::uch,
+    22 as crate::zutil_h::uch,
+    22 as crate::zutil_h::uch,
+    22 as crate::zutil_h::uch,
+    22 as crate::zutil_h::uch,
+    22 as crate::zutil_h::uch,
+    22 as crate::zutil_h::uch,
+    22 as crate::zutil_h::uch,
+    22 as crate::zutil_h::uch,
+    22 as crate::zutil_h::uch,
+    23 as crate::zutil_h::uch,
+    23 as crate::zutil_h::uch,
+    23 as crate::zutil_h::uch,
+    23 as crate::zutil_h::uch,
+    23 as crate::zutil_h::uch,
+    23 as crate::zutil_h::uch,
+    23 as crate::zutil_h::uch,
+    23 as crate::zutil_h::uch,
+    23 as crate::zutil_h::uch,
+    23 as crate::zutil_h::uch,
+    23 as crate::zutil_h::uch,
+    23 as crate::zutil_h::uch,
+    23 as crate::zutil_h::uch,
+    23 as crate::zutil_h::uch,
+    23 as crate::zutil_h::uch,
+    23 as crate::zutil_h::uch,
+    24 as crate::zutil_h::uch,
+    24 as crate::zutil_h::uch,
+    24 as crate::zutil_h::uch,
+    24 as crate::zutil_h::uch,
+    24 as crate::zutil_h::uch,
+    24 as crate::zutil_h::uch,
+    24 as crate::zutil_h::uch,
+    24 as crate::zutil_h::uch,
+    24 as crate::zutil_h::uch,
+    24 as crate::zutil_h::uch,
+    24 as crate::zutil_h::uch,
+    24 as crate::zutil_h::uch,
+    24 as crate::zutil_h::uch,
+    24 as crate::zutil_h::uch,
+    24 as crate::zutil_h::uch,
+    24 as crate::zutil_h::uch,
+    24 as crate::zutil_h::uch,
+    24 as crate::zutil_h::uch,
+    24 as crate::zutil_h::uch,
+    24 as crate::zutil_h::uch,
+    24 as crate::zutil_h::uch,
+    24 as crate::zutil_h::uch,
+    24 as crate::zutil_h::uch,
+    24 as crate::zutil_h::uch,
+    24 as crate::zutil_h::uch,
+    24 as crate::zutil_h::uch,
+    24 as crate::zutil_h::uch,
+    24 as crate::zutil_h::uch,
+    24 as crate::zutil_h::uch,
+    24 as crate::zutil_h::uch,
+    24 as crate::zutil_h::uch,
+    24 as crate::zutil_h::uch,
+    25 as crate::zutil_h::uch,
+    25 as crate::zutil_h::uch,
+    25 as crate::zutil_h::uch,
+    25 as crate::zutil_h::uch,
+    25 as crate::zutil_h::uch,
+    25 as crate::zutil_h::uch,
+    25 as crate::zutil_h::uch,
+    25 as crate::zutil_h::uch,
+    25 as crate::zutil_h::uch,
+    25 as crate::zutil_h::uch,
+    25 as crate::zutil_h::uch,
+    25 as crate::zutil_h::uch,
+    25 as crate::zutil_h::uch,
+    25 as crate::zutil_h::uch,
+    25 as crate::zutil_h::uch,
+    25 as crate::zutil_h::uch,
+    25 as crate::zutil_h::uch,
+    25 as crate::zutil_h::uch,
+    25 as crate::zutil_h::uch,
+    25 as crate::zutil_h::uch,
+    25 as crate::zutil_h::uch,
+    25 as crate::zutil_h::uch,
+    25 as crate::zutil_h::uch,
+    25 as crate::zutil_h::uch,
+    25 as crate::zutil_h::uch,
+    25 as crate::zutil_h::uch,
+    25 as crate::zutil_h::uch,
+    25 as crate::zutil_h::uch,
+    25 as crate::zutil_h::uch,
+    25 as crate::zutil_h::uch,
+    25 as crate::zutil_h::uch,
+    25 as crate::zutil_h::uch,
+    26 as crate::zutil_h::uch,
+    26 as crate::zutil_h::uch,
+    26 as crate::zutil_h::uch,
+    26 as crate::zutil_h::uch,
+    26 as crate::zutil_h::uch,
+    26 as crate::zutil_h::uch,
+    26 as crate::zutil_h::uch,
+    26 as crate::zutil_h::uch,
+    26 as crate::zutil_h::uch,
+    26 as crate::zutil_h::uch,
+    26 as crate::zutil_h::uch,
+    26 as crate::zutil_h::uch,
+    26 as crate::zutil_h::uch,
+    26 as crate::zutil_h::uch,
+    26 as crate::zutil_h::uch,
+    26 as crate::zutil_h::uch,
+    26 as crate::zutil_h::uch,
+    26 as crate::zutil_h::uch,
+    26 as crate::zutil_h::uch,
+    26 as crate::zutil_h::uch,
+    26 as crate::zutil_h::uch,
+    26 as crate::zutil_h::uch,
+    26 as crate::zutil_h::uch,
+    26 as crate::zutil_h::uch,
+    26 as crate::zutil_h::uch,
+    26 as crate::zutil_h::uch,
+    26 as crate::zutil_h::uch,
+    26 as crate::zutil_h::uch,
+    26 as crate::zutil_h::uch,
+    26 as crate::zutil_h::uch,
+    26 as crate::zutil_h::uch,
+    26 as crate::zutil_h::uch,
+    27 as crate::zutil_h::uch,
+    27 as crate::zutil_h::uch,
+    27 as crate::zutil_h::uch,
+    27 as crate::zutil_h::uch,
+    27 as crate::zutil_h::uch,
+    27 as crate::zutil_h::uch,
+    27 as crate::zutil_h::uch,
+    27 as crate::zutil_h::uch,
+    27 as crate::zutil_h::uch,
+    27 as crate::zutil_h::uch,
+    27 as crate::zutil_h::uch,
+    27 as crate::zutil_h::uch,
+    27 as crate::zutil_h::uch,
+    27 as crate::zutil_h::uch,
+    27 as crate::zutil_h::uch,
+    27 as crate::zutil_h::uch,
+    27 as crate::zutil_h::uch,
+    27 as crate::zutil_h::uch,
+    27 as crate::zutil_h::uch,
+    27 as crate::zutil_h::uch,
+    27 as crate::zutil_h::uch,
+    27 as crate::zutil_h::uch,
+    27 as crate::zutil_h::uch,
+    27 as crate::zutil_h::uch,
+    27 as crate::zutil_h::uch,
+    27 as crate::zutil_h::uch,
+    27 as crate::zutil_h::uch,
+    27 as crate::zutil_h::uch,
+    27 as crate::zutil_h::uch,
+    27 as crate::zutil_h::uch,
+    27 as crate::zutil_h::uch,
+    28 as crate::zutil_h::uch,
+];
+
+pub mod trees_h {
+
+    pub static static_ltree: [crate::src::deflate::ct_data; 288] = [
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 12 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 8 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 140 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 8 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 76 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 8 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 204 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 8 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 44 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 8 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 172 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 8 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 108 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 8 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 236 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 8 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 28 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 8 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 156 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 8 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 92 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 8 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 220 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 8 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 60 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 8 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 188 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 8 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 124 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 8 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 252 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 8 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 2 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 8 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 130 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 8 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 66 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 8 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 194 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 8 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 34 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 8 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 162 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 8 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 98 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 8 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 226 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 8 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 18 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 8 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 146 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 8 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 82 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 8 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 210 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 8 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 50 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 8 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 178 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 8 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 114 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 8 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 242 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 8 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 10 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 8 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 138 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 8 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 74 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 8 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 202 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 8 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 42 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 8 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 170 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 8 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 106 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 8 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 234 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 8 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 26 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 8 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 154 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 8 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 90 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 8 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 218 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 8 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 58 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 8 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 186 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 8 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 122 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 8 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 250 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 8 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 6 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 8 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 134 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 8 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 70 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 8 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 198 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 8 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 38 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 8 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 166 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 8 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 102 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 8 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 230 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 8 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 22 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 8 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 150 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 8 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 86 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 8 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 214 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 8 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 54 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 8 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 182 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 8 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 118 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 8 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 246 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 8 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 14 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 8 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 142 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 8 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 78 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 8 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 206 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 8 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 46 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 8 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 174 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 8 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 110 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 8 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 238 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 8 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 30 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 8 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 158 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 8 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 94 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 8 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 222 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 8 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 62 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 8 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 190 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 8 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 126 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 8 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 254 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 8 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 1 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 8 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 129 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 8 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 65 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 8 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 193 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 8 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 33 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 8 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 161 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 8 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 97 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 8 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 225 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 8 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 17 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 8 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 145 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 8 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 81 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 8 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 209 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 8 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 49 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 8 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 177 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 8 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 113 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 8 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 241 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 8 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 9 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 8 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 137 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 8 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 73 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 8 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 201 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 8 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 41 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 8 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 169 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 8 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 105 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 8 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 233 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 8 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 25 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 8 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 153 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 8 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 89 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 8 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 217 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 8 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 57 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 8 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 185 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 8 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 121 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 8 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 249 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 8 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 5 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 8 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 133 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 8 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 69 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 8 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 197 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 8 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 37 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 8 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 165 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 8 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 101 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 8 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 229 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 8 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 21 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 8 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 149 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 8 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 85 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 8 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 213 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 8 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 53 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 8 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 181 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 8 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 117 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 8 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 245 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 8 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 13 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 8 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 141 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 8 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 77 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 8 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 205 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 8 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 45 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 8 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 173 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 8 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 109 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 8 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 237 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 8 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 29 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 8 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 157 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 8 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 93 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 8 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 221 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 8 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 61 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 8 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 189 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 8 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 125 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 8 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 253 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 8 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 19 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 9 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 275 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 9 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 147 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 9 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 403 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 9 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 83 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 9 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 339 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 9 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 211 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 9 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 467 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 9 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 51 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 9 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 307 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 9 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 179 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 9 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 435 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 9 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 115 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 9 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 371 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 9 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 243 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 9 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 499 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 9 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 11 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 9 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 267 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 9 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 139 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 9 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 395 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 9 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 75 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 9 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 331 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 9 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 203 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 9 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 459 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 9 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 43 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 9 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 299 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 9 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 171 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 9 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 427 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 9 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 107 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 9 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 363 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 9 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 235 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 9 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 491 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 9 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 27 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 9 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 283 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 9 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 155 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 9 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 411 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 9 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 91 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 9 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 347 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 9 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 219 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 9 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 475 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 9 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 59 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 9 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 315 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 9 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 187 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 9 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 443 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 9 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 123 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 9 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 379 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 9 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 251 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 9 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 507 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 9 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 7 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 9 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 263 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 9 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 135 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 9 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 391 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 9 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 71 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 9 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 327 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 9 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 199 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 9 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 455 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 9 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 39 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 9 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 295 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 9 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 167 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 9 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 423 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 9 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 103 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 9 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 359 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 9 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 231 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 9 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 487 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 9 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 23 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 9 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 279 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 9 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 151 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 9 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 407 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 9 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 87 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 9 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 343 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 9 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 215 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 9 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 471 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 9 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 55 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 9 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 311 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 9 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 183 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 9 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 439 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 9 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 119 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 9 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 375 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 9 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 247 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 9 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 503 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 9 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 15 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 9 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 271 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 9 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 143 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 9 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 399 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 9 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 79 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 9 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 335 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 9 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 207 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 9 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 463 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 9 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 47 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 9 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 303 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 9 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 175 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 9 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 431 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 9 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 111 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 9 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 367 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 9 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 239 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 9 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 495 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 9 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 31 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 9 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 287 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 9 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 159 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 9 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 415 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 9 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 95 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 9 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 351 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 9 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 223 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 9 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 479 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 9 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 63 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 9 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 319 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 9 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 191 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 9 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 447 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 9 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 127 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 9 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 383 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 9 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 255 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 9 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 511 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 9 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 0 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 7 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 64 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 7 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 32 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 7 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 96 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 7 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 16 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 7 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 80 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 7 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 48 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 7 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 112 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 7 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 8 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 7 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 72 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 7 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 40 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 7 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 104 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 7 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 24 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 7 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 88 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 7 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 56 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 7 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 120 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 7 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 4 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 7 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 68 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 7 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 36 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 7 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 100 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 7 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 20 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 7 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 84 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 7 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 52 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 7 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 116 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 7 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 3 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 8 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 131 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 8 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 67 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 8 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 195 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 8 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 35 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 8 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 163 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 8 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 99 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 8 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 227 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 8 as crate::zutil_h::ush,
+            },
+        },
+    ];
+
+    pub static static_dtree: [crate::src::deflate::ct_data; 30] = [
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 0 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 5 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 16 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 5 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 8 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 5 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 24 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 5 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 4 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 5 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 20 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 5 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 12 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 5 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 28 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 5 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 2 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 5 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 18 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 5 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 10 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 5 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 26 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 5 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 6 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 5 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 22 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 5 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 14 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 5 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 30 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 5 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 1 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 5 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 17 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 5 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 9 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 5 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 25 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 5 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 5 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 5 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 21 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 5 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 13 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 5 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 29 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 5 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 3 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 5 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 19 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 5 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 11 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 5 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 27 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 5 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 7 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 5 as crate::zutil_h::ush,
+            },
+        },
+        crate::src::deflate::ct_data_s {
+            fc: crate::src::deflate::C2Rust_Unnamed_1 {
+                freq: 23 as crate::zutil_h::ush,
+            },
+            dl: crate::src::deflate::C2Rust_Unnamed_0 {
+                dad: 5 as crate::zutil_h::ush,
+            },
+        },
+    ];
+
+    pub static base_length: [::core::ffi::c_int; 29] = [
+        0 as ::core::ffi::c_int,
+        1 as ::core::ffi::c_int,
+        2 as ::core::ffi::c_int,
+        3 as ::core::ffi::c_int,
+        4 as ::core::ffi::c_int,
+        5 as ::core::ffi::c_int,
+        6 as ::core::ffi::c_int,
+        7 as ::core::ffi::c_int,
+        8 as ::core::ffi::c_int,
+        10 as ::core::ffi::c_int,
+        12 as ::core::ffi::c_int,
+        14 as ::core::ffi::c_int,
+        16 as ::core::ffi::c_int,
+        20 as ::core::ffi::c_int,
+        24 as ::core::ffi::c_int,
+        28 as ::core::ffi::c_int,
+        32 as ::core::ffi::c_int,
+        40 as ::core::ffi::c_int,
+        48 as ::core::ffi::c_int,
+        56 as ::core::ffi::c_int,
+        64 as ::core::ffi::c_int,
+        80 as ::core::ffi::c_int,
+        96 as ::core::ffi::c_int,
+        112 as ::core::ffi::c_int,
+        128 as ::core::ffi::c_int,
+        160 as ::core::ffi::c_int,
+        192 as ::core::ffi::c_int,
+        224 as ::core::ffi::c_int,
+        0 as ::core::ffi::c_int,
+    ];
+
+    pub static base_dist: [::core::ffi::c_int; 30] = [
+        0 as ::core::ffi::c_int,
+        1 as ::core::ffi::c_int,
+        2 as ::core::ffi::c_int,
+        3 as ::core::ffi::c_int,
+        4 as ::core::ffi::c_int,
+        6 as ::core::ffi::c_int,
+        8 as ::core::ffi::c_int,
+        12 as ::core::ffi::c_int,
+        16 as ::core::ffi::c_int,
+        24 as ::core::ffi::c_int,
+        32 as ::core::ffi::c_int,
+        48 as ::core::ffi::c_int,
+        64 as ::core::ffi::c_int,
+        96 as ::core::ffi::c_int,
+        128 as ::core::ffi::c_int,
+        192 as ::core::ffi::c_int,
+        256 as ::core::ffi::c_int,
+        384 as ::core::ffi::c_int,
+        512 as ::core::ffi::c_int,
+        768 as ::core::ffi::c_int,
+        1024 as ::core::ffi::c_int,
+        1536 as ::core::ffi::c_int,
+        2048 as ::core::ffi::c_int,
+        3072 as ::core::ffi::c_int,
+        4096 as ::core::ffi::c_int,
+        6144 as ::core::ffi::c_int,
+        8192 as ::core::ffi::c_int,
+        12288 as ::core::ffi::c_int,
+        16384 as ::core::ffi::c_int,
+        24576 as ::core::ffi::c_int,
+    ];
+}
+pub use crate::__stddef_size_t_h::size_t;
+pub use crate::src::deflate::ct_data;
+pub use crate::src::deflate::ct_data_s;
+pub use crate::src::deflate::deflate_state;
+pub use crate::src::deflate::internal_state;
+pub use crate::src::deflate::static_tree_desc;
+pub use crate::src::deflate::tree_desc;
+pub use crate::src::deflate::tree_desc_s;
+pub use crate::src::deflate::Buf_size;
+pub use crate::src::deflate::C2Rust_Unnamed_0;
+pub use crate::src::deflate::C2Rust_Unnamed_1;
+pub use crate::src::deflate::IPos;
+pub use crate::src::deflate::Pos;
+pub use crate::src::deflate::Posf;
+pub use crate::src::deflate::BL_CODES;
+pub use crate::src::deflate::D_CODES;
+pub use crate::src::deflate::HEAP_SIZE;
+pub use crate::src::deflate::LENGTH_CODES;
+pub use crate::src::deflate::LITERALS;
+pub use crate::src::deflate::L_CODES;
+pub use crate::src::deflate::MAX_BITS;
+
+pub use crate::src::trees::trees_h::base_dist;
+pub use crate::src::trees::trees_h::base_length;
+pub use crate::src::trees::trees_h::static_dtree;
+pub use crate::src::trees::trees_h::static_ltree;
+pub use crate::stdlib::charf;
+pub use crate::stdlib::intf;
+pub use crate::stdlib::uInt;
+pub use crate::stdlib::uLong;
+pub use crate::stdlib::voidpf;
+pub use crate::stdlib::Byte;
+pub use crate::stdlib::Bytef;
+pub use crate::zlib_h::alloc_func;
+pub use crate::zlib_h::free_func;
+pub use crate::zlib_h::gz_header;
+pub use crate::zlib_h::gz_header_s;
+pub use crate::zlib_h::gz_headerp;
+pub use crate::zlib_h::z_stream;
+pub use crate::zlib_h::z_stream_s;
+pub use crate::zlib_h::z_streamp;
+pub use crate::zlib_h::Z_BINARY;
+pub use crate::zlib_h::Z_FIXED;
+pub use crate::zlib_h::Z_TEXT;
+pub use crate::zlib_h::Z_UNKNOWN;
+pub use crate::zutil_h::uch;
+pub use crate::zutil_h::uchf;
+pub use crate::zutil_h::ulg;
+pub use crate::zutil_h::ush;
+pub use crate::zutil_h::ushf;
+#[derive(Copy, Clone)]
+#[repr(C)]
+
+pub struct static_tree_desc_s {
+    pub static_tree: Option<&'static [crate::src::deflate::ct_data]>,
+    pub extra_bits: &'static [crate::stdlib::intf],
+    pub extra_base: ::core::ffi::c_int,
+    pub elems: ::core::ffi::c_int,
+    pub max_length: ::core::ffi::c_int,
+}
+
+pub const MAX_BL_BITS: ::core::ffi::c_int = 7 as ::core::ffi::c_int;
+
+pub const END_BLOCK: ::core::ffi::c_int = 256 as ::core::ffi::c_int;
+
+pub const REP_3_6: ::core::ffi::c_int = 16 as ::core::ffi::c_int;
+
+pub const REPZ_3_10: ::core::ffi::c_int = 17 as ::core::ffi::c_int;
+
+pub const REPZ_11_138: ::core::ffi::c_int = 18 as ::core::ffi::c_int;
+
+static extra_lbits: [::core::ffi::c_int; 29] = [
+    0 as ::core::ffi::c_int,
+    0 as ::core::ffi::c_int,
+    0 as ::core::ffi::c_int,
+    0 as ::core::ffi::c_int,
+    0 as ::core::ffi::c_int,
+    0 as ::core::ffi::c_int,
+    0 as ::core::ffi::c_int,
+    0 as ::core::ffi::c_int,
+    1 as ::core::ffi::c_int,
+    1 as ::core::ffi::c_int,
+    1 as ::core::ffi::c_int,
+    1 as ::core::ffi::c_int,
+    2 as ::core::ffi::c_int,
+    2 as ::core::ffi::c_int,
+    2 as ::core::ffi::c_int,
+    2 as ::core::ffi::c_int,
+    3 as ::core::ffi::c_int,
+    3 as ::core::ffi::c_int,
+    3 as ::core::ffi::c_int,
+    3 as ::core::ffi::c_int,
+    4 as ::core::ffi::c_int,
+    4 as ::core::ffi::c_int,
+    4 as ::core::ffi::c_int,
+    4 as ::core::ffi::c_int,
+    5 as ::core::ffi::c_int,
+    5 as ::core::ffi::c_int,
+    5 as ::core::ffi::c_int,
+    5 as ::core::ffi::c_int,
+    0 as ::core::ffi::c_int,
+];
+
+static extra_dbits: [::core::ffi::c_int; 30] = [
+    0 as ::core::ffi::c_int,
+    0 as ::core::ffi::c_int,
+    0 as ::core::ffi::c_int,
+    0 as ::core::ffi::c_int,
+    1 as ::core::ffi::c_int,
+    1 as ::core::ffi::c_int,
+    2 as ::core::ffi::c_int,
+    2 as ::core::ffi::c_int,
+    3 as ::core::ffi::c_int,
+    3 as ::core::ffi::c_int,
+    4 as ::core::ffi::c_int,
+    4 as ::core::ffi::c_int,
+    5 as ::core::ffi::c_int,
+    5 as ::core::ffi::c_int,
+    6 as ::core::ffi::c_int,
+    6 as ::core::ffi::c_int,
+    7 as ::core::ffi::c_int,
+    7 as ::core::ffi::c_int,
+    8 as ::core::ffi::c_int,
+    8 as ::core::ffi::c_int,
+    9 as ::core::ffi::c_int,
+    9 as ::core::ffi::c_int,
+    10 as ::core::ffi::c_int,
+    10 as ::core::ffi::c_int,
+    11 as ::core::ffi::c_int,
+    11 as ::core::ffi::c_int,
+    12 as ::core::ffi::c_int,
+    12 as ::core::ffi::c_int,
+    13 as ::core::ffi::c_int,
+    13 as ::core::ffi::c_int,
+];
+
+static extra_blbits: [::core::ffi::c_int; 19] = [
+    0 as ::core::ffi::c_int,
+    0 as ::core::ffi::c_int,
+    0 as ::core::ffi::c_int,
+    0 as ::core::ffi::c_int,
+    0 as ::core::ffi::c_int,
+    0 as ::core::ffi::c_int,
+    0 as ::core::ffi::c_int,
+    0 as ::core::ffi::c_int,
+    0 as ::core::ffi::c_int,
+    0 as ::core::ffi::c_int,
+    0 as ::core::ffi::c_int,
+    0 as ::core::ffi::c_int,
+    0 as ::core::ffi::c_int,
+    0 as ::core::ffi::c_int,
+    0 as ::core::ffi::c_int,
+    0 as ::core::ffi::c_int,
+    2 as ::core::ffi::c_int,
+    3 as ::core::ffi::c_int,
+    7 as ::core::ffi::c_int,
+];
+
+static bl_order: [crate::zutil_h::uch; 19] = [
+    16 as crate::zutil_h::uch,
+    17 as crate::zutil_h::uch,
+    18 as crate::zutil_h::uch,
+    0 as crate::zutil_h::uch,
+    8 as crate::zutil_h::uch,
+    7 as crate::zutil_h::uch,
+    9 as crate::zutil_h::uch,
+    6 as crate::zutil_h::uch,
+    10 as crate::zutil_h::uch,
+    5 as crate::zutil_h::uch,
+    11 as crate::zutil_h::uch,
+    4 as crate::zutil_h::uch,
+    12 as crate::zutil_h::uch,
+    3 as crate::zutil_h::uch,
+    13 as crate::zutil_h::uch,
+    2 as crate::zutil_h::uch,
+    14 as crate::zutil_h::uch,
+    1 as crate::zutil_h::uch,
+    15 as crate::zutil_h::uch,
+];
+
+static static_l_desc: crate::src::deflate::static_tree_desc = {
+    static_tree_desc_s {
+        static_tree: Some(&static_ltree),
+        extra_bits: &extra_lbits,
+        extra_base: crate::src::deflate::LITERALS + 1 as ::core::ffi::c_int,
+        elems: crate::src::deflate::L_CODES,
+        max_length: crate::src::deflate::MAX_BITS,
+    }
+};
+
+static static_d_desc: crate::src::deflate::static_tree_desc = {
+    static_tree_desc_s {
+        static_tree: Some(&static_dtree),
+        extra_bits: &extra_dbits,
+        extra_base: 0 as ::core::ffi::c_int,
+        elems: crate::src::deflate::D_CODES,
+        max_length: crate::src::deflate::MAX_BITS,
+    }
+};
+
+static static_bl_desc: crate::src::deflate::static_tree_desc = {
+    static_tree_desc_s {
+        static_tree: None,
+        extra_bits: &extra_blbits,
+        extra_base: 0 as ::core::ffi::c_int,
+        elems: crate::src::deflate::BL_CODES,
+        max_length: MAX_BL_BITS,
+    }
+};
+
+fn bi_reverse(mut code: ::core::ffi::c_uint, mut len: ::core::ffi::c_int) -> ::core::ffi::c_uint {
+    let mut res: ::core::ffi::c_uint = 0 as ::core::ffi::c_uint;
+    loop {
+        res |= code & 1 as ::core::ffi::c_uint;
+        code >>= 1 as ::core::ffi::c_int;
+        res <<= 1 as ::core::ffi::c_int;
+        len -= 1;
+        if len <= 0 as ::core::ffi::c_int {
+            break;
+        }
+    }
+    return res >> 1 as ::core::ffi::c_int;
+}
+
+// These bit-buffer operations only mutate an already-owned deflater state
+// and its initialized pending buffer. Keep that bookkeeping reference- and
+// slice-bound, with the raw-pointer adapter below limited to binding them.
+fn bi_flush_state(
+    state: &mut crate::src::deflate::deflate_state,
+    pending: &mut [crate::zutil_h::uch],
+) {
+    if state.bi_valid == 16 as ::core::ffi::c_int {
+        let first = state.pending as usize;
+        state.pending = state.pending.wrapping_add(1);
+        pending[first] = (state.bi_buf as ::core::ffi::c_int & 0xff as ::core::ffi::c_int)
+            as crate::zutil_h::uch;
+        let second = state.pending as usize;
+        state.pending = state.pending.wrapping_add(1);
+        pending[second] =
+            (state.bi_buf as ::core::ffi::c_int >> 8 as ::core::ffi::c_int) as crate::zutil_h::uch;
+        state.bi_buf = 0 as crate::zutil_h::ush;
+        state.bi_valid = 0 as ::core::ffi::c_int;
+    } else if state.bi_valid >= 8 as ::core::ffi::c_int {
+        let next = state.pending as usize;
+        state.pending = state.pending.wrapping_add(1);
+        pending[next] = state.bi_buf as crate::stdlib::Byte;
+        state.bi_buf =
+            (state.bi_buf as ::core::ffi::c_int >> 8 as ::core::ffi::c_int) as crate::zutil_h::ush;
+        state.bi_valid -= 8 as ::core::ffi::c_int;
+    }
+}
+
+fn bi_send_bits(
+    state: &mut crate::src::deflate::deflate_state,
+    pending: &mut [crate::zutil_h::uch],
+    value: crate::zutil_h::ush,
+    len: ::core::ffi::c_int,
+) {
+    if state.bi_valid > crate::src::deflate::Buf_size - len {
+        state.bi_buf = (state.bi_buf as ::core::ffi::c_int
+            | (value as ::core::ffi::c_int) << state.bi_valid)
+            as crate::zutil_h::ush;
+        let first = state.pending as usize;
+        state.pending = state.pending.wrapping_add(1);
+        pending[first] = (state.bi_buf as ::core::ffi::c_int & 0xff as ::core::ffi::c_int)
+            as crate::zutil_h::uch;
+        let second = state.pending as usize;
+        state.pending = state.pending.wrapping_add(1);
+        pending[second] =
+            (state.bi_buf as ::core::ffi::c_int >> 8 as ::core::ffi::c_int) as crate::zutil_h::uch;
+        state.bi_buf = (value as ::core::ffi::c_int
+            >> crate::src::deflate::Buf_size - state.bi_valid)
+            as crate::zutil_h::ush;
+        state.bi_valid += len - crate::src::deflate::Buf_size;
+    } else {
+        state.bi_buf = (state.bi_buf as ::core::ffi::c_int
+            | (value as ::core::ffi::c_int) << state.bi_valid)
+            as crate::zutil_h::ush;
+        state.bi_valid += len;
+    }
+}
+
+fn bi_windup_state(
+    state: &mut crate::src::deflate::deflate_state,
+    pending: &mut [crate::zutil_h::uch],
+) {
+    if state.bi_valid > 8 as ::core::ffi::c_int {
+        let first = state.pending as usize;
+        state.pending = state.pending.wrapping_add(1);
+        pending[first] = (state.bi_buf as ::core::ffi::c_int & 0xff as ::core::ffi::c_int)
+            as crate::zutil_h::uch;
+        let second = state.pending as usize;
+        state.pending = state.pending.wrapping_add(1);
+        pending[second] =
+            (state.bi_buf as ::core::ffi::c_int >> 8 as ::core::ffi::c_int) as crate::zutil_h::uch;
+    } else if state.bi_valid > 0 as ::core::ffi::c_int {
+        let next = state.pending as usize;
+        state.pending = state.pending.wrapping_add(1);
+        pending[next] = state.bi_buf as crate::stdlib::Byte;
+    }
+    state.bi_used = (state.bi_valid - 1 as ::core::ffi::c_int & 7 as ::core::ffi::c_int)
+        + 1 as ::core::ffi::c_int;
+    state.bi_buf = 0 as crate::zutil_h::ush;
+    state.bi_valid = 0 as ::core::ffi::c_int;
+}
+
+// The final bit-buffer write is ordinary state and slice work once the caller
+// has bound the deflater's pending allocation.
+fn bi_windup(state: &mut crate::src::deflate::deflate_state, pending: &mut [crate::zutil_h::uch]) {
+    bi_windup_state(state, pending);
+}
+
+fn gen_codes(
+    tree: &mut [crate::src::deflate::ct_data],
+    max_code: ::core::ffi::c_int,
+    bl_count: &[crate::zutil_h::ush],
+) {
+    let mut next_code: [crate::zutil_h::ush; 16] = [0; 16];
+    let mut code: ::core::ffi::c_uint = 0 as ::core::ffi::c_uint;
+    let mut bits: ::core::ffi::c_int = 0;
+    let mut n: ::core::ffi::c_int = 0;
+    bits = 1 as ::core::ffi::c_int;
+    while bits <= crate::src::deflate::MAX_BITS {
+        code = code.wrapping_add(
+            bl_count[(bits - 1 as ::core::ffi::c_int) as usize] as ::core::ffi::c_uint,
+        ) << 1 as ::core::ffi::c_int;
+        next_code[bits as usize] = code as crate::zutil_h::ush;
+        bits += 1;
+    }
+    n = 0 as ::core::ffi::c_int;
+    while n <= max_code {
+        let len: ::core::ffi::c_int = tree[n as usize].dl.dad as ::core::ffi::c_int;
+        if len != 0 as ::core::ffi::c_int {
+            let c2rust_fresh57 = next_code[len as usize];
+            next_code[len as usize] = next_code[len as usize].wrapping_add(1);
+            tree[n as usize].fc.freq =
+                bi_reverse(c2rust_fresh57 as ::core::ffi::c_uint, len) as crate::zutil_h::ush;
+        }
+        n += 1;
+    }
+}
+
+fn tr_static_init() {}
+
+fn reset_block_metadata(s: &mut crate::src::deflate::deflate_state) {
+    s.static_len = 0 as crate::zutil_h::ulg;
+    s.opt_len = s.static_len;
+    s.matches = 0 as crate::stdlib::uInt;
+    s.sym_next = s.matches;
+}
+
+fn init_block(s: &mut crate::src::deflate::deflate_state) {
+    let mut n: ::core::ffi::c_int = 0;
+    n = 0 as ::core::ffi::c_int;
+    while n < crate::src::deflate::L_CODES {
+        s.dyn_ltree[n as usize].fc.freq = 0 as crate::zutil_h::ush;
+        n += 1;
+    }
+    n = 0 as ::core::ffi::c_int;
+    while n < crate::src::deflate::D_CODES {
+        s.dyn_dtree[n as usize].fc.freq = 0 as crate::zutil_h::ush;
+        n += 1;
+    }
+    n = 0 as ::core::ffi::c_int;
+    while n < crate::src::deflate::BL_CODES {
+        s.bl_tree[n as usize].fc.freq = 0 as crate::zutil_h::ush;
+        n += 1;
+    }
+    s.dyn_ltree[END_BLOCK as usize].fc.freq = 1 as crate::zutil_h::ush;
+    reset_block_metadata(s);
+}
+
+pub fn _tr_init(s: &mut crate::src::deflate::deflate_state) {
+    tr_static_init();
+    s.l_desc.dyn_tree = &raw mut s.dyn_ltree as *mut crate::src::deflate::ct_data_s
+        as *mut crate::src::deflate::ct_data;
+    s.l_desc.stat_desc = &raw const static_l_desc;
+    s.d_desc.dyn_tree = &raw mut s.dyn_dtree as *mut crate::src::deflate::ct_data_s
+        as *mut crate::src::deflate::ct_data;
+    s.d_desc.stat_desc = &raw const static_d_desc;
+    s.bl_desc.dyn_tree = &raw mut s.bl_tree as *mut crate::src::deflate::ct_data_s
+        as *mut crate::src::deflate::ct_data;
+    s.bl_desc.stat_desc = &raw const static_bl_desc;
+    s.bi_buf = 0 as crate::zutil_h::ush;
+    s.bi_valid = 0 as ::core::ffi::c_int;
+    s.bi_used = 0 as ::core::ffi::c_int;
+    init_block(s);
+}
+#[export_name = "_tr_init"]
+
+pub unsafe extern "C" fn _tr_init_ffi(mut s: *mut crate::src::deflate::deflate_state) {
+    _tr_init(&mut *s)
+}
+pub const SMALLEST: ::core::ffi::c_int = 1 as ::core::ffi::c_int;
+
+// Tree construction needs only this disjoint subset of a deflater state.
+// Keeping those borrows explicit lets the dynamic-tree algorithms operate on
+// ordinary references while their caller owns the raw state binding.
+struct TreeBuildWorkspace<'a> {
+    heap: &'a mut [::core::ffi::c_int; 573],
+    heap_len: &'a mut ::core::ffi::c_int,
+    heap_max: &'a mut ::core::ffi::c_int,
+    depth: &'a mut [crate::zutil_h::uch; 573],
+    bl_count: &'a mut [crate::zutil_h::ush; 16],
+    opt_len: &'a mut crate::zutil_h::ulg,
+    static_len: &'a mut crate::zutil_h::ulg,
+}
+
+fn pqdownheap(
+    heap: &mut [::core::ffi::c_int],
+    heap_len: ::core::ffi::c_int,
+    depth: &[crate::zutil_h::uch],
+    tree: &[crate::src::deflate::ct_data],
+    mut k: ::core::ffi::c_int,
+) {
+    let v: ::core::ffi::c_int = heap[k as usize];
+    let mut j: ::core::ffi::c_int = k << 1 as ::core::ffi::c_int;
+    while j <= heap_len {
+        if j < heap_len
+            && ((tree[heap[(j + 1 as ::core::ffi::c_int) as usize] as usize]
+                .fc
+                .freq as ::core::ffi::c_int)
+                < tree[heap[j as usize] as usize].fc.freq as ::core::ffi::c_int
+                || tree[heap[(j + 1 as ::core::ffi::c_int) as usize] as usize]
+                    .fc
+                    .freq as ::core::ffi::c_int
+                    == tree[heap[j as usize] as usize].fc.freq as ::core::ffi::c_int
+                    && depth[heap[(j + 1 as ::core::ffi::c_int) as usize] as usize]
+                        as ::core::ffi::c_int
+                        <= depth[heap[j as usize] as usize] as ::core::ffi::c_int)
+        {
+            j += 1;
+        }
+        if (tree[v as usize].fc.freq as ::core::ffi::c_int)
+            < tree[heap[j as usize] as usize].fc.freq as ::core::ffi::c_int
+            || tree[v as usize].fc.freq as ::core::ffi::c_int
+                == tree[heap[j as usize] as usize].fc.freq as ::core::ffi::c_int
+                && depth[v as usize] as ::core::ffi::c_int
+                    <= depth[heap[j as usize] as usize] as ::core::ffi::c_int
+        {
+            break;
+        }
+        heap[k as usize] = heap[j as usize];
+        k = j;
+        j <<= 1 as ::core::ffi::c_int;
+    }
+    heap[k as usize] = v;
+}
+
+fn gen_bitlen(
+    workspace: &mut TreeBuildWorkspace<'_>,
+    tree: &mut [crate::src::deflate::ct_data],
+    max_code: ::core::ffi::c_int,
+    stat_desc: &crate::src::deflate::static_tree_desc,
+) {
+    let stree = stat_desc.static_tree;
+    let extra = stat_desc.extra_bits;
+    let base = stat_desc.extra_base;
+    let max_length = stat_desc.max_length;
+    let mut h: ::core::ffi::c_int = 0;
+    let mut n: ::core::ffi::c_int = 0;
+    let mut m: ::core::ffi::c_int = 0;
+    let mut bits: ::core::ffi::c_int = 0;
+    let mut xbits: ::core::ffi::c_int = 0;
+    let mut f: crate::zutil_h::ush = 0;
+    let mut overflow: ::core::ffi::c_int = 0 as ::core::ffi::c_int;
+    bits = 0 as ::core::ffi::c_int;
+    while bits <= crate::src::deflate::MAX_BITS {
+        workspace.bl_count[bits as usize] = 0 as crate::zutil_h::ush;
+        bits += 1;
+    }
+    tree[workspace.heap[*workspace.heap_max as usize] as usize]
+        .dl
+        .dad = 0 as crate::zutil_h::ush;
+    h = *workspace.heap_max + 1 as ::core::ffi::c_int;
+    while h < crate::src::deflate::HEAP_SIZE {
+        n = workspace.heap[h as usize];
+        bits = tree[tree[n as usize].dl.dad as usize].dl.dad as ::core::ffi::c_int
+            + 1 as ::core::ffi::c_int;
+        if bits > max_length {
+            bits = max_length;
+            overflow += 1;
+        }
+        tree[n as usize].dl.dad = bits as crate::zutil_h::ush;
+        if n <= max_code {
+            workspace.bl_count[bits as usize] = workspace.bl_count[bits as usize].wrapping_add(1);
+            xbits = 0 as ::core::ffi::c_int;
+            if n >= base {
+                xbits = extra[(n - base) as usize] as ::core::ffi::c_int;
+            }
+            f = tree[n as usize].fc.freq;
+            *workspace.opt_len =
+                workspace
+                    .opt_len
+                    .wrapping_add((f as crate::zutil_h::ulg).wrapping_mul(
+                        (bits + xbits) as ::core::ffi::c_uint as crate::zutil_h::ulg,
+                    ));
+            if let Some(stree) = stree {
+                *workspace.static_len =
+                    workspace
+                        .static_len
+                        .wrapping_add((f as crate::zutil_h::ulg).wrapping_mul(
+                            (stree[n as usize].dl.dad as ::core::ffi::c_int + xbits)
+                                as ::core::ffi::c_uint
+                                as crate::zutil_h::ulg,
+                        ));
+            }
+        }
+        h += 1;
+    }
+    if overflow == 0 as ::core::ffi::c_int {
+        return;
+    }
+    loop {
+        bits = max_length - 1 as ::core::ffi::c_int;
+        while workspace.bl_count[bits as usize] as ::core::ffi::c_int == 0 as ::core::ffi::c_int {
+            bits -= 1;
+        }
+        workspace.bl_count[bits as usize] = workspace.bl_count[bits as usize].wrapping_sub(1);
+        workspace.bl_count[(bits + 1 as ::core::ffi::c_int) as usize] =
+            (workspace.bl_count[(bits + 1 as ::core::ffi::c_int) as usize] as ::core::ffi::c_int
+                + 2 as ::core::ffi::c_int) as crate::zutil_h::ush;
+        workspace.bl_count[max_length as usize] =
+            workspace.bl_count[max_length as usize].wrapping_sub(1);
+        overflow -= 2 as ::core::ffi::c_int;
+        if overflow <= 0 as ::core::ffi::c_int {
+            break;
+        }
+    }
+    bits = max_length;
+    while bits != 0 as ::core::ffi::c_int {
+        n = workspace.bl_count[bits as usize] as ::core::ffi::c_int;
+        while n != 0 as ::core::ffi::c_int {
+            h -= 1;
+            m = workspace.heap[h as usize];
+            if m > max_code {
+                continue;
+            }
+            if tree[m as usize].dl.dad as ::core::ffi::c_uint != bits as ::core::ffi::c_uint {
+                *workspace.opt_len = workspace.opt_len.wrapping_add(
+                    (bits as crate::zutil_h::ulg)
+                        .wrapping_sub(tree[m as usize].dl.dad as crate::zutil_h::ulg)
+                        .wrapping_mul(tree[m as usize].fc.freq as crate::zutil_h::ulg),
+                );
+                tree[m as usize].dl.dad = bits as crate::zutil_h::ush;
+            }
+            n -= 1;
+        }
+        bits -= 1;
+    }
+}
+
+// Build the Huffman tree after the deflater's dynamic tree has been bound to
+// its complete `2 * elems + 1` allocation. The heap and tree walk is then
+// ordinary state and slice work.
+fn build_tree_impl(
+    workspace: &mut TreeBuildWorkspace<'_>,
+    desc: &mut crate::src::deflate::tree_desc,
+    tree: &mut [crate::src::deflate::ct_data],
+    stat_desc: &crate::src::deflate::static_tree_desc,
+) {
+    let stree = stat_desc.static_tree;
+    let mut elems: ::core::ffi::c_int = stat_desc.elems;
+    let mut n: ::core::ffi::c_int = 0;
+    let mut m: ::core::ffi::c_int = 0;
+    let mut max_code: ::core::ffi::c_int = -1 as ::core::ffi::c_int;
+    let mut node: ::core::ffi::c_int = 0;
+    *workspace.heap_len = 0 as ::core::ffi::c_int;
+    *workspace.heap_max = crate::src::deflate::HEAP_SIZE;
+    n = 0 as ::core::ffi::c_int;
+    while n < elems {
+        if tree[n as usize].fc.freq as ::core::ffi::c_int != 0 as ::core::ffi::c_int {
+            max_code = n;
+            *workspace.heap_len += 1;
+            workspace.heap[*workspace.heap_len as usize] = max_code;
+            workspace.depth[n as usize] = 0 as crate::zutil_h::uch;
+        } else {
+            tree[n as usize].dl.dad = 0 as crate::zutil_h::ush;
+        }
+        n += 1;
+    }
+    while *workspace.heap_len < 2 as ::core::ffi::c_int {
+        *workspace.heap_len += 1;
+        let entry = &mut workspace.heap[*workspace.heap_len as usize];
+        *entry = if max_code < 2 as ::core::ffi::c_int {
+            max_code += 1;
+            max_code
+        } else {
+            0 as ::core::ffi::c_int
+        };
+        node = *entry;
+        tree[node as usize].fc.freq = 1 as crate::zutil_h::ush;
+        workspace.depth[node as usize] = 0 as crate::zutil_h::uch;
+        *workspace.opt_len = workspace.opt_len.wrapping_sub(1);
+        if let Some(stree) = stree {
+            *workspace.static_len = workspace
+                .static_len
+                .wrapping_sub(stree[node as usize].dl.dad as crate::zutil_h::ulg);
+        }
+    }
+    desc.max_code = max_code;
+    n = *workspace.heap_len / 2 as ::core::ffi::c_int;
+    while n >= 1 as ::core::ffi::c_int {
+        pqdownheap(
+            workspace.heap,
+            *workspace.heap_len,
+            workspace.depth,
+            tree,
+            n,
+        );
+        n -= 1;
+    }
+    node = elems;
+    loop {
+        n = workspace.heap[SMALLEST as usize];
+        let c2rust_fresh55 = *workspace.heap_len;
+        *workspace.heap_len = *workspace.heap_len - 1;
+        workspace.heap[SMALLEST as usize] = workspace.heap[c2rust_fresh55 as usize];
+        pqdownheap(
+            workspace.heap,
+            *workspace.heap_len,
+            workspace.depth,
+            tree,
+            SMALLEST,
+        );
+        m = workspace.heap[SMALLEST as usize];
+        *workspace.heap_max -= 1;
+        workspace.heap[*workspace.heap_max as usize] = n;
+        *workspace.heap_max -= 1;
+        workspace.heap[*workspace.heap_max as usize] = m;
+        tree[node as usize].fc.freq = (tree[n as usize].fc.freq as ::core::ffi::c_int
+            + tree[m as usize].fc.freq as ::core::ffi::c_int)
+            as crate::zutil_h::ush;
+        workspace.depth[node as usize] = ((if workspace.depth[n as usize] as ::core::ffi::c_int
+            >= workspace.depth[m as usize] as ::core::ffi::c_int
+        {
+            workspace.depth[n as usize] as ::core::ffi::c_int
+        } else {
+            workspace.depth[m as usize] as ::core::ffi::c_int
+        }) + 1 as ::core::ffi::c_int)
+            as crate::zutil_h::uch;
+        tree[m as usize].dl.dad = node as crate::zutil_h::ush;
+        tree[n as usize].dl.dad = tree[m as usize].dl.dad;
+        let c2rust_fresh56 = node;
+        node = node + 1;
+        workspace.heap[SMALLEST as usize] = c2rust_fresh56;
+        pqdownheap(
+            workspace.heap,
+            *workspace.heap_len,
+            workspace.depth,
+            tree,
+            SMALLEST,
+        );
+        if *workspace.heap_len < 2 as ::core::ffi::c_int {
+            break;
+        }
+    }
+    *workspace.heap_max -= 1;
+    workspace.heap[*workspace.heap_max as usize] = workspace.heap[SMALLEST as usize];
+    gen_bitlen(workspace, tree, desc.max_code, stat_desc);
+    gen_codes(&mut tree[..elems as usize], max_code, workspace.bl_count);
+}
+
+fn scan_tree_impl(
+    bl_tree: &mut [crate::src::deflate::ct_data],
+    tree: &mut [crate::src::deflate::ct_data],
+    max_code: ::core::ffi::c_int,
+) {
+    let mut n: ::core::ffi::c_int = 0;
+    let mut prevlen: ::core::ffi::c_int = -1 as ::core::ffi::c_int;
+    let mut curlen: ::core::ffi::c_int = 0;
+    let mut nextlen: ::core::ffi::c_int = tree[0].dl.dad as ::core::ffi::c_int;
+    let mut count: ::core::ffi::c_int = 0 as ::core::ffi::c_int;
+    let mut max_count: ::core::ffi::c_int = 7 as ::core::ffi::c_int;
+    let mut min_count: ::core::ffi::c_int = 4 as ::core::ffi::c_int;
+    if nextlen == 0 as ::core::ffi::c_int {
+        max_count = 138 as ::core::ffi::c_int;
+        min_count = 3 as ::core::ffi::c_int;
+    }
+    tree[(max_code + 1 as ::core::ffi::c_int) as usize].dl.dad =
+        0xffff as ::core::ffi::c_int as crate::zutil_h::ush;
+    n = 0 as ::core::ffi::c_int;
+    while n <= max_code {
+        curlen = nextlen;
+        nextlen = tree[(n + 1 as ::core::ffi::c_int) as usize].dl.dad as ::core::ffi::c_int;
+        count += 1;
+        if !(count < max_count && curlen == nextlen) {
+            if count < min_count {
+                bl_tree[curlen as usize].fc.freq = (bl_tree[curlen as usize].fc.freq
+                    as ::core::ffi::c_int
+                    + count as crate::zutil_h::ush as ::core::ffi::c_int)
+                    as crate::zutil_h::ush;
+            } else if curlen != 0 as ::core::ffi::c_int {
+                if curlen != prevlen {
+                    bl_tree[curlen as usize].fc.freq =
+                        bl_tree[curlen as usize].fc.freq.wrapping_add(1);
+                }
+                bl_tree[REP_3_6 as usize].fc.freq =
+                    bl_tree[REP_3_6 as usize].fc.freq.wrapping_add(1);
+            } else if count <= 10 as ::core::ffi::c_int {
+                bl_tree[REPZ_3_10 as usize].fc.freq =
+                    bl_tree[REPZ_3_10 as usize].fc.freq.wrapping_add(1);
+            } else {
+                bl_tree[REPZ_11_138 as usize].fc.freq =
+                    bl_tree[REPZ_11_138 as usize].fc.freq.wrapping_add(1);
+            }
+            count = 0 as ::core::ffi::c_int;
+            prevlen = curlen;
+            if nextlen == 0 as ::core::ffi::c_int {
+                max_count = 138 as ::core::ffi::c_int;
+                min_count = 3 as ::core::ffi::c_int;
+            } else if curlen == nextlen {
+                max_count = 6 as ::core::ffi::c_int;
+                min_count = 3 as ::core::ffi::c_int;
+            } else {
+                max_count = 7 as ::core::ffi::c_int;
+                min_count = 4 as ::core::ffi::c_int;
+            }
+        }
+        n += 1;
+    }
+}
+
+fn send_tree_code(
+    state: &mut crate::src::deflate::deflate_state,
+    pending: &mut [crate::zutil_h::uch],
+    code: usize,
+) {
+    let value = state.bl_tree[code].fc.freq;
+    let len = state.bl_tree[code].dl.dad as ::core::ffi::c_int;
+    bi_send_bits(state, pending, value, len);
+}
+
+fn send_tree_impl(
+    state: &mut crate::src::deflate::deflate_state,
+    tree: &[crate::src::deflate::ct_data],
+    max_code: ::core::ffi::c_int,
+    pending: &mut [crate::zutil_h::uch],
+) {
+    let mut prevlen = -1;
+    let mut nextlen = tree[0].dl.dad as ::core::ffi::c_int;
+    let mut count = 0;
+    let (mut max_count, mut min_count) = if nextlen == 0 { (138, 3) } else { (7, 4) };
+
+    for n in 0..=max_code as usize {
+        let curlen = nextlen;
+        nextlen = tree[n + 1].dl.dad as ::core::ffi::c_int;
+        count += 1;
+        if count < max_count && curlen == nextlen {
+            continue;
+        }
+        if count < min_count {
+            while count != 0 {
+                send_tree_code(state, pending, curlen as usize);
+                count -= 1;
+            }
+        } else if curlen != 0 {
+            if curlen != prevlen {
+                send_tree_code(state, pending, curlen as usize);
+                count -= 1;
+            }
+            send_tree_code(state, pending, REP_3_6 as usize);
+            bi_send_bits(state, pending, (count - 3) as crate::zutil_h::ush, 2);
+        } else if count <= 10 {
+            send_tree_code(state, pending, REPZ_3_10 as usize);
+            bi_send_bits(state, pending, (count - 3) as crate::zutil_h::ush, 3);
+        } else {
+            send_tree_code(state, pending, REPZ_11_138 as usize);
+            bi_send_bits(state, pending, (count - 11) as crate::zutil_h::ush, 7);
+        }
+        count = 0;
+        prevlen = curlen;
+        (max_count, min_count) = if nextlen == 0 {
+            (138, 3)
+        } else if curlen == nextlen {
+            (6, 3)
+        } else {
+            (7, 4)
+        };
+    }
+}
+
+// Scanning the literal and distance trees and constructing their bit-length
+// tree is entirely bounded by the inline deflater arrays. The raw caller only
+// binds the deflater; this implementation keeps every subsequent traversal
+// reference- and slice-based.
+fn build_bl_tree_impl(
+    workspace: &mut TreeBuildWorkspace<'_>,
+    dyn_ltree: &mut [crate::src::deflate::ct_data],
+    l_max_code: ::core::ffi::c_int,
+    dyn_dtree: &mut [crate::src::deflate::ct_data],
+    d_max_code: ::core::ffi::c_int,
+    bl_tree: &mut [crate::src::deflate::ct_data],
+    bl_desc: &mut crate::src::deflate::tree_desc,
+) -> ::core::ffi::c_int {
+    scan_tree_impl(bl_tree, dyn_ltree, l_max_code);
+    scan_tree_impl(bl_tree, dyn_dtree, d_max_code);
+    build_tree_impl(workspace, bl_desc, bl_tree, &static_bl_desc);
+
+    let mut max_blindex = crate::src::deflate::BL_CODES - 1 as ::core::ffi::c_int;
+    while max_blindex >= 3 as ::core::ffi::c_int {
+        if bl_tree[bl_order[max_blindex as usize] as usize].dl.dad as ::core::ffi::c_int
+            != 0 as ::core::ffi::c_int
+        {
+            break;
+        }
+        max_blindex -= 1;
+    }
+    *workspace.opt_len = workspace.opt_len.wrapping_add(
+        (3 as crate::zutil_h::ulg)
+            .wrapping_mul(
+                (max_blindex as crate::zutil_h::ulg).wrapping_add(1 as crate::zutil_h::ulg),
+            )
+            .wrapping_add(5 as crate::zutil_h::ulg)
+            .wrapping_add(5 as crate::zutil_h::ulg)
+            .wrapping_add(4 as crate::zutil_h::ulg),
+    );
+    max_blindex
+}
+
+fn build_bl_tree_from_inline(state: &mut crate::src::deflate::deflate_state) -> ::core::ffi::c_int {
+    let crate::src::deflate::internal_state {
+        dyn_ltree,
+        dyn_dtree,
+        bl_tree,
+        l_desc,
+        d_desc,
+        bl_desc,
+        heap,
+        heap_len,
+        heap_max,
+        depth,
+        bl_count,
+        opt_len,
+        static_len,
+        ..
+    } = state;
+    let l_max_code = l_desc.max_code;
+    let d_max_code = d_desc.max_code;
+    let mut workspace = TreeBuildWorkspace {
+        heap,
+        heap_len,
+        heap_max,
+        depth,
+        bl_count,
+        opt_len,
+        static_len,
+    };
+    build_bl_tree_impl(
+        &mut workspace,
+        &mut dyn_ltree[..(l_max_code + 2) as usize],
+        l_max_code,
+        &mut dyn_dtree[..(d_max_code + 2) as usize],
+        d_max_code,
+        bl_tree,
+        bl_desc,
+    )
+}
+
+// Dynamic-header construction uses only bounded inline trees and the pending
+// allocation already owned by the deflater. Copying the two source arrays
+// makes their immutable traversal disjoint from bit-buffer updates on state.
+fn send_all_trees_impl(
+    state: &mut crate::src::deflate::deflate_state,
+    pending: &mut [crate::zutil_h::uch],
+    lcodes: ::core::ffi::c_int,
+    dcodes: ::core::ffi::c_int,
+    blcodes: ::core::ffi::c_int,
+) {
+    let ltree = state.dyn_ltree;
+    let dtree = state.dyn_dtree;
+
+    bi_send_bits(state, pending, (lcodes - 257) as crate::zutil_h::ush, 5);
+    bi_send_bits(state, pending, (dcodes - 1) as crate::zutil_h::ush, 5);
+    bi_send_bits(state, pending, (blcodes - 4) as crate::zutil_h::ush, 4);
+    for rank in 0..blcodes as usize {
+        let len = state.bl_tree[bl_order[rank] as usize].dl.dad;
+        bi_send_bits(state, pending, len, 3);
+    }
+    send_tree_impl(state, &ltree[..lcodes as usize + 1], lcodes - 1, pending);
+    send_tree_impl(state, &dtree[..dcodes as usize + 1], dcodes - 1, pending);
+}
+
+// Once the deflater's allocation and source range are bound, emitting a
+// stored block is ordinary bit-buffer and slice work. Keeping it here avoids
+// repeating raw pending-buffer writes in deflate's internal callers.
+pub fn tr_stored_block(
+    state: &mut crate::src::deflate::deflate_state,
+    pending: &mut [crate::zutil_h::uch],
+    buf: &[crate::stdlib::Bytef],
+    last: ::core::ffi::c_int,
+) {
+    bi_send_bits(state, pending, last as crate::zutil_h::ush, 3);
+    bi_windup(state, pending);
+
+    let stored_len = buf.len();
+    let header = state.pending as usize;
+    pending[header] = (stored_len as crate::zutil_h::ush & 0xff) as crate::zutil_h::uch;
+    pending[header + 1] = (stored_len as crate::zutil_h::ush >> 8) as crate::zutil_h::uch;
+    pending[header + 2] = (!stored_len as crate::zutil_h::ush & 0xff) as crate::zutil_h::uch;
+    pending[header + 3] = (!stored_len as crate::zutil_h::ush >> 8) as crate::zutil_h::uch;
+    state.pending = state.pending.wrapping_add(4);
+
+    let data = state.pending as usize;
+    pending[data..data + stored_len].copy_from_slice(buf);
+    state.pending = state
+        .pending
+        .wrapping_add(stored_len as crate::zutil_h::ulg);
+}
+
+pub fn _tr_stored_block(
+    state: &mut crate::src::deflate::deflate_state,
+    pending: &mut [crate::zutil_h::uch],
+    source: &[crate::stdlib::Bytef],
+    last: ::core::ffi::c_int,
+) {
+    tr_stored_block(state, pending, source, last);
+}
+#[export_name = "_tr_stored_block"]
+
+pub unsafe extern "C" fn _tr_stored_block_ffi(
+    mut s: *mut crate::src::deflate::deflate_state,
+    mut buf: *mut crate::stdlib::charf,
+    mut stored_len: crate::zutil_h::ulg,
+    mut last: ::core::ffi::c_int,
+) {
+    // SAFETY: the C ABI supplies an initialized deflater and, when non-empty,
+    // a readable stored-block range. Bind those raw ranges once here; the
+    // implementation is entirely reference- and slice-based.
+    let state = &mut *s;
+    let pending =
+        ::core::slice::from_raw_parts_mut(state.pending_buf, state.pending_buf_size as usize);
+    let source = if stored_len == 0 {
+        &[]
+    } else {
+        ::core::slice::from_raw_parts(buf as *const crate::stdlib::Bytef, stored_len as usize)
+    };
+    _tr_stored_block(state, pending, source, last)
+}
+// Bit flushing only updates an already-bound deflater and its pending-output
+// buffer. Keep that work reference-based; the ABI adapter below owns the raw
+// state and allocation-backed buffer binding.
+pub fn tr_flush_bits(
+    state: &mut crate::src::deflate::deflate_state,
+    pending: &mut [crate::zutil_h::uch],
+) {
+    bi_flush_state(state, pending);
+}
+#[export_name = "_tr_flush_bits"]
+
+pub unsafe extern "C" fn _tr_flush_bits_ffi(mut s: *mut crate::src::deflate::deflate_state) {
+    let state = &mut *s;
+    let pending =
+        ::core::slice::from_raw_parts_mut(state.pending_buf, state.pending_buf_size as usize);
+    tr_flush_bits(state, pending)
+}
+// Aligning a block only changes the bit buffer and the already-owned pending
+// output. Keep those writes safe once the raw adapter has bound the buffer.
+pub fn tr_align(
+    state: &mut crate::src::deflate::deflate_state,
+    pending: &mut [crate::zutil_h::uch],
+    end_code: crate::zutil_h::ush,
+    end_len: ::core::ffi::c_int,
+) {
+    bi_send_bits(state, pending, 2, 3);
+    bi_send_bits(state, pending, end_code, end_len);
+    bi_flush_state(state, pending);
+}
+
+#[export_name = "_tr_align"]
+pub unsafe extern "C" fn _tr_align_ffi(mut s: *mut crate::src::deflate::deflate_state) {
+    // SAFETY: the C ABI requires an initialized deflater state with its
+    // owned pending buffer. Bind both once at this entry point; `tr_align`
+    // itself is reference-based.
+    let state = &mut *s;
+    let pending =
+        ::core::slice::from_raw_parts_mut(state.pending_buf, state.pending_buf_size as usize);
+    let end_code = static_ltree[256].fc.freq;
+    let end_len = static_ltree[256].dl.dad as ::core::ffi::c_int;
+    tr_align(state, pending, end_code, end_len);
+}
+fn send_compressed_tree_code(
+    state: &mut crate::src::deflate::deflate_state,
+    pending: &mut [crate::zutil_h::uch],
+    tree: &[crate::src::deflate::ct_data],
+    code: usize,
+) {
+    bi_send_bits(
+        state,
+        pending,
+        tree[code].fc.freq,
+        tree[code].dl.dad as ::core::ffi::c_int,
+    );
+}
+
+// Symbol records are fixed three-byte (distance, length-or-literal) values.
+// Once their allocation, both code trees, and the pending buffer are bound,
+// block emission is ordinary checked slice indexing.
+fn compress_block_impl(
+    state: &mut crate::src::deflate::deflate_state,
+    ltree: &[crate::src::deflate::ct_data],
+    dtree: &[crate::src::deflate::ct_data],
+    symbols: &[crate::zutil_h::uchf],
+    pending: &mut [crate::zutil_h::uch],
+) {
+    for symbol in symbols.chunks_exact(3) {
+        let mut dist = symbol[0] as ::core::ffi::c_uint | (symbol[1] as ::core::ffi::c_uint) << 8;
+        let mut lc = symbol[2] as ::core::ffi::c_int;
+        if dist == 0 {
+            send_compressed_tree_code(state, pending, ltree, lc as usize);
+            continue;
+        }
+
+        let mut code = _length_code[lc as usize] as usize;
+        send_compressed_tree_code(state, pending, ltree, code + 257);
+        let extra = extra_lbits[code];
+        if extra != 0 {
+            lc -= base_length[code];
+            bi_send_bits(state, pending, lc as crate::zutil_h::ush, extra);
+        }
+
+        dist = dist.wrapping_sub(1);
+        code = if dist < 256 {
+            _dist_code[dist as usize] as usize
+        } else {
+            _dist_code[256 + (dist >> 7) as usize] as usize
+        };
+        send_compressed_tree_code(state, pending, dtree, code);
+        let extra = extra_dbits[code];
+        if extra != 0 {
+            dist = dist.wrapping_sub(base_dist[code] as ::core::ffi::c_uint);
+            bi_send_bits(state, pending, dist as crate::zutil_h::ush, extra);
+        }
+    }
+    send_compressed_tree_code(state, pending, ltree, 256);
+}
+
+fn detect_data_type(s: &crate::src::deflate::deflate_state) -> ::core::ffi::c_int {
+    let mut block_mask: ::core::ffi::c_ulong = 0xf3ffc07f as ::core::ffi::c_ulong;
+    let mut n: ::core::ffi::c_int = 0;
+    n = 0 as ::core::ffi::c_int;
+    while n <= 31 as ::core::ffi::c_int {
+        if block_mask & 1 as ::core::ffi::c_ulong != 0
+            && s.dyn_ltree[n as usize].fc.freq as ::core::ffi::c_int != 0 as ::core::ffi::c_int
+        {
+            return crate::zlib_h::Z_BINARY;
+        }
+        n += 1;
+        block_mask >>= 1 as ::core::ffi::c_int;
+    }
+    if s.dyn_ltree[9 as ::core::ffi::c_int as usize].fc.freq as ::core::ffi::c_int
+        != 0 as ::core::ffi::c_int
+        || s.dyn_ltree[10 as ::core::ffi::c_int as usize].fc.freq as ::core::ffi::c_int
+            != 0 as ::core::ffi::c_int
+        || s.dyn_ltree[13 as ::core::ffi::c_int as usize].fc.freq as ::core::ffi::c_int
+            != 0 as ::core::ffi::c_int
+    {
+        return crate::zlib_h::Z_TEXT;
+    }
+    n = 32 as ::core::ffi::c_int;
+    while n < crate::src::deflate::LITERALS {
+        if s.dyn_ltree[n as usize].fc.freq as ::core::ffi::c_int != 0 as ::core::ffi::c_int {
+            return crate::zlib_h::Z_TEXT;
+        }
+        n += 1;
+    }
+    return crate::zlib_h::Z_BINARY;
+}
+
+// Both dynamic trees live inline in the deflater.  Constructing them here
+// avoids routing an otherwise safe block flush back through raw tree pointers.
+fn build_dynamic_trees(state: &mut crate::src::deflate::deflate_state) {
+    {
+        let crate::src::deflate::internal_state {
+            dyn_ltree,
+            l_desc,
+            heap,
+            heap_len,
+            heap_max,
+            depth,
+            bl_count,
+            opt_len,
+            static_len,
+            ..
+        } = state;
+        let mut workspace = TreeBuildWorkspace {
+            heap,
+            heap_len,
+            heap_max,
+            depth,
+            bl_count,
+            opt_len,
+            static_len,
+        };
+        build_tree_impl(&mut workspace, l_desc, dyn_ltree, &static_l_desc);
+    }
+    {
+        let crate::src::deflate::internal_state {
+            dyn_dtree,
+            d_desc,
+            heap,
+            heap_len,
+            heap_max,
+            depth,
+            bl_count,
+            opt_len,
+            static_len,
+            ..
+        } = state;
+        let mut workspace = TreeBuildWorkspace {
+            heap,
+            heap_len,
+            heap_max,
+            depth,
+            bl_count,
+            opt_len,
+            static_len,
+        };
+        build_tree_impl(&mut workspace, d_desc, dyn_dtree, &static_d_desc);
+    }
+}
+
+// Flush a completed block using only references to the deflater, stream,
+// pending allocation, and the already-bound source/symbol ranges.  In
+// particular, block choice and bit emission do not belong in the ABI layer.
+pub(crate) fn tr_flush_block_bound(
+    state: &mut crate::src::deflate::deflate_state,
+    stream: &mut crate::zlib_h::z_stream_s,
+    pending: &mut [crate::zutil_h::uch],
+    source: Option<&[crate::stdlib::Bytef]>,
+    symbols: &[crate::zutil_h::uchf],
+    stored_len: crate::zutil_h::ulg,
+    last: ::core::ffi::c_int,
+) {
+    let (opt_lenb, static_lenb, max_blindex) = if state.level > 0 {
+        if stream.data_type == crate::zlib_h::Z_UNKNOWN {
+            stream.data_type = detect_data_type(state);
+        }
+        build_dynamic_trees(state);
+        let max_blindex = build_bl_tree_from_inline(state);
+        let mut opt_lenb = state.opt_len.wrapping_add(10) >> 3;
+        let static_lenb = state.static_len.wrapping_add(10) >> 3;
+        if static_lenb <= opt_lenb || state.strategy == crate::zlib_h::Z_FIXED {
+            opt_lenb = static_lenb;
+        }
+        (opt_lenb, static_lenb, max_blindex)
+    } else {
+        let len = stored_len.wrapping_add(5);
+        (len, len, 0)
+    };
+
+    if stored_len.wrapping_add(4) <= opt_lenb {
+        if let Some(source) = source {
+            tr_stored_block(state, pending, source, last);
+        } else if static_lenb == opt_lenb {
+            bi_send_bits(state, pending, (2 + last) as crate::zutil_h::ush, 3);
+            compress_block_impl(state, &static_ltree, &static_dtree, symbols, pending);
+        } else {
+            bi_send_bits(state, pending, (4 + last) as crate::zutil_h::ush, 3);
+            send_all_trees_impl(
+                state,
+                pending,
+                state.l_desc.max_code + 1,
+                state.d_desc.max_code + 1,
+                max_blindex + 1,
+            );
+            let ltree = state.dyn_ltree;
+            let dtree = state.dyn_dtree;
+            compress_block_impl(state, &ltree, &dtree, symbols, pending);
+        }
+    } else if static_lenb == opt_lenb {
+        bi_send_bits(state, pending, (2 + last) as crate::zutil_h::ush, 3);
+        compress_block_impl(state, &static_ltree, &static_dtree, symbols, pending);
+    } else {
+        bi_send_bits(state, pending, (4 + last) as crate::zutil_h::ush, 3);
+        send_all_trees_impl(
+            state,
+            pending,
+            state.l_desc.max_code + 1,
+            state.d_desc.max_code + 1,
+            max_blindex + 1,
+        );
+        let ltree = state.dyn_ltree;
+        let dtree = state.dyn_dtree;
+        compress_block_impl(state, &ltree, &dtree, symbols, pending);
+    }
+    init_block(state);
+    if last != 0 {
+        bi_windup(state, pending);
+    }
+}
+
+#[export_name = "_tr_flush_block"]
+
+pub unsafe extern "C" fn _tr_flush_block_ffi(
+    mut s: *mut crate::src::deflate::deflate_state,
+    mut buf: *mut crate::stdlib::charf,
+    mut stored_len: crate::zutil_h::ulg,
+    mut last: ::core::ffi::c_int,
+) {
+    // SAFETY: the C ABI supplies an initialized deflater and an optional
+    // readable stored-block range. Bind those ranges once at the ABI entry;
+    // the block policy and byte emission below are reference- and slice-based.
+    let state = &mut *s;
+    let stream = &mut *state.strm;
+    let pending =
+        ::core::slice::from_raw_parts_mut(state.pending_buf, state.pending_buf_size as usize);
+    let source = if buf.is_null() {
+        None
+    } else {
+        Some(::core::slice::from_raw_parts(
+            buf as *const crate::stdlib::Bytef,
+            stored_len as usize,
+        ))
+    };
+    let symbols = ::core::slice::from_raw_parts(state.sym_buf, state.sym_next as usize);
+    tr_flush_block_bound(state, stream, pending, source, symbols, stored_len, last);
+}
+fn tally_symbols(
+    state: &mut crate::src::deflate::deflate_state,
+    sym_buf: &mut [crate::zutil_h::uchf],
+    dist: ::core::ffi::c_uint,
+    lc: ::core::ffi::c_uint,
+) -> bool {
+    let first = state.sym_next as usize;
+    state.sym_next = state.sym_next.wrapping_add(1);
+    sym_buf[first] = dist as crate::zutil_h::uch as crate::zutil_h::uchf;
+    let second = state.sym_next as usize;
+    state.sym_next = state.sym_next.wrapping_add(1);
+    sym_buf[second] =
+        (dist >> 8 as ::core::ffi::c_int) as crate::zutil_h::uch as crate::zutil_h::uchf;
+    let third = state.sym_next as usize;
+    state.sym_next = state.sym_next.wrapping_add(1);
+    sym_buf[third] = lc as crate::zutil_h::uch as crate::zutil_h::uchf;
+    state.sym_next == state.sym_end
+}
+
+// Once the deflater state and its three-byte symbol records are bound, tally
+// bookkeeping is ordinary indexed state manipulation. Keep it reference- and
+// slice-based so the raw allocation boundary stays in the small adapter below.
+pub(crate) fn tally_bound(
+    state: &mut crate::src::deflate::deflate_state,
+    sym_buf: &mut [crate::zutil_h::uchf],
+    mut dist: ::core::ffi::c_uint,
+    lc: ::core::ffi::c_uint,
+) -> ::core::ffi::c_int {
+    let full = tally_symbols(state, sym_buf, dist, lc);
+    if dist == 0 as ::core::ffi::c_uint {
+        state.dyn_ltree[lc as usize].fc.freq = state.dyn_ltree[lc as usize].fc.freq.wrapping_add(1);
+    } else {
+        state.matches = state.matches.wrapping_add(1);
+        dist = dist.wrapping_sub(1);
+        state.dyn_ltree[(crate::src::trees::_length_code[lc as usize] as ::core::ffi::c_int
+            + crate::src::deflate::LITERALS
+            + 1 as ::core::ffi::c_int) as usize]
+            .fc
+            .freq = state.dyn_ltree[(crate::src::trees::_length_code[lc as usize]
+            as ::core::ffi::c_int
+            + crate::src::deflate::LITERALS
+            + 1 as ::core::ffi::c_int) as usize]
+            .fc
+            .freq
+            .wrapping_add(1);
+        state.dyn_dtree[(if dist < 256 as ::core::ffi::c_uint {
+            crate::src::trees::_dist_code[dist as usize] as ::core::ffi::c_int
+        } else {
+            crate::src::trees::_dist_code[(256 as ::core::ffi::c_uint)
+                .wrapping_add(dist >> 7 as ::core::ffi::c_int)
+                as usize] as ::core::ffi::c_int
+        }) as usize]
+            .fc
+            .freq = state.dyn_dtree[(if dist < 256 as ::core::ffi::c_uint {
+            crate::src::trees::_dist_code[dist as usize] as ::core::ffi::c_int
+        } else {
+            crate::src::trees::_dist_code[(256 as ::core::ffi::c_uint)
+                .wrapping_add(dist >> 7 as ::core::ffi::c_int)
+                as usize] as ::core::ffi::c_int
+        }) as usize]
+            .fc
+            .freq
+            .wrapping_add(1);
+    }
+    full as ::core::ffi::c_int
+}
+
+// Once the deflater state and its symbol allocation are bound, tallying is
+// ordinary reference- and slice-based bookkeeping. Keep that implementation
+// safe so only the exported C adapter owns the raw boundary.
+pub(crate) fn tr_tally(
+    state: &mut crate::src::deflate::deflate_state,
+    sym_buf: &mut [crate::zutil_h::uchf],
+    mut dist: ::core::ffi::c_uint,
+    lc: ::core::ffi::c_uint,
+) -> ::core::ffi::c_int {
+    tally_bound(state, sym_buf, dist, lc)
+}
+#[export_name = "_tr_tally"]
+
+pub unsafe extern "C" fn _tr_tally_ffi(
+    mut s: *mut crate::src::deflate::deflate_state,
+    mut dist: ::core::ffi::c_uint,
+    mut lc: ::core::ffi::c_uint,
+) -> ::core::ffi::c_int {
+    // SAFETY: the C entry point supplies an initialized deflater and its
+    // allocation-backed three-byte symbol records. Bind both ranges once;
+    // the implementation below only receives checked Rust references.
+    let state = &mut *s;
+    let sym_buf = ::core::slice::from_raw_parts_mut(
+        state.sym_buf,
+        state.lit_bufsize.wrapping_mul(3) as usize,
+    );
+    tr_tally(state, sym_buf, dist, lc)
+}
