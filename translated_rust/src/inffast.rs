@@ -1,0 +1,746 @@
+pub use crate::src::inflate::inflate_mode;
+pub use crate::src::inflate::inflate_state;
+pub use crate::src::inflate::BAD;
+pub use crate::src::inflate::CHECK;
+pub use crate::src::inflate::CODELENS;
+pub use crate::src::inflate::COMMENT;
+pub use crate::src::inflate::COPY_;
+pub use crate::src::inflate::COPY_1;
+pub use crate::src::inflate::DICT;
+pub use crate::src::inflate::DICTID;
+pub use crate::src::inflate::DIST;
+pub use crate::src::inflate::DISTEXT;
+pub use crate::src::inflate::DONE;
+pub use crate::src::inflate::EXLEN;
+pub use crate::src::inflate::EXTRA;
+pub use crate::src::inflate::FLAGS;
+pub use crate::src::inflate::HCRC;
+pub use crate::src::inflate::HEAD;
+pub use crate::src::inflate::LEN;
+pub use crate::src::inflate::LENEXT;
+pub use crate::src::inflate::LENGTH;
+pub use crate::src::inflate::LENLENS;
+pub use crate::src::inflate::LEN_;
+pub use crate::src::inflate::LIT;
+pub use crate::src::inflate::MATCH;
+pub use crate::src::inflate::MEM;
+pub use crate::src::inflate::NAME;
+pub use crate::src::inflate::OS;
+pub use crate::src::inflate::STORED;
+pub use crate::src::inflate::SYNC;
+pub use crate::src::inflate::TABLE;
+pub use crate::src::inflate::TIME;
+pub use crate::src::inflate::TYPE;
+pub use crate::src::inflate::TYPEDO;
+pub use crate::src::inftrees::code;
+
+pub use crate::src::deflate::internal_state;
+pub use crate::stdlib::uInt;
+pub use crate::stdlib::uLong;
+pub use crate::stdlib::voidpf;
+pub use crate::stdlib::Byte;
+pub use crate::stdlib::Bytef;
+pub use crate::zlib_h::alloc_func;
+pub use crate::zlib_h::free_func;
+pub use crate::zlib_h::gz_header;
+pub use crate::zlib_h::gz_header_s;
+pub use crate::zlib_h::gz_headerp;
+pub use crate::zlib_h::z_stream;
+pub use crate::zlib_h::z_stream_s;
+pub use crate::zlib_h::z_streamp;
+
+/// Copy a DEFLATE match whose source is earlier in the current output buffer.
+///
+/// The byte-at-a-time order is deliberate: a match may overlap its destination,
+/// and later bytes must be able to read bytes written by this same match.
+fn copy_output_match(
+    output: &mut [u8],
+    output_index: &mut usize,
+    distance: usize,
+    length: usize,
+) -> bool {
+    let Some(source_start) = output_index.checked_sub(distance) else {
+        return false;
+    };
+    let Some(output_end) = output_index.checked_add(length) else {
+        return false;
+    };
+    if output_end > output.len() {
+        return false;
+    }
+
+    for offset in 0..length {
+        let byte = output[source_start + offset];
+        output[*output_index + offset] = byte;
+    }
+    *output_index = output_end;
+    true
+}
+
+/// Copy a non-overlapping portion of the inflate history window to output.
+fn copy_window_history(
+    output: &mut [u8],
+    output_index: &mut usize,
+    window: &[u8],
+    window_index: usize,
+    length: usize,
+) -> bool {
+    let Some(window_end) = window_index.checked_add(length) else {
+        return false;
+    };
+    let Some(output_end) = output_index.checked_add(length) else {
+        return false;
+    };
+    let Some(source) = window.get(window_index..window_end) else {
+        return false;
+    };
+    let Some(destination) = output.get_mut(*output_index..output_end) else {
+        return false;
+    };
+
+    destination.copy_from_slice(source);
+    *output_index = output_end;
+    true
+}
+
+/// Copy a match whose history and destination are different positions in the
+/// same inflateBack window.
+///
+/// This deliberately uses indexed, byte-at-a-time reads and writes.  A match
+/// may wrap around the window or overlap its destination, and the C loop's
+/// forward order is part of DEFLATE's repeat semantics.  Keeping both roles
+/// in one slice avoids aliasing a mutable output slice with a history slice.
+fn copy_aliasing_window_history(
+    output: &mut [u8],
+    output_index: &mut usize,
+    wsize: usize,
+    wnext: usize,
+    distance: usize,
+    length: usize,
+) -> bool {
+    if wsize == 0 || output.len() != wsize || wnext > wsize || *output_index > output.len() {
+        return false;
+    }
+    let Some(history_distance) = distance.checked_sub(*output_index) else {
+        return false;
+    };
+    if history_distance > wsize {
+        return false;
+    }
+    let Some(output_end) = output_index.checked_add(length) else {
+        return false;
+    };
+    if output_end > output.len() {
+        return false;
+    }
+
+    let history_length = length.min(history_distance);
+    let history_start = if wnext == 0 {
+        wsize - history_distance
+    } else if wnext < history_distance {
+        wsize - (history_distance - wnext)
+    } else {
+        wnext - history_distance
+    };
+    for offset in 0..history_length {
+        let source_index = (history_start + offset) % wsize;
+        let byte = output[source_index];
+        output[*output_index + offset] = byte;
+    }
+    *output_index += history_length;
+
+    let remaining = length - history_length;
+    remaining == 0 || copy_output_match(output, output_index, distance, remaining)
+}
+
+/// Bounded output owned by one invocation of the fast inflate loop.
+///
+/// The ABI still supplies this slice at the legacy boundary below.  Keeping
+/// its cursor and fast-loop limit together gives the decoder an owned-safe
+/// output facade without creating a second view of inflateBack's window.
+struct FastOutput<'a> {
+    bytes: &'a mut [u8],
+    index: usize,
+    fast_end: usize,
+}
+
+impl<'a> FastOutput<'a> {
+    /// Construct a bounded fast-loop output cursor.
+    ///
+    /// The raw stream bridge supplies these bounds today, while a future
+    /// owned-stream implementation can construct the same checked facade
+    /// directly. Keep the decoder from relying on unchecked cursor arithmetic
+    /// at either boundary.
+    fn new(bytes: &'a mut [u8], index: usize, fast_end: usize) -> Option<Self> {
+        if index > fast_end || fast_end > bytes.len() {
+            return None;
+        }
+        Some(Self {
+            bytes,
+            index,
+            fast_end,
+        })
+    }
+
+    fn index(&self) -> usize {
+        self.index
+    }
+
+    fn fast_end(&self) -> usize {
+        self.fast_end
+    }
+
+    fn write_literal(&mut self, byte: u8) -> bool {
+        let Some(destination) = self.bytes.get_mut(self.index) else {
+            return false;
+        };
+        *destination = byte;
+        self.index = self.index.wrapping_add(1);
+        true
+    }
+
+    fn copy_match(&mut self, distance: usize, length: usize) -> bool {
+        copy_output_match(self.bytes, &mut self.index, distance, length)
+    }
+
+    fn copy_window_history(&mut self, window: &[u8], window_index: usize, length: usize) -> bool {
+        copy_window_history(self.bytes, &mut self.index, window, window_index, length)
+    }
+
+    fn copy_aliasing_window_history(
+        &mut self,
+        wsize: usize,
+        wnext: usize,
+        distance: usize,
+        length: usize,
+    ) -> bool {
+        copy_aliasing_window_history(
+            self.bytes,
+            &mut self.index,
+            wsize,
+            wnext,
+            distance,
+            length,
+        )
+    }
+
+}
+
+pub(crate) enum DecodeTable {
+    LiteralLength,
+    Distance,
+}
+
+/// Return the active decode table as a bounded view.
+///
+/// Fixed tables have their own immutable storage; dynamic tables are indices
+/// into the state's code arena. Keeping that distinction here avoids raw
+/// interior table pointers in the decoder state.
+pub(crate) fn decode_table(
+    state: &crate::src::inflate::inflate_state,
+    kind: DecodeTable,
+) -> Option<&[crate::src::inftrees::code]> {
+    let table = match kind {
+        DecodeTable::LiteralLength => state.lencode.clone(),
+        DecodeTable::Distance => state.distcode.clone(),
+    };
+    match table {
+        crate::src::inflate::InflateTableRef::FixedLiteralLength => {
+            Some(&crate::src::inftrees::lenfix[..])
+        }
+        crate::src::inflate::InflateTableRef::FixedDistance => {
+            Some(&crate::src::inftrees::distfix[..])
+        }
+        crate::src::inflate::InflateTableRef::Dynamic(index) => state.codes.get(index..),
+    }
+}
+
+/// Copy one validated decode-table entry.
+///
+/// Both ordinary inflate and inflateBack retain raw table selectors in their
+/// ABI-compatible state.  This is the shared checked access point: fixed
+/// tables use their immutable backing storage and dynamic tables are bounded
+/// by the state-owned code arena.
+pub(crate) fn decode_table_entry(
+    state: &crate::src::inflate::inflate_state,
+    kind: DecodeTable,
+    index: usize,
+) -> Option<crate::src::inftrees::code> {
+    decode_table(state, kind)
+        .and_then(|table| table.get(index))
+        .map(crate::src::inftrees::copy_code)
+}
+
+/// Return zlib's invalid-code marker when an internal table selector is not
+/// usable. The normal decoder then follows its existing data-error path
+/// instead of allowing a panic to cross the ABI boundary.
+pub(crate) fn decode_table_entry_or_invalid(
+    state: &crate::src::inflate::inflate_state,
+    kind: DecodeTable,
+    index: usize,
+) -> crate::src::inftrees::code {
+    decode_table_entry(state, kind, index).unwrap_or(crate::src::inftrees::code {
+        op: 64,
+        bits: 0,
+        val: 0,
+    })
+}
+
+enum FastError {
+    DistanceTooFar,
+    DistanceCode,
+    LiteralLengthCode,
+}
+
+struct FastProgress {
+    input_index: usize,
+    output_index: usize,
+    fast_end: usize,
+    error: Option<FastError>,
+}
+
+/// Decode the fast inflate loop using already-bounded input and output views.
+///
+/// The stream-storage bridge owns conversion of ABI cursors to these slices
+/// and commits the resulting cursors afterwards. In particular, inflateBack
+/// continues to pass one alias-safe output/history window to this core.
+fn inflate_fast_slices(
+    state: &mut crate::src::inflate::inflate_state,
+    history: Option<&[crate::stdlib::Bytef]>,
+    history_may_alias_output: bool,
+    input: &[crate::stdlib::Bytef],
+    output_bytes: &mut [crate::stdlib::Bytef],
+    mut out_index: usize,
+    mut end_index: usize,
+) -> Option<FastProgress> {
+    let mut in_index: usize = 0;
+    let mut last: usize = 0;
+    let mut wsize: ::core::ffi::c_uint = 0;
+    let mut whave: ::core::ffi::c_uint = 0;
+    let mut wnext: ::core::ffi::c_uint = 0;
+    let mut hold: ::core::ffi::c_ulong = 0;
+    let mut bits: ::core::ffi::c_uint = 0;
+    let mut lmask: ::core::ffi::c_uint = 0;
+    let mut dmask: ::core::ffi::c_uint = 0;
+    let mut op: ::core::ffi::c_uint = 0;
+    let mut len: ::core::ffi::c_uint = 0;
+    let mut dist: ::core::ffi::c_uint = 0;
+    if input.len() < 5 {
+        state.mode = crate::src::inflate::BAD;
+        return None;
+    }
+    last = input.len() - 5;
+    let Some(mut output) = FastOutput::new(output_bytes, out_index, end_index) else {
+        state.mode = crate::src::inflate::BAD;
+        return None;
+    };
+    let mut error = None;
+    wsize = state.wsize;
+    whave = state.whave;
+    wnext = state.wnext;
+    hold = state.hold;
+    bits = state.bits;
+    let Some(lcode) = decode_table(state, DecodeTable::LiteralLength) else {
+        state.mode = crate::src::inflate::BAD;
+        return None;
+    };
+    let Some(dcode) = decode_table(state, DecodeTable::Distance) else {
+        state.mode = crate::src::inflate::BAD;
+        return None;
+    };
+    lmask = ((1 as ::core::ffi::c_uint) << state.lenbits).wrapping_sub(1 as ::core::ffi::c_uint);
+    dmask = ((1 as ::core::ffi::c_uint) << state.distbits).wrapping_sub(1 as ::core::ffi::c_uint);
+    's_627: loop {
+        if bits < 15 as ::core::ffi::c_uint {
+            let input_byte = input[in_index];
+            in_index = in_index.wrapping_add(1);
+            hold = hold.wrapping_add((input_byte as ::core::ffi::c_ulong) << bits);
+            bits = bits.wrapping_add(8 as ::core::ffi::c_uint);
+            let input_byte = input[in_index];
+            in_index = in_index.wrapping_add(1);
+            hold = hold.wrapping_add((input_byte as ::core::ffi::c_ulong) << bits);
+            bits = bits.wrapping_add(8 as ::core::ffi::c_uint);
+        }
+        // The root-table mask bounds this cursor within the validated
+        // literal/length decode table. Read it through the bounded table view
+        // rather than dereferencing the legacy raw table cursor.
+        let Some(mut here_code) = lcode
+            .get((hold & lmask as ::core::ffi::c_ulong) as usize)
+            .map(crate::src::inftrees::copy_code)
+        else {
+            state.mode = crate::src::inflate::BAD;
+            break 's_627;
+        };
+        's_92: loop {
+            op = here_code.bits as ::core::ffi::c_uint;
+            hold >>= op;
+            bits = bits.wrapping_sub(op);
+            op = here_code.op as ::core::ffi::c_uint;
+            if op == 0 as ::core::ffi::c_uint {
+                if !output.write_literal(here_code.val as ::core::ffi::c_uchar) {
+                    state.mode = crate::src::inflate::BAD;
+                    break 's_627;
+                }
+                out_index = output.index();
+                break;
+            } else if op & 16 as ::core::ffi::c_uint != 0 {
+                len = here_code.val as ::core::ffi::c_uint;
+                op &= 15 as ::core::ffi::c_uint;
+                if op != 0 {
+                    if bits < op {
+                        let input_byte = input[in_index];
+                        in_index = in_index.wrapping_add(1);
+                        hold = hold.wrapping_add((input_byte as ::core::ffi::c_ulong) << bits);
+                        bits = bits.wrapping_add(8 as ::core::ffi::c_uint);
+                    }
+                    len = len.wrapping_add(
+                        hold as ::core::ffi::c_uint
+                            & ((1 as ::core::ffi::c_uint) << op)
+                                .wrapping_sub(1 as ::core::ffi::c_uint),
+                    );
+                    hold >>= op;
+                    bits = bits.wrapping_sub(op);
+                }
+                if bits < 15 as ::core::ffi::c_uint {
+                    let input_byte = input[in_index];
+                    in_index = in_index.wrapping_add(1);
+                    hold = hold.wrapping_add((input_byte as ::core::ffi::c_ulong) << bits);
+                    bits = bits.wrapping_add(8 as ::core::ffi::c_uint);
+                    let input_byte = input[in_index];
+                    in_index = in_index.wrapping_add(1);
+                    hold = hold.wrapping_add((input_byte as ::core::ffi::c_ulong) << bits);
+                    bits = bits.wrapping_add(8 as ::core::ffi::c_uint);
+                }
+                let Some(mut here_code) = dcode
+                    .get((hold & dmask as ::core::ffi::c_ulong) as usize)
+                    .map(crate::src::inftrees::copy_code)
+                else {
+                    state.mode = crate::src::inflate::BAD;
+                    break 's_627;
+                };
+                loop {
+                    op = here_code.bits as ::core::ffi::c_uint;
+                    hold >>= op;
+                    bits = bits.wrapping_sub(op);
+                    op = here_code.op as ::core::ffi::c_uint;
+                    if op & 16 as ::core::ffi::c_uint != 0 {
+                        dist = here_code.val as ::core::ffi::c_uint;
+                        op &= 15 as ::core::ffi::c_uint;
+                        if bits < op {
+                            let input_byte = input[in_index];
+                            in_index = in_index.wrapping_add(1);
+                            hold = hold.wrapping_add((input_byte as ::core::ffi::c_ulong) << bits);
+                            bits = bits.wrapping_add(8 as ::core::ffi::c_uint);
+                            if bits < op {
+                                let input_byte = input[in_index];
+                                in_index = in_index.wrapping_add(1);
+                                hold =
+                                    hold.wrapping_add((input_byte as ::core::ffi::c_ulong) << bits);
+                                bits = bits.wrapping_add(8 as ::core::ffi::c_uint);
+                            }
+                        }
+                        dist = dist.wrapping_add(
+                            hold as ::core::ffi::c_uint
+                                & ((1 as ::core::ffi::c_uint) << op)
+                                    .wrapping_sub(1 as ::core::ffi::c_uint),
+                        );
+                        hold >>= op;
+                        bits = bits.wrapping_sub(op);
+                        op = output.index() as ::core::ffi::c_uint;
+                        if dist > op {
+                            op = dist.wrapping_sub(op);
+                            if op > whave {
+                                if state.sane != 0 {
+                                    error = Some(FastError::DistanceTooFar);
+                                    state.mode = crate::src::inflate::BAD;
+                                    break 's_627;
+                                }
+                            }
+                            if history_may_alias_output {
+                                // inflateBack uses its caller window as output.  Copy from
+                                // that one mutable window view with indexes, rather than
+                                // creating an aliasing history slice alongside `output`.
+                                if !output.copy_aliasing_window_history(
+                                    wsize as usize,
+                                    wnext as usize,
+                                    dist as usize,
+                                    len as usize,
+                                ) {
+                                    state.mode = crate::src::inflate::BAD;
+                                    break 's_627;
+                                }
+                                out_index = output.index();
+                            } else {
+                                let history = history.unwrap_or(&[]);
+                                let mut remaining = len as usize;
+                                if wnext == 0 as ::core::ffi::c_uint {
+                                    let count = remaining.min(op as usize);
+                                    if !output.copy_window_history(
+                                        history,
+                                        wsize.wrapping_sub(op) as usize,
+                                        count,
+                                    ) {
+                                        state.mode = crate::src::inflate::BAD;
+                                        break 's_627;
+                                    }
+                                    remaining = remaining.wrapping_sub(count);
+                                } else if wnext < op {
+                                    let first = op.wrapping_sub(wnext) as usize;
+                                    let count = remaining.min(first);
+                                    if !output.copy_window_history(
+                                        history,
+                                        wsize.wrapping_add(wnext).wrapping_sub(op) as usize,
+                                        count,
+                                    ) {
+                                        state.mode = crate::src::inflate::BAD;
+                                        break 's_627;
+                                    }
+                                    remaining = remaining.wrapping_sub(count);
+                                    let count = remaining.min(wnext as usize);
+                                    if !output.copy_window_history(
+                                        history,
+                                        0,
+                                        count,
+                                    ) {
+                                        state.mode = crate::src::inflate::BAD;
+                                        break 's_627;
+                                    }
+                                    remaining = remaining.wrapping_sub(count);
+                                } else {
+                                    let count = remaining.min(op as usize);
+                                    if !output.copy_window_history(
+                                        history,
+                                        wnext.wrapping_sub(op) as usize,
+                                        count,
+                                    ) {
+                                        state.mode = crate::src::inflate::BAD;
+                                        break 's_627;
+                                    }
+                                    remaining = remaining.wrapping_sub(count);
+                                }
+                                if remaining != 0
+                                    && !output.copy_match(dist as usize, remaining)
+                                {
+                                    state.mode = crate::src::inflate::BAD;
+                                    break 's_627;
+                                }
+                                out_index = output.index();
+                            }
+                            break 's_92;
+                        } else {
+                            // `dist <= out_index` on this branch, so this is a
+                            // same-allocation match source. Use a bounded
+                            // sequential copy so overlapping matches keep
+                            // their DEFLATE repeat semantics.
+                            if !output.copy_match(dist as usize, len as usize) {
+                                state.mode = crate::src::inflate::BAD;
+                                break 's_627;
+                            }
+                            out_index = output.index();
+                            break 's_92;
+                        }
+                    } else if op & 64 as ::core::ffi::c_uint == 0 as ::core::ffi::c_uint {
+                        let index = (here_code.val as usize).wrapping_add(
+                            (hold
+                                & ((1 as ::core::ffi::c_uint) << op)
+                                    .wrapping_sub(1 as ::core::ffi::c_uint)
+                                    as ::core::ffi::c_ulong) as usize,
+                        );
+                        let Some(next_code) = dcode.get(index).map(crate::src::inftrees::copy_code)
+                        else {
+                            state.mode = crate::src::inflate::BAD;
+                            break 's_627;
+                        };
+                        here_code = next_code;
+                    } else {
+                        error = Some(FastError::DistanceCode);
+                        state.mode = crate::src::inflate::BAD;
+                        break 's_627;
+                    }
+                }
+            } else if op & 64 as ::core::ffi::c_uint == 0 as ::core::ffi::c_uint {
+                let index = (here_code.val as usize).wrapping_add(
+                    (hold
+                        & ((1 as ::core::ffi::c_uint) << op).wrapping_sub(1 as ::core::ffi::c_uint)
+                            as ::core::ffi::c_ulong) as usize,
+                );
+                let Some(next_code) = lcode.get(index).map(crate::src::inftrees::copy_code) else {
+                    state.mode = crate::src::inflate::BAD;
+                    break 's_627;
+                };
+                here_code = next_code;
+            } else if op & 32 as ::core::ffi::c_uint != 0 {
+                state.mode = crate::src::inflate::TYPE;
+                break 's_627;
+            } else {
+                error = Some(FastError::LiteralLengthCode);
+                state.mode = crate::src::inflate::BAD;
+                break 's_627;
+            }
+        }
+        if !(in_index < last && output.index() < output.fast_end()) {
+            break;
+        }
+    }
+    len = bits >> 3 as ::core::ffi::c_int;
+    // `len` is the whole-byte portion of the bits just read, so this rewind
+    // remains within the input cursor range established by the fast loop.
+    in_index = in_index.wrapping_sub(len as usize);
+    bits = bits.wrapping_sub(len << 3 as ::core::ffi::c_int);
+    hold &= ((1 as ::core::ffi::c_uint) << bits).wrapping_sub(1 as ::core::ffi::c_uint)
+        as ::core::ffi::c_ulong;
+    if input.get(in_index..).is_none() {
+        state.mode = crate::src::inflate::BAD;
+        return None;
+    }
+    out_index = output.index();
+    end_index = output.fast_end();
+    if output.bytes.get_mut(out_index..).is_none() {
+        state.mode = crate::src::inflate::BAD;
+        return None;
+    }
+    state.hold = hold;
+    state.bits = bits;
+    Some(FastProgress {
+        input_index: in_index,
+        output_index: out_index,
+        fast_end: end_index,
+        error,
+    })
+}
+
+/// Run the fast loop over the caller's already-validated stream spans.
+///
+/// The callers establish the fast path's five-input-byte and 257-output-byte
+/// bounds before borrowing these slices. Keeping that ABI conversion at those
+/// boundaries leaves this resumable cursor update entirely slice based.
+pub fn inflate_fast(
+    strm: &mut crate::zlib_h::z_stream,
+    state: &mut crate::src::inflate::inflate_state,
+    start: ::core::ffi::c_uint,
+    history: Option<&[crate::stdlib::Bytef]>,
+    history_may_alias_output: bool,
+    input: &[crate::stdlib::Bytef],
+    output: &mut [crate::stdlib::Bytef],
+) {
+    let Some(start) = usize::try_from(start).ok() else {
+        state.mode = crate::src::inflate::BAD;
+        return;
+    };
+    let available_input = strm.avail_in as usize;
+    let available_output = strm.avail_out as usize;
+    let Some(out_index) = start.checked_sub(available_output) else {
+        state.mode = crate::src::inflate::BAD;
+        return;
+    };
+    let Some(fast_available) = available_output.checked_sub(257) else {
+        state.mode = crate::src::inflate::BAD;
+        return;
+    };
+    let Some(end_index) = out_index.checked_add(fast_available) else {
+        state.mode = crate::src::inflate::BAD;
+        return;
+    };
+    if input.len() != available_input || output.len() != start || end_index > output.len() {
+        state.mode = crate::src::inflate::BAD;
+        return;
+    }
+    let Some(progress) = inflate_fast_slices(
+        state,
+        history,
+        history_may_alias_output,
+        input,
+        output,
+        out_index,
+        end_index,
+    ) else {
+        return;
+    };
+    if let Some(error) = progress.error {
+        strm.msg = match error {
+            FastError::DistanceTooFar => b"invalid distance too far back\0".as_ptr(),
+            FastError::DistanceCode => b"invalid distance code\0".as_ptr(),
+            FastError::LiteralLengthCode => b"invalid literal/length code\0".as_ptr(),
+        } as *mut crate::stdlib::charf;
+    }
+    let Some(next_input) = input.get(progress.input_index..) else {
+        state.mode = crate::src::inflate::BAD;
+        return;
+    };
+    let Some(next_output) = output.get_mut(progress.output_index..) else {
+        state.mode = crate::src::inflate::BAD;
+        return;
+    };
+    strm.next_in = next_input.as_ptr() as *mut crate::stdlib::Bytef;
+    strm.next_out = next_output.as_mut_ptr();
+    strm.avail_in = input.len().wrapping_sub(progress.input_index) as crate::stdlib::uInt;
+    strm.avail_out = (if progress.output_index < progress.fast_end {
+        (257usize).wrapping_add(progress.fast_end.wrapping_sub(progress.output_index))
+    } else {
+        (257usize).wrapping_sub(progress.output_index.wrapping_sub(progress.fast_end))
+    }) as ::core::ffi::c_uint as crate::stdlib::uInt;
+}
+/// Validate the ABI-derived fast-path views and run the decoder.  The export
+/// wrapper only creates those views; all decoder validation and error-state
+/// transitions live here.
+fn inflate_fast_for_stream(
+    strm: &mut crate::zlib_h::z_stream,
+    state: &mut crate::src::inflate::inflate_state,
+    start: ::core::ffi::c_uint,
+    input: Option<&[crate::stdlib::Bytef]>,
+    output: Option<&mut [crate::stdlib::Bytef]>,
+    history: Option<&[crate::stdlib::Bytef]>,
+) {
+    let available_input = strm.avail_in as usize;
+    let available_output = strm.avail_out as usize;
+    let start_len = start as usize;
+    if input.is_none() || output.is_none() || available_output < 257 {
+        state.mode = crate::src::inflate::BAD;
+        return;
+    }
+    let input = input.expect("checked input view");
+    let output = output.expect("checked output view");
+    if input.len() != available_input || output.len() != start_len {
+        state.mode = crate::src::inflate::BAD;
+        return;
+    }
+    inflate_fast(strm, state, start, history, false, input, output)
+}
+
+#[export_name = "inflate_fast"]
+
+pub unsafe extern "C" fn inflate_fast_ffi(
+    mut strm: crate::zlib_h::z_streamp,
+    mut start: ::core::ffi::c_uint,
+) {
+    let Some(strm) = strm.as_mut() else {
+        return;
+    };
+    let Some(state) = (strm.state as *mut crate::src::inflate::inflate_state).as_mut() else {
+        return;
+    };
+    let available_input = strm.avail_in as usize;
+    let available_output = strm.avail_out as usize;
+    let start_len = start as usize;
+    let input = if available_input == 0 {
+        Some(&[][..])
+    } else if strm.next_in.is_null() {
+        None
+    } else {
+        Some(::core::slice::from_raw_parts(strm.next_in, available_input))
+    };
+    let output = match start_len.checked_sub(available_output) {
+        Some(output_offset) if !strm.next_out.is_null() => Some(::core::slice::from_raw_parts_mut(
+            strm.next_out.wrapping_sub(output_offset),
+            start_len,
+        )),
+        _ => None,
+    };
+    let window = state.window.load(::core::sync::atomic::Ordering::Relaxed);
+    let history = if window.is_null() || state.wsize == 0 {
+        None
+    } else {
+        Some(::core::slice::from_raw_parts(window, state.wsize as usize))
+    };
+    inflate_fast_for_stream(strm, state, start, input, output, history)
+}
