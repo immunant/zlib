@@ -1,0 +1,25 @@
+[package]
+name = "zlib"
+authors = [ "C2Rust",]
+version = "0.0.0"
+publish = false
+edition = "2021"
+autobins = false
+
+[lib]
+name = "zlib"
+path = "lib.rs"
+crate-type = [ "cdylib",]
+
+[dependencies]
+# Checked descriptor I/O replaces direct libc reads in gzip implementation code.
+rustix = { version = "1", default-features = false, features = ["fs", "std"] }
+# Safe access to the thread-local errno value and its platform error text.
+errno = "0.3"
+
+[workspace]
+members = []
+default-members = [ ".",]
+
+[profile.release]
+strip = "debuginfo"
